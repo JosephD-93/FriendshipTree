@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
+  <meta name="theme-color" content="#10b981" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="FriendTree" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="description" content="Your personal social relationship visualiser" />
+
+  <!-- PWA Manifest -->
+  <link rel="manifest" href="/manifest.json" />
+
+  <!-- Apple touch icons -->
+  <link rel="apple-touch-icon" href="/icon-192.svg" />
+  <link rel="apple-touch-startup-image" href="/icon-512.svg" />
+
+  <!-- Permissions Policy — enable contacts, camera -->
+  <meta http-equiv="Permissions-Policy" content="camera=*, microphone=*, contacts=*" />
+
+  <title>FriendshipTree</title>
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React + ReactDOM -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <!-- Lucide icons -->
+  <script src="https://unpkg.com/lucide-react@0.383.0/dist/umd/lucide-react.min.js"></script>
+  <!-- Babel for JSX -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
+    html, body, #root { height: 100%; margin: 0; padding: 0; overflow: hidden; }
+    body { overscroll-behavior: none; -webkit-user-select: none; user-select: none; }
+    input, textarea { -webkit-user-select: text; user-select: text; }
+    /* iOS safe areas */
+    #root { padding-top: env(safe-area-inset-top); }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- Load the app -->
+  <script type="text/babel" src="/FriendshipTree3.jsx" data-type="module"></script>
+
+  <script>
+    // Register service worker
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js')
+          .then(reg => console.log('SW registered:', reg.scope))
+          .catch(err => console.log('SW failed:', err));
+      });
+    }
+
+    // Prevent rubber-band scrolling on iOS
+    document.addEventListener('touchmove', e => {
+      if (e.target.closest('[data-scrollable]')) return;
+      e.preventDefault();
+    }, { passive: false });
+
+    // iOS PWA: hide address bar on scroll
+    window.addEventListener('load', () => {
+      setTimeout(() => window.scrollTo(0, 1), 100);
+    });
+  </script>
+</body>
+</html>
