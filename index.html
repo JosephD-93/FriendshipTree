@@ -15,6 +15,7 @@
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/lucide-react@0.383.0/dist/umd/lucide-react.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.23.10/babel.min.js"></script>
   <style>
     *{-webkit-tap-highlight-color:transparent;box-sizing:border-box}
     html,body,#root{height:100%;margin:0;padding:0;overflow:hidden}
@@ -22,43 +23,42 @@
     input,textarea{-webkit-user-select:text;user-select:text}
     #root{padding-top:env(safe-area-inset-top)}
     #loading{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;background:#0f172a;color:#10b981;font-family:sans-serif;gap:16px}
-    #loading .tree{font-size:64px;animation:pulse 2s infinite}
-    @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
-    #loading p{color:#94a3b8;font-size:14px}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
   </style>
 </head>
 <body>
   <div id="root">
     <div id="loading">
-      <div class="tree">🌳</div>
+      <div style="font-size:64px;animation:pulse 2s infinite">🌳</div>
       <div style="color:#10b981;font-size:20px;font-weight:700">FriendshipTree</div>
-      <p>Loading your social universe...</p>
+      <div style="color:#94a3b8;font-size:14px">Loading...</div>
     </div>
   </div>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script>
-    // Load and transpile app after Babel is ready
     fetch('/app.jsx')
       .then(r => r.text())
       .then(code => {
-        const transformed = Babel.transform(code, {
-          presets: ['react'],
-          filename: 'app.jsx'
-        }).code;
-        const script = document.createElement('script');
-        script.textContent = transformed;
-        document.body.appendChild(script);
+        try {
+          const result = Babel.transform(code, {
+            presets: ['react'],
+            filename: 'app.jsx',
+            sourceType: 'script'
+          });
+          const s = document.createElement('script');
+          s.textContent = result.code;
+          document.body.appendChild(s);
+        } catch(e) {
+          document.getElementById('loading').innerHTML =
+            '<div style="color:#ef4444;padding:20px;text-align:center;font-family:monospace;font-size:12px">Babel error:<br>' + e.message.replace(/</g,'&lt;') + '</div>';
+          console.error('Babel error:', e);
+        }
       })
-      .catch(err => {
-        document.getElementById('loading').innerHTML = 
-          '<div style="color:#ef4444;text-align:center;padding:20px">Error loading app: ' + err.message + '<br><small>Check console for details</small></div>';
-        console.error(err);
+      .catch(e => {
+        document.getElementById('loading').innerHTML =
+          '<div style="color:#ef4444;padding:20px;text-align:center">Failed to load app: ' + e.message + '</div>';
       });
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js').catch(()=>{});
-      });
-    }
+    if ('serviceWorker' in navigator)
+      window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(()=>{}));
   </script>
 </body>
 </html>
