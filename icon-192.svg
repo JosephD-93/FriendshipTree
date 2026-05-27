@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">
+  <rect width="192" height="192" rx="40" fill="#0f172a"/>
+  <!-- Trunk -->
+  <rect x="90" y="110" width="12" height="50" rx="4" fill="#15803d"/>
+  <!-- Main branches -->
+  <line x1="96" y1="120" x2="56" y2="85" stroke="#15803d" stroke-width="6" stroke-linecap="round"/>
+  <line x1="96" y1="120" x2="136" y2="85" stroke="#15803d" stroke-width="6" stroke-linecap="round"/>
+  <line x1="96" y1="105" x2="96" y2="70" stroke="#15803d" stroke-width="6" stroke-linecap="round"/>
+  <!-- Sub branches -->
+  <line x1="56" y1="85" x2="36" y2="62" stroke="#16a34a" stroke-width="4" stroke-linecap="round"/>
+  <line x1="56" y1="85" x2="68" y2="60" stroke="#16a34a" stroke-width="4" stroke-linecap="round"/>
+  <line x1="136" y1="85" x2="156" y2="62" stroke="#16a34a" stroke-width="4" stroke-linecap="round"/>
+  <line x1="136" y1="85" x2="124" y2="60" stroke="#16a34a" stroke-width="4" stroke-linecap="round"/>
+  <!-- Leaf clusters -->
+  <circle cx="96" cy="58" r="18" fill="#22c55e" opacity="0.9"/>
+  <circle cx="56" cy="72" r="14" fill="#22c55e" opacity="0.85"/>
+  <circle cx="136" cy="72" r="14" fill="#22c55e" opacity="0.85"/>
+  <circle cx="36" cy="52" r="11" fill="#4ade80" opacity="0.8"/>
+  <circle cx="68" cy="48" r="11" fill="#4ade80" opacity="0.8"/>
+  <circle cx="156" cy="52" r="11" fill="#4ade80" opacity="0.8"/>
+  <circle cx="124" cy="48" r="11" fill="#4ade80" opacity="0.8"/>
+  <!-- People circles -->
+  <circle cx="44" cy="148" r="10" fill="#10b981"/>
+  <circle cx="72" cy="155" r="10" fill="#10b981"/>
+  <circle cx="96" cy="158" r="10" fill="#10b981"/>
+  <circle cx="120" cy="155" r="10" fill="#10b981"/>
+  <circle cx="148" cy="148" r="10" fill="#10b981"/>
+</svg>
