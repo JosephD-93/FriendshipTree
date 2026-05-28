@@ -513,6 +513,7 @@ function AppInner() {
         } else if (tapCount >= 2) {
           if (tappedNode?.type === 'hub') setGroupModal({ hubId: ptr.nodeId });
           else if (tappedNode?.type === 'flower') setFlowerPanel(tappedNode.dimKey);
+          else if (tappedNode?.id === 'me') setSelectedNodeId('me');
           else setSelectedNodeId(ptr.nodeId);
           lastTapRef.current.delete(ptr.nodeId);
           lastTapRef.current.delete(ptr.nodeId + '_count');
@@ -2061,6 +2062,89 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         <div className="flex-1 overflow-y-auto p-6">
           {selectedNode ? (
             <div className="space-y-6">
+
+              {/* ── Me Profile Panel ──────────────────────────────────── */}
+              {selectedNode.id === 'me' && (
+                <div className="space-y-5">
+                  <div className="flex items-center space-x-4">
+                    {/* Me photo */}
+                    <button onClick={() => setShowPhotoOptions(p => !p)}
+                      className={`w-20 h-20 rounded-full overflow-hidden border-4 cursor-pointer flex-shrink-0 ${theme.darkMode?'border-indigo-500':'border-indigo-400'}`}
+                      style={{padding:0,background:'none'}}>
+                      <img src={selectedNode.img} alt="Me" className="w-full h-full object-cover"/>
+                    </button>
+                    <div className="flex-1">
+                      <div className="text-xs font-semibold uppercase tracking-wider mb-1" style={{color:theme.darkMode?'#94a3b8':'#64748b'}}>Your name</div>
+                      <input type="text" value={selectedNode.label || ''}
+                        onChange={e => updateSelectedNode('label', e.target.value)}
+                        placeholder="Your name"
+                        className={`w-full px-3 py-2 border rounded-lg text-sm font-semibold focus:ring-2 focus:ring-indigo-500 outline-none ${theme.darkMode?'bg-slate-700 border-slate-600 text-white':'bg-white border-slate-200'}`}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Photo picker */}
+                  {showPhotoOptions && (
+                    <div className={`rounded-xl border overflow-hidden ${theme.darkMode?'bg-slate-800 border-slate-700':'bg-white border-slate-200'}`}>
+                      <label className={`flex items-center gap-3 px-4 py-3 cursor-pointer text-sm font-medium ${theme.darkMode?'hover:bg-slate-700 text-slate-200':'hover:bg-slate-50 text-slate-700'}`}>
+                        📷 Upload Photo
+                        <input type="file" accept="image/*" className="hidden" onChange={e => {
+                          const file = e.target.files[0]; if (!file) return;
+                          const reader = new FileReader();
+                          reader.onload = ev => { setPhotoCrop({ nodeId: 'me', src: ev.target.result, crop: { x:0, y:0, scale:1 } }); setShowPhotoOptions(false); };
+                          reader.readAsDataURL(file);
+                        }} />
+                      </label>
+                      <div className={`border-t ${theme.darkMode?'border-slate-700':'border-slate-100'}`}/>
+                      <button onClick={() => { setAvatarBuilder({ nodeId: 'me' }); setShowPhotoOptions(false); }}
+                        className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-left ${theme.darkMode?'hover:bg-slate-700 text-slate-200':'hover:bg-slate-50 text-slate-700'}`}>
+                        🎨 Build Avatar
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Sync from contacts */}
+                  {'contacts' in navigator && (
+                    <button onClick={async () => {
+                      try {
+                        const contacts = await navigator.contacts.select(['name','email','tel','icon'], { multiple: false });
+                        if (contacts.length > 0) {
+                          const c = contacts[0];
+                          if (c.name?.[0]) updateSelectedNode('label', c.name[0]);
+                          if (c.tel?.[0]) updateSelectedNode('phone', c.tel[0]);
+                          if (c.email?.[0]) updateSelectedNode('email', c.email[0]);
+                          if (c.icon?.[0]) {
+                            const reader = new FileReader();
+                            reader.onload = ev => setPhotoCrop({ nodeId: 'me', src: ev.target.result, crop: { x:0, y:0, scale:1 } });
+                            reader.readAsDataURL(c.icon[0]);
+                          }
+                          showToast('✅ Synced from contacts!');
+                        }
+                      } catch(e) { showToast('Could not access contacts'); }
+                    }} className="w-full py-2 rounded-xl text-sm font-bold text-white" style={{background:'#6366f1'}}>
+                      👤 Sync from Contacts
+                    </button>
+                  )}
+
+                  {/* Birthday */}
+                  <div className="flex flex-col gap-1">
+                    <label className={`text-xs font-semibold uppercase tracking-wider ${theme.darkMode?'text-slate-400':'text-slate-500'}`}>🎂 Your Birthday</label>
+                    <input type="text" value={selectedNode.birthday || ''} onChange={e => updateSelectedNode('birthday', e.target.value)}
+                      placeholder="e.g. 15 March 1993"
+                      className={`px-3 py-2 border rounded-lg text-sm focus:ring-1 focus:ring-indigo-500 outline-none ${theme.darkMode?'bg-slate-700 border-slate-600 text-white':'bg-white border-slate-200'}`}/>
+                  </div>
+
+                  {/* Notes */}
+                  <div className="flex flex-col gap-1">
+                    <label className={`text-xs font-semibold uppercase tracking-wider ${theme.darkMode?'text-slate-400':'text-slate-500'}`}>📝 About Me</label>
+                    <textarea value={selectedNode.notes || ''} onChange={e => updateSelectedNode('notes', e.target.value)}
+                      placeholder="A few words about yourself..."
+                      rows={3}
+                      className={`px-3 py-2 border rounded-lg text-sm focus:ring-1 focus:ring-indigo-500 outline-none resize-none ${theme.darkMode?'bg-slate-700 border-slate-600 text-white':'bg-white border-slate-200'}`}/>
+                  </div>
+                </div>
+              )}
+
               {selectedNode.type !== 'hub' && selectedNode.id !== 'me' && (
                 <>
                   <div className="flex items-center space-x-3">
