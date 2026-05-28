@@ -222,6 +222,15 @@ function AppInner() {
   const isSlashing = useRef(false);
   const activePointers = useRef(new Map());
   const liftTimer = useRef(null);
+  const svgGroupRef = useRef(null);
+  const nodeTransition = (nodeId) =>
+    liftedNodeId === nodeId ? 'none' : 'transform 0.25s cubic-bezier(0.34,1.56,0.64,1)';
+
+  const applyTransform = (t) => {
+    if (svgGroupRef.current) {
+      svgGroupRef.current.setAttribute('transform', `translate(${t.x}, ${t.y}) scale(${t.scale})`);
+    }
+  };
   const lastTapRef = useRef(new Map());
   const initialPinchDist = useRef(null);
   const initialPinchScale = useRef(null);
@@ -399,9 +408,11 @@ function AppInner() {
     if (isPanning && !liftedNodeId) {
       const newX = e.clientX - panStart.x;
       const newY = e.clientY - panStart.y;
-      setTransform(t => ({ ...t, x: newX, y: newY }));
+      // Apply directly to DOM for smooth 60fps — no React re-render
+      const newT = { ...transform, x: newX, y: newY };
+      applyTransform(newT);
+      setTransform(newT);
       lastPanPos.current = { x: e.clientX, y: e.clientY };
-      // As soon as the canvas actually moves, cancel any pending node lift
       if (liftTimer.current) {
         clearTimeout(liftTimer.current);
         liftTimer.current = null;
@@ -1747,9 +1758,6 @@ Return only the JSON array. If nothing trackable is found, return [].`;
     return { ...node, renderX: node.x, renderY: node.y, radius: getNodeRadius(node) };
   });
 
-  // Node transition duration — 0.25s except when actively dragging (instant follow)
-  const nodeTransition = (nodeId) =>
-    liftedNodeId === nodeId ? 'none' : 'transform 0.25s cubic-bezier(0.34,1.56,0.64,1)';
 
   const selectedNode = nodes.find(n => n.id === selectedNodeId);
   const bgClass = theme.darkMode ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-800';
@@ -1799,7 +1807,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
   };
 
   return (
-    <div className={`fixed inset-0 flex flex-col w-full h-full font-sans overflow-hidden transition-colors duration-300 ${bgClass}`}>
+    <div className={`fixed inset-0 font-sans overflow-hidden transition-colors duration-300 ${bgClass}`} style={{display:'flex', flexDirection:'column'}}>
       
       {/* Top Right Controls — tools only */}
       <div className="absolute top-6 right-6 z-50 flex items-center space-x-3 pointer-events-none">
@@ -2057,8 +2065,4 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         );
                       })()}
                     </div>
-                  </div>
-
-                  {/* Sync banner — shown at top until dismissed or synced */}
-                  {!selectedNode.syncDismissed && !selectedNode.phone && (
-                    <div cl
+           
