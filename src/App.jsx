@@ -3850,7 +3850,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       {/* ── Photo Crop Modal ─────────────────────────────────────────────────── */}
       {photoCrop && (() => {
         const dm = theme.darkMode;
-        const SIZE = 300; // output size px
+        const SIZE = 600; // output size px - higher quality
 
         const applyCrop = () => {
           const img = cropImgRef.current;
@@ -3873,7 +3873,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           ctx.drawImage(img, sx, sy, sw, sh, 0, 0, SIZE, SIZE);
 
           // Export as compressed JPEG (~15-30KB)
-          const base64 = canvas.toDataURL('image/jpeg', 0.7);
+          const base64 = canvas.toDataURL('image/jpeg', 0.85);
           setNodes(prev => prev.map(n => n.id === photoCrop.nodeId ? { ...n, img: base64 } : n));
           setPhotoCrop(null);
         };
