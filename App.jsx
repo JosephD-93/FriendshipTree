@@ -1799,7 +1799,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
   };
 
   return (
-    <div className={`fixed inset-0 flex w-full h-full font-sans overflow-hidden transition-colors duration-300 ${bgClass}`}>
+    <div className={`fixed inset-0 flex flex-col w-full h-full font-sans overflow-hidden transition-colors duration-300 ${bgClass}`}>
       
       {/* Top Right Controls — tools only */}
       <div className="absolute top-6 right-6 z-50 flex items-center space-x-3 pointer-events-none">
@@ -2518,8 +2518,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       {/* Canvas */}
       <div
         className="flex-1 relative"
-        style={{paddingBottom: 56}}
-        style={{ cursor: macheteMode ? 'crosshair' : vineDrawMode ? 'cell' : (isPanning ? 'grabbing' : 'grab') }}
+        style={{
+          paddingBottom: 56,
+          cursor: macheteMode ? 'crosshair' : vineDrawMode ? 'cell' : (isPanning ? 'grabbing' : 'grab'),
+          background: theme.darkMode ? '#0f172a' : '#f8fafc',
+          width: '100%',
+          height: '100%',
+        }}
         onPointerDown={e => {
           // Capture ALL pointer events at the canvas level
           e.currentTarget.setPointerCapture(e.pointerId);
