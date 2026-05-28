@@ -206,7 +206,7 @@ function AppInner() {
   const [toastMessage, setToastMessage] = useState(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [theme, setTheme] = useState({ darkMode: true, showWeathering: true });
-  const [showTutorial, setShowTutorial] = useState(true);
+  const [showTutorial, setShowTutorial] = useState(false);
   const [showLevelPanel, setShowLevelPanel] = useState(false);
   const [showLevelSetter, setShowLevelSetter] = useState(false);
   const [groupModal, setGroupModal] = useState(null); // null | { hubId }
@@ -1959,8 +1959,15 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         </div>{/* end search+plus+settings group */}
       </div>{/* end top-right controls */}
 
-      {/* Sidebar */}
-      <div className={`w-80 border-r shadow-xl flex flex-col z-10 transition-all duration-300 ${sidebarBg} ${selectedNode ? 'translate-x-0' : '-translate-x-full'}`} style={{ marginLeft: selectedNode ? 0 : '-20rem' }}>
+      {/* Sidebar — fixed overlay, slides in from left */}
+      <div className={`border-r shadow-2xl flex flex-col z-40 transition-all duration-300 ${sidebarBg}`}
+        style={{
+          position: 'fixed',
+          top: 0, left: 0, bottom: 0,
+          width: '20rem',
+          transform: selectedNode ? 'translateX(0)' : 'translateX(-100%)',
+          paddingBottom: 56,
+        }}>
         <div className={`p-6 border-b flex justify-between items-center ${theme.darkMode ? 'border-slate-700 bg-slate-800' : 'border-slate-100 bg-slate-50'}`}>
           <h1 className="text-2xl font-bold" style={{ background: 'linear-gradient(to right, #10b981, #14b8a6)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>Friendship Tree</h1>
           {selectedNode && <button onClick={() => { setSelectedNodeId(null); setAddFriendForms([]); setShowPhotoOptions(false); }} className={`p-2 rounded-full ${theme.darkMode ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-200 hover:bg-slate-300'}`}><X className="w-4 h-4" /></button>}
@@ -2054,4 +2061,4 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
                   {/* Sync banner — shown at top until dismissed or synced */}
                   {!selectedNode.syncDismissed && !selectedNode.phone && (
-                    <div className={`relative flex items-center justify-between px-3 py-2 rounded-lg border ${theme.darkMode ? 'bg-indigo-900/40 border-indigo-800' : 'bg-indigo-5
+                    <div cl
