@@ -178,7 +178,11 @@ function AppInner() {
   const [activeTags, setActiveTags] = useState([]); // tags currently filtered on
   const [tagInput, setTagInput] = useState('');     // new tag being typed in panel
   const [addFriendForms, setAddFriendForms] = useState([]);
+  const [photoCrop, setPhotoCrop] = useState(null);
   const [avatarBuilder, setAvatarBuilder] = useState(null);
+  const cropCanvasRef = useRef(null);
+  const cropImgRef = useRef(null);
+  const cropDragRef = useRef(null);
   const [showPhotoOptions, setShowPhotoOptions] = useState(false);
   const [showAddToGroup, setShowAddToGroup] = useState(false);
   const [avBg,    setAvBg]    = useState('#4f46e5');
@@ -2028,7 +2032,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                               if (!file) return;
                               const reader = new FileReader();
                               reader.onload = ev => {
-                                updateSelectedNode('img', ev.target.result);
+                                setPhotoCrop({ nodeId: selectedNodeId, src: ev.target.result, crop: { x: 0, y: 0, scale: 1 } });
                                 setShowPhotoOptions(false);
                               };
                               reader.readAsDataURL(file);
@@ -3838,6 +3842,113 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               {q.length > 0 && results.length === 0 && (
                 <div style={{padding:'20px 16px',textAlign:'center',color:dm?'#475569':'#94a3b8',fontSize:13}}>No results for "{searchQuery}"</div>
               )}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Photo Crop Modal ─────────────────────────────────────────────────── */}
+      {photoCrop && (() => {
+        const dm = theme.darkMode;
+        const SIZE = 300; // output size px
+
+        const applyCrop = () => {
+          const img = cropImgRef.current;
+          if (!img) return;
+          const canvas = document.createElement('canvas');
+          canvas.width = SIZE; canvas.height = SIZE;
+          const ctx = canvas.getContext('2d');
+
+          // Draw circle clip
+          ctx.beginPath();
+          ctx.arc(SIZE/2, SIZE/2, SIZE/2, 0, Math.PI*2);
+          ctx.clip();
+
+          // Draw image with crop offset and scale
+          const { x, y, scale } = photoCrop.crop;
+          const sw = img.naturalWidth / scale;
+          const sh = img.naturalHeight / scale;
+          const sx = (img.naturalWidth - sw) / 2 - x * (img.naturalWidth / (300 * scale));
+          const sy = (img.naturalHeight - sh) / 2 - y * (img.naturalHeight / (300 * scale));
+          ctx.drawImage(img, sx, sy, sw, sh, 0, 0, SIZE, SIZE);
+
+          // Export as compressed JPEG (~15-30KB)
+          const base64 = canvas.toDataURL('image/jpeg', 0.7);
+          setNodes(prev => prev.map(n => n.id === photoCrop.nodeId ? { ...n, img: base64 } : n));
+          setPhotoCrop(null);
+        };
+
+        return (
+          <div style={{position:'fixed',inset:0,zIndex:600,background:'rgba(0,0,0,0.85)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center'}}
+            onClick={e=>{if(e.target===e.currentTarget)setPhotoCrop(null)}}>
+            <div style={{background:dm?'#0f172a':'white',borderRadius:20,overflow:'hidden',width:'min(90vw,380px)',boxShadow:'0 25px 60px rgba(0,0,0,0.6)'}}>
+              {/* Header */}
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'14px 18px',borderBottom:`1px solid ${dm?'#334155':'#e2e8f0'}`}}>
+                <span style={{fontWeight:800,fontSize:15,color:dm?'#e2e8f0':'#1e293b'}}>📷 Crop Photo</span>
+                <button onClick={()=>setPhotoCrop(null)} style={{background:'none',border:'none',cursor:'pointer',fontSize:20,color:dm?'#94a3b8':'#64748b'}}>✕</button>
+              </div>
+
+              {/* Crop area */}
+              <div style={{position:'relative',width:'100%',paddingBottom:'100%',background:'#111',overflow:'hidden',cursor:'move'}}
+                onPointerDown={e=>{
+                  cropDragRef.current = {startX:e.clientX, startY:e.clientY, ox:photoCrop.crop.x, oy:photoCrop.crop.y};
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                }}
+                onPointerMove={e=>{
+                  if(!cropDragRef.current) return;
+                  const dx = e.clientX - cropDragRef.current.startX;
+                  const dy = e.clientY - cropDragRef.current.startY;
+                  setPhotoCrop(p=>({...p, crop:{...p.crop, x:cropDragRef.current.ox+dx, y:cropDragRef.current.oy+dy}}));
+                }}
+                onPointerUp={()=>{cropDragRef.current=null;}}
+                onWheel={e=>{
+                  e.preventDefault();
+                  setPhotoCrop(p=>({...p, crop:{...p.crop, scale:Math.max(0.5,Math.min(4,p.crop.scale*(e.deltaY>0?0.9:1.1)))}}));
+                }}>
+                <img ref={cropImgRef} src={photoCrop.src} alt="crop"
+                  style={{
+                    position:'absolute',
+                    top:'50%', left:'50%',
+                    transform:`translate(calc(-50% + ${photoCrop.crop.x}px), calc(-50% + ${photoCrop.crop.y}px)) scale(${photoCrop.crop.scale})`,
+                    maxWidth:'none', maxHeight:'none',
+                    width:'100%', height:'100%',
+                    objectFit:'contain',
+                    pointerEvents:'none',
+                    userSelect:'none',
+                  }} />
+                {/* Circle overlay */}
+                <svg style={{position:'absolute',inset:0,width:'100%',height:'100%',pointerEvents:'none'}} viewBox="0 0 100 100" preserveAspectRatio="none">
+                  <mask id="circle-mask">
+                    <rect width="100" height="100" fill="white"/>
+                    <circle cx="50" cy="50" r="50" fill="black"/>
+                  </mask>
+                  <rect width="100" height="100" fill="rgba(0,0,0,0.55)" mask="url(#circle-mask)"/>
+                  <circle cx="50" cy="50" r="49.5" fill="none" stroke="white" strokeWidth="0.5" opacity="0.6"/>
+                </svg>
+              </div>
+
+              {/* Controls */}
+              <div style={{padding:16}}>
+                {/* Zoom slider */}
+                <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:14}}>
+                  <span style={{fontSize:12,color:dm?'#94a3b8':'#64748b'}}>🔍</span>
+                  <input type="range" min="0.5" max="4" step="0.05"
+                    value={photoCrop.crop.scale}
+                    onChange={e=>setPhotoCrop(p=>({...p,crop:{...p.crop,scale:parseFloat(e.target.value)}}))}
+                    style={{flex:1,accentColor:'#10b981'}} />
+                </div>
+                <div style={{display:'flex',gap:10}}>
+                  <button onClick={applyCrop}
+                    style={{flex:1,padding:'11px',borderRadius:10,background:'#10b981',color:'white',border:'none',cursor:'pointer',fontWeight:800,fontSize:14}}>
+                    ✓ Save Photo
+                  </button>
+                  <button onClick={()=>setPhotoCrop(null)}
+                    style={{padding:'11px 16px',borderRadius:10,background:dm?'#334155':'#e2e8f0',color:dm?'#e2e8f0':'#334155',border:'none',cursor:'pointer',fontWeight:600}}>
+                    Cancel
+                  </button>
+                </div>
+                <p style={{fontSize:10,color:dm?'#475569':'#94a3b8',textAlign:'center',marginTop:8}}>Drag to reposition · Scroll or slide to zoom</p>
+              </div>
             </div>
           </div>
         );
