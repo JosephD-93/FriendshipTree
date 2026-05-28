@@ -183,6 +183,51 @@ function AppInner() {
   const cropCanvasRef = useRef(null);
   const cropImgRef = useRef(null);
   const cropDragRef = useRef(null);
+  const idbRef = useRef(null);
+
+  // ── IndexedDB for photo storage ───────────────────────────────────────────
+  const openPhotoDB = () => new Promise((resolve, reject) => {
+    const req = indexedDB.open('FriendTreePhotos', 1);
+    req.onupgradeneeded = e => e.target.result.createObjectStore('photos', { keyPath: 'nodeId' });
+    req.onsuccess = e => resolve(e.target.result);
+    req.onerror = e => reject(e.target.error);
+  });
+
+  const savePhotoToDB = async (nodeId, dataUrl) => {
+    try {
+      const db = idbRef.current || (idbRef.current = await openPhotoDB());
+      const tx = db.transaction('photos', 'readwrite');
+      tx.objectStore('photos').put({ nodeId, dataUrl });
+    } catch(e) { console.warn('Photo save failed:', e); }
+  };
+
+  const deletePhotoFromDB = async (nodeId) => {
+    try {
+      const db = idbRef.current || (idbRef.current = await openPhotoDB());
+      const tx = db.transaction('photos', 'readwrite');
+      tx.objectStore('photos').delete(nodeId);
+    } catch(e) {}
+  };
+
+  // On mount — restore photos from IndexedDB onto nodes
+  useEffect(() => {
+    (async () => {
+      try {
+        const db = await openPhotoDB();
+        idbRef.current = db;
+        const tx = db.transaction('photos', 'readonly');
+        const all = await new Promise((res, rej) => {
+          const req = tx.objectStore('photos').getAll();
+          req.onsuccess = () => res(req.result);
+          req.onerror = () => rej(req.error);
+        });
+        if (all.length === 0) return;
+        const photoMap = {};
+        all.forEach(({ nodeId, dataUrl }) => { if (dataUrl) photoMap[nodeId] = dataUrl; });
+        setNodes(prev => prev.map(n => photoMap[n.id] ? { ...n, img: photoMap[n.id] } : n));
+      } catch(e) { console.warn('Photo restore failed:', e); }
+    })();
+  }, []); // eslint-disable-line
   const [showPhotoOptions, setShowPhotoOptions] = useState(false);
   const [showAddToGroup, setShowAddToGroup] = useState(false);
   const [avBg,    setAvBg]    = useState('#4f46e5');
@@ -1468,8 +1513,18 @@ function AppInner() {
   useEffect(() => {
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      try { localStorage.setItem('ft_nodes', JSON.stringify(nodes)); } catch(e) {
-        console.warn('localStorage full - try clearing old data:', e);
+      try {
+        // Strip photo data from localStorage — photos are stored in IndexedDB separately
+        const nodesWithoutPhotos = nodes.map(n => {
+          if (n.img && n.img.startsWith('data:image')) {
+            const { img, ...rest } = n;
+            return rest;
+          }
+          return n;
+        });
+        localStorage.setItem('ft_nodes', JSON.stringify(nodesWithoutPhotos));
+      } catch(e) {
+        console.warn('localStorage save failed:', e);
       }
     }, 500);
   }, [nodes]);
@@ -3872,8 +3927,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           const sy = (img.naturalHeight - sh) / 2 - y * (img.naturalHeight / (300 * scale));
           ctx.drawImage(img, sx, sy, sw, sh, 0, 0, SIZE, SIZE);
 
-          // Export as compressed JPEG (~15-30KB)
+          // Export as high quality JPEG, save to IndexedDB (device storage, no size limit)
           const base64 = canvas.toDataURL('image/jpeg', 0.85);
+          savePhotoToDB(photoCrop.nodeId, base64);
           setNodes(prev => prev.map(n => n.id === photoCrop.nodeId ? { ...n, img: base64 } : n));
           setPhotoCrop(null);
         };
