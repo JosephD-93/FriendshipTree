@@ -979,7 +979,10 @@ function AppInner() {
           if (contact.tel?.length) updates.phone = contact.tel[0];
           if (contact.icon?.length) {
             const blob = contact.icon[0];
-            updates.img = URL.createObjectURL(blob);
+            const blobReader = new FileReader();
+            blobReader.onload = ev => { updates.img = ev.target.result; setNodes(prev => prev.map(n => n.id === selectedNodeId ? { ...n, ...updates } : n)); };
+            blobReader.readAsDataURL(blob);
+            blob = null; // handled async
             
           }
           setNodes(prev => prev.map(n => n.id === selectedNodeId ? { ...n, ...updates } : n));
@@ -1456,7 +1459,16 @@ function AppInner() {
   };;
 
   // ── Auto-save to localStorage ─────────────────────────────────────────────
-  useEffect(() => { try { localStorage.setItem('ft_nodes', JSON.stringify(nodes)); } catch {} }, [nodes]);
+  // Debounced so photos (large base64) don't block on every render
+  const saveTimer = useRef(null);
+  useEffect(() => {
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      try { localStorage.setItem('ft_nodes', JSON.stringify(nodes)); } catch(e) {
+        console.warn('localStorage full - try clearing old data:', e);
+      }
+    }, 500);
+  }, [nodes]);
   useEffect(() => { try { localStorage.setItem('ft_links', JSON.stringify(links)); } catch {} }, [links]);
   useEffect(() => { try { localStorage.setItem('ft_dimensions', JSON.stringify(dimensions)); } catch {} }, [dimensions]);
 
@@ -2012,10 +2024,14 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           <label className={`flex items-center gap-2 px-4 py-3 text-sm font-medium cursor-pointer ${theme.darkMode ? 'hover:bg-slate-700 text-slate-200' : 'hover:bg-slate-50 text-slate-700'}`}>
                             <span>📷</span> Upload Photo
                             <input type="file" accept="image/*" className="hidden" onChange={e => {
-                              if (e.target.files[0]) {
-                                updateSelectedNode('img', URL.createObjectURL(e.target.files[0]));
+                              const file = e.target.files[0];
+                              if (!file) return;
+                              const reader = new FileReader();
+                              reader.onload = ev => {
+                                updateSelectedNode('img', ev.target.result);
                                 setShowPhotoOptions(false);
-                              }
+                              };
+                              reader.readAsDataURL(file);
                             }} />
                           </label>
                           <div className={`border-t ${theme.darkMode ? 'border-slate-700' : 'border-slate-100'}`} />
@@ -2442,7 +2458,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         const c = contacts[0];
                         const name = c.name?.[0] || form.name;
                         const blob = c.icon?.[0] || null;
-                        const img = blob ? URL.createObjectURL(blob) : null;
+                        let img = null;
+                        if (blob) {
+                          const br = new FileReader();
+                          await new Promise(res => { br.onload = e => { img = e.target.result; res(); }; br.readAsDataURL(blob); });
+                        }
                         setAddFriendForms(prev => prev.map(f => f.id === form.id ? { ...f, name } : f));
                         createFriendFromForm(form.id, img, blob);
                         return;
