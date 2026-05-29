@@ -2,9 +2,18 @@
   "name": "FriendshipTree",
   "short_name": "FriendTree",
   "description": "Your personal social relationship visualiser",
-  "start_url": "/",
+  "start_url": "/FriendshipTree/",
+  "scope": "/FriendshipTree/",
   "display": "standalone",
   "background_color": "#0f172a",
   "theme_color": "#10b981",
-  "icons": [{"src":"icon-192.svg","sizes":"192x192","type":"image/svg+xml","purpose":"any maskable"}]
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "icon-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
 }
