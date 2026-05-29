@@ -316,6 +316,62 @@ function AppInner() {
   const idbRef = useRef(null);
 
   // ── IndexedDB for photo storage ───────────────────────────────────────────
+  const openPinModal = (mode, title, onSuccess) => {
+    setPinModal({ mode, title, onSuccess });
+    setPinInput('');
+    setPinError('');
+  };
+
+  const handlePinDigit = (d) => {
+    const next = (pinInput + d).slice(0, 6);
+    setPinInput(next);
+    setPinError('');
+    if (next.length >= 4) {
+      setTimeout(() => {
+        if (!pinModal) return;
+        const stored = localStorage.getItem('ft_pin');
+        if (pinModal.mode === 'set') {
+          localStorage.setItem('ft_pin', next);
+          setPinModal(null); setPinInput('');
+          showToast('🔒 PIN set!');
+          pinModal.onSuccess && pinModal.onSuccess();
+        } else if (pinModal.mode === 'verify' || pinModal.mode === 'clear') {
+          if (next === stored) {
+            setPinModal(null); setPinInput('');
+            pinModal.onSuccess && pinModal.onSuccess();
+          } else {
+            setPinError('Wrong PIN'); setPinInput('');
+          }
+        }
+      }, 150);
+    }
+  };
+
+  const handlePinBackspace = () => setPinInput(p => p.slice(0,-1));
+
+  const clearPhotoDB = async () => {
+    try {
+      const db = idbRef.current || (idbRef.current = await openPhotoDB());
+      const tx = db.transaction('photos', 'readwrite');
+      tx.objectStore('photos').clear();
+    } catch(e) {}
+  };
+
+  const clearAllData = () => {
+    clearTimeout(saveTimer.current);
+    setNodes(INITIAL_NODES);
+    setLinks(INITIAL_LINKS);
+    setDimensions(DEFAULT_DIMENSIONS);
+    try {
+      localStorage.removeItem('ft_nodes');
+      localStorage.removeItem('ft_links');
+      localStorage.removeItem('ft_dimensions');
+    } catch {}
+    clearPhotoDB();
+    showToast('🗑️ All data cleared');
+  };
+
+  // ── IndexedDB photo storage ───────────────────────────────────────────────
   const openPhotoDB = () => new Promise((resolve, reject) => {
     const req = indexedDB.open('FriendTreePhotos', 1);
     req.onupgradeneeded = e => e.target.result.createObjectStore('photos', { keyPath: 'nodeId' });
@@ -382,6 +438,38 @@ function AppInner() {
   const [selectedNodeId, setSelectedNodeId] = useState(null);
   const [toastMessage, setToastMessage] = useState(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [pinModal, setPinModal] = useState(null); // {mode:'set'|'verify'|'clear', onSuccess, title}
+  const [pinInput, setPinInput] = useState('');
+  const [pinError, setPinError] = useState('');
+  const [appLocked, setAppLocked] = useState(false);
+  const [lockPin, setLockPin] = useState(() => { try { return localStorage.getItem('ft_pin') || ''; } catch { return ''; } });
+  const [lockTimer, setLockTimerVal] = useState(() => { try { return localStorage.getItem('ft_lockTimer') || 'close'; } catch { return 'close'; } });
+  const lastActiveRef = useRef(Date.now());
+
+  // Check if app should lock based on timer
+  useEffect(() => {
+    const check = () => {
+      const pin = localStorage.getItem('ft_pin');
+      if (!pin) return;
+      const timer = localStorage.getItem('ft_lockTimer') || 'close';
+      const elapsed = Date.now() - lastActiveRef.current;
+      const limits = { '5min': 5*60000, '1hour': 3600000, '1day': 86400000, 'close': Infinity };
+      if (timer !== 'close' && elapsed > (limits[timer] || Infinity)) setAppLocked(true);
+    };
+    const iv = setInterval(check, 30000);
+    const resetTimer = () => { lastActiveRef.current = Date.now(); };
+    window.addEventListener('pointerdown', resetTimer);
+    // Lock on visibility change (app close/background)
+    const onVis = () => {
+      if (document.hidden) {
+        const pin = localStorage.getItem('ft_pin');
+        const timer = localStorage.getItem('ft_lockTimer') || 'close';
+        if (pin && timer === 'close') setAppLocked(true);
+      }
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { clearInterval(iv); window.removeEventListener('pointerdown', resetTimer); document.removeEventListener('visibilitychange', onVis); };
+  }, []);
   const [theme, setTheme] = useState({ darkMode: true, showWeathering: true });
   const [fabOpen, setFabOpen] = useState(false);
   const [fabPos, setFabPos] = useState({ edge: 'left', offset: 0.3 });
@@ -393,7 +481,9 @@ function AppInner() {
   const [showTutorial, setShowTutorial] = useState(false);
   const [showLevelPanel, setShowLevelPanel] = useState(false);
   const [showLevelSetter, setShowLevelSetter] = useState(false);
-  const [groupModal, setGroupModal] = useState(null); // null | { hubId }
+  const [groupModal, setGroupModal] = useState(null);
+  const [selectForGroupMode, setSelectForGroupMode] = useState(null); // hubId when selecting
+  const [selectedForGroup, setSelectedForGroup] = useState([]); // nodeIds selected // null | { hubId }
   const [slashTrail, setSlashTrail] = useState([]);
   const [archivedLinks, setArchivedLinks] = useState([]);
   const [macheteMode, setMacheteMode] = useState(false);
@@ -497,6 +587,15 @@ function AppInner() {
     }
 
     if (nodeId && viewMode === 'canvas') {
+      // In select-for-group mode, don't lift nodes — just register touch for tap detection
+      if (selectForGroupMode) {
+        activePointers.current.set(e.pointerId, {
+          id: e.pointerId, x: e.clientX, y: e.clientY,
+          startX: e.clientX, startY: e.clientY,
+          nodeId: nodeId, time: Date.now(), decidedPan: false,
+        });
+        return;
+      }
       // Ignore node touches if we're already panning the canvas
       if (isPanning) {
         activePointers.current.set(e.pointerId, {
@@ -509,7 +608,7 @@ function AppInner() {
       // Start the long-press timer — node only lifts after 150ms stillness
       isPanningOverride.current = false;
       const node = nodes.find(n => n.id === nodeId);
-      if (!node) return; // node not found - treat as background touch
+      if (!node) return;
       setDragNode({ id: nodeId, startX: node.x, startY: node.y, pointerId: e.pointerId });
       clearTimeout(liftTimer.current);
       liftTimer.current = setTimeout(() => {
@@ -634,6 +733,16 @@ function AppInner() {
     const wasTap = moved < 12;
 
     if (ptr.nodeId && wasTap && viewMode === 'canvas') {
+      // Select-for-group mode — tap toggles selection
+      if (selectForGroupMode) {
+        const tappedNode = nodes.find(n => n.id === ptr.nodeId);
+        if (tappedNode && tappedNode.type !== 'hub' && tappedNode.type !== 'flower') {
+          setSelectedForGroup(prev =>
+            prev.includes(ptr.nodeId) ? prev.filter(id => id !== ptr.nodeId) : [...prev, ptr.nodeId]
+          );
+        }
+        return;
+      }
       const lastTime = lastTapRef.current.get(ptr.nodeId) || 0;
       const tapCount = (lastTapRef.current.get(ptr.nodeId + '_count') || 0) + 1;
       const now = Date.now();
@@ -1131,7 +1240,10 @@ function AppInner() {
     if (!form) return;
     const newId = `node_${Date.now()}`;
     const avatarKeys = Object.keys(AVATARS);
-    const parentNode = nodes.find(n => n.id === form.parentId) || nodes.find(n => n.id === 'flower_social') || { x: 0, y: -191, id: 'flower_social' };
+    // Free-floating if parentId is null/none, otherwise place near parent
+    const parentNode = form.parentId
+      ? nodes.find(n => n.id === form.parentId) || { x: 0, y: 0 }
+      : { x: (Math.random() - 0.5) * 400, y: (Math.random() - 0.5) * 400 };
     const clearPos = findClearPosition(parentNode, nodes);
     snapshot();
     setNodes(prev => [...prev, {
@@ -1142,10 +1254,12 @@ function AppInner() {
       interactionScore: 0, pinned: false, type: 'friend',
       syncDismissed: !!img,
     }]);
-    setLinks(prev => [...prev, { source: form.parentId, target: newId }]);
+    // Only link if a parent is specified
+    if (form.parentId) {
+      setLinks(prev => [...prev, { source: form.parentId, target: newId }]);
+    }
     setSelectedNodeId(newId);
     setAddFriendForms(prev => prev.filter(f => f.id !== formId));
-    
     showToast(`🌱 ${form.name.trim() || 'New Friend'} added`);
   };
 
@@ -1242,17 +1356,43 @@ function AppInner() {
         const props = ['name', 'tel', 'icon'];
         const contacts = await navigator.contacts.select(props, { multiple: true });
         if (contacts.length > 0) {
-          // Sort by photo count descending — most photos first (like Google Photos)
           const sorted = [...contacts].sort((a, b) => (b.icon?.length || 0) - (a.icon?.length || 0));
-          const mapped = await Promise.all(sorted.map(async c => ({
-            label: c.name?.[0] || 'Friend',
-            phone: c.tel?.[0] || '',
-            img: c.icon?.length ? await new Promise(res => {
-              const reader = new FileReader();
-              reader.onload = e => res(e.target.result);
-              reader.readAsDataURL(c.icon[0]);
-            }) : AVATARS.james_f,
-          })));
+          const mapped = await Promise.all(sorted.map(async c => {
+            const fullName = c.name?.[0] || 'Friend';
+            const firstName = fullName.split(' ')[0]; // first name only
+            // Upscale contact thumbnail using canvas
+            let img = AVATARS.james_f;
+            if (c.icon?.length) {
+              img = await new Promise(res => {
+                const reader = new FileReader();
+                reader.onload = ev => {
+                  // Draw onto larger canvas to upscale
+                  const src = new Image();
+                  src.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = 400; canvas.height = 400;
+                    const ctx = canvas.getContext('2d');
+                    ctx.imageSmoothingEnabled = true;
+                    ctx.imageSmoothingQuality = 'high';
+                    // Crop to square then upscale
+                    const size = Math.min(src.width, src.height);
+                    const sx = (src.width - size) / 2;
+                    const sy = (src.height - size) / 2;
+                    ctx.drawImage(src, sx, sy, size, size, 0, 0, 400, 400);
+                    res(canvas.toDataURL('image/jpeg', 0.9));
+                  };
+                  src.src = ev.target.result;
+                };
+                reader.readAsDataURL(c.icon[0]);
+              });
+            }
+            return {
+              label: firstName,
+              contactName: fullName !== firstName ? fullName : null, // store full name as AKA
+              phone: c.tel?.[0] || '',
+              img,
+            };
+          }));
           spawnNodes(mapped);
         }
       } else throw new Error("API not supported");
@@ -1459,10 +1599,10 @@ function AppInner() {
     // Default parent is flower_social (all social connections route through it)
     // unless the user has a specific non-Me, non-hub, non-flower node selected
     const sel = selectedNodeId && nodes.find(n => n.id === selectedNodeId);
-    const parentId = (sel && sel.id !== 'me' && sel.type !== 'hub' && sel.type !== 'flower')
-      ? sel.id
-      : 'flower_social';
-    const parentNode = nodes.find(n => n.id === parentId) || nodes.find(n => n.id === 'flower_social') || { x: 0, y: 191 };
+    // Anchor position — near Me if Me selected, otherwise spread out
+    const anchorNode = selectedNodeId === 'me'
+      ? nodes.find(n => n.id === 'me') || { x: 0, y: 0 }
+      : { x: (Math.random() - 0.5) * 600, y: (Math.random() - 0.5) * 600 };
 
     // Try candidate positions radiating outward from the parent in 24 directions,
     // at increasing distances, until we find one that doesn't overlap any existing node.
@@ -1472,16 +1612,16 @@ function AppInner() {
     const HUB_RADIUS = 60;  // clearance bubble for the new hub sign
     const DIRECTIONS = 24;
 
-    let bestX = parentNode.x + MIN_DIST;
-    let bestY = parentNode.y;
+    let bestX = anchorNode.x + MIN_DIST;
+    let bestY = anchorNode.y;
     let placed = false;
 
     outer:
     for (let dist = MIN_DIST; dist <= MAX_DIST; dist += STEP) {
       for (let di = 0; di < DIRECTIONS; di++) {
         const angle = (di / DIRECTIONS) * Math.PI * 2;
-        const cx = parentNode.x + Math.cos(angle) * dist;
-        const cy = parentNode.y + Math.sin(angle) * dist;
+        const cx = anchorNode.x + Math.cos(angle) * dist;
+        const cy = anchorNode.y + Math.sin(angle) * dist;
         // Check clearance against every existing node
         const clear = nodes.every(n => {
           const nodeR = n.type === 'hub' ? 70 : (n.id === 'me' ? 80 : 60);
@@ -1503,7 +1643,10 @@ function AppInner() {
       x: bestX, y: bestY, pinned: false,
     };
     setNodes(prev => [...prev, newHub]);
-    setLinks(prev => [...prev, { source: parentId, target: id }]);
+    // Only connect to Me if Me node is selected — otherwise free-floating
+    if (selectedNodeId === 'me') {
+      setLinks(prev => [...prev, { source: 'me', target: id }]);
+    }
     setSelectedNodeId(id);
     setGroupModal({ hubId: id });
     setShowTutorial(false);
@@ -2059,9 +2202,73 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               <input type="checkbox" checked={theme.darkMode} onChange={e => setTheme(p => ({ ...p, darkMode: e.target.checked }))} className="w-4 h-4" />
             </div>
             <div className="flex items-center justify-between pt-2 border-t" style={{ borderColor: theme.darkMode ? '#334155' : '#e2e8f0' }}>
+              <span className="text-sm font-medium">🌱 Start Blank</span>
+              <button onClick={() => {
+                setSettingsOpen(false);
+                const doReset = () => {
+                  clearTimeout(saveTimer.current);
+                  setNodes(INITIAL_NODES);
+                  setLinks(INITIAL_LINKS);
+                  setDimensions(DEFAULT_DIMENSIONS);
+                  try {
+                    localStorage.removeItem('ft_nodes');
+                    localStorage.removeItem('ft_links');
+                    localStorage.removeItem('ft_dimensions');
+                  } catch {}
+                  clearPhotoDB();
+                  showToast('🌱 Started fresh!');
+                };
+                const pin = localStorage.getItem('ft_pin');
+                if (pin) {
+                  openPinModal('clear', 'Confirm Reset', doReset);
+                } else {
+                  doReset();
+                }
+              }} className="text-xs px-3 py-1 rounded-full bg-slate-500 text-white font-bold">Reset</button>
+            </div>
+            <div className="flex items-center justify-between pt-2 border-t" style={{ borderColor: theme.darkMode ? '#334155' : '#e2e8f0' }}>
               <span className="text-sm font-medium">✨ Load Demo Data</span>
               <button onClick={() => { loadDemoData(); setSettingsOpen(false); }}
                 className="text-xs px-3 py-1 rounded-full bg-emerald-600 text-white font-bold">Load</button>
+            </div>
+            {/* Clear Data */}
+            <div className="flex items-center justify-between pt-2 border-t" style={{ borderColor: theme.darkMode ? '#334155' : '#e2e8f0' }}>
+              <span className="text-sm font-medium">🗑️ Clear All Data</span>
+              <button onClick={() => {
+                setSettingsOpen(false);
+                const pin = localStorage.getItem('ft_pin');
+                if (pin) { openPinModal('clear', 'Confirm Clear Data', clearAllData); }
+                else { clearAllData(); }
+              }} className="text-xs px-3 py-1 rounded-full bg-red-600 text-white font-bold">Clear</button>
+            </div>
+            {/* PIN Lock */}
+            <div className="pt-2 border-t space-y-2" style={{ borderColor: theme.darkMode ? '#334155' : '#e2e8f0' }}>
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium">🔒 App PIN</span>
+                {localStorage.getItem('ft_pin') ? (
+                  <div className="flex gap-2">
+                    <button onClick={() => { setSettingsOpen(false); openPinModal('verify','Current PIN',()=>openPinModal('set','Set new PIN')); }}
+                      className="text-xs px-2 py-1 rounded-full bg-emerald-600 text-white font-bold">Change</button>
+                    <button onClick={() => { setSettingsOpen(false); openPinModal('verify','Enter PIN to remove',()=>{ localStorage.removeItem('ft_pin'); showToast('🔓 PIN removed'); }); }}
+                      className="text-xs px-2 py-1 rounded-full bg-slate-500 text-white font-bold">Remove</button>
+                  </div>
+                ) : (
+                  <button onClick={() => { setSettingsOpen(false); openPinModal('set','Set App PIN'); }}
+                    className="text-xs px-3 py-1 rounded-full bg-indigo-600 text-white font-bold">Set PIN</button>
+                )}
+              </div>
+              {localStorage.getItem('ft_pin') && (
+                <div className="flex items-center justify-between">
+                  <span className="text-xs" style={{color:theme.darkMode?'#94a3b8':'#64748b'}}>Lock after</span>
+                  <select value={lockTimer} onChange={e=>{ setLockTimerVal(e.target.value); localStorage.setItem('ft_lockTimer',e.target.value); }}
+                    className={`text-xs rounded-lg px-2 py-1 border outline-none ${theme.darkMode?'bg-slate-700 border-slate-600 text-white':'bg-white border-slate-200'}`}>
+                    <option value="close">App close</option>
+                    <option value="5min">5 minutes</option>
+                    <option value="1hour">1 hour</option>
+                    <option value="1day">1 day</option>
+                  </select>
+                </div>
+              )}
             </div>
             <div className="flex items-center justify-between pt-2 border-t" style={{ borderColor: theme.darkMode ? '#334155' : '#e2e8f0' }}>
               <span className="text-sm flex items-center">🔔 Notifications</span>
@@ -2106,7 +2313,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       {showAddMenu && (
         <div style={{position:'fixed', bottom:66, right:8, zIndex:200}}>
           <div className={`w-44 rounded-xl shadow-2xl border overflow-hidden ${theme.darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-            <button onClick={()=>{ const parentId = selectedNodeId && selectedNodeId !== 'me' && nodes.find(n=>n.id===selectedNodeId&&n.type!=='flower') ? selectedNodeId : 'flower_social'; setAddFriendForms(prev=>[...prev,{id:`form_${Date.now()}`,name:'',parentId}]); setShowAddMenu(false); }}
+            <button onClick={()=>{ setAddFriendForms(prev=>[...prev,{id:`form_${Date.now()}`,name:'',parentId:null}]); setShowAddMenu(false); }}
               className={`w-full text-left px-4 py-3 text-sm font-medium ${theme.darkMode?'hover:bg-slate-700 text-slate-200':'hover:bg-slate-50 text-slate-700'}`}>
               👤 Add Friend
             </button>
@@ -2135,7 +2342,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           position: 'fixed',
           top: 0, left: 0, bottom: 0,
           width: '20rem',
-          transform: selectedNode ? 'translateX(0)' : 'translateX(-100%)',
+          transform: selectedNode || addFriendForms.length > 0 ? 'translateX(0)' : 'translateX(-100%)',
           paddingBottom: 56,
         }}>
         <div className={`p-6 border-b flex justify-between items-center ${theme.darkMode ? 'border-slate-700 bg-slate-800' : 'border-slate-100 bg-slate-50'}`}>
@@ -2164,6 +2371,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         placeholder="Your name"
                         className={`w-full px-3 py-2 border rounded-lg text-sm font-semibold focus:ring-2 focus:ring-indigo-500 outline-none ${theme.darkMode?'bg-slate-700 border-slate-600 text-white':'bg-white border-slate-200'}`}
                       />
+                      {selectedNode.contactName && selectedNode.contactName !== selectedNode.label && (
+                        <div style={{fontSize:10,color:theme.darkMode?'#64748b':'#94a3b8',fontStyle:'italic',marginTop:2}}>
+                          aka {selectedNode.contactName}
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -2194,7 +2406,10 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         const contacts = await navigator.contacts.select(['name','email','tel','icon'], { multiple: false });
                         if (contacts.length > 0) {
                           const c = contacts[0];
-                          if (c.name?.[0]) updateSelectedNode('label', c.name[0]);
+                          const fullName = c.name?.[0] || '';
+                          const firstName = fullName.split(' ')[0];
+                          if (firstName) updateSelectedNode('label', firstName);
+                          if (fullName && fullName !== firstName) updateSelectedNode('contactName', fullName);
                           if (c.tel?.[0]) updateSelectedNode('phone', c.tel[0]);
                           if (c.email?.[0]) updateSelectedNode('email', c.email[0]);
                           if (c.icon?.[0]) {
@@ -2296,6 +2511,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         }}
                         className={`w-full font-bold text-lg bg-transparent border-b outline-none focus:border-emerald-500 transition-colors ${theme.darkMode ? 'border-slate-600 text-slate-100 placeholder-slate-500' : 'border-slate-300 text-slate-900 placeholder-slate-400'}`}
                       />
+                      {/* AKA bar — shown when contact name differs from display name */}
+                      {selectedNode.contactName && selectedNode.contactName !== selectedNode.label && (
+                        <div style={{
+                          fontSize:10, color:theme.darkMode?'#64748b':'#94a3b8',
+                          marginTop:2, fontStyle:'italic',
+                        }}>aka {selectedNode.contactName}</div>
+                      )}
                       {/* Friendship Level Badge — tap to expand log */}
                       {(() => {
                         const score = selectedNode.interactionScore || 0;
@@ -3377,6 +3599,14 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       onPointerDown={e => handlePointerDown(e, node.id)}
                       style={{ WebkitTouchCallout:'none', WebkitUserSelect:'none', userSelect:'none' }}
                     >
+                      {/* Selection ring in select-for-group mode */}
+                      {selectForGroupMode && selectedForGroup.includes(node.id) && (
+                        <circle cx={0} cy={0} r={node.radius + 14} fill="rgba(22,163,74,0.2)" stroke="#16a34a" strokeWidth="5" style={{pointerEvents:'none'}}/>
+                      )}
+                      {/* Dim unselected in select mode */}
+                      {selectForGroupMode && !selectedForGroup.includes(node.id) && node.type !== 'hub' && node.type !== 'flower' && (
+                        <circle cx={0} cy={0} r={node.radius} fill="rgba(0,0,0,0.5)" style={{pointerEvents:'none'}}/>
+                      )}
                       {node.type === 'flower' && viewMode === 'canvas' ? (
                         (() => {
                           const dim = dimensions[node.dimKey];
@@ -3875,7 +4105,53 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           </g>
         </svg>
 
-        {/* Tutorial overlay — floating top-left corner */}
+        {/* ── Select from Map mode overlay ─────────────────────────────────────── */}
+      {selectForGroupMode && (
+        <div style={{
+          position:'fixed', top:0, left:0, right:0, zIndex:300,
+          display:'flex', flexDirection:'column', gap:6,
+          padding:'12px 16px',
+          background:'#064e3b',
+          borderBottom:'3px solid #16a34a',
+          boxShadow:'0 4px 20px rgba(0,0,0,0.4)',
+        }}>
+          <div style={{display:'flex',gap:10,alignItems:'center',justifyContent:'space-between'}}>
+            <span style={{fontSize:13,fontWeight:700,color:'white'}}>
+              🫂 Tap people to add to group
+            </span>
+            <div style={{display:'flex',gap:8}}>
+              <button onClick={() => {
+                setLinks(prev => {
+                  const newLinks = selectedForGroup
+                    .filter(id => !prev.some(l =>
+                      (l.source === selectForGroupMode && l.target === id) ||
+                      (l.source === id && l.target === selectForGroupMode)
+                    ))
+                    .map(id => ({ source: selectForGroupMode, target: id }));
+                  return [...prev, ...newLinks];
+                });
+                showToast('Added ' + selectedForGroup.length + ' people to group');
+                setSelectForGroupMode(null);
+                setSelectedForGroup([]);
+              }} style={{padding:'6px 16px',borderRadius:8,background:'#16a34a',color:'white',border:'none',cursor:'pointer',fontSize:13,fontWeight:700}}>
+                Confirm ({selectedForGroup.length})
+              </button>
+              <button onClick={() => { setSelectForGroupMode(null); setSelectedForGroup([]); }}
+                style={{padding:'6px 12px',borderRadius:8,background:'#ef4444',color:'white',border:'none',cursor:'pointer',fontSize:13,fontWeight:600}}>
+                Cancel
+              </button>
+            </div>
+          </div>
+          {selectedForGroup.length > 0 && (
+            <div style={{fontSize:11,color:'#86efac',display:'flex',gap:6,flexWrap:'wrap'}}>
+              {selectedForGroup.map(id => {
+                const n = nodes.find(x => x.id === id);
+                return n ? <span key={id} style={{background:'rgba(255,255,255,0.15)',borderRadius:4,padding:'1px 6px'}}>{n.label}</span> : null;
+              })}
+            </div>
+          )}
+        </div>
+      )}
         {showTutorial && viewMode === 'canvas' && (
           <div style={{
             position:'absolute', top:80, left:16, zIndex:60, width:240,
@@ -3958,7 +4234,92 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         )}
       </div>
 
-      {/* ── Merge Prompt Modal ──────────────────────────────────────────────── */}
+      {/* ── Lock Screen ─────────────────────────────────────────────────────── */}
+      {appLocked && (
+        <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:900,
+          background:theme.darkMode?'#0f172a':'#f8fafc',
+          display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:20}}>
+          <div style={{fontSize:48}}>🔒</div>
+          <div style={{fontSize:20,fontWeight:800,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>FriendshipTree</div>
+          <div style={{fontSize:14,color:theme.darkMode?'#94a3b8':'#64748b'}}>Enter PIN to unlock</div>
+          {/* PIN dots */}
+          <div style={{display:'flex',gap:12,margin:'8px 0'}}>
+            {Array.from({length:6}).map((_,i)=>(
+              <div key={i} style={{width:14,height:14,borderRadius:'50%',
+                background:i<pinInput.length?'#10b981':(theme.darkMode?'#334155':'#e2e8f0'),
+                transition:'background 0.15s'}}/>
+            ))}
+          </div>
+          {pinError && <div style={{color:'#ef4444',fontSize:12,fontWeight:600}}>{pinError}</div>}
+          {/* Numpad */}
+          <div style={{display:'grid',gridTemplateColumns:'repeat(3,72px)',gap:10}}>
+            {[1,2,3,4,5,6,7,8,9,'',0,'⌫'].map((d,i)=>(
+              <button key={i} onClick={()=>{
+                if(d==='') return;
+                if(d==='⌫'){handlePinBackspace();return;}
+                const next=(pinInput+String(d)).slice(0,6);
+                setPinInput(next);setPinError('');
+                if(next.length>=4){
+                  setTimeout(()=>{
+                    const stored=localStorage.getItem('ft_pin');
+                    if(next===stored){setAppLocked(false);setPinInput('');}
+                    else{setPinError('Wrong PIN');setPinInput('');}
+                  },150);
+                }
+              }}
+              style={{height:64,borderRadius:12,border:'none',cursor:d===''?'default':'pointer',
+                background:d===''?'transparent':(theme.darkMode?'#1e293b':'white'),
+                fontSize:d==='⌫'?20:22,fontWeight:600,
+                color:theme.darkMode?'#e2e8f0':'#1e293b',
+                boxShadow:d===''?'none':'0 2px 8px rgba(0,0,0,0.15)',
+              }}>{d}</button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── PIN Modal ───────────────────────────────────────────────────────── */}
+      {pinModal && (
+        <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:800,background:'rgba(0,0,0,0.6)',
+          display:'flex',alignItems:'center',justifyContent:'center'}}
+          onClick={e=>{if(e.target===e.currentTarget){setPinModal(null);setPinInput('');}}}>
+          <div style={{background:theme.darkMode?'#0f172a':'white',borderRadius:20,padding:28,
+            width:'min(90vw,320px)',textAlign:'center',boxShadow:'0 25px 60px rgba(0,0,0,0.4)'}}>
+            <div style={{fontSize:32,marginBottom:8}}>{pinModal.mode==='set'?'🔐':'🔒'}</div>
+            <div style={{fontSize:16,fontWeight:800,color:theme.darkMode?'#e2e8f0':'#1e293b',marginBottom:4}}>{pinModal.title}</div>
+            <div style={{fontSize:12,color:theme.darkMode?'#64748b':'#94a3b8',marginBottom:16}}>
+              {pinModal.mode==='set'?'Choose a 4–6 digit PIN':'Enter your PIN to continue'}
+            </div>
+            {/* PIN dots */}
+            <div style={{display:'flex',gap:10,justifyContent:'center',marginBottom:8}}>
+              {Array.from({length:6}).map((_,i)=>(
+                <div key={i} style={{width:12,height:12,borderRadius:'50%',
+                  background:i<pinInput.length?'#10b981':(theme.darkMode?'#334155':'#e2e8f0'),transition:'background 0.15s'}}/>
+              ))}
+            </div>
+            {pinError && <div style={{color:'#ef4444',fontSize:12,fontWeight:600,marginBottom:8}}>{pinError}</div>}
+            {/* Numpad */}
+            <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8,marginTop:8}}>
+              {[1,2,3,4,5,6,7,8,9,'',0,'⌫'].map((d,i)=>(
+                <button key={i} onClick={()=>{
+                  if(d==='') return;
+                  if(d==='⌫'){handlePinBackspace();return;}
+                  handlePinDigit(String(d));
+                }}
+                  style={{padding:'14px 0',borderRadius:10,border:'none',cursor:d===''?'default':'pointer',
+                    background:d===''?'transparent':(theme.darkMode?'#1e293b':'#f8fafc'),
+                    fontSize:d==='⌫'?18:20,fontWeight:600,
+                    color:theme.darkMode?'#e2e8f0':'#1e293b',
+                    boxShadow:d===''?'none':'0 1px 4px rgba(0,0,0,0.1)',
+                  }}>{d}</button>
+              ))}
+            </div>
+            <button onClick={()=>{setPinModal(null);setPinInput('');}}
+              style={{marginTop:16,padding:'8px 24px',borderRadius:99,border:'none',cursor:'pointer',
+                background:'transparent',color:theme.darkMode?'#64748b':'#94a3b8',fontSize:13}}>Cancel</button>
+          </div>
+        </div>
+      )}
       {mergePrompt && (() => {
         const nodeA = nodes.find(n => n.id === mergePrompt.a);
         const nodeB = nodes.find(n => n.id === mergePrompt.b);
@@ -5012,10 +5373,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         const hub = nodes.find(n => n.id === groupModal.hubId);
         if (!hub) { setGroupModal(null); return null; }
 
-        // All non-hub, non-me people
+        // All non-hub, non-flower people INCLUDING Me
+        const people = nodes.filter(n => n.type !== 'hub' && n.type !== 'flower');
         const visiblePeople = activeTags.length > 0 ? people.filter(n => isTagFiltered(n.id)) : people;
-        const people = nodes.filter(n => n.type !== 'hub' && n.type !== 'flower' && n.id !== 'me');
-        // All hubs
         const hubs = nodes.filter(n => n.type === 'hub');
 
         // States:
@@ -5124,18 +5484,30 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   style={{ flex:1, background:'transparent', border:'none', outline:'none', fontSize:18, fontWeight:700, color:text }}
                 />
                 <button
+                  onClick={() => {
+                    setLinks(prev => prev.filter(l => l.source !== hub.id && l.target !== hub.id));
+                    setNodes(prev => prev.filter(n => n.id !== hub.id));
+                    setGroupModal(null);
+                    showToast('🗑️ Group deleted');
+                  }}
+                  style={{ padding:'6px 12px', borderRadius:8, background:'#ef4444', border:'none', color:'white', cursor:'pointer', fontSize:12, fontWeight:600 }}
+                >Delete</button>
+                <button
                   onClick={() => setGroupModal(null)}
                   style={{ padding:'6px 14px', borderRadius:8, background:dm?'#334155':'#e2e8f0', border:'none', color:text, cursor:'pointer', fontSize:13, fontWeight:600 }}
                 >Done</button>
               </div>
 
-              {/* Add people button */}
+              {/* Select from Map button */}
               <div style={{ padding:'12px 24px', borderBottom:`1px solid ${border}` }}>
                 <button
-                  onClick={addFriendsFromContacts}
+                  onClick={() => {
+                    setGroupModal(null);
+                    setSelectForGroupMode(groupModal.hubId);
+                  }}
                   style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 16px', borderRadius:8, background:'#16a34a', color:'white', border:'none', cursor:'pointer', fontSize:13, fontWeight:600 }}
                 >
-                  <span>＋</span><span>Add new people</span>
+                  <span>＋</span><span>Select from Map</span>
                 </button>
               </div>
 
@@ -5339,8 +5711,6 @@ const DEFAULT_DIMENSIONS = {
   },
 };
 
-function App() {
+export default function App() {
   return <ErrorBoundary><AppInner /></ErrorBoundary>;
 }
-
-export default App;
