@@ -7,7 +7,7 @@ import {
   BookUser
 } from 'lucide-react';
 
-const INTERACTION_DISTANCE = 80;
+const APP_VERSION = '1.1';
 const MAX_SCORE = 1000;
 const DECAY_RATE_PER_DAY = 5;
 const CALENDAR_NODE_SCALE = 8.4; // 30% smaller than original 15, then 20% more
@@ -495,6 +495,7 @@ function AppInner() {
   const [archivedLinks, setArchivedLinks] = useState([]);
   const [macheteMode, setMacheteMode] = useState(false);
   const [vineDrawMode, setVineDrawMode] = useState(false);
+  const [vineConnectPrompt, setVineConnectPrompt] = useState(null);
   const [pendingPaths, setPendingPaths] = useState([]); // [{pts:[{x,y}]}] accumulated while mode is on
   const [currentStroke, setCurrentStroke] = useState([]); // [{x,y}] current stroke being drawn
   const [growingVines, setGrowingVines] = useState([]); // [{id, pathD, totalLen, progress, nodeId}]
@@ -1635,16 +1636,19 @@ function AppInner() {
       : [targetNode.id, sourceNode.id];
 
     snapshot();
-    setLinks(prev => [...prev, { source: finalSrc, target: finalTgt }]);
 
     if (archived) {
+      setLinks(prev => [...prev, { source: finalSrc, target: finalTgt }]);
       setArchivedLinks(prev => prev.filter(l => l !== archived));
       setNodes(prev => prev.map(n =>
         n.id === finalTgt ? { ...n, interactionScore: Math.max(n.interactionScore || 0, archived.score || 0) } : n
       ));
-      showToast(`🌿 Reconnected — ${sourceNode.label} & ${targetNode.label} restored at ${archived.score} pts`);
+      showToast('🌿 Reconnected — ' + sourceNode.label + ' & ' + targetNode.label);
     } else {
-      showToast(`🌱 Connected ${sourceNode.label} → ${targetNode.label}`);
+      // Show dotted link preview + friendship type prompt
+      const midX = (sourceNode.x + targetNode.x) / 2;
+      const midY = (sourceNode.y + targetNode.y) / 2;
+      setVineConnectPrompt({ srcId: finalSrc, tgtId: finalTgt, midX, midY });
     }
   };
 
@@ -2182,10 +2186,4 @@ Return only the JSON array. If nothing trackable is found, return [].`;
   const svgGroupRef = useRef(null);
 
   // Apply transform directly to SVG group for smooth panning (bypasses React re-render)
-  const applyTransform = useCallback((t) => {
-    if (svgGroupRef.current) {
-      svgGroupRef.current.setAttribute('transform', `translate(${t.x}, ${t.y}) scale(${t.scale})`);
-    }
-  }, []);
-
-  const selectedNode = nodes.find(n => n.id === sel
+  const applyTransform = useCallback((t)
