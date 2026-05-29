@@ -478,6 +478,9 @@ function AppInner() {
   const fabDragStart = useRef(null);
   const fabRef = useRef(null);
   const holdTimer = useRef(null);
+  const groupLiftTimer = useRef(null);
+  const groupDragIds = useRef(null); // Set of nodeIds to move together, or null
+  const groupDragOrigins = useRef({});
   const [showTutorial, setShowTutorial] = useState(false);
   const [showLevelPanel, setShowLevelPanel] = useState(false);
   const [showLevelSetter, setShowLevelSetter] = useState(false);
@@ -615,10 +618,44 @@ function AppInner() {
       if (!node) return;
       setDragNode({ id: nodeId, startX: node.x, startY: node.y, pointerId: e.pointerId });
       clearTimeout(liftTimer.current);
+      clearTimeout(groupLiftTimer.current);
       liftTimer.current = setTimeout(() => {
         isPanningOverride.current = false;
         setLiftedNodeId(nodeId);
       }, 150);
+      // 2s hold — drag node with all directly connected friends
+      groupLiftTimer.current = setTimeout(() => {
+        // Only activate if node is already lifted (being dragged)
+        if (!liftedNodeId) return;
+        const draggedNode = nodes.find(n => n.id === nodeId);
+        if (!draggedNode) return;
+
+        // BFS outward from this node (following source→target links away from centre)
+        const visited = new Set([nodeId]);
+        const queue = [nodeId];
+        while (queue.length > 0) {
+          const curr = queue.shift();
+          links.forEach(l => {
+            if (l.source === curr && !visited.has(l.target)) {
+              const target = nodes.find(n => n.id === l.target);
+              if (target && target.type !== 'flower' && target.id !== 'me') {
+                visited.add(l.target);
+                queue.push(l.target);
+              }
+            }
+          });
+        }
+        if (visited.size <= 1) return; // no children to drag
+
+        // Save origins at current node positions
+        const origins = {};
+        nodes.forEach(n => { if (visited.has(n.id)) origins[n.id] = { x: n.x, y: n.y }; });
+        groupDragOrigins.current = origins;
+        // Update dragNode startX/Y to current position so delta starts from here
+        setDragNode(prev => prev ? { ...prev, startX: draggedNode.x, startY: draggedNode.y } : prev);
+        groupDragIds.current = visited;
+        showToast('🌿 Moving group of ' + visited.size);
+      }, 2000);
     } else {
       // Background touch — start panning immediately
       setIsPanning(true);
@@ -665,8 +702,9 @@ function AppInner() {
         // Not lifted yet — check if we should switch to pan
         const moved = Math.sqrt((ptr.x - ptr.startX)**2 + (ptr.y - ptr.startY)**2);
         if (moved > 12) {
-          // Swipe detected — cancel lift, switch to pan
           clearTimeout(liftTimer.current);
+          clearTimeout(groupLiftTimer.current);
+          groupDragIds.current = null;
           isPanningOverride.current = true;
           ptr.decidedPan = true;
           ptr.nodeId = null; // treat as background touch from now on
@@ -706,8 +744,18 @@ function AppInner() {
       const svgX = (e.clientX - rect.left - transform.x) / transform.scale;
       const svgY = (e.clientY - rect.top - transform.y) / transform.scale;
       setHexSnapPos(snapToHex(svgX, svgY));
-      setNodes(prev => prev.map(n => n.id === dragNode.id ? { ...n, x: svgX, y: svgY } : n));
-      let closest = null, minDist = INTERACTION_DISTANCE;
+      if (groupDragIds.current) {
+        const dx = svgX - dragNode.startX;
+        const dy = svgY - dragNode.startY;
+        setNodes(prev => prev.map(n => {
+          if (!groupDragIds.current.has(n.id)) return n;
+          const orig = groupDragOrigins.current[n.id];
+          if (!orig) return n;
+          return { ...n, x: orig.x + dx, y: orig.y + dy };
+        }));
+      } else {
+        setNodes(prev => prev.map(n => n.id === dragNode.id ? { ...n, x: svgX, y: svgY } : n));
+      }      let closest = null, minDist = INTERACTION_DISTANCE;
       nodes.forEach(n => {
         if (n.id !== dragNode.id && n.id !== 'me' && n.type !== 'flower') {
           const d = Math.sqrt((n.x-svgX)**2 + (n.y-svgY)**2);
@@ -729,6 +777,9 @@ function AppInner() {
     }
 
     clearTimeout(liftTimer.current);
+    clearTimeout(groupLiftTimer.current);
+    groupDragIds.current = null;
+    groupDragOrigins.current = {};
     const ptr = activePointers.current.get(e.pointerId);
     if (!ptr) return;
     activePointers.current.delete(e.pointerId);
@@ -815,16 +866,13 @@ function AppInner() {
             (l.source === hoverTarget && l.target === dragNode.id)
           );
           if (!alreadyLinked) {
-            const clearPos = findClearPosition(targetNode, nodes);
             setLinks(prev => [...prev, { source: dragNode.id, target: hoverTarget }]);
-            setNodes(prev => prev.map(n =>
-              n.id === dragNode.id ? { ...n, x: clearPos.x, y: clearPos.y } : n
-            ));
+            // Don't move the node — snap to hex where they released it
             if (archived) {
               setArchivedLinks(prev => prev.filter(l => l !== archived));
-              showToast(`🌿 Reconnected — friendship restored at ${archived.score} pts`);
+              showToast('🌿 Reconnected — friendship restored at ' + archived.score + ' pts');
             } else {
-              showToast(`🌱 Connected to ${targetNode.label}`);
+              showToast('🌱 Connected to ' + targetNode.label);
             }
           }
         } else if (targetNode?.type === 'hub') {
@@ -1247,27 +1295,28 @@ function AppInner() {
     if (!form) return;
     const newId = `node_${Date.now()}`;
     const avatarKeys = Object.keys(AVATARS);
-    // Free-floating if parentId is null/none, otherwise place near parent
-    const parentNode = form.parentId
+    // Place near parent if one set, otherwise random open space
+    const anchor = form.parentId
       ? nodes.find(n => n.id === form.parentId) || { x: 0, y: 0 }
-      : { x: (Math.random() - 0.5) * 400, y: (Math.random() - 0.5) * 400 };
-    const clearPos = findClearPosition(parentNode, nodes);
+      : { x: (Math.random()-0.5)*600, y: (Math.random()-0.5)*600 };
+    const clearPos = findClearPosition(anchor, nodes);
     snapshot();
     setNodes(prev => [...prev, {
       id: newId,
       label: form.name.trim() || 'New Friend',
-      img: img || AVATARS[avatarKeys[Math.floor(Math.random() * avatarKeys.length)]],
+      img: img || AVATARS[avatarKeys[Math.floor(Math.random()*avatarKeys.length)]],
       x: clearPos.x, y: clearPos.y,
-      interactionScore: form.initialScore || 0, pinned: false, type: 'friend',
+      interactionScore: form.initialScore || 0,
+      pinned: false, type: 'friend',
       syncDismissed: !!img,
     }]);
-    // Only link if a parent is specified
+    // Link to parent (group hub or nothing)
     if (form.parentId) {
       setLinks(prev => [...prev, { source: form.parentId, target: newId }]);
     }
     setSelectedNodeId(newId);
     setAddFriendForms(prev => prev.filter(f => f.id !== formId));
-    showToast(`🌱 ${form.name.trim() || 'New Friend'} added`);
+    showToast('🌱 ' + (form.name.trim() || 'New Friend') + ' added');
   };
 
   const handleImportContact = async () => {
@@ -2470,6 +2519,20 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       {showPhotoOptions && (
                         <div className={`absolute left-0 top-18 z-50 rounded-xl shadow-xl border overflow-hidden w-44 ${theme.darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}
                           style={{top:'4.5rem'}}>
+                          {/* Re-crop existing photo */}
+                          {selectedNode?.img && !selectedNode.img.includes('svg') && (
+                            <>
+                              <button
+                                onClick={() => {
+                                  setPhotoCrop({ nodeId: selectedNodeId, src: selectedNode.img, crop: { x: 0, y: 0, scale: 1 } });
+                                  setShowPhotoOptions(false);
+                                }}
+                                className={`w-full flex items-center gap-2 px-4 py-3 text-sm font-medium text-left ${theme.darkMode ? 'hover:bg-slate-700 text-slate-200' : 'hover:bg-slate-50 text-slate-700'}`}>
+                                <span>✂️</span> Re-crop Photo
+                              </button>
+                              <div className={`border-t ${theme.darkMode ? 'border-slate-700' : 'border-slate-100'}`} />
+                            </>
+                          )}
                           <label className={`flex items-center gap-2 px-4 py-3 text-sm font-medium cursor-pointer ${theme.darkMode ? 'hover:bg-slate-700 text-slate-200' : 'hover:bg-slate-50 text-slate-700'}`}>
                             <span>📷</span> Upload Photo
                             <input type="file" accept="image/*" className="hidden" onChange={e => {
@@ -4485,21 +4548,55 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           canvas.width = SIZE; canvas.height = SIZE;
           const ctx = canvas.getContext('2d');
 
-          // Draw circle clip
+          // Circle clip
           ctx.beginPath();
           ctx.arc(SIZE/2, SIZE/2, SIZE/2, 0, Math.PI*2);
           ctx.clip();
 
-          // Draw image with crop offset and scale
           const { x, y, scale } = photoCrop.crop;
-          const sw = img.naturalWidth / scale;
-          const sh = img.naturalHeight / scale;
-          const sx = (img.naturalWidth - sw) / 2 - x * (img.naturalWidth / (300 * scale));
-          const sy = (img.naturalHeight - sh) / 2 - y * (img.naturalHeight / (300 * scale));
-          ctx.drawImage(img, sx, sy, sw, sh, 0, 0, SIZE, SIZE);
 
-          // Export as high quality JPEG, save to IndexedDB (device storage, no size limit)
-          const base64 = canvas.toDataURL('image/png'); // full quality, stored in IndexedDB
+          // The preview div is square (containerW = containerH = container size)
+          // The image is displayed with objectFit:'contain' scaled to fit that square
+          // We need to map from screen-space drag offsets back to image-space coordinates
+
+          const iw = img.naturalWidth;
+          const ih = img.naturalHeight;
+
+          // Size of the preview container in CSS pixels (from the rendered element)
+          const previewEl = cropImgRef.current?.parentElement;
+          const containerW = previewEl ? previewEl.offsetWidth : 300;
+          const containerH = previewEl ? previewEl.offsetHeight : 300;
+
+          // How the image fits in the container with objectFit:contain
+          const imgAspect = iw / ih;
+          const containerAspect = containerW / containerH;
+          let renderedW, renderedH;
+          if (imgAspect > containerAspect) {
+            renderedW = containerW;
+            renderedH = containerW / imgAspect;
+          } else {
+            renderedH = containerH;
+            renderedW = containerH * imgAspect;
+          }
+
+          // Scale factor from CSS pixels to image pixels
+          const cssToImg = iw / renderedW;
+
+          // The visible region in image-space:
+          // Center of image + user drag offset (converted to image pixels) / scale
+          const imgCenterX = iw / 2 - (x * cssToImg) / scale;
+          const imgCenterY = ih / 2 - (y * cssToImg) / scale;
+
+          // Half-size of the square region to crop from the image
+          const halfSize = (Math.min(renderedW, renderedH) * cssToImg) / (2 * scale);
+
+          const sx = imgCenterX - halfSize;
+          const sy = imgCenterY - halfSize;
+          const sSize = halfSize * 2;
+
+          ctx.drawImage(img, sx, sy, sSize, sSize, 0, 0, SIZE, SIZE);
+
+          const base64 = canvas.toDataURL('image/png');
           savePhotoToDB(photoCrop.nodeId, base64);
           setNodes(prev => prev.map(n => n.id === photoCrop.nodeId ? { ...n, img: base64 } : n));
           setPhotoCrop(null);
@@ -5540,8 +5637,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 >Done</button>
               </div>
 
-              {/* Select from Map button */}
-              <div style={{ padding:'12px 24px', borderBottom:`1px solid ${border}` }}>
+              {/* Action buttons */}
+              <div style={{ padding:'12px 24px', borderBottom:`1px solid ${border}`, display:'flex', gap:10 }}>
                 <button
                   onClick={() => {
                     setGroupModal(null);
@@ -5550,6 +5647,15 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 16px', borderRadius:8, background:'#16a34a', color:'white', border:'none', cursor:'pointer', fontSize:13, fontWeight:600 }}
                 >
                   <span>＋</span><span>Select from Map</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setGroupModal(null);
+                    setAddFriendForms(prev => [...prev, { id:'form_'+Date.now(), name:'', parentId: hub.id }]);
+                  }}
+                  style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 16px', borderRadius:8, background:'#0ea5e9', color:'white', border:'none', cursor:'pointer', fontSize:13, fontWeight:600 }}
+                >
+                  <span>👤</span><span>New Friend</span>
                 </button>
               </div>
 
