@@ -5339,6 +5339,8 @@ const DEFAULT_DIMENSIONS = {
   },
 };
 
-export default function App() {
+function App() {
   return <ErrorBoundary><AppInner /></ErrorBoundary>;
 }
+
+export default App;
