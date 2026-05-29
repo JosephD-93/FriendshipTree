@@ -148,6 +148,136 @@ class ErrorBoundary extends React.Component {
   }
 }
 
+
+// ── FAB Component ────────────────────────────────────────────────────────────
+function FabMenu(props) {
+  const { theme, fabOpen, setFabOpen, fabPos, setFabPos,
+    draggingFab, setDraggingFab, heldTool, setHeldTool,
+    fabDragStart, fabRef, holdTimer,
+    historyLen, futureLen, vineDrawMode, macheteMode, pendingPaths,
+    undo, redo, setSearchOpen, setSettingsOpen,
+    commitAllPaths, setVineDrawMode, setMacheteMode, setPendingPaths, setCurrentStroke
+  } = props;
+
+  const dm = theme.darkMode;
+  const bg = dm?'#1e293b':'white';
+  const col = dm?'#e2e8f0':'#334155';
+  const FAB=52, TOOL=44, ICON_R=82, LABEL_R=130;
+  const W=window.innerWidth, H=window.innerHeight;
+
+  const py = fabPos.edge==='bottom'?H-FAB-64:fabPos.edge==='top'?8:Math.max(8,Math.min(H-FAB-64,fabPos.offset*H-FAB/2));
+  const px = fabPos.edge==='right'?W-FAB-8:fabPos.edge==='left'?8:Math.max(8,Math.min(W-FAB-8,fabPos.offset*W-FAB/2));
+  const cx=px+FAB/2, cy=py+FAB/2;
+
+  const snapEdge=(ex,ey)=>{
+    const d={left:ex,right:W-ex,top:ey,bottom:H-ey};
+    const edge=Object.keys(d).reduce((a,b)=>d[a]<d[b]?a:b);
+    const off=(edge==='left'||edge==='right')?Math.max(0.05,Math.min(0.95,ey/H)):Math.max(0.05,Math.min(0.95,ex/W));
+    return {edge,offset:off};
+  };
+
+  const tools = [
+    {id:'search',icon:'🔍',label:'Search',  fn:()=>{setSearchOpen(true);setFabOpen(false);}},
+    {id:'undo',  icon:'↩', label:'Undo',    fn:()=>undo(), holdFn:()=>redo(), holdIcon:'↪',holdLabel:'Redo', dim:historyLen===0&&futureLen===0},
+    {id:'vine',  icon:'🌿',label:vineDrawMode?'Commit':'Vine', fn:()=>{vineDrawMode?(commitAllPaths(),setVineDrawMode(false)):(setVineDrawMode(true),setMacheteMode(false),setPendingPaths([]),setCurrentStroke([]));setFabOpen(false);}, active:vineDrawMode},
+    {id:'cut',   icon:'🪓',label:macheteMode?'Stop':'Cut', fn:()=>{setMacheteMode(!macheteMode);setVineDrawMode(false);setFabOpen(false);}, active:macheteMode},
+    {id:'cfg',   icon:'⚙️',label:'Settings',fn:()=>{setSettingsOpen(v=>!v);setFabOpen(false);}},
+  ];
+  const n=tools.length;
+
+  // Fan angle pointing inward from whichever edge we're on
+  const cAngle=fabPos.edge==='left'?0:fabPos.edge==='right'?180:fabPos.edge==='top'?90:270;
+  const spread=(n-1)*36;
+
+  // For each tool, compute icon pos and label pos at same angle, further out
+  // Clamp label to stay on screen
+  const getPositions=(i)=>{
+    const ang=(cAngle - spread/2 + spread/(n-1)*i)*Math.PI/180;
+    const ix=cx+Math.cos(ang)*ICON_R-TOOL/2;
+    const iy=cy+Math.sin(ang)*ICON_R-TOOL/2;
+    const lx=cx+Math.cos(ang)*LABEL_R;
+    const ly=cy+Math.sin(ang)*LABEL_R;
+    return {
+      icon:{ x:Math.max(6,Math.min(W-TOOL-6,ix)), y:Math.max(6,Math.min(H-TOOL-64,iy)) },
+      label:{ x:Math.max(4,Math.min(W-90,lx)), y:Math.max(4,Math.min(H-20,ly)) },
+      ang,
+    };
+  };
+
+  const fabIconCol=fabOpen?'white':(vineDrawMode||macheteMode?'white':'#10b981');
+  const fabBg=fabOpen?'#dc2626':(vineDrawMode||macheteMode?'#10b981':bg);
+
+  return (
+    <>
+      {fabOpen&&<div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:149}} onClick={()=>setFabOpen(false)}/>}
+      {tools.map((t,i)=>{
+        const pos=getPositions(i);
+        const held=heldTool===t.id;
+        const icon=held&&t.holdIcon?t.holdIcon:t.icon;
+        const lbl=held&&t.holdLabel?t.holdLabel:t.label;
+        return (
+          <React.Fragment key={t.id}>
+            <div style={{position:'fixed',left:pos.icon.x,top:pos.icon.y,zIndex:151,
+              transform:fabOpen?'scale(1)':'scale(0)',
+              opacity:fabOpen?(t.dim?0.3:1):0,
+              transition:'all 0.25s cubic-bezier(0.34,1.56,0.64,1) '+(i*40)+'ms',
+              pointerEvents:fabOpen&&!t.dim?'auto':'none'}}>
+              <button
+                onPointerDown={()=>{if(t.holdFn)holdTimer.current=setTimeout(()=>setHeldTool(t.id),400);}}
+                onPointerUp={()=>{clearTimeout(holdTimer.current);if(held&&t.holdFn){t.holdFn();setHeldTool(null);}else{t.fn();setHeldTool(null);}}}
+                onPointerLeave={()=>{clearTimeout(holdTimer.current);setHeldTool(null);}}
+                style={{width:TOOL,height:TOOL,borderRadius:'50%',
+                  border:'2px solid '+(t.active||held?'#10b981':'transparent'),
+                  cursor:'pointer',fontSize:18,display:'flex',alignItems:'center',justifyContent:'center',
+                  background:t.active||held?'#064e3b':bg,
+                  boxShadow:held?'0 0 0 3px #10b981,0 4px 14px rgba(0,0,0,0.35)':'0 4px 14px rgba(0,0,0,0.35)',
+                  color:t.active||held?'#10b981':col,
+                }}>{icon}</button>
+            </div>
+            {fabOpen&&!t.dim&&(
+              <div style={{position:'fixed',
+                left:pos.label.x, top:pos.label.y,
+                transform:'translate(-50%,-50%)',
+                zIndex:153,
+                fontSize:10,fontWeight:700,whiteSpace:'nowrap',pointerEvents:'none',
+                color:dm?'#e2e8f0':'#1e293b',
+                background:dm?'rgba(15,23,42,0.92)':'rgba(255,255,255,0.92)',
+                padding:'2px 7px',borderRadius:4,
+                boxShadow:'0 1px 4px rgba(0,0,0,0.2)',
+                opacity:fabOpen?1:0,
+                transition:'opacity 0.2s '+(i*40)+'ms',
+              }}>{lbl}</div>
+            )}
+          </React.Fragment>
+        );
+      })}
+      <div ref={fabRef} style={{position:'fixed',left:px,top:py,zIndex:152,width:FAB,height:FAB,touchAction:'none'}}
+        onPointerDown={e=>{e.currentTarget.setPointerCapture(e.pointerId);fabDragStart.current={x:e.clientX,y:e.clientY,moved:false};setDraggingFab(false);}}
+        onPointerMove={e=>{if(!fabDragStart.current)return;const dx=e.clientX-fabDragStart.current.x,dy=e.clientY-fabDragStart.current.y;if(Math.sqrt(dx*dx+dy*dy)>8){fabDragStart.current.moved=true;setDraggingFab(true);setFabOpen(false);setFabPos(snapEdge(e.clientX,e.clientY));}}}
+        onPointerUp={e=>{if(!fabDragStart.current)return;if(!fabDragStart.current.moved)setFabOpen(v=>!v);else setFabPos(snapEdge(e.clientX,e.clientY));fabDragStart.current=null;setDraggingFab(false);}}
+      >
+        <button style={{width:'100%',height:'100%',borderRadius:'50%',border:'none',
+          cursor:draggingFab?'grabbing':'grab',background:fabBg,
+          boxShadow:'0 4px 20px rgba(0,0,0,0.35)',
+          display:'flex',alignItems:'center',justifyContent:'center',
+          transition:'background 0.2s',pointerEvents:'none'}}>
+          <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
+            <path d="M3 11 L13 3 L23 11" stroke={fabIconCol} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+            <rect x="5" y="11" width="16" height="11" rx="0.5" stroke={fabIconCol} strokeWidth="1.8" fill="none"/>
+            <rect x="10" y="16" width="6" height="6" rx="0.5" stroke={fabIconCol} strokeWidth="1.5" fill="none"/>
+            <circle cx="15" cy="19" r="0.8" fill={fabIconCol}/>
+            <rect x="6.5" y="13" width="4" height="3.5" rx="0.3" stroke={fabIconCol} strokeWidth="1.2" fill="none"/>
+            <path d="M8.5 13 L8.5 16.5 M6.5 14.75 L10.5 14.75" stroke={fabIconCol} strokeWidth="0.8"/>
+          </svg>
+        </button>
+      </div>
+    </>
+  );
+}
+
+
+
+
 function AppInner() {
   const svgRef = useRef(null);
   const [nodes, setNodes] = useState(() => {
@@ -253,6 +383,13 @@ function AppInner() {
   const [toastMessage, setToastMessage] = useState(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [theme, setTheme] = useState({ darkMode: true, showWeathering: true });
+  const [fabOpen, setFabOpen] = useState(false);
+  const [fabPos, setFabPos] = useState({ edge: 'left', offset: 0.3 });
+  const [draggingFab, setDraggingFab] = useState(false);
+  const [heldTool, setHeldTool] = useState(null);
+  const fabDragStart = useRef(null);
+  const fabRef = useRef(null);
+  const holdTimer = useRef(null);
   const [showTutorial, setShowTutorial] = useState(false);
   const [showLevelPanel, setShowLevelPanel] = useState(false);
   const [showLevelSetter, setShowLevelSetter] = useState(false);
@@ -1105,10 +1242,16 @@ function AppInner() {
         const props = ['name', 'tel', 'icon'];
         const contacts = await navigator.contacts.select(props, { multiple: true });
         if (contacts.length > 0) {
-          const mapped = await Promise.all(contacts.map(async c => ({
+          // Sort by photo count descending — most photos first (like Google Photos)
+          const sorted = [...contacts].sort((a, b) => (b.icon?.length || 0) - (a.icon?.length || 0));
+          const mapped = await Promise.all(sorted.map(async c => ({
             label: c.name?.[0] || 'Friend',
             phone: c.tel?.[0] || '',
-            img: c.icon?.length ? URL.createObjectURL(c.icon[0]) : AVATARS.james_f,
+            img: c.icon?.length ? await new Promise(res => {
+              const reader = new FileReader();
+              reader.onload = e => res(e.target.result);
+              reader.readAsDataURL(c.icon[0]);
+            }) : AVATARS.james_f,
           })));
           spawnNodes(mapped);
         }
@@ -1887,163 +2030,104 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         color: theme.darkMode ? '#f1f5f9' : '#1e293b',
       }}>
       
-      {/* Top Right Controls — tools only */}
-      <div className="absolute top-6 right-6 z-50 flex items-center space-x-3 pointer-events-none">
-
-        {/* Vine draw tool + Undo/Redo + Machete */}
-        {viewMode === 'canvas' && (
-          <div className="pointer-events-auto flex items-center space-x-1">
-            {/* Undo */}
-            <button onClick={undo} disabled={historyLen === 0} title="Undo"
-              className={`p-2 rounded-full shadow-md transition-all active:scale-95 text-base leading-none ${historyLen === 0 ? 'opacity-30 cursor-not-allowed ' + (theme.darkMode ? 'bg-slate-800 text-slate-500' : 'bg-white text-slate-400') : theme.darkMode ? 'bg-slate-800 hover:bg-slate-700 text-slate-200' : 'bg-white hover:bg-slate-50 text-slate-700'}`}
-            >↩</button>
-            {/* Vine draw */}
-            <button
-              onClick={() => {
-                if (vineDrawMode) {
-                  // Toggle OFF → commit all accumulated strokes
-                  commitAllPaths();
-                  setVineDrawMode(false);
-                } else {
-                  setVineDrawMode(true);
-                  setMacheteMode(false);
-                  setPendingPaths([]);
-                  setCurrentStroke([]);
-                }
-              }}
-              title={vineDrawMode ? `Commit vines (${pendingPaths.length} drawn)` : 'Draw a vine'}
-              className={`p-2 rounded-full shadow-md transition-all active:scale-95 text-xl leading-none relative
-                ${vineDrawMode
-                  ? 'bg-emerald-600 text-white ring-2 ring-emerald-400 ring-offset-2 ring-offset-slate-900'
-                  : theme.darkMode ? 'bg-slate-800 hover:bg-slate-700 text-slate-200' : 'bg-white hover:bg-slate-50 text-slate-700'
-                }`}
-            >
-              🌿
-              {vineDrawMode && pendingPaths.length > 0 && (
-                <span style={{ position:'absolute', top:-4, right:-4, background:'#22c55e', color:'white', borderRadius:'50%', width:16, height:16, fontSize:9, fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center' }}>
-                  {pendingPaths.length}
-                </span>
-              )}
-            </button>
-            {/* Axe */}
-            <button
-              onClick={() => { setMacheteMode(m => !m); setVineDrawMode(false); }}
-              title={macheteMode ? 'Exit cut mode' : 'Cut connections'}
-              className={`p-2 rounded-full shadow-md transition-all active:scale-95 text-xl leading-none
-                ${macheteMode
-                  ? 'bg-red-600 text-white ring-2 ring-red-400 ring-offset-2 ring-offset-slate-900'
-                  : theme.darkMode ? 'bg-slate-800 hover:bg-slate-700 text-slate-200' : 'bg-white hover:bg-slate-50 text-slate-700'
-                }`}
-            >🪓</button>
-            {/* Redo */}
-            <button onClick={redo} disabled={futureLen === 0} title="Redo"
-              className={`p-2 rounded-full shadow-md transition-all active:scale-95 text-base leading-none ${futureLen === 0 ? 'opacity-30 cursor-not-allowed ' + (theme.darkMode ? 'bg-slate-800 text-slate-500' : 'bg-white text-slate-400') : theme.darkMode ? 'bg-slate-800 hover:bg-slate-700 text-slate-200' : 'bg-white hover:bg-slate-50 text-slate-700'}`}
-            >↪</button>
-          </div>
-        )}
-
-        <div className="relative pointer-events-auto">
-          {/* Search */}
-          <button onClick={() => setSearchOpen(true)}
-            className={`p-2 rounded-full shadow-md transition-all active:scale-95 text-base leading-none ${theme.darkMode ? 'bg-slate-800 hover:bg-slate-700 text-slate-200' : 'bg-white hover:bg-slate-50 text-slate-700'}`}>
-            🔍
-          </button>
-          {/* Plus menu */}
-          <div className="relative">
-            <button onClick={() => setShowAddMenu(p=>!p)}
-              className={`p-2 rounded-full shadow-md transition-all active:scale-95 text-base leading-none ${theme.darkMode ? 'bg-slate-800 hover:bg-slate-700 text-slate-200' : 'bg-white hover:bg-slate-50 text-slate-700'}`}>
-              ➕
-            </button>
-            {showAddMenu && (
-              <div className={`absolute right-0 mt-2 w-44 rounded-xl shadow-2xl border overflow-hidden z-50 ${theme.darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                <button onClick={()=>{
-                  const parentId = selectedNodeId && selectedNodeId !== 'me' && nodes.find(n=>n.id===selectedNodeId&&n.type!=='flower') ? selectedNodeId : 'flower_social';
-                  setAddFriendForms(prev=>[...prev,{id:`form_${Date.now()}`,name:'',parentId}]);
-                  setShowAddMenu(false);
-                }} className={`w-full text-left px-4 py-3 text-sm font-medium ${theme.darkMode?'hover:bg-slate-700 text-slate-200':'hover:bg-slate-50 text-slate-700'}`}>
-                  👤 Add Friend
-                </button>
-                <div className={`border-t ${theme.darkMode?'border-slate-700':'border-slate-100'}`} />
-                <button onClick={()=>{addNewHub();setShowAddMenu(false);}}
-                  className={`w-full text-left px-4 py-3 text-sm font-medium ${theme.darkMode?'hover:bg-slate-700 text-slate-200':'hover:bg-slate-50 text-slate-700'}`}>
-                  🌳 Add Group
-                </button>
-                <div className={`border-t ${theme.darkMode?'border-slate-700':'border-slate-100'}`} />
-                <label className={`flex items-center gap-2 px-4 py-3 text-sm font-medium cursor-pointer ${theme.darkMode?'hover:bg-slate-700 text-slate-200':'hover:bg-slate-50 text-slate-700'}`}>
-                  📦 Import Tree
-                  <input type="file" accept=".json" className="hidden" onChange={e=>{ if(e.target.files[0]) importData(e.target.files[0]); setShowAddMenu(false); }} />
-                </label>
-                <div className={`border-t ${theme.darkMode?'border-slate-700':'border-slate-100'}`} />
-                <button onClick={()=>{exportData();setShowAddMenu(false);}}
-                  className={`w-full text-left px-4 py-3 text-sm font-medium ${theme.darkMode?'hover:bg-slate-700 text-slate-200':'hover:bg-slate-50 text-slate-700'}`}>
-                  📤 Export Tree
-                </button>
-              </div>
-            )}
-          </div>
-          {/* Settings button */}
-          <div className="relative">
-            <button onClick={() => setSettingsOpen(!settingsOpen)} className={`p-2 rounded-full shadow-md transition-all active:scale-95 ${theme.darkMode ? 'bg-slate-800 hover:bg-slate-700 text-slate-200' : 'bg-white hover:bg-slate-50 text-slate-700'}`}>
-              <Settings className="w-5 h-5" />
-            </button>
-          {settingsOpen && (
-            <div className={`absolute right-0 mt-2 w-72 rounded-xl shadow-2xl border p-4 space-y-4 ${theme.darkMode ? 'bg-slate-800 border-slate-700 text-slate-200' : 'bg-white border-slate-100 text-slate-800'}`}>
-              <h3 className="font-bold border-b pb-2 text-sm" style={{ borderColor: theme.darkMode ? '#334155' : '#e2e8f0' }}>Appearance</h3>
+      {/* ── Draggable Edge-Snapping FAB ─────────────────────────────────────── */}
+      {/* ── FAB ── */}
+      {viewMode === "canvas" && <FabMenu
+        theme={theme} viewMode={viewMode}
+        fabOpen={fabOpen} setFabOpen={setFabOpen}
+        fabPos={fabPos} setFabPos={setFabPos}
+        draggingFab={draggingFab} setDraggingFab={setDraggingFab}
+        heldTool={heldTool} setHeldTool={setHeldTool}
+        fabDragStart={fabDragStart} fabRef={fabRef} holdTimer={holdTimer}
+        historyLen={historyLen} futureLen={futureLen}
+        vineDrawMode={vineDrawMode} macheteMode={macheteMode} pendingPaths={pendingPaths}
+        undo={undo} redo={redo} setSearchOpen={setSearchOpen} setSettingsOpen={setSettingsOpen}
+        commitAllPaths={commitAllPaths} setVineDrawMode={setVineDrawMode}
+        setMacheteMode={setMacheteMode} setPendingPaths={setPendingPaths} setCurrentStroke={setCurrentStroke}
+      />}
+      {/* Settings panel — triggered from bottom tab */}
+      {settingsOpen && (
+        <div style={{position:'fixed', bottom:66, right:8, zIndex:200}}>
+          <div className={`w-72 rounded-xl shadow-2xl border p-4 space-y-4 ${theme.darkMode ? 'bg-slate-800 border-slate-700 text-slate-200' : 'bg-white border-slate-100 text-slate-800'}`}>
+            <h3 className="font-bold border-b pb-2 text-sm" style={{ borderColor: theme.darkMode ? '#334155' : '#e2e8f0' }}>Appearance</h3>
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium">Weathered Hubs</span>
+              <input type="checkbox" checked={theme.showWeathering} onChange={e => setTheme(p => ({ ...p, showWeathering: e.target.checked }))} className="w-4 h-4" />
+            </div>
+            <div className="flex items-center justify-between pt-2 border-t" style={{ borderColor: theme.darkMode ? '#334155' : '#e2e8f0' }}>
+              <span className="text-sm flex items-center"><Moon className="w-4 h-4 mr-2" /> Dark Mode</span>
+              <input type="checkbox" checked={theme.darkMode} onChange={e => setTheme(p => ({ ...p, darkMode: e.target.checked }))} className="w-4 h-4" />
+            </div>
+            <div className="flex items-center justify-between pt-2 border-t" style={{ borderColor: theme.darkMode ? '#334155' : '#e2e8f0' }}>
+              <span className="text-sm font-medium">✨ Load Demo Data</span>
+              <button onClick={() => { loadDemoData(); setSettingsOpen(false); }}
+                className="text-xs px-3 py-1 rounded-full bg-emerald-600 text-white font-bold">Load</button>
+            </div>
+            <div className="flex items-center justify-between pt-2 border-t" style={{ borderColor: theme.darkMode ? '#334155' : '#e2e8f0' }}>
+              <span className="text-sm flex items-center">🔔 Notifications</span>
+              {notifPermission === 'granted'
+                ? <span className="text-xs text-emerald-500 font-bold">Enabled ✓</span>
+                : <button onClick={requestNotifications} className="text-xs px-3 py-1 rounded-full bg-emerald-600 text-white font-bold">Enable</button>
+              }
+            </div>
+            {/* Tag filters */}
+            <div className="pt-2 border-t space-y-2" style={{ borderColor: theme.darkMode ? '#334155' : '#e2e8f0' }}>
               <div className="flex items-center justify-between">
-                <span className="text-sm font-medium">Weathered Hubs</span>
-                <input type="checkbox" checked={theme.showWeathering} onChange={e => setTheme(p => ({ ...p, showWeathering: e.target.checked }))} className="w-4 h-4" />
-              </div>
-              <div className="flex items-center justify-between pt-2 border-t" style={{ borderColor: theme.darkMode ? '#334155' : '#e2e8f0' }}>
-                <span className="text-sm flex items-center"><Moon className="w-4 h-4 mr-2" /> Dark Mode</span>
-                <input type="checkbox" checked={theme.darkMode} onChange={e => setTheme(p => ({ ...p, darkMode: e.target.checked }))} className="w-4 h-4" />
-              </div>
-              <div className="flex items-center justify-between pt-2 border-t" style={{ borderColor: theme.darkMode ? '#334155' : '#e2e8f0' }}>
-                <span className="text-sm flex items-center">🔔 Notifications</span>
-                {notifPermission === 'granted'
-                  ? <span className="text-xs text-emerald-500 font-bold">Enabled ✓</span>
-                  : <button onClick={requestNotifications} className="text-xs px-3 py-1 rounded-full bg-emerald-600 text-white font-bold">Enable</button>
-                }
-              </div>
-
-              {/* Tag filters */}
-              <div className="pt-2 border-t space-y-2" style={{ borderColor: theme.darkMode ? '#334155' : '#e2e8f0' }}>
-                <div className="flex items-center justify-between">
-                  <h3 className="font-bold text-sm">🏷 Filter by Tag</h3>
-                  {activeTags.length > 0 && (
-                    <button onClick={() => setActiveTags([])}
-                      className="text-xs text-red-400 hover:text-red-500 font-semibold">Clear all</button>
-                  )}
-                </div>
-                {allTags.length === 0 ? (
-                  <p className="text-xs italic" style={{ color: theme.darkMode ? '#475569' : '#94a3b8' }}>
-                    No tags yet — open a person's panel to add tags
-                  </p>
-                ) : (
-                  <div className="space-y-1.5">
-                    {allTags.map(tag => {
-                      const on = activeTags.includes(tag);
-                      const count = nodes.filter(n => (n.tags||[]).includes(tag)).length;
-                      return (
-                        <label key={tag} className="flex items-center gap-3 cursor-pointer group">
-                          <input
-                            type="checkbox"
-                            checked={on}
-                            onChange={() => setActiveTags(prev => on ? prev.filter(t=>t!==tag) : [...prev, tag])}
-                            className="w-4 h-4 rounded accent-emerald-500 cursor-pointer"
-                          />
-                          <span className="flex-1 text-sm font-medium">{tag}</span>
-                          <span className="text-xs" style={{ color: theme.darkMode?'#475569':'#94a3b8' }}>{count} {count===1?'person':'people'}</span>
-                        </label>
-                      );
-                    })}
-                  </div>
+                <h3 className="font-bold text-sm">🏷 Filter by Tag</h3>
+                {activeTags.length > 0 && (
+                  <button onClick={() => setActiveTags([])} className="text-xs text-red-400 hover:text-red-500 font-semibold">Clear all</button>
                 )}
               </div>
+              {allTags.length === 0 ? (
+                <p className="text-xs italic" style={{ color: theme.darkMode ? '#475569' : '#94a3b8' }}>No tags yet — open a person's panel to add tags</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {allTags.map(tag => {
+                    const on = activeTags.includes(tag);
+                    const count = nodes.filter(n => (n.tags||[]).includes(tag)).length;
+                    return (
+                      <label key={tag} className="flex items-center gap-3 cursor-pointer">
+                        <input type="checkbox" checked={on}
+                          onChange={() => setActiveTags(prev => on ? prev.filter(t=>t!==tag) : [...prev, tag])}
+                          className="w-4 h-4 rounded accent-emerald-500 cursor-pointer"/>
+                        <span className="flex-1 text-sm font-medium">{tag}</span>
+                        <span className="text-xs" style={{ color: theme.darkMode?'#475569':'#94a3b8' }}>{count} {count===1?'person':'people'}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
             </div>
-          )}
-          </div>{/* end settings relative */}
-        </div>{/* end search+plus+settings group */}
-      </div>{/* end top-right controls */}
+          </div>
+        </div>
+      )}
+
+      {/* Add menu — triggered from bottom tab */}
+      {showAddMenu && (
+        <div style={{position:'fixed', bottom:66, right:8, zIndex:200}}>
+          <div className={`w-44 rounded-xl shadow-2xl border overflow-hidden ${theme.darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+            <button onClick={()=>{ const parentId = selectedNodeId && selectedNodeId !== 'me' && nodes.find(n=>n.id===selectedNodeId&&n.type!=='flower') ? selectedNodeId : 'flower_social'; setAddFriendForms(prev=>[...prev,{id:`form_${Date.now()}`,name:'',parentId}]); setShowAddMenu(false); }}
+              className={`w-full text-left px-4 py-3 text-sm font-medium ${theme.darkMode?'hover:bg-slate-700 text-slate-200':'hover:bg-slate-50 text-slate-700'}`}>
+              👤 Add Friend
+            </button>
+            <div className={`border-t ${theme.darkMode?'border-slate-700':'border-slate-100'}`}/>
+            <button onClick={()=>{addNewHub();setShowAddMenu(false);}}
+              className={`w-full text-left px-4 py-3 text-sm font-medium ${theme.darkMode?'hover:bg-slate-700 text-slate-200':'hover:bg-slate-50 text-slate-700'}`}>
+              🌳 Add Group
+            </button>
+            <div className={`border-t ${theme.darkMode?'border-slate-700':'border-slate-100'}`}/>
+            <label className={`flex items-center gap-2 px-4 py-3 text-sm font-medium cursor-pointer ${theme.darkMode?'hover:bg-slate-700 text-slate-200':'hover:bg-slate-50 text-slate-700'}`}>
+              📦 Import Tree
+              <input type="file" accept=".json" className="hidden" onChange={e=>{ if(e.target.files[0]) importData(e.target.files[0]); setShowAddMenu(false); }}/>
+            </label>
+            <div className={`border-t ${theme.darkMode?'border-slate-700':'border-slate-100'}`}/>
+            <button onClick={()=>{exportData();setShowAddMenu(false);}}
+              className={`w-full text-left px-4 py-3 text-sm font-medium ${theme.darkMode?'hover:bg-slate-700 text-slate-200':'hover:bg-slate-50 text-slate-700'}`}>
+              📤 Export Tree
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Sidebar — fixed overlay, slides in from left */}
       <div className={`border-r shadow-2xl flex flex-col z-40 transition-all duration-300 ${sidebarBg}`}
@@ -3882,7 +3966,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         const isGroup = mergePrompt.type === 'group';
         const dm = theme.darkMode;
         return (
-          <div style={{position:'fixed',inset:0,zIndex:500,background:'rgba(0,0,0,0.6)',display:'flex',alignItems:'center',justifyContent:'center'}}
+          <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:500,background:'rgba(0,0,0,0.6)',display:'flex',alignItems:'center',justifyContent:'center'}}
             onClick={e => { if(e.target===e.currentTarget) setMergePrompt(null); }}>
             <div style={{background:dm?'#0f172a':'white',borderRadius:16,padding:24,width:'min(90vw,340px)',boxShadow:'0 25px 60px rgba(0,0,0,0.5)',border:`1px solid ${dm?'#334155':'#e2e8f0'}`}}>
               <div style={{fontSize:32,textAlign:'center',marginBottom:8}}>{isGroup ? '🌳' : '🤝'}</div>
@@ -3934,7 +4018,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           n.label?.toLowerCase().includes(q) && n.id !== 'me' && n.type !== 'flower'
         ) : [];
         return (
-          <div style={{position:'fixed',inset:0,zIndex:500,background:'rgba(0,0,0,0.5)'}}
+          <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:500,background:'rgba(0,0,0,0.5)'}}
             onClick={e => { if(e.target===e.currentTarget) { setSearchOpen(false); setSearchQuery(''); } }}>
             <div style={{
               position:'absolute',top:20,left:'50%',transform:'translateX(-50%)',
@@ -3989,7 +4073,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       {/* ── Photo Crop Modal ─────────────────────────────────────────────────── */}
       {photoCrop && (() => {
         const dm = theme.darkMode;
-        const SIZE = 600; // output size px - higher quality
+        const SIZE = 800; // output size px - full quality
 
         const applyCrop = () => {
           const img = cropImgRef.current;
@@ -4012,14 +4096,14 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           ctx.drawImage(img, sx, sy, sw, sh, 0, 0, SIZE, SIZE);
 
           // Export as high quality JPEG, save to IndexedDB (device storage, no size limit)
-          const base64 = canvas.toDataURL('image/jpeg', 0.85);
+          const base64 = canvas.toDataURL('image/png'); // full quality, stored in IndexedDB
           savePhotoToDB(photoCrop.nodeId, base64);
           setNodes(prev => prev.map(n => n.id === photoCrop.nodeId ? { ...n, img: base64 } : n));
           setPhotoCrop(null);
         };
 
         return (
-          <div style={{position:'fixed',inset:0,zIndex:600,background:'rgba(0,0,0,0.85)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center'}}
+          <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:600,background:'rgba(0,0,0,0.85)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center'}}
             onClick={e=>{if(e.target===e.currentTarget)setPhotoCrop(null)}}>
             <div style={{background:dm?'#0f172a':'white',borderRadius:20,overflow:'hidden',width:'min(90vw,380px)',boxShadow:'0 25px 60px rgba(0,0,0,0.6)'}}>
               {/* Header */}
@@ -4057,7 +4141,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     userSelect:'none',
                   }} />
                 {/* Circle overlay */}
-                <svg style={{position:'absolute',inset:0,width:'100%',height:'100%',pointerEvents:'none'}} viewBox="0 0 100 100" preserveAspectRatio="none">
+                <svg style={{position:'absolute',top:0,left:0,right:0,bottom:0,width:'100%',height:'100%',pointerEvents:'none'}} viewBox="0 0 100 100" preserveAspectRatio="none">
                   <mask id="circle-mask">
                     <rect width="100" height="100" fill="white"/>
                     <circle cx="50" cy="50" r="50" fill="black"/>
@@ -4165,7 +4249,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         const label = (t) => <p style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.06em',color:dm?'#94a3b8':'#64748b',marginBottom:5,marginTop:8}}>{t}</p>;
 
         return (
-          <div style={{position:'fixed',inset:0,zIndex:400,background:'rgba(0,0,0,0.65)',display:'flex',alignItems:'center',justifyContent:'center'}}
+          <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:400,background:'rgba(0,0,0,0.65)',display:'flex',alignItems:'center',justifyContent:'center'}}
             onClick={e => { if(e.target===e.currentTarget) setAvatarBuilder(null); }}>
             <div style={{background:dm?'#0f172a':'white',border:`1px solid ${dm?'#334155':'#e2e8f0'}`,borderRadius:16,width:'min(94vw,380px)',maxHeight:'88vh',display:'flex',flexDirection:'column',overflow:'hidden',boxShadow:'0 25px 60px rgba(0,0,0,0.5)'}}>
               <div style={{padding:'14px 18px',borderBottom:`1px solid ${dm?'#334155':'#e2e8f0'}`,display:'flex',alignItems:'center',gap:10}}>
@@ -4302,7 +4386,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         const onDragEnd = () => setDragActivity(null);
 
         return (
-          <div style={{position:'fixed',inset:0,zIndex:310,background:'rgba(0,0,0,0.6)',display:'flex',alignItems:'center',justifyContent:'center'}}
+          <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:310,background:'rgba(0,0,0,0.6)',display:'flex',alignItems:'center',justifyContent:'center'}}
             onClick={e => { if (e.target===e.currentTarget) setFlowerPanel(null); }}>
             <div style={{background:bg,border:`1px solid ${border}`,borderRadius:16,width:'min(94vw,480px)',maxHeight:'86vh',display:'flex',flexDirection:'column',boxShadow:'0 25px 60px rgba(0,0,0,0.5)',overflow:'hidden'}}>
 
@@ -4412,7 +4496,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
       {/* ── Diary Log Modal ──────────────────────────────────────────────────── */}
       {diaryOpen && (
-        <div style={{position:'fixed',inset:0,zIndex:300,background:'rgba(0,0,0,0.6)',display:'flex',alignItems:'center',justifyContent:'center'}}
+        <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:300,background:'rgba(0,0,0,0.6)',display:'flex',alignItems:'center',justifyContent:'center'}}
           onClick={e => { if(e.target===e.currentTarget) setDiaryOpen(false); }}>
           <div style={{background:theme.darkMode?'#0f172a':'white',border:`1px solid ${theme.darkMode?'#334155':'#e2e8f0'}`,borderRadius:16,width:'min(95vw,600px)',maxHeight:'88vh',display:'flex',flexDirection:'column',boxShadow:'0 25px 60px rgba(0,0,0,0.5)',overflow:'hidden'}}>
             {/* Header */}
@@ -4549,7 +4633,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         const visiblePeople = activeTags.length > 0 ? people.filter(n => isTagFiltered(n.id)) : people;
 
         return (
-          <div style={{position:'absolute',inset:0,zIndex:50,background:bg,display:'flex',flexDirection:'column',overflow:'hidden',paddingBottom:56}}>
+          <div style={{position:'absolute',top:0,left:0,right:0,bottom:0,zIndex:50,background:bg,display:'flex',flexDirection:'column',overflow:'hidden',paddingBottom:56}}>
             {/* Header */}
             <div style={{padding:'16px 20px 0',background:card,borderBottom:`1px solid ${border}`,flexShrink:0}}>
               <h2 style={{textAlign:'center',fontWeight:800,fontSize:20,marginBottom:12,background:'linear-gradient(to right,#10b981,#6366f1)',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent'}}>
@@ -5026,7 +5110,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
         return (
           <div
-            style={{ position:'fixed', inset:0, zIndex:200, background:'rgba(0,0,0,0.55)', display:'flex', alignItems:'center', justifyContent:'center' }}
+            style={{ position:'fixed', top:0,left:0,right:0,bottom:0, zIndex:200, background:'rgba(0,0,0,0.55)', display:'flex', alignItems:'center', justifyContent:'center' }}
             onClick={e => { if (e.target === e.currentTarget) setGroupModal(null); }}
           >
             <div style={{ background:bg, border:`1px solid ${border}`, borderRadius:16, width:'min(96vw, 780px)', maxHeight:'85vh', display:'flex', flexDirection:'column', boxShadow:'0 25px 60px rgba(0,0,0,0.5)', overflow:'hidden' }}>
@@ -5136,12 +5220,30 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         paddingBottom: 'env(safe-area-inset-bottom)',
       }}>
         {[
-          { id: 'canvas',   icon: <MapIcon className="w-5 h-5" />,      label: 'Map'      },
-          { id: 'calendar', icon: <CalendarIcon className="w-5 h-5" />,  label: 'Calendar' },
-          { id: 'me',       icon: <span style={{fontSize:20}}>🌳</span>, label: 'Me'       },
-          { id: 'demo',     icon: <span style={{fontSize:18}}>✨</span>, label: 'Demo',    action: loadDemoData },
+          { id: 'canvas',   label: 'Map', icon: (active) => (
+            <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+              {/* Vine/plant for map */}
+              <path d="M11 19 L11 10 M11 14 C11 14 7 12 6 8 C9 7 12 10 11 14 M11 12 C11 12 15 10 16 6 C13 5 10 8 11 12" stroke={active?'#10b981':'currentColor'} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+              <circle cx="11" cy="19" r="1.5" fill={active?'#10b981':'currentColor'}/>
+            </svg>
+          )},
+          { id: 'calendar', label: 'Calendar', icon: (active) => <CalendarIcon className="w-5 h-5" /> },
+          { id: 'me',       label: 'Overview', icon: (active) => (
+            <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+              {/* Sideways bar chart */}
+              <rect x="4" y="5" width="8" height="3" rx="1.5" fill={active?'#10b981':'currentColor'}/>
+              <rect x="4" y="10" width="13" height="3" rx="1.5" fill={active?'#10b981':'currentColor'}/>
+              <rect x="4" y="15" width="5" height="3" rx="1.5" fill={active?'#10b981':'currentColor'}/>
+            </svg>
+          )},
+          { id: 'add', label: 'Add', action: () => setShowAddMenu(p=>!p), icon: (active) => (
+            <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+              <circle cx="11" cy="11" r="8" stroke={active?'#10b981':'currentColor'} strokeWidth="1.8"/>
+              <path d="M11 7 L11 15 M7 11 L15 11" stroke={active?'#10b981':'currentColor'} strokeWidth="2" strokeLinecap="round"/>
+            </svg>
+          )},
         ].map(tab => {
-          const active = viewMode === tab.id;
+          const active = tab.action ? (tab.id==='add' ? showAddMenu : false) : viewMode === tab.id;
           const color = active ? '#10b981' : (theme.darkMode ? '#94a3b8' : '#64748b');
           return (
             <button key={tab.id}
@@ -5155,7 +5257,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 borderTop: active ? `2px solid #10b981` : '2px solid transparent',
                 transition: 'color 0.15s',
               }}>
-              {tab.icon}
+              {tab.icon(active)}
               <span style={{fontSize: 10, fontWeight: active ? 700 : 500, marginTop: 2}}>{tab.label}</span>
             </button>
           );
