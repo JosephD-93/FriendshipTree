@@ -482,8 +482,12 @@ function AppInner() {
   const [showLevelPanel, setShowLevelPanel] = useState(false);
   const [showLevelSetter, setShowLevelSetter] = useState(false);
   const [groupModal, setGroupModal] = useState(null);
-  const [selectForGroupMode, setSelectForGroupMode] = useState(null); // hubId when selecting
-  const [selectedForGroup, setSelectedForGroup] = useState([]); // nodeIds selected // null | { hubId }
+  const [selectForGroupMode, setSelectForGroupMode] = useState(null);
+  const [selectedForGroup, setSelectedForGroup] = useState([]);
+  const selectedForGroupRef = useRef([]);
+
+  // Keep ref in sync with state
+  useEffect(() => { selectedForGroupRef.current = selectedForGroup; }, [selectedForGroup]); // null | { hubId }
   const [slashTrail, setSlashTrail] = useState([]);
   const [archivedLinks, setArchivedLinks] = useState([]);
   const [macheteMode, setMacheteMode] = useState(false);
@@ -737,9 +741,12 @@ function AppInner() {
       if (selectForGroupMode) {
         const tappedNode = nodes.find(n => n.id === ptr.nodeId);
         if (tappedNode && tappedNode.type !== 'hub' && tappedNode.type !== 'flower') {
-          setSelectedForGroup(prev =>
-            prev.includes(ptr.nodeId) ? prev.filter(id => id !== ptr.nodeId) : [...prev, ptr.nodeId]
-          );
+          const current = selectedForGroupRef.current;
+          const next = current.includes(ptr.nodeId)
+            ? current.filter(id => id !== ptr.nodeId)
+            : [...current, ptr.nodeId];
+          selectedForGroupRef.current = next;
+          setSelectedForGroup(next);
         }
         return;
       }
@@ -1251,7 +1258,7 @@ function AppInner() {
       label: form.name.trim() || 'New Friend',
       img: img || AVATARS[avatarKeys[Math.floor(Math.random() * avatarKeys.length)]],
       x: clearPos.x, y: clearPos.y,
-      interactionScore: 0, pinned: false, type: 'friend',
+      interactionScore: form.initialScore || 0, pinned: false, type: 'friend',
       syncDismissed: !!img,
     }]);
     // Only link if a parent is specified
@@ -2894,6 +2901,24 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 autoCapitalize="words"
                 className={`w-full px-3 py-1.5 rounded-lg border text-sm font-medium outline-none focus:ring-2 focus:ring-emerald-500 ${theme.darkMode ? 'bg-slate-800 border-slate-600 text-slate-100 placeholder-slate-500' : 'bg-slate-50 border-slate-200 text-slate-900 placeholder-slate-400'}`}
               />
+              {/* Friendship level selector */}
+              <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
+                {[
+                  {label:'New',    score:0,   color:'#bef264'},
+                  {label:'Friend', score:100, color:'#84cc16'},
+                  {label:'Good',   score:300, color:'#166534'},
+                  {label:'Close',  score:600, color:'#3b82f6'},
+                ].map(tier => (
+                  <button key={tier.score}
+                    onClick={() => setAddFriendForms(prev => prev.map(f => f.id === form.id ? { ...f, initialScore: tier.score } : f))}
+                    style={{
+                      flex:1, padding:'3px 4px', borderRadius:6, border:'2px solid',
+                      borderColor: form.initialScore === tier.score ? tier.color : 'transparent',
+                      background: form.initialScore === tier.score ? tier.color+'22' : (theme.darkMode?'#1e293b':'#f8fafc'),
+                      color: tier.color, fontSize:10, fontWeight:700, cursor:'pointer',
+                    }}>{tier.label}</button>
+                ))}
+              </div>
               <div className="flex gap-1.5">
                 <button onClick={() => createFriendFromForm(form.id, null)}
                   className="flex-1 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors">
@@ -4122,17 +4147,34 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             <div style={{display:'flex',gap:8}}>
               <button onClick={() => {
                 setLinks(prev => {
-                  const newLinks = selectedForGroup
-                    .filter(id => !prev.some(l =>
+                  const toAdd = selectedForGroupRef.current;
+                  const newLinks = [];
+                  toAdd.forEach(id => {
+                    const alreadyLinked = prev.some(l =>
                       (l.source === selectForGroupMode && l.target === id) ||
                       (l.source === id && l.target === selectForGroupMode)
-                    ))
-                    .map(id => ({ source: selectForGroupMode, target: id }));
+                    );
+                    if (!alreadyLinked) {
+                      if (id === 'me') {
+                        // Connect Me to social node, not the group hub
+                        const meAlreadyLinkedToSocial = prev.some(l =>
+                          (l.source === 'me' && l.target === 'flower_social') ||
+                          (l.source === 'flower_social' && l.target === 'me')
+                        );
+                        if (!meAlreadyLinkedToSocial) {
+                          newLinks.push({ source: 'me', target: 'flower_social' });
+                        }
+                      } else {
+                        newLinks.push({ source: selectForGroupMode, target: id });
+                      }
+                    }
+                  });
                   return [...prev, ...newLinks];
                 });
-                showToast('Added ' + selectedForGroup.length + ' people to group');
+                showToast('Added ' + selectedForGroupRef.current.length + ' people to group');
                 setSelectForGroupMode(null);
                 setSelectedForGroup([]);
+                selectedForGroupRef.current = [];
               }} style={{padding:'6px 16px',borderRadius:8,background:'#16a34a',color:'white',border:'none',cursor:'pointer',fontSize:13,fontWeight:700}}>
                 Confirm ({selectedForGroup.length})
               </button>
