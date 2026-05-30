@@ -513,7 +513,8 @@ function AppInner() {
   const [userIdeas, setUserIdeas] = useState(() => {
     try { return JSON.parse(localStorage.getItem('ft_ideas') || '[]'); } catch { return []; }
   });
-  const [settingsSections, setSettingsSections] = useState({appearance:true,filters:false,data:false,reset:false,security:false,future:false});
+  const settingsOpenTime = useRef(0);
+  useEffect(() => { if (settingsOpen) settingsOpenTime.current = Date.now(); }, [settingsOpen]);
   const [tierPickMode, setTierPickMode] = useState(false);
   const [photoBorderMode, setPhotoBorderMode] = useState('none');
   const [groupColors, setGroupColors] = useState({});
@@ -2389,9 +2390,17 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       {/* Settings panel — full height slide-in from right */}
       {settingsOpen && (
         <div
-          onClick={()=>setSettingsOpen(false)}
+          onPointerDown={e=>{
+            const panel = e.currentTarget.children[0];
+            if (panel && !panel.contains(e.target)) {
+              // Guard: ignore if opened within last 400ms (prevents same-tap close)
+              if (Date.now() - settingsOpenTime.current > 400) {
+                setSettingsOpen(false);
+              }
+            }
+          }}
           style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:400,background:'rgba(0,0,0,0.4)'}}>
-          <div onClick={e=>e.stopPropagation()}
+          <div
             style={{
             position:'absolute',top:0,right:0,bottom:56,width:'min(100vw,320px)',
             display:'flex',flexDirection:'column',
