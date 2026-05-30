@@ -7,7 +7,7 @@ import {
   BookUser
 } from 'lucide-react';
 
-const APP_VERSION = '2.8';
+const APP_VERSION = '2.9';
 const INTERACTION_DISTANCE = 70;
 const TIER_COLORS_GLOBAL = ['#bef264','#84cc16','#166534','#3b82f6','#9333ea'];
 const PRIMARY_GROUP_COLORS = ['#ef4444','#3b82f6','#f59e0b','#10b981','#8b5cf6','#ec4899','#06b6d4','#f97316'];
@@ -2836,109 +2836,106 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
               {selectedNode.type !== 'hub' && selectedNode.id !== 'me' && (
                 <>
-                  <div className="flex items-center space-x-3">
-                    {/* Photo — tap to open picker */}
-                    <div className="relative flex-shrink-0">
-                      <button
-                        onClick={() => setShowPhotoOptions(p => !p)}
-                        className={`w-16 h-16 rounded-full overflow-hidden border-2 cursor-pointer relative ${theme.darkMode ? 'border-slate-600' : 'border-emerald-100'}`}
-                        style={{padding:0,background:'none'}}
-                      >
-                        <img src={selectedNode.img} alt="Profile" className="w-full h-full object-cover" />
-                        <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-0 hover:bg-opacity-40 transition-all rounded-full">
-                          <span className="text-white text-lg opacity-0 hover:opacity-100">✎</span>
-                        </div>
-                      </button>
-                      {/* Photo carousel dots — if multiple photos */}
-                      {(selectedNode.photos?.length > 1) && (
-                        <div style={{display:'flex',gap:4,marginTop:4,justifyContent:'center'}}>
+                  <div className="flex items-start space-x-3">
+                    {/* Main profile photo */}
+                    <div style={{position:'relative',flexShrink:0}}>
+                      <div style={{width:64,height:64,borderRadius:'50%',overflow:'hidden',border:'2px solid '+(theme.darkMode?'#334155':'#d1fae5')}}>
+                        <img src={selectedNode.img} alt="Profile" style={{width:'100%',height:'100%',objectFit:'cover'}}/>
+                      </div>
+                      {/* Edit + Add buttons below photo */}
+                      <div style={{display:'flex',gap:3,marginTop:4,justifyContent:'center'}}>
+                        {/* Edit current photo */}
+                        <button title="Edit crop"
+                          onClick={() => {
+                            let origSrc = selectedNode.img;
+                            openPhotoDB().then(db => {
+                              const tx = db.transaction('photos','readonly');
+                              const req = tx.objectStore('photos').get(selectedNodeId + '_orig');
+                              req.onsuccess = e => {
+                                if (e.target.result?.dataUrl) origSrc = e.target.result.dataUrl;
+                                setPhotoCrop({ nodeId: selectedNodeId, src: origSrc, originalSrc: origSrc, crop: { x:0, y:0, scale:1 } });
+                              };
+                              req.onerror = () => setPhotoCrop({ nodeId: selectedNodeId, src: origSrc, originalSrc: origSrc, crop: { x:0, y:0, scale:1 } });
+                            }).catch(() => setPhotoCrop({ nodeId: selectedNodeId, src: origSrc, originalSrc: origSrc, crop: { x:0, y:0, scale:1 } }));
+                          }}
+                          style={{width:26,height:26,borderRadius:7,background:theme.darkMode?'#334155':'#f1f5f9',border:'none',cursor:'pointer',fontSize:13,display:'flex',alignItems:'center',justifyContent:'center'}}>
+                          ✂️
+                        </button>
+                        {/* Add new photo */}
+                        <label title="Add photo" style={{width:26,height:26,borderRadius:7,background:theme.darkMode?'#334155':'#f1f5f9',cursor:'pointer',fontSize:13,display:'flex',alignItems:'center',justifyContent:'center'}}>
+                          ➕
+                          <input type="file" accept="image/*" style={{display:'none'}} onChange={e => {
+                            const file = e.target.files[0];
+                            if (!file) return;
+                            const reader = new FileReader();
+                            reader.onload = ev => {
+                              setPhotoCrop({ nodeId: selectedNodeId, src: ev.target.result, originalSrc: ev.target.result, crop: { x:0, y:0, scale:1 } });
+                            };
+                            reader.readAsDataURL(file);
+                          }}/>
+                        </label>
+                        {/* Avatar builder */}
+                        <button title="Build avatar"
+                          onClick={() => {
+                            const n = nodes.find(nd => nd.id === selectedNodeId);
+                            setAvBg(n?._avBg || '#4f46e5');
+                            setAvSkin(n?._avSkin || '#f4c2a1');
+                            setAvHair(n?._avHair || '#2d1b00');
+                            setAvStyle(n?._avStyle || 'medium');
+                            setAvFace(n?._avFace || 'smile');
+                            setAvatarBuilder({ nodeId: selectedNodeId });
+                          }}
+                          style={{width:26,height:26,borderRadius:7,background:theme.darkMode?'#334155':'#f1f5f9',border:'none',cursor:'pointer',fontSize:13,display:'flex',alignItems:'center',justifyContent:'center'}}>
+                          🎨
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Photo gallery — thumbnails */}
+                    <div style={{flex:1,minWidth:0}}>
+                      {(selectedNode.photos?.length > 0) ? (
+                        <div style={{display:'flex',flexWrap:'wrap',gap:4}}>
                           {selectedNode.photos.map((p,pi)=>(
-                            <button key={pi}
-                              onClick={()=>setNodes(prev=>prev.map(n=>n.id===selectedNode.id?{...n,img:p.cropped,activePhotoIdx:pi}:n))}
-                              style={{width:20,height:20,borderRadius:'50%',overflow:'hidden',border:'2px solid '+(selectedNode.activePhotoIdx===pi?'#10b981':'transparent'),padding:0,cursor:'pointer',background:'none'}}>
-                              <img src={p.cropped} style={{width:'100%',height:'100%',objectFit:'cover'}}/>
-                            </button>
+                            <div key={pi} style={{position:'relative'}}>
+                              <button
+                                onClick={()=>setNodes(prev=>prev.map(n=>n.id===selectedNode.id?{...n,img:p.cropped,activePhotoIdx:pi}:n))}
+                                style={{width:40,height:40,borderRadius:8,overflow:'hidden',border:'2.5px solid '+(selectedNode.activePhotoIdx===pi?'#10b981':'transparent'),padding:0,cursor:'pointer',background:'none',display:'block'}}>
+                                <img src={p.cropped} style={{width:'100%',height:'100%',objectFit:'cover'}}/>
+                              </button>
+                              {/* Delete photo button */}
+                              <button onClick={()=>{
+                                const updated = (selectedNode.photos||[]).filter((_,i)=>i!==pi);
+                                const newActive = Math.max(0, (selectedNode.activePhotoIdx||0)-1);
+                                const newImg = updated.length>0 ? updated[Math.min(newActive,updated.length-1)].cropped : selectedNode.img;
+                                setNodes(prev=>prev.map(n=>n.id===selectedNode.id?{...n,photos:updated,activePhotoIdx:newActive,img:updated.length>0?newImg:n.img}:n));
+                              }} style={{position:'absolute',top:-4,right:-4,width:14,height:14,borderRadius:'50%',background:'#ef4444',border:'none',cursor:'pointer',color:'white',fontSize:9,display:'flex',alignItems:'center',justifyContent:'center',lineHeight:1,padding:0}}>×</button>
+                            </div>
                           ))}
                         </div>
-                      )}
-                      {/* Picker sheet */}
-                      {showPhotoOptions && (
-                        <div className={`absolute left-0 top-18 z-50 rounded-xl shadow-xl border overflow-hidden w-44 ${theme.darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}
-                          style={{top:'4.5rem'}}>
-                          {/* Re-crop existing photo */}
-                          {selectedNode?.img && !selectedNode.img.includes('svg') && (
-                            <>
-                              <button
-                                onClick={async () => {
-                                  // Load original (pre-crop) if available, else use current
-                                  let origSrc = selectedNode.img;
-                                  try {
-                                    const db = idbRef.current || (idbRef.current = await openPhotoDB());
-                                    const tx = db.transaction('photos','readonly');
-                                    const stored = await new Promise((res,rej) => {
-                                      const req = tx.objectStore('photos').get(selectedNodeId + '_orig');
-                                      req.onsuccess = e => res(e.target.result);
-                                      req.onerror = rej;
-                                    });
-                                    if (stored?.dataUrl) origSrc = stored.dataUrl;
-                                  } catch {}
-                                  setPhotoCrop({ nodeId: selectedNodeId, src: origSrc, originalSrc: origSrc, crop: { x:0, y:0, scale:1 } });
-                                  setShowPhotoOptions(false);
-                                }}
-                                className={`w-full flex items-center gap-2 px-4 py-3 text-sm font-medium text-left ${theme.darkMode ? 'hover:bg-slate-700 text-slate-200' : 'hover:bg-slate-50 text-slate-700'}`}>
-                                <span>✂️</span> Re-crop Photo
-                              </button>
-                              <div className={`border-t ${theme.darkMode ? 'border-slate-700' : 'border-slate-100'}`} />
-                            </>
-                          )}
-                          <label className={`flex items-center gap-2 px-4 py-3 text-sm font-medium cursor-pointer ${theme.darkMode ? 'hover:bg-slate-700 text-slate-200' : 'hover:bg-slate-50 text-slate-700'}`}>
-                            <span>📷</span> Upload Photo
-                            <input type="file" accept="image/*" className="hidden" onChange={e => {
-                              const file = e.target.files[0];
-                              if (!file) return;
-                              const reader = new FileReader();
-                              reader.onload = ev => {
-                                setPhotoCrop({ nodeId: selectedNodeId, src: ev.target.result, originalSrc: ev.target.result, crop: { x: 0, y: 0, scale: 1 } });
-                                setShowPhotoOptions(false);
-                              };
-                              reader.readAsDataURL(file);
-                            }} />
-                          </label>
-                          <div className={`border-t ${theme.darkMode ? 'border-slate-700' : 'border-slate-100'}`} />
-                          <button
-                            onClick={() => {
-                              const n = nodes.find(nd => nd.id === selectedNodeId);
-                              setAvBg(n?._avBg || '#4f46e5');
-                              setAvSkin(n?._avSkin || '#f4c2a1');
-                              setAvHair(n?._avHair || '#2d1b00');
-                              setAvStyle(n?._avStyle || 'medium');
-                              setAvFace(n?._avFace || 'smile');
-                              setAvatarBuilder({ nodeId: selectedNodeId });
-                              setShowPhotoOptions(false);
-                            }}
-                            className={`w-full flex items-center gap-2 px-4 py-3 text-sm font-medium text-left ${theme.darkMode ? 'hover:bg-slate-700 text-slate-200' : 'hover:bg-slate-50 text-slate-700'}`}>
-                            <span>🎨</span> Build Avatar
-                          </button>
+                      ) : (
+                        <div style={{fontSize:11,color:theme.darkMode?'#475569':'#94a3b8',fontStyle:'italic',paddingTop:4}}>
+                          No photos yet — tap ➕ to add
                         </div>
                       )}
-                    </div>
-                    <div className="flex-1">
-                      <input
-                        type="text"
-                        value={selectedNode.label === 'New Friend' ? '' : selectedNode.label || ''}
-                        placeholder="New Friend"
-                        autoCapitalize="words"
-                        onChange={e => {
-                          // Auto-capitalise first letter of each word
-                          const val = e.target.value.replace(/\b\w/g, c => c.toUpperCase());
-                          updateSelectedNode('label', val || 'New Friend');
-                        }}
-                        onFocus={e => {
-                          // Select all so user can type straight over placeholder
-                          if (selectedNode.label === 'New Friend') e.target.select();
-                        }}
-                        className={`w-full font-bold text-lg bg-transparent border-b outline-none focus:border-emerald-500 transition-colors ${theme.darkMode ? 'border-slate-600 text-slate-100 placeholder-slate-500' : 'border-slate-300 text-slate-900 placeholder-slate-400'}`}
-                      />
+                    </div>{/* end gallery */}
+                  </div>{/* end flex items-start */}
+
+                  {/* Name input */}
+                  <div className="flex-1">
+                    <input
+                      type="text"
+                      value={selectedNode.label === 'New Friend' ? '' : selectedNode.label || ''}
+                      placeholder="New Friend"
+                      autoCapitalize="words"
+                      onChange={e => {
+                        const val = e.target.value.replace(/\b\w/g, c => c.toUpperCase());
+                        updateSelectedNode('label', val || 'New Friend');
+                      }}
+                      onFocus={e => {
+                        if (selectedNode.label === 'New Friend') e.target.select();
+                      }}
+                      className={`w-full font-bold text-lg bg-transparent border-b outline-none focus:border-emerald-500 transition-colors ${theme.darkMode ? 'border-slate-600 text-slate-100 placeholder-slate-500' : 'border-slate-300 text-slate-900 placeholder-slate-400'}`}
+                    />
                       {/* AKA bar — shown when contact name differs from display name */}
                       {selectedNode.contactName && selectedNode.contactName !== selectedNode.label && (
                         <div style={{
@@ -2964,7 +2961,6 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         );
                       })()}
                     </div>
-                  </div>
 
                   {/* Sync banner — shown at top until dismissed or synced */}
                   {!selectedNode.syncDismissed && !selectedNode.phone && (
@@ -3099,6 +3095,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 <button onClick={()=>{setPfSelectedPart('main');setPfColorPickerFor(null);setPfTab('design');setPartnerFlowerEditor(selectedNodeId);}}
                   style={{width:'100%',padding:'8px',borderRadius:10,background:'#f43f5e',color:'white',border:'none',cursor:'pointer',fontSize:13,fontWeight:700,marginBottom:4}}>
                   💗 Customise Partner Flower
+                </button>
+              )}
+
+              {selectedNode.type !== 'hub' && !selectedNode.isPartner && (
+                <button onClick={()=>{setPfSelectedPart('main');setPfColorPickerFor(null);setPfTab('design');setPartnerFlowerEditor(selectedNodeId);}}
+                  style={{width:'100%',padding:'8px',borderRadius:10,background:selectedNode.partnerFlower?'linear-gradient(135deg,#a855f7,#3b82f6)':'linear-gradient(135deg,#334155,#475569)',color:'white',border:'none',cursor:'pointer',fontSize:13,fontWeight:700,marginBottom:4}}>
+                  🌸 {selectedNode.partnerFlower?'Edit Flower':'Add Flower'}
                 </button>
               )}
 
@@ -4315,9 +4318,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                   const SP=pf.subPetals??6,spl=pf.subPetalLength??0.47;
                                   const spr=r2*(1+spl),spw=spr*0.65;
                                   const spPath=Array.from({length:SP},(_,pi)=>{const pa=(pi/SP)*Math.PI*2,L=spr,W=spw,tx=Math.cos(pa)*L,ty=Math.sin(pa)*L,perpA=pa+Math.PI*0.5;const c1x=Math.cos(pa)*L*0.35+Math.cos(perpA)*W*0.6,c1y=Math.sin(pa)*L*0.35+Math.sin(perpA)*W*0.6,c2x=Math.cos(pa)*L*0.85+Math.cos(perpA)*W*0.5,c2y=Math.sin(pa)*L*0.85+Math.sin(perpA)*W*0.5,c3x=Math.cos(pa)*L*0.85-Math.cos(perpA)*W*0.5,c3y=Math.sin(pa)*L*0.85-Math.sin(perpA)*W*0.5,c4x=Math.cos(pa)*L*0.35-Math.cos(perpA)*W*0.6,c4y=Math.sin(pa)*L*0.35-Math.sin(perpA)*W*0.6;return `M 0,0 C ${c1x},${c1y} ${c2x},${c2y} ${tx},${ty} C ${c3x},${c3y} ${c4x},${c4y} 0,0`;}).join(' ');
-                                  return <g transform={`rotate(${360/SP/2})`} opacity={0.55}><path d={spPath} fill={pf.subPetalColor} stroke={pf.subPetalBorderColor&&pf.subPetalBorderColor!=='transparent'?pf.subPetalBorderColor:'none'} strokeWidth={pf.subPetalBorderColor&&pf.subPetalBorderColor!=='transparent'?1:0}/></g>;
+                                  return <g transform={`rotate(${360/SP/2})`} opacity={0.55}><path d={spPath} fill={pf.subPetalColor} stroke={pf.subPetalBorderColor&&pf.subPetalBorderColor!=='transparent'?pf.subPetalBorderColor:'none'} strokeWidth={pf.subPetalBorderColor&&pf.subPetalBorderColor!=='transparent'?1.5:0} strokeDasharray={pf.subPetalBorderStyle==='dashed'?'6 3':pf.subPetalBorderStyle==='dotted'?'2 3':undefined}/></g>;
                                 })()}
-                                <path d={buildPF()} fill={mainFill} opacity={0.9} stroke={pf.petalBorderColor&&pf.petalBorderColor!=='transparent'?pf.petalBorderColor:'none'} strokeWidth={pf.petalBorderColor&&pf.petalBorderColor!=='transparent'?1:0}/>
+                                <path d={buildPF()} fill={mainFill} opacity={0.9} stroke={pf.petalBorderColor&&pf.petalBorderColor!=='transparent'?pf.petalBorderColor:'none'} strokeWidth={pf.petalBorderColor&&pf.petalBorderColor!=='transparent'?1.5:0} strokeDasharray={pf.petalBorderStyle==='dashed'?'6 3':pf.petalBorderStyle==='dotted'?'2 3':undefined}/>
                                 {pf.pattern&&pf.pattern!=='solid'&&pf.pattern!=='radial'&&<path d={buildPF()} fill={`url(#${pid}-${pf.pattern})`} opacity={0.4}/>}
                               </g>
                             );
@@ -4448,7 +4451,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       {isHoverTarget && <circle r={r + 10} fill="none" stroke="#3B82F6" strokeWidth="6" strokeDasharray="6 4" />}
 
                       {/* Partner flower — drawn BEFORE image so it's behind the photo */}
-                      {node.isPartner && (() => {
+                      {/* Flower — renders around person if they have one */}
+                      {node.partnerFlower && (() => {
                         const pf = node.partnerFlower || {petals:6,petalColor:'#f43f5e',subPetalColor:'#fda4af',petalBorderColor:'#9f1239',subPetalBorderColor:'#fecdd3',borderColor:'#9f1239',pattern:'solid',petalLength:0.55};
                         const PETALS = pf.petals || 6;
                         const petalLen = pf.petalLength ?? 0.55;
@@ -4475,9 +4479,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                               const SP=pf.subPetals??6,spl=pf.subPetalLength??0.47;
                               const spr=r*(1+spl),spw=spr*0.65;
                               const spPath=Array.from({length:SP},(_,pi)=>{const pa=(pi/SP)*Math.PI*2,L=spr,W=spw,tx=Math.cos(pa)*L,ty=Math.sin(pa)*L,perpA=pa+Math.PI*0.5;const c1x=Math.cos(pa)*L*0.35+Math.cos(perpA)*W*0.6,c1y=Math.sin(pa)*L*0.35+Math.sin(perpA)*W*0.6,c2x=Math.cos(pa)*L*0.85+Math.cos(perpA)*W*0.5,c2y=Math.sin(pa)*L*0.85+Math.sin(perpA)*W*0.5,c3x=Math.cos(pa)*L*0.85-Math.cos(perpA)*W*0.5,c3y=Math.sin(pa)*L*0.85-Math.sin(perpA)*W*0.5,c4x=Math.cos(pa)*L*0.35-Math.cos(perpA)*W*0.6,c4y=Math.sin(pa)*L*0.35-Math.sin(perpA)*W*0.6;return `M 0,0 C ${c1x},${c1y} ${c2x},${c2y} ${tx},${ty} C ${c3x},${c3y} ${c4x},${c4y} 0,0`;}).join(' ');
-                              return <g transform={`rotate(${360/SP/2})`} opacity={0.55}><path d={spPath} fill={pf.subPetalColor} stroke={pf.subPetalBorderColor&&pf.subPetalBorderColor!=='transparent'?pf.subPetalBorderColor:'none'} strokeWidth={pf.subPetalBorderColor&&pf.subPetalBorderColor!=='transparent'?1:0}/></g>;
+                              return <g transform={`rotate(${360/SP/2})`} opacity={0.55}><path d={spPath} fill={pf.subPetalColor} stroke={pf.subPetalBorderColor&&pf.subPetalBorderColor!=='transparent'?pf.subPetalBorderColor:'none'} strokeWidth={pf.subPetalBorderColor&&pf.subPetalBorderColor!=='transparent'?1.5:0} strokeDasharray={pf.subPetalBorderStyle==='dashed'?'6 3':pf.subPetalBorderStyle==='dotted'?'2 3':undefined}/></g>;
                             })()}
-                            <path d={buildPF()} fill={mainFill} opacity={0.9} stroke={pf.petalBorderColor&&pf.petalBorderColor!=='transparent'?pf.petalBorderColor:'none'} strokeWidth={pf.petalBorderColor&&pf.petalBorderColor!=='transparent'?1:0}/>
+                            <path d={buildPF()} fill={mainFill} opacity={0.9} stroke={pf.petalBorderColor&&pf.petalBorderColor!=='transparent'?pf.petalBorderColor:'none'} strokeWidth={pf.petalBorderColor&&pf.petalBorderColor!=='transparent'?1.5:0} strokeDasharray={pf.petalBorderStyle==='dashed'?'6 3':pf.petalBorderStyle==='dotted'?'2 3':undefined}/>
                             {pf.pattern&&pf.pattern!=='solid'&&pf.pattern!=='radial'&&(
                               <path d={buildPF()} fill={`url(#${pid}-${pf.pattern})`} opacity={0.4}/>
                             )}
@@ -5349,7 +5353,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         };
 
         const ColorPicker = ({forKey}) => (
-          <div style={{position:'absolute',bottom:'100%',right:0,zIndex:10,background:dm?'#1e293b':'white',borderRadius:12,padding:10,boxShadow:'0 8px 32px rgba(0,0,0,0.35)',border:'1px solid '+brd,display:'flex',flexWrap:'wrap',gap:5,width:180}}>
+          <div style={{position:'absolute',top:'110%',right:0,zIndex:20,background:dm?'#1e293b':'white',borderRadius:12,padding:10,boxShadow:'0 8px 32px rgba(0,0,0,0.35)',border:'1px solid '+brd,display:'flex',flexWrap:'wrap',gap:5,width:180}}>
             {COLORS.map(c=>{
               const sel = pf[forKey]===c;
               const isBlack = c==='#000000';
@@ -5371,7 +5375,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
               {/* Header */}
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'16px 20px 8px',flexShrink:0}}>
-                <span style={{fontSize:16,fontWeight:800,color:txt}}>🌸 {pn.label}&apos;s Flower</span>
+                <span style={{fontSize:16,fontWeight:800,color:txt}}>🌸 {pn.label}'s Flower</span>
                 <button onClick={()=>setPartnerFlowerEditor(null)} style={{background:'none',border:'none',fontSize:22,cursor:'pointer',color:sub}}>✕</button>
               </div>
 
@@ -5593,38 +5597,53 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                             {/* Border colour — always on, transparent = no border */}
                             <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'6px 8px',background:dm?'#1e293b':'#f8fafc',borderRadius:10}}>
                               <span style={{fontSize:12,fontWeight:600,color:txt}}>Border</span>
-                              <div style={{position:'relative'}}>
+                              <div style={{display:'flex',gap:5,alignItems:'center'}}>
+                                {/* Border style */}
                                 {(() => {
                                   const bKey = selectedPart==='main'?'petalBorderColor':selectedPart==='sub'?'subPetalBorderColor':'borderColor';
                                   const bVal = pf[bKey]||'transparent';
+                                  const bStyleKey = selectedPart==='main'?'petalBorderStyle':selectedPart==='sub'?'subPetalBorderStyle':'borderStyle';
+                                  const bStyle = pf[bStyleKey]||'solid';
+                                  const hasBorder = bVal && bVal !== 'transparent';
                                   return <>
-                                    <button onClick={()=>setColorPickerFor(colorPickerFor===bKey?null:bKey)}
-                                      style={{width:26,height:26,borderRadius:'50%',
-                                        background:bVal==='transparent'?'none':bVal,
-                                        border:'2px solid '+(bVal==='transparent'?brd:'rgba(128,128,128,0.3)'),
-                                        cursor:'pointer',
-                                        backgroundImage:bVal==='transparent'?'repeating-linear-gradient(45deg,#ccc 0,#ccc 2px,white 0,white 50%)':undefined,
-                                        backgroundSize:bVal==='transparent'?'6px 6px':undefined}}>
-                                    </button>
-                                    {colorPickerFor===bKey&&(
-                                      <div style={{position:'absolute',bottom:'100%',right:0,zIndex:10,background:dm?'#1e293b':'white',borderRadius:12,padding:10,boxShadow:'0 8px 32px rgba(0,0,0,0.35)',border:'1px solid '+brd,display:'flex',flexWrap:'wrap',gap:5,width:185}}>
-                                        {/* Transparent option */}
-                                        <button onClick={()=>{update(bKey,'transparent');setColorPickerFor(null);}}
-                                          style={{width:26,height:26,borderRadius:'50%',background:'none',border:'2px solid '+(bVal==='transparent'?'#3b82f6':brd),cursor:'pointer',backgroundImage:'repeating-linear-gradient(45deg,#ccc 0,#ccc 2px,white 0,white 50%)',backgroundSize:'6px 6px',display:'flex',alignItems:'center',justifyContent:'center'}}>
-                                          {bVal==='transparent'&&<span style={{fontSize:10}}>✓</span>}
-                                        </button>
-                                        {COLORS.map(c=>{
-                                          const sel=pf[bKey]===c;
-                                          const isBlack=c==='#000000';
-                                          return <button key={c} onClick={()=>{update(bKey,c);setColorPickerFor(null);}}
-                                            style={{width:26,height:26,borderRadius:'50%',background:c,cursor:'pointer',
-                                              border:'2.5px solid '+(isBlack?'#6b7280':sel?(isLight(c)?'#1e293b':'white'):'transparent'),
-                                              display:'flex',alignItems:'center',justifyContent:'center'}}>
-                                            {sel&&<span style={{fontSize:10,color:isLight(c)?'#1e293b':'white'}}>✓</span>}
-                                          </button>;
-                                        })}
+                                    {hasBorder && (
+                                      <div style={{display:'flex',gap:3}}>
+                                        {['solid','dashed','dotted'].map(s=>(
+                                          <button key={s} onClick={()=>update(bStyleKey,s)}
+                                            style={{padding:'3px 7px',borderRadius:6,fontSize:10,fontWeight:700,cursor:'pointer',border:'1.5px solid '+(bStyle===s?pf[bKey]:brd),background:bStyle===s?pf[bKey]:'transparent',color:bStyle===s?'white':sub}}>
+                                            {s==='solid'?'—':s==='dashed'?'- -':'···'}
+                                          </button>
+                                        ))}
                                       </div>
                                     )}
+                                    <div style={{position:'relative'}}>
+                                      <button onClick={()=>setPfColorPickerFor(pfColorPickerFor===bKey?null:bKey)}
+                                        style={{width:26,height:26,borderRadius:'50%',
+                                          background:bVal==='transparent'?'none':bVal,
+                                          border:'2px solid '+(bVal==='transparent'?brd:'rgba(128,128,128,0.3)'),
+                                          cursor:'pointer',
+                                          backgroundImage:bVal==='transparent'?'repeating-linear-gradient(45deg,#ccc 0,#ccc 2px,white 0,white 50%)':undefined,
+                                          backgroundSize:bVal==='transparent'?'6px 6px':undefined}}>
+                                      </button>
+                                      {pfColorPickerFor===bKey&&(
+                                        <div style={{position:'absolute',top:'110%',right:0,zIndex:20,background:dm?'#1e293b':'white',borderRadius:12,padding:10,boxShadow:'0 8px 32px rgba(0,0,0,0.35)',border:'1px solid '+brd,display:'flex',flexWrap:'wrap',gap:5,width:185}}>
+                                          <button onClick={()=>{update(bKey,'transparent');setPfColorPickerFor(null);}}
+                                            style={{width:26,height:26,borderRadius:'50%',background:'none',border:'2px solid '+(bVal==='transparent'?'#3b82f6':brd),cursor:'pointer',backgroundImage:'repeating-linear-gradient(45deg,#ccc 0,#ccc 2px,white 0,white 50%)',backgroundSize:'6px 6px',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                                            {bVal==='transparent'&&<span style={{fontSize:10}}>✓</span>}
+                                          </button>
+                                          {COLORS.map(c=>{
+                                            const sel=pf[bKey]===c;
+                                            const isBlack=c==='#000000';
+                                            return <button key={c} onClick={()=>{update(bKey,c);setPfColorPickerFor(null);}}
+                                              style={{width:26,height:26,borderRadius:'50%',background:c,cursor:'pointer',
+                                                border:'2.5px solid '+(isBlack?'#6b7280':sel?(isLight(c)?'#1e293b':'white'):'transparent'),
+                                                display:'flex',alignItems:'center',justifyContent:'center'}}>
+                                              {sel&&<span style={{fontSize:10,color:isLight(c)?'#1e293b':'white'}}>✓</span>}
+                                            </button>;
+                                          })}
+                                        </div>
+                                      )}
+                                    </div>
                                   </>;
                                 })()}
                               </div>
@@ -5678,16 +5697,26 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       <div style={{fontSize:11,fontWeight:800,textTransform:'uppercase',letterSpacing:1,color:sub,marginBottom:8}}>Shape</div>
                       <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8}}>
                         <span style={{fontSize:12,fontWeight:600,color:txt,minWidth:80}}>Main petals</span>
-                        <input type="number" min="1" max="24"
-                          value={pf.petals||6}
-                          onChange={e=>{const v=parseInt(e.target.value);if(v>=1&&v<=24)update('petals',v);}}
+                        <input type="number" min="0" max="24"
+                          value={pf.petals===0?'':pf.petals??6}
+                          onChange={e=>{
+                            const raw=e.target.value;
+                            if(raw===''||raw==='0'){update('petals',0);return;}
+                            const v=parseInt(raw);
+                            if(!isNaN(v)&&v>=1&&v<=24)update('petals',v);
+                          }}
                           style={{width:60,padding:'5px 8px',borderRadius:8,border:'1.5px solid '+brd,background:dm?'#0f172a':'white',color:txt,fontSize:14,fontWeight:700,textAlign:'center',outline:'none'}}/>
                       </div>
                       <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8}}>
                         <span style={{fontSize:12,fontWeight:600,color:txt,minWidth:80}}>Sub-petals</span>
                         <input type="number" min="0" max="24"
-                          value={pf.subPetals??6}
-                          onChange={e=>{const v=parseInt(e.target.value);if(v>=0&&v<=24)update('subPetals',v);}}
+                          value={pf.subPetals===0?'0':pf.subPetals??6}
+                          onChange={e=>{
+                            const raw=e.target.value;
+                            if(raw===''){update('subPetals',0);return;}
+                            const v=parseInt(raw);
+                            if(!isNaN(v)&&v>=0&&v<=24)update('subPetals',v);
+                          }}
                           style={{width:60,padding:'5px 8px',borderRadius:8,border:'1.5px solid '+brd,background:dm?'#0f172a':'white',color:txt,fontSize:14,fontWeight:700,textAlign:'center',outline:'none'}}/>
                         <span style={{fontSize:11,color:sub}}>(0 = off)</span>
                       </div>
