@@ -7,7 +7,7 @@ import {
   BookUser
 } from 'lucide-react';
 
-const APP_VERSION = '2.9';
+const APP_VERSION = '3.0';
 const INTERACTION_DISTANCE = 70;
 const TIER_COLORS_GLOBAL = ['#bef264','#84cc16','#166534','#3b82f6','#9333ea'];
 const PRIMARY_GROUP_COLORS = ['#ef4444','#3b82f6','#f59e0b','#10b981','#8b5cf6','#ec4899','#06b6d4','#f97316'];
@@ -340,6 +340,10 @@ function AppInner() {
   });
   const [settingsSections, setSettingsSections] = useState({appearance:true,filters:false,data:false,reset:false,security:false,future:false});
   const [fontSize, setFontSize] = useState(() => { try { return parseFloat(localStorage.getItem('ft_fontSize')||'1'); } catch { return 1; } });
+  useEffect(() => {
+    document.documentElement.style.fontSize = `${fontSize * 16}px`;
+    return () => { document.documentElement.style.fontSize = ''; };
+  }, [fontSize]);
   const [dataSnapshot, setDataSnapshot] = useState(null); // {nodes, links} saved before destructive reset
   const [avatarBuilder, setAvatarBuilder] = useState(null);
   const cropCanvasRef = useRef(null);
@@ -2406,7 +2410,6 @@ Return only the JSON array. If nothing trackable is found, return [].`;
   return (
     <div className={`fixed inset-0 font-sans overflow-hidden transition-colors duration-300 ${bgClass}`}
       style={{
-        fontSize: `${fontSize}rem`,
         display:'flex', flexDirection:'column',
         background: theme.darkMode ? '#0f172a' : '#f8fafc',
         color: theme.darkMode ? '#f1f5f9' : '#1e293b',
@@ -4318,9 +4321,15 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                   const SP=pf.subPetals??6,spl=pf.subPetalLength??0.47;
                                   const spr=r2*(1+spl),spw=spr*0.65;
                                   const spPath=Array.from({length:SP},(_,pi)=>{const pa=(pi/SP)*Math.PI*2,L=spr,W=spw,tx=Math.cos(pa)*L,ty=Math.sin(pa)*L,perpA=pa+Math.PI*0.5;const c1x=Math.cos(pa)*L*0.35+Math.cos(perpA)*W*0.6,c1y=Math.sin(pa)*L*0.35+Math.sin(perpA)*W*0.6,c2x=Math.cos(pa)*L*0.85+Math.cos(perpA)*W*0.5,c2y=Math.sin(pa)*L*0.85+Math.sin(perpA)*W*0.5,c3x=Math.cos(pa)*L*0.85-Math.cos(perpA)*W*0.5,c3y=Math.sin(pa)*L*0.85-Math.sin(perpA)*W*0.5,c4x=Math.cos(pa)*L*0.35-Math.cos(perpA)*W*0.6,c4y=Math.sin(pa)*L*0.35-Math.sin(perpA)*W*0.6;return `M 0,0 C ${c1x},${c1y} ${c2x},${c2y} ${tx},${ty} C ${c3x},${c3y} ${c4x},${c4y} 0,0`;}).join(' ');
-                                  return <g transform={`rotate(${360/SP/2})`} opacity={0.55}><path d={spPath} fill={pf.subPetalColor} stroke={pf.subPetalBorderColor&&pf.subPetalBorderColor!=='transparent'?pf.subPetalBorderColor:'none'} strokeWidth={pf.subPetalBorderColor&&pf.subPetalBorderColor!=='transparent'?1.5:0} strokeDasharray={pf.subPetalBorderStyle==='dashed'?'6 3':pf.subPetalBorderStyle==='dotted'?'2 3':undefined}/></g>;
+                                  return <g transform={`rotate(${360/SP/2})`}><path d={spPath} fill={pf.subPetalColor} stroke={pf.subPetalBorderColor&&pf.subPetalBorderColor!=='transparent'?pf.subPetalBorderColor:'none'} strokeWidth={pf.subPetalBorderColor&&pf.subPetalBorderColor!=='transparent'?pf.borderWidth||1.5:0} strokeDasharray={pf.subPetalBorderStyle==='dashed'?'6 3':pf.subPetalBorderStyle==='dotted'?'2 3':undefined}/></g>;
                                 })()}
-                                <path d={buildPF()} fill={mainFill} opacity={0.9} stroke={pf.petalBorderColor&&pf.petalBorderColor!=='transparent'?pf.petalBorderColor:'none'} strokeWidth={pf.petalBorderColor&&pf.petalBorderColor!=='transparent'?1.5:0} strokeDasharray={pf.petalBorderStyle==='dashed'?'6 3':pf.petalBorderStyle==='dotted'?'2 3':undefined}/>
+                                {(pf.layer3Petals||0)>0&&(()=>{
+                                  const L3=pf.layer3Petals,l3l=pf.layer3Length??0.35;
+                                  const l3r=r2*(1+l3l),l3w=l3r*0.65;
+                                  const l3Path=Array.from({length:L3},(_,pi)=>{const pa=(pi/L3)*Math.PI*2,L=l3r,W=l3w,tx=Math.cos(pa)*L,ty=Math.sin(pa)*L,perpA=pa+Math.PI*0.5;const c1x=Math.cos(pa)*L*0.35+Math.cos(perpA)*W*0.6,c1y=Math.sin(pa)*L*0.35+Math.sin(perpA)*W*0.6,c2x=Math.cos(pa)*L*0.85+Math.cos(perpA)*W*0.5,c2y=Math.sin(pa)*L*0.85+Math.sin(perpA)*W*0.5,c3x=Math.cos(pa)*L*0.85-Math.cos(perpA)*W*0.5,c3y=Math.sin(pa)*L*0.85-Math.sin(perpA)*W*0.5,c4x=Math.cos(pa)*L*0.35-Math.cos(perpA)*W*0.6,c4y=Math.sin(pa)*L*0.35-Math.sin(perpA)*W*0.6;return `M 0,0 C ${c1x},${c1y} ${c2x},${c2y} ${tx},${ty} C ${c3x},${c3y} ${c4x},${c4y} 0,0`;}).join(' ');
+                                  return <g transform={`rotate(${360/L3/3})`}><path d={l3Path} fill={pf.layer3Color||pf.subPetalColor||'#fecdd3'}/></g>;
+                                })()}
+                                <path d={buildPF()} fill={mainFill} opacity={0.9} stroke={pf.petalBorderColor&&pf.petalBorderColor!=='transparent'?pf.petalBorderColor:'none'} strokeWidth={pf.petalBorderColor&&pf.petalBorderColor!=='transparent'?pf.borderWidth||1.5:0} strokeDasharray={pf.petalBorderStyle==='dashed'?'6 3':pf.petalBorderStyle==='dotted'?'2 3':undefined}/>
                                 {pf.pattern&&pf.pattern!=='solid'&&pf.pattern!=='radial'&&<path d={buildPF()} fill={`url(#${pid}-${pf.pattern})`} opacity={0.4}/>}
                               </g>
                             );
@@ -4479,9 +4488,15 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                               const SP=pf.subPetals??6,spl=pf.subPetalLength??0.47;
                               const spr=r*(1+spl),spw=spr*0.65;
                               const spPath=Array.from({length:SP},(_,pi)=>{const pa=(pi/SP)*Math.PI*2,L=spr,W=spw,tx=Math.cos(pa)*L,ty=Math.sin(pa)*L,perpA=pa+Math.PI*0.5;const c1x=Math.cos(pa)*L*0.35+Math.cos(perpA)*W*0.6,c1y=Math.sin(pa)*L*0.35+Math.sin(perpA)*W*0.6,c2x=Math.cos(pa)*L*0.85+Math.cos(perpA)*W*0.5,c2y=Math.sin(pa)*L*0.85+Math.sin(perpA)*W*0.5,c3x=Math.cos(pa)*L*0.85-Math.cos(perpA)*W*0.5,c3y=Math.sin(pa)*L*0.85-Math.sin(perpA)*W*0.5,c4x=Math.cos(pa)*L*0.35-Math.cos(perpA)*W*0.6,c4y=Math.sin(pa)*L*0.35-Math.sin(perpA)*W*0.6;return `M 0,0 C ${c1x},${c1y} ${c2x},${c2y} ${tx},${ty} C ${c3x},${c3y} ${c4x},${c4y} 0,0`;}).join(' ');
-                              return <g transform={`rotate(${360/SP/2})`} opacity={0.55}><path d={spPath} fill={pf.subPetalColor} stroke={pf.subPetalBorderColor&&pf.subPetalBorderColor!=='transparent'?pf.subPetalBorderColor:'none'} strokeWidth={pf.subPetalBorderColor&&pf.subPetalBorderColor!=='transparent'?1.5:0} strokeDasharray={pf.subPetalBorderStyle==='dashed'?'6 3':pf.subPetalBorderStyle==='dotted'?'2 3':undefined}/></g>;
+                              return <g transform={`rotate(${360/SP/2})`}><path d={spPath} fill={pf.subPetalColor} stroke={pf.subPetalBorderColor&&pf.subPetalBorderColor!=='transparent'?pf.subPetalBorderColor:'none'} strokeWidth={pf.subPetalBorderColor&&pf.subPetalBorderColor!=='transparent'?pf.borderWidth||1.5:0} strokeDasharray={pf.subPetalBorderStyle==='dashed'?'6 3':pf.subPetalBorderStyle==='dotted'?'2 3':undefined}/></g>;
                             })()}
-                            <path d={buildPF()} fill={mainFill} opacity={0.9} stroke={pf.petalBorderColor&&pf.petalBorderColor!=='transparent'?pf.petalBorderColor:'none'} strokeWidth={pf.petalBorderColor&&pf.petalBorderColor!=='transparent'?1.5:0} strokeDasharray={pf.petalBorderStyle==='dashed'?'6 3':pf.petalBorderStyle==='dotted'?'2 3':undefined}/>
+                            {(pf.layer3Petals||0)>0&&(()=>{
+                              const L3=pf.layer3Petals,l3l=pf.layer3Length??0.35;
+                              const l3r=r*(1+l3l),l3w=l3r*0.65;
+                              const l3Path=Array.from({length:L3},(_,pi)=>{const pa=(pi/L3)*Math.PI*2,L=l3r,W=l3w,tx=Math.cos(pa)*L,ty=Math.sin(pa)*L,perpA=pa+Math.PI*0.5;const c1x=Math.cos(pa)*L*0.35+Math.cos(perpA)*W*0.6,c1y=Math.sin(pa)*L*0.35+Math.sin(perpA)*W*0.6,c2x=Math.cos(pa)*L*0.85+Math.cos(perpA)*W*0.5,c2y=Math.sin(pa)*L*0.85+Math.sin(perpA)*W*0.5,c3x=Math.cos(pa)*L*0.85-Math.cos(perpA)*W*0.5,c3y=Math.sin(pa)*L*0.85-Math.sin(perpA)*W*0.5,c4x=Math.cos(pa)*L*0.35-Math.cos(perpA)*W*0.6,c4y=Math.sin(pa)*L*0.35-Math.sin(perpA)*W*0.6;return `M 0,0 C ${c1x},${c1y} ${c2x},${c2y} ${tx},${ty} C ${c3x},${c3y} ${c4x},${c4y} 0,0`;}).join(' ');
+                              return <g transform={`rotate(${360/L3/3})`}><path d={l3Path} fill={pf.layer3Color||pf.subPetalColor||'#fecdd3'}/></g>;
+                            })()}
+                            <path d={buildPF()} fill={mainFill} opacity={0.9} stroke={pf.petalBorderColor&&pf.petalBorderColor!=='transparent'?pf.petalBorderColor:'none'} strokeWidth={pf.petalBorderColor&&pf.petalBorderColor!=='transparent'?pf.borderWidth||1.5:0} strokeDasharray={pf.petalBorderStyle==='dashed'?'6 3':pf.petalBorderStyle==='dotted'?'2 3':undefined}/>
                             {pf.pattern&&pf.pattern!=='solid'&&pf.pattern!=='radial'&&(
                               <path d={buildPF()} fill={`url(#${pid}-${pf.pattern})`} opacity={0.4}/>
                             )}
@@ -5347,26 +5362,64 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             {label:'Fill colour', key:'subPetalColor'},
             {label:'Border colour', key:'subPetalBorderColor', toggleKey:'subPetalBorder'},
           ],
+          layer3: [
+            {label:'Fill colour', key:'layer3Color'},
+          ],
           centre: [
             {label:'Border colour', key:'borderColor'},
           ],
         };
 
-        const ColorPicker = ({forKey}) => (
-          <div style={{position:'absolute',top:'110%',right:0,zIndex:20,background:dm?'#1e293b':'white',borderRadius:12,padding:10,boxShadow:'0 8px 32px rgba(0,0,0,0.35)',border:'1px solid '+brd,display:'flex',flexWrap:'wrap',gap:5,width:180}}>
-            {COLORS.map(c=>{
-              const sel = pf[forKey]===c;
-              const isBlack = c==='#000000';
-              return <button key={c} onClick={()=>{update(forKey,c);setColorPickerFor(null);}}
-                style={{width:26,height:26,borderRadius:'50%',background:c,cursor:'pointer',
-                  border:'2.5px solid '+(isBlack?'#6b7280':sel?(isLight(c)?'#1e293b':'white'):'transparent'),
-                  boxShadow:sel?'0 0 0 2px '+(isLight(c)?'#1e293b':'white'):'none',
-                  display:'flex',alignItems:'center',justifyContent:'center'}}>
-                {sel&&<span style={{fontSize:11,color:isLight(c)?'#1e293b':'white'}}>✓</span>}
-              </button>;
-            })}
-          </div>
-        );
+        const EXTENDED_COLORS = [
+          // Reds/pinks
+          '#ff0000','#ef4444','#f43f5e','#ec4899','#fb7185','#fda4af','#fecdd3',
+          // Purples
+          '#a855f7','#8b5cf6','#6366f1','#7c3aed','#4f46e5','#d8b4fe','#c4b5fd',
+          // Blues
+          '#3b82f6','#2563eb','#06b6d4','#0ea5e9','#38bdf8','#93c5fd','#bae6fd',
+          // Greens
+          '#10b981','#22c55e','#16a34a','#84cc16','#4ade80','#86efac','#bbf7d0',
+          // Yellows/oranges
+          '#f59e0b','#f97316','#ef4444','#fbbf24','#fde047','#fed7aa','#fef3c7',
+          // Neutrals
+          '#ffffff','#f1f5f9','#94a3b8','#475569','#1e293b','#000000',
+        ];
+
+        const ColorPicker = ({forKey}) => {
+          const current = pf[forKey]||'#f43f5e';
+          return (
+            <div style={{position:'absolute',top:'110%',right:0,zIndex:20,background:dm?'#1e293b':'white',borderRadius:14,padding:10,boxShadow:'0 8px 32px rgba(0,0,0,0.4)',border:'1px solid '+brd,width:220}} onClick={e=>e.stopPropagation()}>
+              {/* Hex input */}
+              <div style={{display:'flex',gap:6,alignItems:'center',marginBottom:8}}>
+                <div style={{width:28,height:28,borderRadius:6,background:current,border:'1px solid rgba(128,128,128,0.3)',flexShrink:0}}/>
+                <input type="text" value={current} maxLength={7}
+                  onChange={e=>{
+                    const v=e.target.value;
+                    if(/^#[0-9a-fA-F]{6}$/.test(v)) update(forKey,v);
+                  }}
+                  style={{flex:1,padding:'4px 8px',borderRadius:6,border:'1px solid '+brd,background:dm?'#0f172a':'#f8fafc',color:txt,fontSize:12,fontFamily:'monospace',outline:'none'}}/>
+                <input type="color" value={/^#[0-9a-fA-F]{6}$/.test(current)?current:'#f43f5e'}
+                  onChange={e=>{update(forKey,e.target.value);}}
+                  style={{width:28,height:28,borderRadius:6,border:'none',cursor:'pointer',padding:0,background:'none'}}/>
+              </div>
+              {/* Colour swatches */}
+              <div style={{display:'flex',flexWrap:'wrap',gap:4}}>
+                {EXTENDED_COLORS.map(c=>{
+                  const sel=pf[forKey]===c;
+                  const isBlack=c==='#000000';
+                  const isWhite=c==='#ffffff';
+                  return <button key={c} onClick={()=>{update(forKey,c);setPfColorPickerFor(null);}}
+                    style={{width:22,height:22,borderRadius:'50%',background:c,cursor:'pointer',flexShrink:0,
+                      border:'2px solid '+(isBlack?'#6b7280':isWhite?'#d1d5db':sel?(isLight(c)?'#1e293b':'white'):'transparent'),
+                      boxShadow:sel?'0 0 0 2px '+(isLight(c)?'#1e293b':'white'):'none',
+                      display:'flex',alignItems:'center',justifyContent:'center'}}>
+                    {sel&&<span style={{fontSize:9,color:isLight(c)?'#1e293b':'white'}}>✓</span>}
+                  </button>;
+                })}
+              </div>
+            </div>
+          );
+        };
 
         return (
           <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:600,background:'rgba(0,0,0,0.75)',display:'flex',alignItems:'flex-end',justifyContent:'center'}}
@@ -5450,7 +5503,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                   </radialGradient>
                                   <pattern id={`pre-${pi}-d`} width="8" height="8" patternUnits="userSpaceOnUse"><circle cx="4" cy="4" r="2" fill={preset.patternColor||preset.subPetalColor||'#fff'}/></pattern>
                                 </defs>
-                                {pSub&&<g transform={`rotate(${360/(preset.subPetals||6)/2})`} opacity={0.5}><path d={pSub} fill={preset.subPetalColor}/></g>}
+                                {pSub&&<g transform={`rotate(${360/(preset.subPetals||6)/2})`}><path d={pSub} fill={preset.subPetalColor}/></g>}
                                 <path d={pMain} fill={preset.pattern==='radial'?`url(#pre-${pi}-rg)`:preset.petalColor} opacity={0.9}/>
                                 {preset.pattern==='dots'&&<path d={pMain} fill={`url(#pre-${pi}-d)`} opacity={0.5}/>}
                                 <circle r={pR*0.52} fill={dm?'#0f172a':'#fafafa'} stroke={preset.borderColor&&preset.borderColor!=='transparent'?preset.borderColor:'none'} strokeWidth="2"/>
@@ -5529,14 +5582,28 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           </defs>
 
                           {subPath&&(
-                            <g transform={`rotate(${360/(pf.subPetals||6)/2})`} opacity={selectedPart==='sub'?1:0.55}
+                            <g transform={`rotate(${360/(pf.subPetals||6)/2})`} opacity={selectedPart==='sub'?1:1}
                               style={{cursor:'pointer'}} onClick={()=>setSelectedPart(selectedPart==='sub'?null:'sub')}>
                               <path d={subPath} fill={pf.subPetalColor}
                                 stroke={selectedPart==='sub'?'white':(pf.subPetalBorderColor&&pf.subPetalBorderColor!=='transparent'?pf.subPetalBorderColor:'none')}
-                                strokeWidth={selectedPart==='sub'?2.5:(pf.subPetalBorderColor&&pf.subPetalBorderColor!=='transparent'?1:0)}
-                                strokeDasharray={selectedPart==='sub'?'4 2':'none'}/>
+                                strokeWidth={selectedPart==='sub'?2.5:(pf.subPetalBorderColor&&pf.subPetalBorderColor!=='transparent'?pf.borderWidth||1.5:0)}
+                                strokeDasharray={selectedPart==='sub'?'4 2':(pf.subPetalBorderStyle==='dashed'?'6 3':pf.subPetalBorderStyle==='dotted'?'2 3':undefined)}/>
                             </g>
                           )}
+
+                          {/* Layer 3 */}
+                          {(pf.layer3Petals||0)>0&&(()=>{
+                            const l3path=buildPath(pf.layer3Petals,pf.layer3Length??0.35,PREVIEW_R);
+                            return (
+                              <g transform={`rotate(${360/(pf.layer3Petals||4)/3})`} opacity={1}
+                                style={{cursor:'pointer'}} onClick={()=>setSelectedPart(selectedPart==='layer3'?null:'layer3')}>
+                                <path d={l3path} fill={pf.layer3Color||pf.subPetalColor||'#fecdd3'}
+                                  stroke={selectedPart==='layer3'?'white':'none'}
+                                  strokeWidth={selectedPart==='layer3'?2:0}
+                                  strokeDasharray={selectedPart==='layer3'?'4 2':undefined}/>
+                              </g>
+                            );
+                          })()}
 
                           <g opacity={selectedPart==='main'?1:0.88}
                             style={{cursor:'pointer'}} onClick={()=>setSelectedPart(selectedPart==='main'?null:'main')}>
@@ -5570,6 +5637,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           {[
                             {id:'main',label:'Petals'},
                             ...(subPath?[{id:'sub',label:'Sub'}]:[]),
+                            ...((pf.layer3Petals||0)>0?[{id:'layer3',label:'3rd'}]:[]),
                             {id:'centre',label:'Centre'},
                           ].map(p=>(
                             <button key={p.id} onClick={()=>setSelectedPart(selectedPart===p.id?null:p.id)}
@@ -5726,12 +5794,35 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         <span style={{fontSize:11,color:sub,minWidth:32,textAlign:'right'}}>{Math.round((pf.petalLength??0.55)*100)}%</span>
                       </div>
                       {(pf.subPetals??6)>0&&(
-                        <div style={{display:'flex',alignItems:'center',gap:8}}>
+                        <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
                           <span style={{fontSize:12,fontWeight:600,color:txt,minWidth:80}}>Sub length</span>
                           <input type="range" min="15" max="100" step="5" value={Math.round((pf.subPetalLength??0.47)*100)} onChange={e=>update('subPetalLength',parseInt(e.target.value)/100)} style={{flex:1,accentColor:pf.subPetalColor}}/>
                           <span style={{fontSize:11,color:sub,minWidth:32,textAlign:'right'}}>{Math.round((pf.subPetalLength??0.47)*100)}%</span>
                         </div>
                       )}
+
+                      {/* Third petal layer */}
+                      <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8,marginTop:4}}>
+                        <span style={{fontSize:12,fontWeight:600,color:txt,minWidth:80}}>3rd layer</span>
+                        <input type="number" min="0" max="24"
+                          value={pf.layer3Petals===0?'0':pf.layer3Petals??0}
+                          onChange={e=>{const raw=e.target.value;if(raw===''){update('layer3Petals',0);return;}const v=parseInt(raw);if(!isNaN(v)&&v>=0&&v<=24)update('layer3Petals',v);}}
+                          style={{width:50,padding:'4px 6px',borderRadius:8,border:'1.5px solid '+brd,background:dm?'#0f172a':'white',color:txt,fontSize:13,fontWeight:700,textAlign:'center',outline:'none'}}/>
+                        {(pf.layer3Petals||0)>0&&(
+                          <input type="range" min="10" max="90" step="5" value={Math.round((pf.layer3Length??0.35)*100)} onChange={e=>update('layer3Length',parseInt(e.target.value)/100)} style={{flex:1,accentColor:pf.layer3Color||'#fecdd3'}}/>
+                        )}
+                        {(pf.layer3Petals||0)>0&&<span style={{fontSize:11,color:sub,minWidth:28,textAlign:'right'}}>{Math.round((pf.layer3Length??0.35)*100)}%</span>}
+                      </div>
+
+                      {/* Border thickness */}
+                      <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
+                        <span style={{fontSize:12,fontWeight:600,color:txt,minWidth:80}}>Border width</span>
+                        <input type="range" min="0.5" max="6" step="0.5"
+                          value={pf.borderWidth??1.5}
+                          onChange={e=>update('borderWidth',parseFloat(e.target.value))}
+                          style={{flex:1,accentColor:pf.petalBorderColor||pf.petalColor}}/>
+                        <span style={{fontSize:11,color:sub,minWidth:32,textAlign:'right'}}>{pf.borderWidth??1.5}px</span>
+                      </div>
                     </div>
                   </>
                 )}
