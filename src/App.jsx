@@ -7,7 +7,7 @@ import {
   BookUser
 } from 'lucide-react';
 
-const APP_VERSION = '1.8';
+const APP_VERSION = '2.1';
 const INTERACTION_DISTANCE = 70;
 const TIER_COLORS_GLOBAL = ['#bef264','#84cc16','#166534','#3b82f6','#9333ea'];
 const PRIMARY_GROUP_COLORS = ['#ef4444','#3b82f6','#f59e0b','#10b981','#8b5cf6','#ec4899','#06b6d4','#f97316'];
@@ -418,16 +418,27 @@ function AppInner() {
 
   const clearAllData = () => {
     clearTimeout(saveTimer.current);
-    setNodes(INITIAL_NODES);
+    // Keep names, photos, birthdays, notes, tags — only clear scores, logs, links history
+    setNodes(prev => prev.map(n => ({
+      ...n,
+      interactionScore: 0,
+      prevScore: 0,
+      log: [],
+      tags: n.tags, // keep tags
+      // keep: label, img, birthday, notes, phone, email, contactName, type, x, y, id
+    })));
     setLinks(INITIAL_LINKS);
-    setDimensions(DEFAULT_DIMENSIONS);
-    try {
-      localStorage.removeItem('ft_nodes');
-      localStorage.removeItem('ft_links');
-      localStorage.removeItem('ft_dimensions');
-    } catch {}
-    clearPhotoDB();
-    showToast('🗑️ All data cleared');
+    // Reset dimension logs and weekly scores but keep activities config
+    setDimensions(prev => {
+      const reset = {};
+      Object.keys(prev).forEach(k => {
+        reset[k] = { ...prev[k], log: [], weeklyScore: 0, health: 1.0 };
+      });
+      return reset;
+    });
+    setArchivedLinks([]);
+    try { localStorage.removeItem('ft_links'); } catch {}
+    showToast('🗑️ History cleared — people & photos kept');
   };
 
   // ── IndexedDB photo storage ───────────────────────────────────────────────
@@ -502,6 +513,8 @@ function AppInner() {
   const [userIdeas, setUserIdeas] = useState(() => {
     try { return JSON.parse(localStorage.getItem('ft_ideas') || '[]'); } catch { return []; }
   });
+  const [settingsSections, setSettingsSections] = useState({appearance:true,filters:false,data:false,reset:false,security:false,future:false});
+  const [tierPickMode, setTierPickMode] = useState(false);
   const [photoBorderMode, setPhotoBorderMode] = useState('none');
   const [groupColors, setGroupColors] = useState({});
   const [confirmModal, setConfirmModal] = useState(null);
@@ -898,22 +911,21 @@ function AppInner() {
           showToast(collapsedGroups.includes(ptr.nodeId) ? '📂 Group expanded' : '📁 Group collapsed');
           lastTapRef.current.delete(ptr.nodeId);
           lastTapRef.current.delete(ptr.nodeId + '_count');
-        } else if (tapCount >= 3 && tappedNode?.id === 'flower_social') {
-          // Triple-tap social flower: open social settings panel
-          setFlowerPanel('social');
-          lastTapRef.current.delete(ptr.nodeId);
-          lastTapRef.current.delete(ptr.nodeId + '_count');
         } else if (tapCount >= 2) {
           if (tappedNode?.type === 'hub') setGroupModal({ hubId: ptr.nodeId });
-          else if (tappedNode?.id === 'flower_social') {
-            // Double-tap social flower: cycle border mode
-            const modes = ['none','tier','group','momentum'];
-            const labels = ['No border','Tier colour','Group colour','Momentum colour'];
-            const next = modes[(modes.indexOf(photoBorderMode) + 1) % modes.length];
-            setPhotoBorderMode(next);
-            showToast('🌸 Border: ' + labels[modes.indexOf(next)]);
+          else if (tappedNode?.type === 'flower') {
+            // Double-tap any flower: cycle border mode (unless locked)
+            const flowerNode = nodes.find(n => n.dimKey === tappedNode.dimKey);
+            if (!flowerNode?.borderLocked) {
+              const modes = ['none','tier','group','momentum'];
+              const labels = ['No border','Tier colour','Group colour','Momentum colour'];
+              const next = modes[(modes.indexOf(photoBorderMode) + 1) % modes.length];
+              setPhotoBorderMode(next);
+              showToast('🌸 Border: ' + labels[modes.indexOf(next)]);
+            } else {
+              showToast('🔒 Border locked — unlock in group settings');
+            }
           }
-          else if (tappedNode?.type === 'flower') setFlowerPanel(tappedNode.dimKey);
           else if (tappedNode?.id === 'me') setSelectedNodeId('me');
           else setSelectedNodeId(ptr.nodeId);
           lastTapRef.current.delete(ptr.nodeId);
@@ -2408,110 +2420,91 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               minHeight:0,
             }}>
               <div style={{display:'flex',flexDirection:'column',gap:0}}>
+                {(()=>{
+                  const tog=(k)=>setSettingsSections(p=>({...p,[k]:!p[k]}));
+                  const SH=({k,label})=>(
+                    <button onClick={()=>tog(k)} style={{display:'flex',alignItems:'center',justifyContent:'space-between',width:'100%',padding:'12px 0',background:'none',border:'none',borderBottom:'1px solid '+(theme.darkMode?'#334155':'#e2e8f0'),cursor:'pointer',color:theme.darkMode?'#e2e8f0':'#1e293b'}}>
+                      <span style={{fontSize:13,fontWeight:800}}>{label}</span>
+                      <span style={{fontSize:12,color:theme.darkMode?'#475569':'#94a3b8'}}>{settingsSections[k]?'▲':'▼'}</span>
+                    </button>
+                  );
+                  return (<>
 
-                {/* Section: Appearance */}
-                {[
-                  {label:'Weathered Hubs', ctrl:<input type="checkbox" checked={theme.showWeathering} onChange={e=>setTheme(p=>({...p,showWeathering:e.target.checked}))} style={{width:18,height:18,accentColor:'#10b981'}}/>},
-                  {label:'🌙 Dark Mode',    ctrl:<input type="checkbox" checked={theme.darkMode} onChange={e=>setTheme(p=>({...p,darkMode:e.target.checked}))} style={{width:18,height:18,accentColor:'#10b981'}}/>},
-                ].map((row,i)=>(
-                  <div key={i} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 0',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}>
-                    <span style={{fontSize:14,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>{row.label}</span>
-                    {row.ctrl}
-                  </div>
-                ))}
-
-                {/* Grid Style */}
-                <div style={{padding:'14px 0',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}>
-                  <div style={{fontSize:13,fontWeight:700,color:theme.darkMode?'#94a3b8':'#64748b',marginBottom:8}}>⬡ Grid Style</div>
-                  <div style={{display:'flex',gap:6}}>
-                    {[{id:'hex',label:'Hex'},{id:'hexSmall',label:'Small Hex'},{id:'square',label:'Square'}].map(g=>(
-                      <button key={g.id} onClick={()=>setGridStyle(g.id)} style={{
-                        flex:1,padding:'7px 2px',borderRadius:8,border:'2px solid '+(gridStyle===g.id?'#10b981':(theme.darkMode?'#334155':'#e2e8f0')),
-                        background:gridStyle===g.id?'#10b981':(theme.darkMode?'#1e293b':'#f8fafc'),
-                        color:gridStyle===g.id?'white':(theme.darkMode?'#94a3b8':'#64748b'),
-                        fontSize:11,fontWeight:700,cursor:'pointer',
-                      }}>{g.label}</button>
+                  <SH k="appearance" label="🎨 Appearance"/>
+                  {settingsSections.appearance&&<div style={{padding:'8px 0'}}>
+                    {[{label:'Weathered Hubs',ctrl:<input type="checkbox" checked={theme.showWeathering} onChange={e=>setTheme(p=>({...p,showWeathering:e.target.checked}))} style={{width:18,height:18,accentColor:'#10b981'}}/>},{label:'🌙 Dark Mode',ctrl:<input type="checkbox" checked={theme.darkMode} onChange={e=>setTheme(p=>({...p,darkMode:e.target.checked}))} style={{width:18,height:18,accentColor:'#10b981'}}/>}].map((row,i)=>(
+                      <div key={i} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 0',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}><span style={{fontSize:14,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>{row.label}</span>{row.ctrl}</div>
                     ))}
-                  </div>
-                </div>
+                    <div style={{padding:'12px 0',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}>
+                      <div style={{fontSize:13,fontWeight:700,color:theme.darkMode?'#94a3b8':'#64748b',marginBottom:8}}>⬡ Grid Style</div>
+                      <div style={{display:'flex',gap:6}}>{[{id:'hex',label:'Hex'},{id:'hexSmall',label:'Small Hex'},{id:'square',label:'Square'}].map(g=>(
+                        <button key={g.id} onClick={()=>setGridStyle(g.id)} style={{flex:1,padding:'7px 2px',borderRadius:8,border:'2px solid '+(gridStyle===g.id?'#10b981':(theme.darkMode?'#334155':'#e2e8f0')),background:gridStyle===g.id?'#10b981':(theme.darkMode?'#1e293b':'#f8fafc'),color:gridStyle===g.id?'white':(theme.darkMode?'#94a3b8':'#64748b'),fontSize:11,fontWeight:700,cursor:'pointer'}}>{g.label}</button>
+                      ))}</div>
+                    </div>
+                    <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 0'}}>
+                      <span style={{fontSize:14,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>🔔 Notifications</span>
+                      {notifPermission==='granted'?<span style={{fontSize:12,color:'#10b981',fontWeight:700}}>Enabled ✓</span>:<button onClick={requestNotifications} style={{padding:'5px 14px',borderRadius:99,background:'#10b981',color:'white',border:'none',cursor:'pointer',fontSize:12,fontWeight:700}}>Enable</button>}
+                    </div>
+                  </div>}
 
-                {/* Notifications */}
-                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 0',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}>
-                  <span style={{fontSize:14,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>🔔 Notifications</span>
-                  {notifPermission==='granted'
-                    ?<span style={{fontSize:12,color:'#10b981',fontWeight:700}}>Enabled ✓</span>
-                    :<button onClick={requestNotifications} style={{padding:'5px 14px',borderRadius:99,background:'#10b981',color:'white',border:'none',cursor:'pointer',fontSize:12,fontWeight:700}}>Enable</button>}
-                </div>
+                  <SH k="filters" label="🏷 Filters"/>
+                  {settingsSections.filters&&<div style={{padding:'8px 0'}}>
+                    {activeTags.length>0&&activeTags.length<allTags.length&&<button onClick={()=>setActiveTags([])} style={{fontSize:11,color:'#ef4444',background:'none',border:'none',cursor:'pointer',fontWeight:700,marginBottom:6}}>Show all</button>}
+                    {allTags.length===0?<p style={{fontSize:12,fontStyle:'italic',color:theme.darkMode?'#475569':'#94a3b8',margin:'0 0 8px'}}>No tags yet</p>
+                    :<div style={{display:'flex',flexDirection:'column',gap:4}}>{allTags.map(tag=>{
+                      const hidden=activeTags.length>0&&!activeTags.includes(tag);
+                      const count=nodes.filter(n=>(n.tags||[]).includes(tag)).length;
+                      return(<label key={tag} style={{display:'flex',alignItems:'center',gap:10,cursor:'pointer',padding:'3px 0'}}>
+                        <input type="checkbox" checked={!hidden} onChange={()=>{if(activeTags.length===0){setActiveTags(allTags.filter(t=>t!==tag));}else if(activeTags.includes(tag)){const nx=activeTags.filter(t=>t!==tag);setActiveTags(nx.length===allTags.length?[]:nx);}else{const nx=[...activeTags,tag];setActiveTags(nx.length===allTags.length?[]:nx);}}} style={{width:16,height:16,accentColor:'#10b981',cursor:'pointer',flexShrink:0}}/>
+                        <span style={{flex:1,fontSize:13,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>{tag}</span>
+                        <span style={{fontSize:11,color:theme.darkMode?'#475569':'#94a3b8'}}>{count}p</span>
+                      </label>);
+                    })}</div>}
+                  </div>}
 
-                {/* Tags — near top, checked = visible */}
-                <div style={{fontSize:11,fontWeight:800,letterSpacing:1,textTransform:'uppercase',color:theme.darkMode?'#475569':'#94a3b8',padding:'4px 0 6px',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-                  <span>🏷 Filter Tags</span>
-                  {activeTags.length>0&&activeTags.length<allTags.length&&<button onClick={()=>setActiveTags([])} style={{fontSize:10,color:'#ef4444',background:'none',border:'none',cursor:'pointer',fontWeight:700,textTransform:'none',letterSpacing:0}}>Show all</button>}
-                </div>
-                {allTags.length===0?(
-                  <p style={{fontSize:12,fontStyle:'italic',color:theme.darkMode?'#475569':'#94a3b8',margin:'0 0 12px'}}>No tags yet — add them in a person's panel</p>
-                ):(
-                  <div style={{display:'flex',flexDirection:'column',gap:4,marginBottom:12}}>
-                    {allTags.map(tag=>{
-                      // checked = visible (not in exclusion list)
-                      // activeTags empty = show all; activeTags has items = show only those
-                      // We flip: hiddenTags = tags NOT shown. checked = not hidden.
-                      const hidden = activeTags.length > 0 && !activeTags.includes(tag);
-                      const count = nodes.filter(n=>(n.tags||[]).includes(tag)).length;
-                      return(
-                        <label key={tag} style={{display:'flex',alignItems:'center',gap:10,cursor:'pointer',padding:'3px 0'}}>
-                          <input type="checkbox" checked={!hidden}
-                            onChange={()=>{
-                              if (activeTags.length === 0) {
-                                // Currently showing all — uncheck this tag to hide it = show all others
-                                setActiveTags(allTags.filter(t=>t!==tag));
-                              } else if (activeTags.includes(tag)) {
-                                // Was shown — hide it
-                                const next = activeTags.filter(t=>t!==tag);
-                                setActiveTags(next.length===allTags.length?[]:next);
-                              } else {
-                                // Was hidden — show it
-                                const next = [...activeTags, tag];
-                                setActiveTags(next.length===allTags.length?[]:next);
-                              }
-                            }}
-                            style={{width:16,height:16,accentColor:'#10b981',cursor:'pointer',flexShrink:0}}/>
-                          <span style={{flex:1,fontSize:13,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>{tag}</span>
-                          <span style={{fontSize:11,color:theme.darkMode?'#475569':'#94a3b8'}}>{count}p</span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                )}
+                  <SH k="data" label="💾 Data"/>
+                  {settingsSections.data&&<div style={{padding:'8px 0'}}>
+                    {[{label:'🌱 Start Blank',btnLabel:'Reset',btnBg:'#64748b',onClick:()=>{setSettingsOpen(false);const doReset=()=>{clearTimeout(saveTimer.current);setNodes(INITIAL_NODES);setLinks(INITIAL_LINKS);setDimensions(DEFAULT_DIMENSIONS);try{localStorage.removeItem('ft_nodes');localStorage.removeItem('ft_links');localStorage.removeItem('ft_dimensions');}catch{}clearPhotoDB();showToast('🌱 Fresh start!');};const run=()=>localStorage.getItem('ft_pin')?openPinModal('clear','Confirm Reset',doReset):doReset();setConfirmModal({title:'Start Blank?',message:'Removes all people, groups, photos and history.',danger:true,onConfirm:run});}},
+                      {label:'✨ Demo Data',btnLabel:'Load',btnBg:'#10b981',onClick:()=>{setSettingsOpen(false);setConfirmModal({title:'Load Demo Data?',message:'Replaces your current tree with example data.',danger:false,onConfirm:()=>loadDemoData()});}},
+                    ].map((row,i)=>(
+                      <div key={i} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 0',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}>
+                        <span style={{fontSize:14,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>{row.label}</span>
+                        <button onClick={row.onClick} style={{padding:'5px 14px',borderRadius:99,background:row.btnBg,color:'white',border:'none',cursor:'pointer',fontSize:12,fontWeight:700}}>{row.btnLabel}</button>
+                      </div>
+                    ))}
+                  </div>}
 
-                {/* Section label: Data */}
-                <div style={{fontSize:11,fontWeight:800,letterSpacing:1,textTransform:'uppercase',color:theme.darkMode?'#475569':'#94a3b8',padding:'14px 0 6px'}}>Data</div>
+                  <SH k="reset" label="🗑️ Reset"/>
+                  {settingsSections.reset&&<div style={{padding:'8px 0'}}>
+                    {[
+                      {label:'📋 Logs & history',desc:'Keeps tier, sets score to 50% in current tier',title:'Reset Logs?',msg:'Clears logs. Scores set to tier midpoints.',onConfirm:()=>{setNodes(prev=>prev.map(n=>{const s=n.interactionScore||0;const mid=s<100?50:s<300?200:s<600?450:s<1000?800:1200;return{...n,interactionScore:mid,prevScore:mid,log:[]};} ));setDimensions(prev=>{const r={};Object.keys(prev).forEach(k=>{r[k]={...prev[k],log:[],weeklyScore:0};});return r;});showToast('📋 Done');}},
+                      {label:'📓 Diary entries',desc:'Clears all diary entries',title:'Clear Diaries?',msg:'Removes diary entries from all people.',onConfirm:()=>{setNodes(prev=>prev.map(n=>({...n,diaryEntries:[]})));showToast('📓 Diaries cleared');}},
+                      {label:'⭐ Friendship scores',desc:"Reset scores — pick each person's tier on map",title:'Reset Scores?',msg:'Resets all scores. Each person shows tier picker on return.',onConfirm:()=>{setNodes(prev=>prev.map(n=>n.type==='friend'||n.id==='me'?{...n,interactionScore:0,prevScore:0}:n));setTierPickMode(true);showToast('⭐ Tap each person to set their level');}},
+                      {label:'🔗 Connections',desc:'Removes all vines & groups, keeps people',title:'Remove Connections?',msg:'Removes all vines and groups. People and photos stay.',onConfirm:()=>{setNodes(prev=>prev.filter(n=>n.type!=='hub'));setLinks(INITIAL_LINKS);setArchivedLinks([]);try{localStorage.removeItem('ft_links');}catch{}showToast('🔗 Done');}},
+                      {label:'👥 People',desc:'Removes all people, keeps Me',title:'Remove People?',msg:'Deletes all person nodes except Me.',onConfirm:()=>{setNodes(prev=>prev.filter(n=>n.type==='hub'||n.type==='flower'||n.id==='me'));setLinks(prev=>prev.filter(l=>{const sn=nodes.find(n=>n.id===l.source);const tn=nodes.find(n=>n.id===l.target);return(sn?.type==='hub'||sn?.type==='flower'||sn?.id==='me')&&(tn?.type==='hub'||tn?.type==='flower'||tn?.id==='me');}));clearPhotoDB();showToast('👥 Done');}},
+                      {label:'📸 Photos',desc:'Replaces photos with blank avatars',title:'Remove Photos?',msg:'Replaces uploaded photos with default avatars.',onConfirm:()=>{clearPhotoDB();const ak=Object.keys(AVATARS);setNodes(prev=>prev.map(n=>n.type==='friend'||n.id==='me'?{...n,img:AVATARS[ak[Math.floor(Math.random()*ak.length)]]}:n));showToast('📸 Done');}},
+                      {label:'🌳 Groups',desc:'Removes group hubs, keeps people',title:'Remove Groups?',msg:'Deletes all group hubs. People remain.',onConfirm:()=>{setNodes(prev=>prev.filter(n=>n.type!=='hub'));setLinks(prev=>prev.filter(l=>{const sn=nodes.find(n=>n.id===l.source);const tn=nodes.find(n=>n.id===l.target);return sn?.type!=='hub'&&tn?.type!=='hub';}));showToast('🌳 Done');}},
+                    ].map((row,i)=>(
+                      <div key={i} style={{padding:'10px 0',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}>
+                        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8}}>
+                          <div>
+                            <div style={{fontSize:13,fontWeight:600,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>{row.label}</div>
+                            <div style={{fontSize:11,color:theme.darkMode?'#475569':'#94a3b8',marginTop:1}}>{row.desc}</div>
+                          </div>
+                          <button onClick={()=>{setSettingsOpen(false);setConfirmModal({title:row.title,message:row.msg,danger:true,onConfirm:row.onConfirm});}} style={{flexShrink:0,padding:'4px 12px',borderRadius:99,background:'#ef4444',color:'white',border:'none',cursor:'pointer',fontSize:11,fontWeight:700}}>Reset</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>}
 
-                {[
-                  {label:'🌱 Start Blank', btnLabel:'Reset', btnBg:'#64748b', onClick:()=>{
-                    setSettingsOpen(false);
-                    const doReset=()=>{clearTimeout(saveTimer.current);setNodes(INITIAL_NODES);setLinks(INITIAL_LINKS);setDimensions(DEFAULT_DIMENSIONS);try{localStorage.removeItem('ft_nodes');localStorage.removeItem('ft_links');localStorage.removeItem('ft_dimensions');}catch{}clearPhotoDB();showToast('🌱 Fresh start!');};
-                    const run = ()=>localStorage.getItem('ft_pin')?openPinModal('clear','Confirm Reset',doReset):doReset();
-                    setConfirmModal({title:'Start Blank?',message:'This will remove all your people and groups. You can reload demo data anytime.',danger:true,onConfirm:run});
-                  }},
-                  {label:'✨ Demo Data', btnLabel:'Load', btnBg:'#10b981', onClick:()=>{
-                    setSettingsOpen(false);
-                    setConfirmModal({title:'Load Demo Data?',message:'This will replace your current tree with example data.',danger:false,onConfirm:()=>{loadDemoData();}});
-                  }},
-                  {label:'🗑️ Clear All',  btnLabel:'Clear', btnBg:'#ef4444', onClick:()=>{
-                    setSettingsOpen(false);
-                    const run = ()=>localStorage.getItem('ft_pin')?openPinModal('clear','Confirm Clear',clearAllData):clearAllData();
-                    setConfirmModal({title:'Clear All Data?',message:'This permanently deletes all people, groups, photos and history. This cannot be undone.',danger:true,onConfirm:run});
-                  }},
-                ].map((row,i)=>(
-                  <div key={i} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 0',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}>
-                    <span style={{fontSize:14,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>{row.label}</span>
-                    <button onClick={row.onClick} style={{padding:'5px 14px',borderRadius:99,background:row.btnBg,color:'white',border:'none',cursor:'pointer',fontSize:12,fontWeight:700}}>{row.btnLabel}</button>
-                  </div>
-                ))}
-
-                {/* Section label: Security */}
-                <div style={{fontSize:11,fontWeight:800,letterSpacing:1,textTransform:'uppercase',color:theme.darkMode?'#475569':'#94a3b8',padding:'14px 0 6px'}}>Security</div>
+                  </>);
+                })()}
+                {/* Security */}
+                <button onClick={()=>setSettingsSections(p=>({...p,security:!p.security}))} style={{display:'flex',alignItems:'center',justifyContent:'space-between',width:'100%',padding:'12px 0',background:'none',border:'none',borderBottom:'1px solid '+(theme.darkMode?'#334155':'#e2e8f0'),cursor:'pointer',color:theme.darkMode?'#e2e8f0':'#1e293b'}}>
+                  <span style={{fontSize:13,fontWeight:800}}>🔒 Security</span>
+                  <span style={{fontSize:12,color:theme.darkMode?'#475569':'#94a3b8'}}>{settingsSections.security?'▲':'▼'}</span>
+                </button>
+                {settingsSections.security&&<div style={{padding:'8px 0'}}>
 
                 <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 0',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}>
                   <span style={{fontSize:14,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>🔒 App PIN</span>
@@ -2537,16 +2530,19 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     </select>
                   </div>
                 )}
+                </div>}
 
                 {/* Version */}
-                <div style={{textAlign:'center',paddingTop:24,paddingBottom:8}}>
+                <div style={{textAlign:'center',paddingTop:16,paddingBottom:4}}>
                   <span style={{fontSize:11,color:theme.darkMode?'#334155':'#cbd5e1'}}>🌳 FriendshipTree v{APP_VERSION}</span>
                 </div>
 
                 {/* Future Updates */}
-                <div style={{fontSize:11,fontWeight:800,letterSpacing:1,textTransform:'uppercase',color:theme.darkMode?'#475569':'#94a3b8',padding:'14px 0 6px'}}>
-                  🚀 Future Updates
-                </div>
+                <button onClick={()=>setSettingsSections(p=>({...p,future:!p.future}))} style={{display:'flex',alignItems:'center',justifyContent:'space-between',width:'100%',padding:'12px 0',background:'none',border:'none',borderBottom:'1px solid '+(theme.darkMode?'#334155':'#e2e8f0'),cursor:'pointer',color:theme.darkMode?'#e2e8f0':'#1e293b'}}>
+                  <span style={{fontSize:13,fontWeight:800}}>🚀 Future Updates</span>
+                  <span style={{fontSize:12,color:theme.darkMode?'#475569':'#94a3b8'}}>{settingsSections.future?'▲':'▼'}</span>
+                </button>
+                {settingsSections.future&&<div style={{padding:'8px 0'}}>
                 {(() => {
                   const plannedItems = [
                     'Notification reminders for neglected friendships',
@@ -2625,6 +2621,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     </div>
                   );
                 })()}
+                </div>}
 
               </div>
             </div>
@@ -4122,6 +4119,15 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                 };
                                 return icons[node.dimKey] || null;
                               })()}
+                              {/* + button bottom-right of flower */}
+                              <g transform={`translate(${centreR * 0.7}, ${centreR * 0.7})`}
+                                style={{cursor:'pointer', pointerEvents:'all'}}
+                                onPointerDown={e => { e.stopPropagation(); setFlowerPanel(node.dimKey); }}>
+                                <circle r={centreR * 0.32} fill="#16a34a" stroke="white" strokeWidth="1.5"/>
+                                <text textAnchor="middle" dominantBaseline="middle"
+                                  fontSize={centreR * 0.38} fontWeight="900" fill="white"
+                                  style={{userSelect:'none', pointerEvents:'none'}}>+</text>
+                              </g>
                             </g>
                           );
                         })()
@@ -4279,6 +4285,33 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       <image href={node.img} x={-r} y={-r} width={r * 2} height={r * 2} clipPath={`url(#clip-${node.id})`} preserveAspectRatio="xMidYMid slice" />
                       {photoBorderMode !== 'none' && getPhotoBorderColor(node) && (
                         <circle r={r + 3} fill="none" stroke={getPhotoBorderColor(node)} strokeWidth="4" opacity="0.95"/>
+                      )}
+                      {/* Tier picker in tierPickMode */}
+                      {tierPickMode && (
+                        <g>
+                          {[
+                            {label:'New',score:50,color:'#bef264'},
+                            {label:'Friend',score:200,color:'#84cc16'},
+                            {label:'Good',score:450,color:'#166534'},
+                            {label:'Close',score:800,color:'#3b82f6'},
+                            {label:'Family',score:1200,color:'#9333ea'},
+                          ].map((t,ti)=>{
+                            const bw=r*0.48, bh=r*0.55, gap=2;
+                            const totalW=5*bw+4*gap;
+                            const sx=-totalW/2+ti*(bw+gap);
+                            return (
+                              <g key={t.label} transform={`translate(${sx},${r+6})`}
+                                style={{cursor:'pointer',pointerEvents:'all'}}
+                                onPointerDown={e=>{e.stopPropagation();setNodes(prev=>prev.map(n=>n.id===node.id?{...n,interactionScore:t.score}:n));}}>
+                                <rect width={bw} height={bh} rx={3}
+                                  fill={(node.interactionScore||0)===t.score?t.color:t.color+'88'}/>
+                                <text x={bw/2} y={bh*0.65} textAnchor="middle"
+                                  fontSize={Math.max(6,r*0.18)} fontWeight="800" fill="white"
+                                  style={{userSelect:'none',pointerEvents:'none'}}>{t.label}</text>
+                              </g>
+                            );
+                          })}
+                        </g>
                       )}
                       {/* Name label — grey arc band inside circle bottom */}
                       <g clipPath={`url(#clip-${node.id})`} style={{pointerEvents:'none'}}>
@@ -4491,7 +4524,16 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           </g>
         </svg>
 
-        {/* ── Select from Map mode overlay ─────────────────────────────────────── */}
+        {/* ── Tier Pick Mode overlay ───────────────────────────────────────────── */}
+      {tierPickMode && (
+        <div style={{position:'fixed',top:0,left:0,right:0,zIndex:300,
+          padding:'10px 16px',background:'#1e3a5f',borderBottom:'3px solid #3b82f6',
+          display:'flex',alignItems:'center',justifyContent:'space-between',gap:10}}>
+          <span style={{fontSize:13,fontWeight:700,color:'white'}}>⭐ Tap each person to set their friendship level</span>
+          <button onClick={()=>setTierPickMode(false)}
+            style={{padding:'6px 14px',borderRadius:8,background:'#3b82f6',color:'white',border:'none',cursor:'pointer',fontSize:13,fontWeight:700}}>Done</button>
+        </div>
+      )}
       {selectForGroupMode && (
         <div style={{
           position:'fixed', top:0, left:0, right:0, zIndex:300,
@@ -5330,7 +5372,31 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 <button onClick={()=>setFlowerPanel(null)} style={{background:'none',border:'none',cursor:'pointer',fontSize:18,color:sub}}>✕</button>
               </div>
 
-              {/* Activity list — draggable */}
+              {/* Border mode chooser for this flower */}
+              {(() => {
+                const flowerNode = nodes.find(n => n.dimKey === flowerPanel);
+                return (
+                  <div style={{padding:'8px 16px',borderBottom:`1px solid ${border}`,display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+                    <span style={{fontSize:11,fontWeight:700,color:sub}}>Border:</span>
+                    {[{k:'none',l:'Off'},{k:'tier',l:'Tier'},{k:'group',l:'Group'},{k:'momentum',l:'Momentum'}].map(m=>(
+                      <button key={m.k} onClick={()=>setPhotoBorderMode(m.k)}
+                        style={{padding:'3px 10px',borderRadius:99,fontSize:11,fontWeight:700,cursor:'pointer',border:'none',
+                          background:photoBorderMode===m.k?dim.color:(dm?'#1e293b':'#f1f5f9'),
+                          color:photoBorderMode===m.k?'white':(dm?'#94a3b8':'#64748b')}}>
+                        {m.l}
+                      </button>
+                    ))}
+                    {flowerNode && (
+                      <button onClick={()=>setNodes(prev=>prev.map(n=>n.dimKey===flowerPanel?{...n,borderLocked:!n.borderLocked}:n))}
+                        style={{marginLeft:'auto',padding:'3px 10px',borderRadius:99,fontSize:11,fontWeight:700,cursor:'pointer',border:'none',
+                          background:flowerNode.borderLocked?(dm?'#7c3aed':'#8b5cf6'):(dm?'#1e293b':'#f1f5f9'),
+                          color:flowerNode.borderLocked?'white':(dm?'#94a3b8':'#64748b')}}>
+                        {flowerNode.borderLocked ? '🔒 Locked' : '🔓 Lock'}
+                      </button>
+                    )}
+                  </div>
+                );
+              })()}
               <div style={{flex:1,overflowY:'auto',padding:'12px 16px'}}>
                 <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
                   <span style={{fontSize:12,fontWeight:700,color:sub,textTransform:'uppercase',letterSpacing:'0.05em'}}>
