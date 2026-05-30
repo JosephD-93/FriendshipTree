@@ -2186,4 +2186,3829 @@ Return only the JSON array. If nothing trackable is found, return [].`;
   const svgGroupRef = useRef(null);
 
   // Apply transform directly to SVG group for smooth panning (bypasses React re-render)
-  const applyTransform = useCallback((t)
+  const applyTransform = useCallback((t) => {
+    if (svgGroupRef.current) {
+      svgGroupRef.current.setAttribute('transform', `translate(${t.x}, ${t.y}) scale(${t.scale})`);
+    }
+  }, []);
+
+  const selectedNode = nodes.find(n => n.id === selectedNodeId);
+  const bgClass = theme.darkMode ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-800';
+  const sidebarBg = theme.darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200';
+  const panelBg = theme.darkMode ? 'bg-slate-900 border-slate-700 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700';
+
+  let nextMessagePoints = 5;
+  if (selectedNode && selectedNode.type !== 'hub') {
+    const today = new Date().toDateString();
+    const msgs = selectedNode.dailyMessages;
+    if (msgs && msgs.date === today) {
+      if (msgs.count >= 15) nextMessagePoints = 0;
+      else if (msgs.count > 0) nextMessagePoints = 1;
+    }
+  }
+
+  // --- FRIENDSHIP LEVELS ---
+  const FRIENDSHIP_LEVELS = [
+    { tier: 1, label: 'Acquaintance',  emoji: '🌱', color: '#84cc16',
+      desc: 'You know their name and share a nod in passing. The seed is planted but roots have not formed yet.',
+      scoreRange: '0 – 99' },
+    { tier: 2, label: 'Friendly',      emoji: '🌿', color: '#22c55e',
+      desc: 'You chat when you meet and might grab a coffee. Warmth without depth yet.',
+      scoreRange: '100 – 299' },
+    { tier: 3, label: 'Good Friend',   emoji: '🌳', color: '#16a34a',
+      desc: 'You actively make plans, share laughs and some personal things. They would show up if you needed them.',
+      scoreRange: '300 – 599' },
+    { tier: 4, label: 'Close Friend',  emoji: '🌲', color: '#15803d',
+      desc: 'Deep mutual trust. You know their fears and dreams. You would drop things for each other without thinking.',
+      scoreRange: '600 – 999' },
+    { tier: 5, label: 'Kindred Spirit',emoji: '✨', color: '#14532d',
+      desc: 'A rare bond. They feel like family. History, honesty, and unconditional presence define this connection.',
+      scoreRange: '1000+' },
+    { tier: 'family', label: 'Family', emoji: '🏠', color: '#f59e0b',
+      desc: 'Blood or chosen — these people are home. The bond exists independent of interaction frequency.',
+      scoreRange: 'Always' },
+  ];
+  const getTier = (score, node) => {
+    if (node?.isFamily) return 'family';
+    return score < 100 ? 1 : score < 300 ? 2 : score < 600 ? 3 : score < 1000 ? 4 : 5;
+  };
+  const TIER_SCORE_MAP = [0, 0, 100, 300, 600, 1000];
+  // Safe level lookup — handles both numeric tiers and 'family'
+  const getLevel = (score, node) => {
+    const t = getTier(score, node);
+    return FRIENDSHIP_LEVELS.find(l => l.tier === t) || FRIENDSHIP_LEVELS[0];
+  };
+
+  return (
+    <div className={`fixed inset-0 font-sans overflow-hidden transition-colors duration-300 ${bgClass}`}
+      style={{
+        display:'flex', flexDirection:'column',
+        background: theme.darkMode ? '#0f172a' : '#f8fafc',
+        color: theme.darkMode ? '#f1f5f9' : '#1e293b',
+      }}>
+      
+      {/* ── Draggable Edge-Snapping FAB ─────────────────────────────────────── */}
+      {/* ── FAB ── */}
+      {viewMode === "canvas" && <FabMenu
+        theme={theme} viewMode={viewMode}
+        fabOpen={fabOpen} setFabOpen={setFabOpen}
+        fabPos={fabPos} setFabPos={setFabPos}
+        draggingFab={draggingFab} setDraggingFab={setDraggingFab}
+        heldTool={heldTool} setHeldTool={setHeldTool}
+        fabDragStart={fabDragStart} fabRef={fabRef} holdTimer={holdTimer}
+        historyLen={historyLen} futureLen={futureLen}
+        vineDrawMode={vineDrawMode} macheteMode={macheteMode} pendingPaths={pendingPaths}
+        undo={undo} redo={redo} setSearchOpen={setSearchOpen} setSettingsOpen={setSettingsOpen}
+        commitAllPaths={commitAllPaths} setVineDrawMode={setVineDrawMode}
+        setMacheteMode={setMacheteMode} setPendingPaths={setPendingPaths} setCurrentStroke={setCurrentStroke}
+      />}
+      {/* Settings panel — full height slide-in from right */}
+      {settingsOpen && (
+        <div onClick={e=>{if(e.target===e.currentTarget)setSettingsOpen(false);}}
+          style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:400,background:'rgba(0,0,0,0.4)'}}>
+          <div style={{
+            position:'absolute',top:0,right:0,bottom:56,width:'min(100vw,320px)',
+            display:'flex',flexDirection:'column',
+            background:theme.darkMode?'#0f172a':'white',
+            boxShadow:'-4px 0 32px rgba(0,0,0,0.3)',
+            overflow:'hidden',
+          }}>
+            {/* Fixed header */}
+            <div style={{
+              padding:'16px 20px',flexShrink:0,
+              borderBottom:'1px solid '+(theme.darkMode?'#334155':'#e2e8f0'),
+              display:'flex',alignItems:'center',justifyContent:'space-between',
+              background:theme.darkMode?'#0f172a':'white',
+              zIndex:1,
+            }}>
+              <span style={{fontWeight:800,fontSize:16,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>⚙️ Settings</span>
+              <button onClick={()=>setSettingsOpen(false)}
+                style={{background:'none',border:'none',cursor:'pointer',fontSize:22,lineHeight:1,color:theme.darkMode?'#64748b':'#94a3b8'}}>✕</button>
+            </div>
+            {/* Scrollable body — fills remaining space */}
+            <div style={{
+              flex:1,
+              overflowY:'scroll',
+              WebkitOverflowScrolling:'touch',
+              padding:'12px 20px 32px',
+              minHeight:0,
+            }}>
+              <div style={{display:'flex',flexDirection:'column',gap:0}}>
+
+                {/* Section: Appearance */}
+                {[
+                  {label:'Weathered Hubs', ctrl:<input type="checkbox" checked={theme.showWeathering} onChange={e=>setTheme(p=>({...p,showWeathering:e.target.checked}))} style={{width:18,height:18,accentColor:'#10b981'}}/>},
+                  {label:'🌙 Dark Mode',    ctrl:<input type="checkbox" checked={theme.darkMode} onChange={e=>setTheme(p=>({...p,darkMode:e.target.checked}))} style={{width:18,height:18,accentColor:'#10b981'}}/>},
+                ].map((row,i)=>(
+                  <div key={i} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 0',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}>
+                    <span style={{fontSize:14,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>{row.label}</span>
+                    {row.ctrl}
+                  </div>
+                ))}
+
+                {/* Grid Style */}
+                <div style={{padding:'14px 0',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}>
+                  <div style={{fontSize:13,fontWeight:700,color:theme.darkMode?'#94a3b8':'#64748b',marginBottom:8}}>⬡ Grid Style</div>
+                  <div style={{display:'flex',gap:6}}>
+                    {[{id:'hex',label:'Hex'},{id:'hexSmall',label:'Small Hex'},{id:'square',label:'Square'}].map(g=>(
+                      <button key={g.id} onClick={()=>setGridStyle(g.id)} style={{
+                        flex:1,padding:'7px 2px',borderRadius:8,border:'2px solid '+(gridStyle===g.id?'#10b981':(theme.darkMode?'#334155':'#e2e8f0')),
+                        background:gridStyle===g.id?'#10b981':(theme.darkMode?'#1e293b':'#f8fafc'),
+                        color:gridStyle===g.id?'white':(theme.darkMode?'#94a3b8':'#64748b'),
+                        fontSize:11,fontWeight:700,cursor:'pointer',
+                      }}>{g.label}</button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Notifications */}
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 0',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}>
+                  <span style={{fontSize:14,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>🔔 Notifications</span>
+                  {notifPermission==='granted'
+                    ?<span style={{fontSize:12,color:'#10b981',fontWeight:700}}>Enabled ✓</span>
+                    :<button onClick={requestNotifications} style={{padding:'5px 14px',borderRadius:99,background:'#10b981',color:'white',border:'none',cursor:'pointer',fontSize:12,fontWeight:700}}>Enable</button>}
+                </div>
+
+                {/* Section label: Data */}
+                <div style={{fontSize:11,fontWeight:800,letterSpacing:1,textTransform:'uppercase',color:theme.darkMode?'#475569':'#94a3b8',padding:'14px 0 6px'}}>Data</div>
+
+                {[
+                  {label:'🌱 Start Blank', btnLabel:'Reset', btnBg:'#64748b', onClick:()=>{
+                    setSettingsOpen(false);
+                    const doReset=()=>{clearTimeout(saveTimer.current);setNodes(INITIAL_NODES);setLinks(INITIAL_LINKS);setDimensions(DEFAULT_DIMENSIONS);try{localStorage.removeItem('ft_nodes');localStorage.removeItem('ft_links');localStorage.removeItem('ft_dimensions');}catch{}clearPhotoDB();showToast('🌱 Fresh start!');};
+                    localStorage.getItem('ft_pin')?openPinModal('clear','Confirm Reset',doReset):doReset();
+                  }},
+                  {label:'✨ Demo Data', btnLabel:'Load', btnBg:'#10b981', onClick:()=>{loadDemoData();setSettingsOpen(false);}},
+                  {label:'🗑️ Clear All',  btnLabel:'Clear', btnBg:'#ef4444', onClick:()=>{setSettingsOpen(false);localStorage.getItem('ft_pin')?openPinModal('clear','Confirm Clear',clearAllData):clearAllData();}},
+                ].map((row,i)=>(
+                  <div key={i} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 0',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}>
+                    <span style={{fontSize:14,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>{row.label}</span>
+                    <button onClick={row.onClick} style={{padding:'5px 14px',borderRadius:99,background:row.btnBg,color:'white',border:'none',cursor:'pointer',fontSize:12,fontWeight:700}}>{row.btnLabel}</button>
+                  </div>
+                ))}
+
+                {/* Section label: Security */}
+                <div style={{fontSize:11,fontWeight:800,letterSpacing:1,textTransform:'uppercase',color:theme.darkMode?'#475569':'#94a3b8',padding:'14px 0 6px'}}>Security</div>
+
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 0',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}>
+                  <span style={{fontSize:14,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>🔒 App PIN</span>
+                  {localStorage.getItem('ft_pin')?(
+                    <div style={{display:'flex',gap:6}}>
+                      <button onClick={()=>{setSettingsOpen(false);openPinModal('verify','Current PIN',()=>openPinModal('set','New PIN'));}} style={{padding:'5px 10px',borderRadius:99,background:'#10b981',color:'white',border:'none',cursor:'pointer',fontSize:11,fontWeight:700}}>Change</button>
+                      <button onClick={()=>{setSettingsOpen(false);openPinModal('verify','Remove PIN',()=>{localStorage.removeItem('ft_pin');showToast('🔓 PIN removed');});}} style={{padding:'5px 10px',borderRadius:99,background:'#64748b',color:'white',border:'none',cursor:'pointer',fontSize:11,fontWeight:700}}>Remove</button>
+                    </div>
+                  ):(
+                    <button onClick={()=>{setSettingsOpen(false);openPinModal('set','Set App PIN');}} style={{padding:'5px 14px',borderRadius:99,background:'#6366f1',color:'white',border:'none',cursor:'pointer',fontSize:12,fontWeight:700}}>Set PIN</button>
+                  )}
+                </div>
+
+                {localStorage.getItem('ft_pin')&&(
+                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 0',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}>
+                    <span style={{fontSize:13,color:theme.darkMode?'#94a3b8':'#64748b'}}>Lock after</span>
+                    <select value={lockTimer} onChange={e=>{setLockTimerVal(e.target.value);localStorage.setItem('ft_lockTimer',e.target.value);}}
+                      style={{fontSize:12,padding:'5px 8px',borderRadius:8,border:'1px solid '+(theme.darkMode?'#334155':'#e2e8f0'),background:theme.darkMode?'#1e293b':'white',color:theme.darkMode?'#e2e8f0':'#1e293b',outline:'none'}}>
+                      <option value="close">App close</option>
+                      <option value="5min">5 minutes</option>
+                      <option value="1hour">1 hour</option>
+                      <option value="1day">1 day</option>
+                    </select>
+                  </div>
+                )}
+
+                {/* Tags */}
+                <div style={{fontSize:11,fontWeight:800,letterSpacing:1,textTransform:'uppercase',color:theme.darkMode?'#475569':'#94a3b8',padding:'14px 0 6px',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                  <span>🏷 Tags</span>
+                  {activeTags.length>0&&<button onClick={()=>setActiveTags([])} style={{fontSize:10,color:'#ef4444',background:'none',border:'none',cursor:'pointer',fontWeight:700,textTransform:'none',letterSpacing:0}}>Clear all</button>}
+                </div>
+                {allTags.length===0?(
+                  <p style={{fontSize:12,fontStyle:'italic',color:theme.darkMode?'#475569':'#94a3b8',margin:0}}>No tags yet — add them in a person&apos;s panel</p>
+                ):(
+                  <div style={{display:'flex',flexDirection:'column',gap:6}}>
+                    {allTags.map(tag=>{
+                      const on=activeTags.includes(tag);
+                      const count=nodes.filter(n=>(n.tags||[]).includes(tag)).length;
+                      return(
+                        <label key={tag} style={{display:'flex',alignItems:'center',gap:10,cursor:'pointer',padding:'4px 0'}}>
+                          <input type="checkbox" checked={on} onChange={()=>setActiveTags(prev=>on?prev.filter(t=>t!==tag):[...prev,tag])}
+                            style={{width:16,height:16,accentColor:'#10b981',cursor:'pointer',flexShrink:0}}/>
+                          <span style={{flex:1,fontSize:13,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>{tag}</span>
+                          <span style={{fontSize:11,color:theme.darkMode?'#475569':'#94a3b8'}}>{count}p</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Version */}
+                <div style={{textAlign:'center',paddingTop:24}}>
+                  <span style={{fontSize:11,color:theme.darkMode?'#334155':'#cbd5e1'}}>🌳 FriendshipTree v{APP_VERSION}</span>
+                </div>
+
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add menu — triggered from bottom tab */}
+      {showAddMenu && (
+        <div style={{position:'fixed', bottom:66, right:8, zIndex:200}}>
+          <div className={`w-44 rounded-xl shadow-2xl border overflow-hidden ${theme.darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+            <button onClick={()=>{ setAddFriendForms(prev=>[...prev,{id:`form_${Date.now()}`,name:'',parentId:null}]); setShowAddMenu(false); }}
+              className={`w-full text-left px-4 py-3 text-sm font-medium ${theme.darkMode?'hover:bg-slate-700 text-slate-200':'hover:bg-slate-50 text-slate-700'}`}>
+              👤 Add Friend
+            </button>
+            <div className={`border-t ${theme.darkMode?'border-slate-700':'border-slate-100'}`}/>
+            <button onClick={()=>{addNewHub();setShowAddMenu(false);}}
+              className={`w-full text-left px-4 py-3 text-sm font-medium ${theme.darkMode?'hover:bg-slate-700 text-slate-200':'hover:bg-slate-50 text-slate-700'}`}>
+              🌳 Add Group
+            </button>
+            <div className={`border-t ${theme.darkMode?'border-slate-700':'border-slate-100'}`}/>
+            <label className={`flex items-center gap-2 px-4 py-3 text-sm font-medium cursor-pointer ${theme.darkMode?'hover:bg-slate-700 text-slate-200':'hover:bg-slate-50 text-slate-700'}`}>
+              📦 Import Tree
+              <input type="file" accept=".json" className="hidden" onChange={e=>{ if(e.target.files[0]) importData(e.target.files[0]); setShowAddMenu(false); }}/>
+            </label>
+            <div className={`border-t ${theme.darkMode?'border-slate-700':'border-slate-100'}`}/>
+            <button onClick={()=>{exportData();setShowAddMenu(false);}}
+              className={`w-full text-left px-4 py-3 text-sm font-medium ${theme.darkMode?'hover:bg-slate-700 text-slate-200':'hover:bg-slate-50 text-slate-700'}`}>
+              📤 Export Tree
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Sidebar — fixed overlay, slides in from left */}
+      <div className={`border-r shadow-2xl flex flex-col z-40 transition-all duration-300 ${sidebarBg}`}
+        style={{
+          position: 'fixed',
+          top: 0, left: 0, bottom: 0,
+          width: '20rem',
+          transform: selectedNode || addFriendForms.length > 0 ? 'translateX(0)' : 'translateX(-100%)',
+          paddingBottom: 56,
+        }}>
+        <div className={`p-6 border-b flex justify-between items-center ${theme.darkMode ? 'border-slate-700 bg-slate-800' : 'border-slate-100 bg-slate-50'}`}>
+          <h1 className="text-2xl font-bold" style={{ background: 'linear-gradient(to right, #10b981, #14b8a6)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>Friendship Tree</h1>
+          {selectedNode && <button onClick={() => { setSelectedNodeId(null); setAddFriendForms([]); setShowPhotoOptions(false); }} className={`p-2 rounded-full ${theme.darkMode ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-200 hover:bg-slate-300'}`}><X className="w-4 h-4" /></button>}
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-6">
+          {selectedNode ? (
+            <div className="space-y-6">
+
+              {/* ── Me Profile Panel ──────────────────────────────────── */}
+              {selectedNode.id === 'me' && (
+                <div className="space-y-5">
+                  <div className="flex items-center space-x-4">
+                    {/* Me photo */}
+                    <button onClick={() => setShowPhotoOptions(p => !p)}
+                      className={`w-20 h-20 rounded-full overflow-hidden border-4 cursor-pointer flex-shrink-0 ${theme.darkMode?'border-indigo-500':'border-indigo-400'}`}
+                      style={{padding:0,background:'none'}}>
+                      <img src={selectedNode.img} alt="Me" className="w-full h-full object-cover"/>
+                    </button>
+                    <div className="flex-1">
+                      <div className="text-xs font-semibold uppercase tracking-wider mb-1" style={{color:theme.darkMode?'#94a3b8':'#64748b'}}>Your name</div>
+                      <input type="text" value={selectedNode.label || ''}
+                        onChange={e => updateSelectedNode('label', e.target.value)}
+                        placeholder="Your name"
+                        className={`w-full px-3 py-2 border rounded-lg text-sm font-semibold focus:ring-2 focus:ring-indigo-500 outline-none ${theme.darkMode?'bg-slate-700 border-slate-600 text-white':'bg-white border-slate-200'}`}
+                      />
+                      {selectedNode.contactName && selectedNode.contactName !== selectedNode.label && (
+                        <div style={{fontSize:10,color:theme.darkMode?'#64748b':'#94a3b8',fontStyle:'italic',marginTop:2}}>
+                          aka {selectedNode.contactName}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Photo picker */}
+                  {showPhotoOptions && (
+                    <div className={`rounded-xl border overflow-hidden ${theme.darkMode?'bg-slate-800 border-slate-700':'bg-white border-slate-200'}`}>
+                      <label className={`flex items-center gap-3 px-4 py-3 cursor-pointer text-sm font-medium ${theme.darkMode?'hover:bg-slate-700 text-slate-200':'hover:bg-slate-50 text-slate-700'}`}>
+                        📷 Upload Photo
+                        <input type="file" accept="image/*" className="hidden" onChange={e => {
+                          const file = e.target.files[0]; if (!file) return;
+                          const reader = new FileReader();
+                          reader.onload = ev => { setPhotoCrop({ nodeId: 'me', src: ev.target.result, crop: { x:0, y:0, scale:1 } }); setShowPhotoOptions(false); };
+                          reader.readAsDataURL(file);
+                        }} />
+                      </label>
+                      <div className={`border-t ${theme.darkMode?'border-slate-700':'border-slate-100'}`}/>
+                      <button onClick={() => { setAvatarBuilder({ nodeId: 'me' }); setShowPhotoOptions(false); }}
+                        className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-left ${theme.darkMode?'hover:bg-slate-700 text-slate-200':'hover:bg-slate-50 text-slate-700'}`}>
+                        🎨 Build Avatar
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Sync from contacts */}
+                  {'contacts' in navigator && (
+                    <button onClick={async () => {
+                      try {
+                        const contacts = await navigator.contacts.select(['name','email','tel','icon'], { multiple: false });
+                        if (contacts.length > 0) {
+                          const c = contacts[0];
+                          const fullName = c.name?.[0] || '';
+                          const firstName = fullName.split(' ')[0];
+                          if (firstName) updateSelectedNode('label', firstName);
+                          if (fullName && fullName !== firstName) updateSelectedNode('contactName', fullName);
+                          if (c.tel?.[0]) updateSelectedNode('phone', c.tel[0]);
+                          if (c.email?.[0]) updateSelectedNode('email', c.email[0]);
+                          if (c.icon?.[0]) {
+                            const reader = new FileReader();
+                            reader.onload = ev => setPhotoCrop({ nodeId: 'me', src: ev.target.result, crop: { x:0, y:0, scale:1 } });
+                            reader.readAsDataURL(c.icon[0]);
+                          }
+                          showToast('✅ Synced from contacts!');
+                        }
+                      } catch(e) { showToast('Could not access contacts'); }
+                    }} className="w-full py-2 rounded-xl text-sm font-bold text-white" style={{background:'#6366f1'}}>
+                      👤 Sync from Contacts
+                    </button>
+                  )}
+
+                  {/* Birthday */}
+                  <div className="flex flex-col gap-1">
+                    <label className={`text-xs font-semibold uppercase tracking-wider ${theme.darkMode?'text-slate-400':'text-slate-500'}`}>🎂 Your Birthday</label>
+                    <input type="text" value={selectedNode.birthday || ''} onChange={e => updateSelectedNode('birthday', e.target.value)}
+                      placeholder="e.g. 15 March 1993"
+                      className={`px-3 py-2 border rounded-lg text-sm focus:ring-1 focus:ring-indigo-500 outline-none ${theme.darkMode?'bg-slate-700 border-slate-600 text-white':'bg-white border-slate-200'}`}/>
+                  </div>
+
+                  {/* Notes */}
+                  <div className="flex flex-col gap-1">
+                    <label className={`text-xs font-semibold uppercase tracking-wider ${theme.darkMode?'text-slate-400':'text-slate-500'}`}>📝 About Me</label>
+                    <textarea value={selectedNode.notes || ''} onChange={e => updateSelectedNode('notes', e.target.value)}
+                      placeholder="A few words about yourself..."
+                      rows={3}
+                      className={`px-3 py-2 border rounded-lg text-sm focus:ring-1 focus:ring-indigo-500 outline-none resize-none ${theme.darkMode?'bg-slate-700 border-slate-600 text-white':'bg-white border-slate-200'}`}/>
+                  </div>
+                </div>
+              )}
+
+              {selectedNode.type !== 'hub' && selectedNode.id !== 'me' && (
+                <>
+                  <div className="flex items-center space-x-3">
+                    {/* Photo — tap to open picker */}
+                    <div className="relative flex-shrink-0">
+                      <button
+                        onClick={() => setShowPhotoOptions(p => !p)}
+                        className={`w-16 h-16 rounded-full overflow-hidden border-2 cursor-pointer relative ${theme.darkMode ? 'border-slate-600' : 'border-emerald-100'}`}
+                        style={{padding:0,background:'none'}}
+                      >
+                        <img src={selectedNode.img} alt="Profile" className="w-full h-full object-cover" />
+                        <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-0 hover:bg-opacity-40 transition-all rounded-full">
+                          <span className="text-white text-lg opacity-0 hover:opacity-100">✎</span>
+                        </div>
+                      </button>
+                      {/* Picker sheet */}
+                      {showPhotoOptions && (
+                        <div className={`absolute left-0 top-18 z-50 rounded-xl shadow-xl border overflow-hidden w-44 ${theme.darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}
+                          style={{top:'4.5rem'}}>
+                          {/* Re-crop existing photo */}
+                          {selectedNode?.img && !selectedNode.img.includes('svg') && (
+                            <>
+                              <button
+                                onClick={() => {
+                                  setPhotoCrop({ nodeId: selectedNodeId, src: selectedNode.img, crop: { x: 0, y: 0, scale: 1 } });
+                                  setShowPhotoOptions(false);
+                                }}
+                                className={`w-full flex items-center gap-2 px-4 py-3 text-sm font-medium text-left ${theme.darkMode ? 'hover:bg-slate-700 text-slate-200' : 'hover:bg-slate-50 text-slate-700'}`}>
+                                <span>✂️</span> Re-crop Photo
+                              </button>
+                              <div className={`border-t ${theme.darkMode ? 'border-slate-700' : 'border-slate-100'}`} />
+                            </>
+                          )}
+                          <label className={`flex items-center gap-2 px-4 py-3 text-sm font-medium cursor-pointer ${theme.darkMode ? 'hover:bg-slate-700 text-slate-200' : 'hover:bg-slate-50 text-slate-700'}`}>
+                            <span>📷</span> Upload Photo
+                            <input type="file" accept="image/*" className="hidden" onChange={e => {
+                              const file = e.target.files[0];
+                              if (!file) return;
+                              const reader = new FileReader();
+                              reader.onload = ev => {
+                                setPhotoCrop({ nodeId: selectedNodeId, src: ev.target.result, crop: { x: 0, y: 0, scale: 1 } });
+                                setShowPhotoOptions(false);
+                              };
+                              reader.readAsDataURL(file);
+                            }} />
+                          </label>
+                          <div className={`border-t ${theme.darkMode ? 'border-slate-700' : 'border-slate-100'}`} />
+                          <button
+                            onClick={() => {
+                              const n = nodes.find(nd => nd.id === selectedNodeId);
+                              setAvBg(n?._avBg || '#4f46e5');
+                              setAvSkin(n?._avSkin || '#f4c2a1');
+                              setAvHair(n?._avHair || '#2d1b00');
+                              setAvStyle(n?._avStyle || 'medium');
+                              setAvFace(n?._avFace || 'smile');
+                              setAvatarBuilder({ nodeId: selectedNodeId });
+                              setShowPhotoOptions(false);
+                            }}
+                            className={`w-full flex items-center gap-2 px-4 py-3 text-sm font-medium text-left ${theme.darkMode ? 'hover:bg-slate-700 text-slate-200' : 'hover:bg-slate-50 text-slate-700'}`}>
+                            <span>🎨</span> Build Avatar
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex-1">
+                      <input
+                        type="text"
+                        value={selectedNode.label === 'New Friend' ? '' : selectedNode.label || ''}
+                        placeholder="New Friend"
+                        autoCapitalize="words"
+                        onChange={e => {
+                          // Auto-capitalise first letter of each word
+                          const val = e.target.value.replace(/\b\w/g, c => c.toUpperCase());
+                          updateSelectedNode('label', val || 'New Friend');
+                        }}
+                        onFocus={e => {
+                          // Select all so user can type straight over placeholder
+                          if (selectedNode.label === 'New Friend') e.target.select();
+                        }}
+                        className={`w-full font-bold text-lg bg-transparent border-b outline-none focus:border-emerald-500 transition-colors ${theme.darkMode ? 'border-slate-600 text-slate-100 placeholder-slate-500' : 'border-slate-300 text-slate-900 placeholder-slate-400'}`}
+                      />
+                      {/* AKA bar — shown when contact name differs from display name */}
+                      {selectedNode.contactName && selectedNode.contactName !== selectedNode.label && (
+                        <div style={{
+                          fontSize:10, color:theme.darkMode?'#64748b':'#94a3b8',
+                          marginTop:2, fontStyle:'italic',
+                        }}>aka {selectedNode.contactName}</div>
+                      )}
+                      {/* Friendship Level Badge — tap to expand log */}
+                      {(() => {
+                        const score = selectedNode.interactionScore || 0;
+                        const lvl = getLevel(score, selectedNode);
+                        return (
+                          <button
+                            onClick={() => { setShowLevelPanel(p => !p); setShowLevelSetter(false); }}
+                            className="mt-1 flex items-center space-x-1 text-xs font-semibold px-2 py-0.5 rounded-full transition-all hover:opacity-80"
+                            style={{ backgroundColor: lvl.color + '33', color: lvl.color, border: `1px solid ${lvl.color}66` }}
+                          >
+                            <span>{lvl.emoji}</span>
+                            <span>{lvl.label}</span>
+                            <span className="opacity-60">· {score} pts</span>
+                            <span className="opacity-50 ml-1">{showLevelPanel ? '▲' : '▼'}</span>
+                          </button>
+                        );
+                      })()}
+                    </div>
+                  </div>
+
+                  {/* Sync banner — shown at top until dismissed or synced */}
+                  {!selectedNode.syncDismissed && !selectedNode.phone && (
+                    <div className={`relative flex items-center justify-between px-3 py-2 rounded-lg border ${theme.darkMode ? 'bg-indigo-900/40 border-indigo-800' : 'bg-indigo-50 border-indigo-100'}`}>
+                      <button
+                        onClick={() => {
+                          handleImportContact();
+                          updateSelectedNode('syncDismissed', true);
+                        }}
+                        className={`flex items-center space-x-2 text-sm font-medium ${theme.darkMode ? 'text-indigo-200' : 'text-indigo-700'}`}
+                      >
+                        <BookUser className="w-4 h-4 flex-shrink-0" />
+                        <span>Sync with Contacts</span>
+                      </button>
+                      <button
+                        onClick={() => updateSelectedNode('syncDismissed', true)}
+                        className={`ml-2 p-0.5 rounded-full flex-shrink-0 ${theme.darkMode ? 'text-indigo-400 hover:text-indigo-200' : 'text-indigo-400 hover:text-indigo-700'}`}
+                        title="Dismiss"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Level panel: interaction log + set level */}
+                  {showLevelPanel && (() => {
+                    const score = selectedNode.interactionScore || 0;
+                    const currentLvl = getLevel(score, selectedNode);
+                    const currentTier = currentLvl.tier;
+                    const interactions = selectedNode.interactionLog || [];
+                    return (
+                      <div className={`rounded-xl border overflow-hidden ${theme.darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'}`}>
+                        {/* Level summary */}
+                        <div className="p-3" style={{ background: currentLvl.color + '22' }}>
+                          <div className="flex items-center space-x-2 mb-1">
+                            <span className="text-lg">{currentLvl.emoji}</span>
+                            <span className="font-bold text-sm" style={{ color: currentLvl.color }}>{currentLvl.label}</span>
+                            <span className={`text-xs ml-auto opacity-60 ${theme.darkMode ? 'text-slate-400' : 'text-slate-500'}`}>{currentLvl.scoreRange} pts</span>
+                          </div>
+                          <p className={`text-xs leading-relaxed ${theme.darkMode ? 'text-slate-400' : 'text-slate-600'}`}>{currentLvl.desc}</p>
+                        </div>
+
+                        {/* Score bar */}
+                        <div className={`px-3 py-2 border-b ${theme.darkMode ? 'border-slate-700' : 'border-slate-100'}`}>
+                          <div className="flex justify-between text-[10px] opacity-50 mb-1">
+                            <span>Progress to next level</span>
+                          <span>{score} / {currentTier === 'family' ? '∞' : currentTier < 5 ? TIER_SCORE_MAP[currentTier + 1] : 1000} pts</span>
+                          </div>
+                          <div className={`h-1.5 rounded-full ${theme.darkMode ? 'bg-slate-700' : 'bg-slate-100'}`}>
+                            <div className="h-full rounded-full transition-all"
+                              style={{
+                                width: currentTier === 'family' ? '100%' : currentTier < 5
+                                  ? `${Math.min(100, ((score - (TIER_SCORE_MAP[currentTier] || 0)) / ((TIER_SCORE_MAP[currentTier+1] || 1000) - (TIER_SCORE_MAP[currentTier] || 0))) * 100)}%`
+                                  : '100%',
+                                backgroundColor: currentLvl.color
+                              }} />
+                          </div>
+                        </div>
+
+                        {/* Interaction log */}
+                        <div className="px-3 py-2">
+                          <p className="text-[10px] font-semibold uppercase tracking-wider opacity-50 mb-2">Interaction History</p>
+                          {interactions.length === 0
+                            ? <p className="text-xs opacity-40 italic">No interactions logged yet.</p>
+                            : <div className="space-y-1 max-h-28 overflow-y-auto">
+                                {[...interactions].reverse().map((entry, ei) => (
+                                  <div key={ei} className={`flex justify-between text-xs px-2 py-1 rounded ${theme.darkMode ? 'bg-slate-800' : 'bg-slate-50'}`}>
+                                    <span>{entry.label}</span>
+                                    <span className="opacity-50">{entry.date}</span>
+                                    <span className="font-bold" style={{ color: currentLvl.color }}>+{entry.pts}</span>
+                                  </div>
+                                ))}
+                              </div>
+                          }
+                        </div>
+
+                        {/* Set level button */}
+                        <div className={`px-3 pb-3 border-t pt-2 ${theme.darkMode ? 'border-slate-700' : 'border-slate-100'}`}>
+                          <button
+                            onClick={() => setShowLevelSetter(p => !p)}
+                            className={`w-full text-xs font-semibold py-1.5 rounded-lg transition-colors ${theme.darkMode ? 'bg-slate-700 hover:bg-slate-600 text-slate-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'}`}
+                          >
+                            {showLevelSetter ? 'Hide levels ▲' : 'Set friendship level ▼'}
+                          </button>
+
+                          {showLevelSetter && (
+                            <div className="mt-2 space-y-1.5">
+                              {FRIENDSHIP_LEVELS.map(lvl => (
+                                <button
+                                  key={lvl.tier}
+                                  onClick={() => {
+                                    if (lvl.tier === 'family') {
+                                      setNodes(prev => prev.map(n => n.id === selectedNodeId ? { ...n, isFamily: true } : n));
+                                    } else {
+                                      setNodes(prev => prev.map(n => n.id === selectedNodeId ? { ...n, isFamily: false, interactionScore: TIER_SCORE_MAP[lvl.tier] || 0 } : n));
+                                    }
+                                    showToast(`${lvl.emoji} Set to ${lvl.label}`);
+                                  }}
+                                  className={`w-full text-left px-3 py-2 rounded-lg border transition-all ${
+                                    getTier(score, selectedNode) === lvl.tier
+                                      ? 'border-2'
+                                      : theme.darkMode ? 'border-slate-700 hover:border-slate-500' : 'border-slate-200 hover:border-slate-300'
+                                  }`}
+                                  style={getTier(score, selectedNode) === lvl.tier ? { borderColor: lvl.color, background: lvl.color + '18' } : {}}
+                                >
+                                  <div className="flex items-center space-x-2">
+                                    <span>{lvl.emoji}</span>
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-xs font-bold" style={{ color: lvl.color }}>{lvl.label}</span>
+                                        <span className="text-[9px] opacity-50">{lvl.scoreRange}</span>
+                                      </div>
+                                      <p className={`text-[10px] leading-tight mt-0.5 opacity-70 ${theme.darkMode ? 'text-slate-400' : 'text-slate-500'}`}>{lvl.desc}</p>
+                                    </div>
+                                  </div>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </>
+              )}
+
+              {selectedNode.type !== 'hub' && (
+                <div className="flex items-center gap-3">
+                  <label className={`flex items-center text-xs font-semibold uppercase tracking-wider whitespace-nowrap flex-shrink-0 ${theme.darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                    <CalendarIcon className="w-3 h-3 mr-1" /> Birthday
+                  </label>
+                  <input type="text" value={selectedNode.birthday || ''}
+                    onChange={e => updateSelectedNode('birthday', e.target.value)}
+                    onBlur={e => updateSelectedNode('birthday', normaliseBirthday(e.target.value))}
+                    className={`flex-1 px-2 py-1 border rounded-md focus:ring-1 focus:ring-emerald-500 outline-none text-xs ${panelBg}`}
+                    placeholder="e.g. 11 Mar 93" />
+                </div>
+              )}
+
+              {/* Tags */}
+              {selectedNode.type !== 'hub' && selectedNode.type !== 'flower' && (
+                <div className="flex flex-col gap-1.5">
+                  <label className={`flex items-center text-xs font-semibold uppercase tracking-wider ${theme.darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                    🏷 Tags
+                  </label>
+                  {/* Existing tags */}
+                  <div style={{display:'flex',flexWrap:'wrap',gap:5}}>
+                    {(selectedNode.tags || []).map(tag => (
+                      <span key={tag} style={{
+                        display:'flex',alignItems:'center',gap:4,
+                        padding:'2px 8px',borderRadius:99,fontSize:11,fontWeight:600,
+                        background:theme.darkMode?'#334155':'#e2e8f0',
+                        color:theme.darkMode?'#e2e8f0':'#334155',
+                      }}>
+                        {tag}
+                        <button onClick={() => updateSelectedNode('tags', (selectedNode.tags||[]).filter(t=>t!==tag))}
+                          style={{background:'none',border:'none',cursor:'pointer',padding:0,lineHeight:1,fontSize:12,color:theme.darkMode?'#94a3b8':'#64748b'}}>✕</button>
+                      </span>
+                    ))}
+                  </div>
+                  {/* Add tag input */}
+                  <div style={{display:'flex',gap:6}}>
+                    <input
+                      type="text" value={tagInput}
+                      onChange={e => setTagInput(e.target.value)}
+                      onKeyDown={e => {
+                        if ((e.key==='Enter'||e.key===',') && tagInput.trim()) {
+                          const t = tagInput.trim().replace(/,$/,'');
+                          if (t && !(selectedNode.tags||[]).includes(t)) {
+                            updateSelectedNode('tags', [...(selectedNode.tags||[]), t]);
+                          }
+                          setTagInput('');
+                          e.preventDefault();
+                        }
+                      }}
+                      placeholder="Add tag…"
+                      className={`flex-1 px-2 py-1 border rounded-md focus:ring-1 focus:ring-emerald-500 outline-none text-xs ${panelBg}`}
+                    />
+                    <button onClick={() => {
+                      const t = tagInput.trim();
+                      if (t && !(selectedNode.tags||[]).includes(t)) {
+                        updateSelectedNode('tags', [...(selectedNode.tags||[]), t]);
+                      }
+                      setTagInput('');
+                    }} style={{padding:'2px 10px',borderRadius:8,background:'#10b981',color:'white',border:'none',cursor:'pointer',fontSize:12,fontWeight:700}}>+</button>
+                  </div>
+                  {/* Suggest existing tags */}
+                  {allTags.filter(t=>!(selectedNode.tags||[]).includes(t)).length > 0 && (
+                    <div style={{display:'flex',flexWrap:'wrap',gap:4}}>
+                      {allTags.filter(t=>!(selectedNode.tags||[]).includes(t)).map(t=>(
+                        <button key={t} onClick={()=>updateSelectedNode('tags',[...(selectedNode.tags||[]),t])}
+                          style={{padding:'1px 7px',borderRadius:99,fontSize:10,border:`1px dashed ${theme.darkMode?'#475569':'#cbd5e1'}`,background:'transparent',cursor:'pointer',color:theme.darkMode?'#94a3b8':'#64748b'}}>
+                          +{t}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {selectedNode.type !== 'hub' && selectedNode.id !== 'me' && (
+                <div className={`pt-4 border-t ${theme.darkMode ? 'border-slate-700' : 'border-slate-200'}`}>
+                  <h3 className="text-xs font-semibold uppercase tracking-wider mb-3 flex items-center text-emerald-600"><Activity className="w-4 h-4 mr-1" /> Log Interaction</h3>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button onClick={() => logActivity(1, 'message')} className={`flex flex-col items-center p-2 rounded-lg border transition-colors ${theme.darkMode ? 'border-slate-600 hover:bg-slate-700' : 'border-slate-200 hover:bg-emerald-50'}`}>
+                      <MessageCircle className="w-5 h-5 mb-1 text-slate-400" />
+                      <span className="text-[10px] font-bold">Message (+{nextMessagePoints})</span>
+                    </button>
+                    <button onClick={() => logActivity(50, 'hangout')} className={`flex flex-col items-center p-2 rounded-lg border transition-colors ${theme.darkMode ? 'border-slate-600 hover:bg-slate-700' : 'border-slate-200 hover:bg-emerald-50'}`}>
+                      <Coffee className="w-5 h-5 mb-1 text-amber-500" />
+                      <span className="text-[10px] font-bold">Hangout (+50)</span>
+                    </button>
+                    <button onClick={() => logActivity(80, 'nightout')} className={`flex flex-col items-center p-2 rounded-lg border transition-colors ${theme.darkMode ? 'border-slate-600 hover:bg-slate-700' : 'border-slate-200 hover:bg-emerald-50'}`}>
+                      <PartyPopper className="w-5 h-5 mb-1 text-purple-500" />
+                      <span className="text-[10px] font-bold">Night Out (+80)</span>
+                    </button>
+                    <button onClick={() => logActivity(150, 'trip')} className={`flex flex-col items-center p-2 rounded-lg border border-emerald-500 transition-colors ${theme.darkMode ? 'bg-emerald-900/40 hover:bg-emerald-900/60' : 'bg-emerald-50 hover:bg-emerald-100'}`}>
+                      <Plane className="w-5 h-5 mb-1 text-emerald-500" />
+                      <span className="text-[10px] font-bold">Trip Away (+150)</span>
+                    </button>
+                    <button onClick={() => logActivity(80, 'gesture')} className={`col-span-2 flex flex-col items-center p-2 rounded-lg border transition-colors ${theme.darkMode ? 'border-slate-600 hover:bg-slate-700' : 'border-slate-200 hover:bg-emerald-50'}`}>
+                      <HeartHandshake className="w-5 h-5 mb-1 text-rose-500" />
+                      <span className="text-[10px] font-bold">Meaningful Gesture (+80)</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {selectedNode.type === 'hub' && (
+                <>
+                  <div className="text-center p-4 rounded-xl border" style={{ backgroundColor: theme.darkMode ? 'rgba(16,185,129,0.1)' : '#f0fdf4', borderColor: theme.darkMode ? 'rgba(16,185,129,0.3)' : '#bbf7d0' }}>
+                    <TreePine className="w-8 h-8 mx-auto text-emerald-600 mb-2" />
+                    <input type="text"
+                      value={selectedNode.label === 'New Group' ? '' : selectedNode.label || ''}
+                      placeholder="New Group"
+                      autoCapitalize="words"
+                      onChange={e => {
+                        const val = e.target.value.replace(/\b\w/g, c => c.toUpperCase());
+                        updateSelectedNode('label', val || 'New Group');
+                      }}
+                      onFocus={e => { if (selectedNode.label === 'New Group') e.target.select(); }}
+                      className={`w-full text-center font-bold text-lg bg-transparent border-b outline-none focus:border-emerald-500 ${theme.darkMode ? 'text-slate-100 placeholder-slate-500 border-slate-600' : 'text-slate-900 placeholder-slate-400 border-slate-300'}`}
+                    />
+                  </div>
+                  {(() => {
+                    const severed = archivedLinks.filter(l => l.source === selectedNode.id || l.target === selectedNode.id);
+                    if (severed.length === 0) return null;
+                    return (
+                      <div className={`pt-4 border-t ${theme.darkMode ? 'border-slate-700' : 'border-slate-200'}`}>
+                        <h3 className="text-xs font-semibold uppercase tracking-wider mb-3 flex items-center" style={{ color: '#f97316' }}>
+                          ✂ Severed Members
+                        </h3>
+                        <div className="space-y-2">
+                          {severed.map((l, i) => {
+                            const otherId = l.source === selectedNode.id ? l.target : l.source;
+                            const other = nodes.find(n => n.id === otherId);
+                            const cutDate = new Date(l.cutAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+                            return (
+                              <div key={i} className={`flex items-center justify-between px-3 py-2 rounded-lg border ${theme.darkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                                <div className="flex items-center space-x-2 min-w-0">
+                                  {other?.img && <img src={other.img} className="w-6 h-6 rounded-full object-cover flex-shrink-0" alt="" />}
+                                  <div className="min-w-0">
+                                    <p className="text-xs font-semibold truncate">{other?.label ?? otherId}</p>
+                                    <p className="text-[10px] opacity-50">Cut {cutDate}</p>
+                                  </div>
+                                </div>
+                                <button
+                                  onClick={() => restoreLink(l)}
+                                  className="ml-2 flex-shrink-0 px-2 py-1 rounded-md text-[10px] font-bold text-emerald-600 border border-emerald-500 hover:bg-emerald-500/10 transition-colors"
+                                >Restore</button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </>
+              )}
+
+              {/* Severed connections relevant to this node */}
+              {(() => {
+                const severed = archivedLinks.filter(l => l.source === selectedNode.id || l.target === selectedNode.id);
+                if (severed.length === 0) return null;
+                return (
+                  <div className={`pt-4 border-t ${theme.darkMode ? 'border-slate-700' : 'border-slate-200'}`}>
+                    <h3 className="text-xs font-semibold uppercase tracking-wider mb-3 flex items-center" style={{ color: '#f97316' }}>
+                      ✂ Severed Connections
+                    </h3>
+                    <div className="space-y-2">
+                      {severed.map((l, i) => {
+                        const otherId = l.source === selectedNode.id ? l.target : l.source;
+                        const other = nodes.find(n => n.id === otherId);
+                        const cutDate = new Date(l.cutAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+                        return (
+                          <div key={i} className={`flex items-center justify-between px-3 py-2 rounded-lg border ${theme.darkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                            <div className="flex items-center space-x-2 min-w-0">
+                              {other?.img && <img src={other.img} className="w-6 h-6 rounded-full object-cover flex-shrink-0" alt="" />}
+                              <div className="min-w-0">
+                                <p className="text-xs font-semibold truncate">{other?.label ?? otherId}</p>
+                                <p className="text-[10px] opacity-50">Cut {cutDate}</p>
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => restoreLink(l)}
+                              className="ml-2 flex-shrink-0 px-2 py-1 rounded-md text-[10px] font-bold text-emerald-600 border border-emerald-500 hover:bg-emerald-500/10 transition-colors"
+                            >Restore</button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {selectedNode.id !== 'me' && (
+                <div className={`pt-4 border-t space-y-2 ${theme.darkMode ? 'border-slate-700' : 'border-slate-100'}`}>
+                  {/* Sync button at bottom — shown when dismissed from top or already synced */}
+                  {selectedNode.type !== 'hub' && (selectedNode.syncDismissed || selectedNode.phone) && (
+                    <button onClick={handleImportContact} className={`w-full flex items-center justify-center space-x-2 px-3 py-1.5 rounded-lg font-medium text-xs border opacity-60 hover:opacity-100 transition-opacity ${theme.darkMode ? 'bg-slate-800 border-slate-700 text-slate-400' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>
+                      <BookUser className="w-3 h-3" /><span>{selectedNode.phone ? 'Re-sync with Contacts' : 'Sync with Contacts'}</span>
+                    </button>
+                  )}
+                  <button onClick={() => {
+                    snapshot();
+                    setNodes(p => p.filter(n => n.id !== selectedNodeId));
+                    setLinks(p => p.filter(l => l.source !== selectedNodeId && l.target !== selectedNodeId));
+                    setSelectedNodeId(null);
+                  }} className="w-full flex items-center justify-center space-x-2 px-4 py-2 text-red-500 bg-red-500/10 hover:bg-red-500/20 rounded-lg transition-colors font-medium">
+                    <Trash2 className="w-4 h-4" /><span>Remove {selectedNode.type === 'hub' ? 'Group' : 'Friend'}</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : null}
+        </div>
+
+        <div className={`p-4 border-t space-y-2 ${theme.darkMode ? 'border-slate-700 bg-slate-800' : 'border-slate-200 bg-slate-50'}`}>
+          {/* One row per queued friend */}
+          {addFriendForms.map((form, fi) => (
+            <div key={form.id} className={`rounded-xl border p-2.5 space-y-1.5 ${theme.darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'}`}>
+              <input
+                autoFocus={fi === addFriendForms.length - 1}
+                type="text"
+                value={form.name}
+                onChange={e => {
+                  const val = e.target.value.replace(/\b\w/g, c => c.toUpperCase());
+                  setAddFriendForms(prev => prev.map(f => f.id === form.id ? { ...f, name: val } : f));
+                }}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') createFriendFromForm(form.id, null);
+                  if (e.key === 'Escape') setAddFriendForms(prev => prev.filter(f => f.id !== form.id));
+                }}
+                placeholder="Name…"
+                autoCapitalize="words"
+                className={`w-full px-3 py-1.5 rounded-lg border text-sm font-medium outline-none focus:ring-2 focus:ring-emerald-500 ${theme.darkMode ? 'bg-slate-800 border-slate-600 text-slate-100 placeholder-slate-500' : 'bg-slate-50 border-slate-200 text-slate-900 placeholder-slate-400'}`}
+              />
+              {/* Friendship level selector */}
+              <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
+                {[
+                  {label:'New',    score:0,   color:'#bef264'},
+                  {label:'Friend', score:100, color:'#84cc16'},
+                  {label:'Good',   score:300, color:'#166534'},
+                  {label:'Close',  score:600, color:'#3b82f6'},
+                  {label:'Family', score:800, color:'#9333ea'},
+                ].map(tier => (
+                  <button key={tier.score}
+                    onClick={() => setAddFriendForms(prev => prev.map(f => f.id === form.id ? { ...f, initialScore: tier.score } : f))}
+                    style={{
+                      flex:1, padding:'3px 4px', borderRadius:6, border:'2px solid',
+                      borderColor: form.initialScore === tier.score ? tier.color : 'transparent',
+                      background: form.initialScore === tier.score ? tier.color+'22' : (theme.darkMode?'#1e293b':'#f8fafc'),
+                      color: tier.color, fontSize:10, fontWeight:700, cursor:'pointer',
+                    }}>{tier.label}</button>
+                ))}
+              </div>
+              <div className="flex gap-1.5">
+                <button onClick={() => createFriendFromForm(form.id, null)}
+                  className="flex-1 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors">
+                  ✓ Add
+                </button>
+                <button onClick={async () => {
+                  try {
+                    if ('contacts' in navigator && 'ContactsManager' in window) {
+                      const contacts = await navigator.contacts.select(['name','tel','icon'], { multiple: false });
+                      if (contacts.length > 0) {
+                        const c = contacts[0];
+                        const name = c.name?.[0] || form.name;
+                        const blob = c.icon?.[0] || null;
+                        let img = null;
+                        if (blob) {
+                          const br = new FileReader();
+                          await new Promise(res => { br.onload = e => { img = e.target.result; res(); }; br.readAsDataURL(blob); });
+                        }
+                        setAddFriendForms(prev => prev.map(f => f.id === form.id ? { ...f, name } : f));
+                        createFriendFromForm(form.id, img, blob);
+                        return;
+                      }
+                    }
+                  } catch {}
+                  createFriendFromForm(form.id, null);
+                }} className={`flex items-center gap-1 px-2 py-1.5 rounded-lg border text-xs font-semibold ${theme.darkMode ? 'bg-slate-800 border-slate-600 text-slate-300 hover:bg-slate-700' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+                  <BookUser className="w-3 h-3" /> Sync
+                </button>
+                <button onClick={() => setAddFriendForms(prev => prev.filter(f => f.id !== form.id))}
+                  className={`px-2 py-1.5 rounded-lg border text-xs ${theme.darkMode ? 'bg-slate-800 border-slate-600 text-slate-400' : 'bg-white border-slate-200 text-slate-400'}`}>
+                  ✕
+                </button>
+              </div>
+            </div>
+          ))}
+
+          {/* Add another friend row button — always visible */}
+          <button
+            onClick={() => {
+              const parentId = selectedNodeId && selectedNodeId !== 'me' && nodes.find(n => n.id === selectedNodeId && n.type !== 'flower')
+                ? selectedNodeId
+                : 'flower_social';
+              setAddFriendForms(prev => [...prev, { id: `form_${Date.now()}`, name: '', parentId }]);
+            }}
+            className="w-full flex items-center justify-center space-x-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg shadow-sm transition-all active:scale-95 font-medium"
+          >
+            <Plus className="w-4 h-4" />
+            <span>
+              {selectedNodeId && selectedNodeId !== 'me' && nodes.find(n => n.id === selectedNodeId && n.type !== 'flower')
+                ? `Add Friend via ${nodes.find(n => n.id === selectedNodeId)?.label}`
+                : 'Add Friend'}
+            </span>
+          </button>
+          {selectedNodeId === 'me' && (
+            <button onClick={addNewHub} className={`w-full flex items-center justify-center space-x-2 px-4 py-2 rounded-lg shadow-sm transition-all active:scale-95 font-medium border ${theme.darkMode ? 'bg-slate-700 hover:bg-slate-600 text-slate-200 border-slate-600' : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200'}`}>
+              <TreePine className="w-4 h-4 text-emerald-500" /><span>Add Group</span>
+            </button>
+          )}
+          {selectedNodeId && selectedNodeId !== 'me' && nodes.find(n => n.id === selectedNodeId && n.type !== 'flower' && n.type !== 'hub') && (
+            <div>
+              <button onClick={() => setShowAddToGroup(p => !p)}
+                className={`w-full flex items-center justify-center space-x-2 px-4 py-2 rounded-lg shadow-sm transition-all active:scale-95 font-medium border ${theme.darkMode ? 'bg-slate-700 hover:bg-slate-600 text-slate-200 border-slate-600' : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200'}`}>
+                <TreePine className="w-4 h-4 text-emerald-500" />
+                <span>Add to Group</span>
+              </button>
+              {showAddToGroup && (
+                <div className={`mt-2 rounded-xl border overflow-hidden ${theme.darkMode ? 'border-slate-700' : 'border-slate-200'}`}>
+                  {nodes.filter(n => n.type === 'hub').map(hub => {
+                    const alreadyLinked = links.some(l =>
+                      (l.source === hub.id && l.target === selectedNodeId) ||
+                      (l.source === selectedNodeId && l.target === hub.id)
+                    );
+                    return (
+                      <button key={hub.id}
+                        onClick={() => {
+                          if (!alreadyLinked) {
+                            snapshot();
+                            setLinks(prev => [...prev, { source: hub.id, target: selectedNodeId }]);
+                            showToast(`Added to ${hub.label}`);
+                          }
+                          setShowAddToGroup(false);
+                        }}
+                        className={`w-full text-left px-4 py-2.5 text-sm font-medium transition-colors flex items-center justify-between
+                          ${alreadyLinked
+                            ? theme.darkMode ? 'text-slate-500 bg-slate-800' : 'text-slate-400 bg-slate-50'
+                            : theme.darkMode ? 'text-slate-200 hover:bg-slate-700' : 'text-slate-700 hover:bg-slate-50'
+                          }`}>
+                        <span>🌳 {hub.label}</span>
+                        {alreadyLinked && <span className="text-xs opacity-50">already in</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Canvas */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 0, left: 0, right: 0,
+          bottom: 56, // leave room for bottom tab bar
+          cursor: macheteMode ? 'crosshair' : vineDrawMode ? 'cell' : (isPanning ? 'grabbing' : 'grab'),
+          background: theme.darkMode ? '#0f172a' : '#f8fafc',
+          overflow: 'hidden',
+        }}
+        onPointerDown={e => {
+          // Capture ALL pointer events at the canvas level
+          e.currentTarget.setPointerCapture(e.pointerId);
+          if (vineDrawMode) {
+            const rect = svgRef.current.getBoundingClientRect();
+            const sx = (e.clientX - rect.left - transform.x) / transform.scale;
+            const sy = (e.clientY - rect.top - transform.y) / transform.scale;
+            isDrawing.current = true;
+            setCurrentStroke([{ x: sx, y: sy }]);
+            return;
+          }
+          if (macheteMode) {
+            snapshot();
+            const rect = svgRef.current.getBoundingClientRect();
+            const sx = (e.clientX - rect.left - transform.x) / transform.scale;
+            const sy = (e.clientY - rect.top - transform.y) / transform.scale;
+            isSlashing.current = true;
+            setSlashTrail([{ x: sx, y: sy }]);
+            return;
+          }
+          // Always capture the pointer so move/up events route here
+          e.currentTarget.setPointerCapture(e.pointerId);
+          // Only handle as canvas touch if node handlers haven't registered this pointer yet
+          if (!activePointers.current.has(e.pointerId)) {
+            handlePointerDown(e, null);
+          }
+        }}
+        onPointerMove={e => {
+          if (vineDrawMode && isDrawing.current) {
+            const rect = svgRef.current.getBoundingClientRect();
+            const sx = (e.clientX - rect.left - transform.x) / transform.scale;
+            const sy = (e.clientY - rect.top - transform.y) / transform.scale;
+            setCurrentStroke(prev => [...prev, { x: sx, y: sy }]);
+            return;
+          }
+          if (macheteMode && isSlashing.current) {
+            const rect = svgRef.current.getBoundingClientRect();
+            const sx = (e.clientX - rect.left - transform.x) / transform.scale;
+            const sy = (e.clientY - rect.top - transform.y) / transform.scale;
+            setSlashTrail(prev => {
+              const next = [...prev, { x: sx, y: sy }];
+              checkSlashCuts(next);
+              return next;
+            });
+            return;
+          }
+          handlePointerMove(e);
+        }}
+        onPointerUp={e => {
+          if (vineDrawMode && isDrawing.current) {
+            isDrawing.current = false;
+            // Save this stroke to pendingPaths — don't render yet
+            setCurrentStroke(prev => {
+              if (prev.length >= 4) {
+                setPendingPaths(pp => [...pp, { pts: prev }]);
+              }
+              return [];
+            });
+            return;
+          }
+          if (macheteMode) {
+            isSlashing.current = false;
+            setSlashTrail([]);
+            return;
+          }
+          handlePointerUp(e);
+        }}
+        onPointerCancel={e => {
+          if (vineDrawMode) { isDrawing.current = false; setCurrentStroke([]); return; }
+          if (macheteMode) { isSlashing.current = false; setSlashTrail([]); return; }
+          handlePointerUp(e);
+        }}
+        onPointerLeave={e => {
+          if (vineDrawMode) { isDrawing.current = false; setCurrentStroke([]); return; }
+          if (macheteMode) { isSlashing.current = false; setSlashTrail([]); return; }
+          handlePointerUp(e);
+        }}
+        onWheel={handleWheel}
+        onContextMenu={e => e.preventDefault()}
+      >
+        <svg ref={svgRef} className="w-full h-full absolute inset-0 touch-none" onContextMenu={e => e.preventDefault()}>
+          <defs>
+            <pattern id="bg-grid" width="40" height="40" patternUnits="userSpaceOnUse">
+              <path d="M 40 0 L 0 0 0 40" fill="none" stroke={theme.darkMode ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.04)"} strokeWidth="1" />
+            </pattern>
+          </defs>
+          <rect width="100%" height="100%" fill="url(#bg-grid)" />
+
+          <g ref={svgGroupRef} transform={`translate(${transform.x}, ${transform.y}) scale(${transform.scale})`}>
+            {/* Background fill */}
+            <rect x="-50000" y="-50000" width="100000" height="100000"
+              fill={theme.darkMode ? '#0f172a' : '#f8fafc'} />
+
+            {/* Hex grid — visible only while dragging, shows held hex + neighbours */}
+            {viewMode === 'canvas' && liftedNodeId && hexSnapPos && (() => {
+              const dm = theme.darkMode;
+              const strokeCol = dm ? 'rgba(16,185,129,0.35)' : 'rgba(16,185,129,0.3)';
+              const heldCol   = dm ? 'rgba(16,185,129,0.15)' : 'rgba(16,185,129,0.12)';
+
+              if (gridStyle === 'square') {
+                // Square grid
+                const S = HEX_SIZE;
+                const squares = [];
+                for (let di = -2; di <= 2; di++) for (let dj = -2; dj <= 2; dj++) {
+                  const sx = hexSnapPos.x + di * S;
+                  const sy = hexSnapPos.y + dj * S;
+                  squares.push({ x: sx, y: sy, held: di === 0 && dj === 0 });
+                }
+                return (
+                  <g style={{pointerEvents:'none'}}>
+                    {squares.map((sq, i) => (
+                      <rect key={i} x={sq.x - S/2} y={sq.y - S/2} width={S} height={S}
+                        fill={sq.held ? heldCol : 'none'}
+                        stroke={strokeCol} strokeWidth={sq.held ? 1.5 : 1}
+                        strokeDasharray={sq.held ? 'none' : '6 4'} />
+                    ))}
+                    <circle cx={hexSnapPos.x} cy={hexSnapPos.y} r={5} fill="#10b981" opacity={0.7}/>
+                  </g>
+                );
+              }
+
+              const hexes = [
+                { ...hexSnapPos, held: true },
+                ...hexNeighbours(hexSnapPos.q, hexSnapPos.r).map(h => ({ ...h, held: false })),
+              ];
+              return (
+                <g style={{pointerEvents:'none'}}>
+                  {hexes.map((h, hi) => {
+                    const corners = hexCorners(h.x, h.y);
+                    const d = 'M ' + corners.map(c => c.join(',')).join(' L ') + ' Z';
+                    return (
+                      <path key={hi} d={d}
+                        fill={h.held ? heldCol : 'none'}
+                        stroke={strokeCol}
+                        strokeWidth={h.held ? 1.5 : 1}
+                        strokeDasharray={h.held ? 'none' : '6 4'}
+                      />
+                    );
+                  })}
+                  <circle cx={hexSnapPos.x} cy={hexSnapPos.y} r={5} fill="#10b981" opacity={0.7} />
+                </g>
+              );
+            })()}
+            {viewMode === 'calendar' && (
+              <g>
+                {/* Shadow under vine */}
+                <path d={calendarPath} fill="none"
+                  stroke={theme.darkMode ? "rgba(0,0,0,0.4)" : "rgba(0,0,0,0.12)"}
+                  strokeWidth="140" strokeLinecap="round" />
+
+                {(calendarStrandSegments || []).map((seg, mi) => {
+                  const { tStart, tEnd, strands } = seg;
+                  const todayT = calendarTodayT;
+                  const monthCol = MONTH_COLORS[mi];
+                  const widths    = [24, 36, 24];
+                  const opacities = [0.72, 1, 0.72];
+                  const GREEN_DARK  = ['#14532d', '#166534', '#15803d'];
+                  const GREEN_LIGHT = ['#15803d', '#16a34a', '#22c55e'];
+                  const BROWN_DARK  = '#3d1a00';
+                  const BROWN_MID   = '#7c3500';
+                  const BROWN_AMB   = '#c47a1e';
+
+                  return (strands || []).map((strand, si) => {
+                    if (!strand || !strand.pts || strand.pts.length < 2) return null;
+                    const pts = strand.pts;
+
+                    // Split pts into grown (t <= todayT) and ungrown (t >= todayT)
+                    const grownPts   = pts.filter(p => p.t <= todayT + 0.001);
+                    const ungrownPts = pts.filter(p => p.t >= todayT - 0.001);
+
+                    const toD = (arr) => arr.length > 1
+                      ? `M ${arr.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' L ')}`
+                      : '';
+
+                    const dGrown   = toD(grownPts);
+                    const dUngrown = toD(ungrownPts);
+                    const baseGreen = theme.darkMode ? GREEN_DARK[si] : GREEN_LIGHT[si];
+
+                    return (
+                      <g key={`seg-${mi}-${si}`}>
+                        {/* Grown section — green multi-strand with month tint */}
+                        {dGrown && <>
+                          <path d={dGrown} fill="none" stroke={baseGreen}
+                            strokeWidth={widths[si]} strokeLinecap="round" strokeLinejoin="round"
+                            opacity={opacities[si]} />
+                          <path d={dGrown} fill="none" stroke={monthCol}
+                            strokeWidth={widths[si]} strokeLinecap="round" strokeLinejoin="round"
+                            opacity={0.15} />
+                        </>}
+                        {/* Ungrown section — brown woody branch */}
+                        {dUngrown && si === 1 && <>
+                          <path d={dUngrown} fill="none" stroke={BROWN_DARK}
+                            strokeWidth={32} strokeLinecap="round" strokeLinejoin="round" />
+                          <path d={dUngrown} fill="none" stroke={BROWN_MID}
+                            strokeWidth={22} strokeLinecap="round" strokeLinejoin="round" opacity={0.9} />
+                          <path d={dUngrown} fill="none" stroke={BROWN_AMB}
+                            strokeWidth={7} strokeLinecap="round" strokeLinejoin="round"
+                            strokeDasharray="55 45" opacity={0.55} />
+                        </>}
+                      </g>
+                    );
+                  });
+                })}
+
+                {/* Leaves along vine up to today */}
+                {(calendarLeaves || []).map((leaf, i) => {
+                  const LW = (330 + 120 * Math.sin(i * 2.3 + 1.1)) * leaf.scale;
+                  const LH = LW * 0.28;
+                  const leafD = `M 0,0 C ${LW*0.25},${-LH} ${LW*0.75},${-LH} ${LW},0 C ${LW*0.75},${LH} ${LW*0.25},${LH} 0,0 Z`;
+                  const midribD = `M ${LW*0.05},0 L ${LW*0.9},0`;
+                  const vein1 = `M ${LW*0.25},${-LH*0.55} L ${LW*0.6},${-LH*0.15}`;
+                  const vein2 = `M ${LW*0.25},${LH*0.55} L ${LW*0.6},${LH*0.15}`;
+                  const vein3 = `M ${LW*0.45},${-LH*0.65} L ${LW*0.72},${-LH*0.18}`;
+                  const vein4 = `M ${LW*0.45},${LH*0.65} L ${LW*0.72},${LH*0.18}`;
+                  const baseCol  = theme.darkMode ? '#16a34a' : '#22c55e';
+                  const darkCol  = theme.darkMode ? '#14532d' : '#15803d';
+                  const monthCol = MONTH_COLORS[leaf.mi] || darkCol;
+                  return (
+                    <g key={`leaf-${i}`}
+                      transform={`translate(${leaf.x},${leaf.y}) rotate(${leaf.angle + leaf.side * 45})`}
+                      opacity={0.88}
+                      style={{ pointerEvents: 'none' }}
+                    >
+                      {/* Month-coloured border — rendered first (underneath) */}
+                      <path d={leafD} fill="none" stroke={monthCol} strokeWidth={22} />
+                      {/* Green fill on top */}
+                      <path d={leafD} fill={baseCol} stroke="none" />
+                      {/* Veins and midrib */}
+                      <path d={midribD} fill="none" stroke={darkCol} strokeWidth={4} opacity={0.6} />
+                      <path d={vein1}   fill="none" stroke={darkCol} strokeWidth={2.5} opacity={0.4} />
+                      <path d={vein2}   fill="none" stroke={darkCol} strokeWidth={2.5} opacity={0.4} />
+                      <path d={vein3}   fill="none" stroke={darkCol} strokeWidth={2} opacity={0.3} />
+                      <path d={vein4}   fill="none" stroke={darkCol} strokeWidth={2} opacity={0.3} />
+                    </g>
+                  );
+                })}
+
+                {/* Flower month markers — same rounded petal style as map page flowers */}
+                {(calendarMonthMarkers || []).map((m, mi) => {
+                  const PETALS = 6;
+                  // Just under photo size: photos are CALENDAR_NODE_SCALE*80 ≈ 672 units radius
+                  // Flower petal tip at ~500 units, centre disc at ~220 units
+                  const flowerR = 500;
+                  const petalL  = flowerR * 0.72;
+                  const petalW  = petalL  * 0.68;
+                  const centreR = flowerR * 0.44;
+
+                  const buildPetals = (scale = 1) => Array.from({length: PETALS}, (_, pi) => {
+                    const pa = (pi / PETALS) * Math.PI * 2;
+                    const L = petalL * scale, W = petalW * scale;
+                    const tx = Math.cos(pa) * L, ty = Math.sin(pa) * L;
+                    const perpA = pa + Math.PI * 0.5;
+                    const cp1x = Math.cos(pa)*L*0.35 + Math.cos(perpA)*W*0.6;
+                    const cp1y = Math.sin(pa)*L*0.35 + Math.sin(perpA)*W*0.6;
+                    const cp2x = Math.cos(pa)*L*0.85 + Math.cos(perpA)*W*0.5;
+                    const cp2y = Math.sin(pa)*L*0.85 + Math.sin(perpA)*W*0.5;
+                    const cp3x = Math.cos(pa)*L*0.85 - Math.cos(perpA)*W*0.5;
+                    const cp3y = Math.sin(pa)*L*0.85 - Math.sin(perpA)*W*0.5;
+                    const cp4x = Math.cos(pa)*L*0.35 - Math.cos(perpA)*W*0.6;
+                    const cp4y = Math.sin(pa)*L*0.35 - Math.sin(perpA)*W*0.6;
+                    return `M 0,0 C ${cp1x},${cp1y} ${cp2x},${cp2y} ${tx},${ty} C ${cp3x},${cp3y} ${cp4x},${cp4y} 0,0`;
+                  }).join(' ');
+
+                  return (
+                    <g key={`month-${mi}`} transform={`translate(${m.x}, ${m.y})`}>
+                      {/* Back petals rotated for depth */}
+                      <g transform={`rotate(${360/PETALS/2})`} opacity={0.5}>
+                        <path d={buildPetals()} fill={m.color} />
+                      </g>
+                      {/* Front petals */}
+                      <path d={buildPetals()} fill={m.color} opacity={0.9} />
+                      {/* White accent inner petals */}
+                      <g transform={`rotate(${360/PETALS/2})`} opacity={0.22}>
+                        <path d={buildPetals(0.55)} fill="white" />
+                      </g>
+                      <path d={buildPetals(0.45)} fill="white" opacity={0.15} />
+                      {/* Centre disc with month-colour border ring */}
+                      <circle r={centreR} fill="white" opacity={0.95} />
+                      <circle r={centreR} fill="none" stroke={m.color} strokeWidth={18} opacity={0.9} />
+                      <circle r={centreR * 0.78} fill={m.color} />
+                      {/* Month label */}
+                      <text textAnchor="middle" dominantBaseline="middle"
+                        fontSize={centreR * 0.62} fontWeight="900" fill="white"
+                        style={{ userSelect: 'none', pointerEvents: 'none' }}>
+                        {m.shortLabel}
+                      </text>
+                    </g>
+                  );
+                })}
+              </g>
+            )}
+
+            {viewMode === 'canvas' && (
+              <g>
+                {links.map((link, i) => {
+                  const src = activeRenderNodes.find(n => n.id === link.source);
+                  const tgt = activeRenderNodes.find(n => n.id === link.target);
+                  if (!src || !tgt) return null;
+
+                  const isMainTrunk = (src.id === 'me' && tgt.type === 'hub') || (tgt.id === 'me' && src.type === 'hub') || (src.type === 'flower' && tgt.type === 'hub') || (tgt.type === 'flower' && src.type === 'hub') || (src.id === 'me' && tgt.type === 'flower') || (tgt.id === 'me' && src.type === 'flower');
+                  let score = 0;
+                  if (isMainTrunk) {
+                    const hubId = src.type === 'hub' ? src.id : tgt.id;
+                    score = calculateHubStrength(hubId);
+                  } else {
+                    score = (src.type !== 'hub' ? src.interactionScore : tgt.interactionScore) || 0;
+                  }
+                  const tier = score < 100 ? 1 : score < 300 ? 2 : score < 600 ? 3 : score < 1000 ? 4 : 5;
+
+                  // Growing animation state for drawn vines
+                  const growingVine = link.drawnLinkId
+                    ? growingVines.find(v => v.id === link.drawnLinkId)
+                    : null;
+                  const dashOffset = growingVine
+                    ? growingVine.totalLen * (1 - growingVine.progress)
+                    : null;
+
+                  const dx = tgt.renderX - src.renderX;
+                  const dy = tgt.renderY - src.renderY;
+                  const dist = Math.sqrt(dx * dx + dy * dy);
+                  if (dist === 0) return null;
+
+                  const perpX = -dy / dist;
+                  const perpY =  dx / dist;
+                  const STEPS = link.customPathPts
+                    ? link.customPathPts.length - 1
+                    : Math.max(60, Math.floor(dist / 5));
+
+                  // --- ORGANIC BASE WIGGLE for the whole vine ---
+                  // Used as the spine reference; strands wrap around this.
+                  const OCTAVES_MAP = [
+                    { freq: 1.0,          amp: 0.5,  phase: 0.0 + i * 0.7 },
+                    { freq: 1.6180339887, amp: 0.22, phase: 2.1 + i * 0.4 },
+                    { freq: 2.7182818284, amp: 0.10, phase: 4.7 + i * 0.2 },
+                    { freq: 4.236,        amp: 0.05, phase: 1.3             },
+                  ];
+                  const spineWiggle = (t) => {
+                    let w = 0;
+                    for (const o of OCTAVES_MAP) w += Math.sin(t * 2.8 * o.freq * Math.PI * 2 + o.phase) * o.amp;
+                    return w * dist * 0.045;
+                  };
+
+                  // --- STRAND DEFINITIONS per tier ---
+                  // Each tier accumulates strands. The last strand is always the "growing" one.
+                  // Role:  0=core, 1=wrapped, 2=wrapped, 3=wrapped, 4=growing
+                  //
+                  // Properties per strand:
+                  //   width       — stroke width
+                  //   wrapFreq    — how many coils along the vine (higher = tighter wrap)
+                  //   wrapAmp     — max perpendicular excursion as fraction of coreRadius
+                  //   coreRadius  — radius of the core vine (perpendicular offset of center)
+                  //   color dark/light
+                  //   role: 'core' | 'wrapped' | 'growing'
+
+                  const coreRadius = 1.5 + tier * 0.8; // how thick the bundle is
+
+                  // Strand table — index 0 is always the core, grows darker/thicker each tier
+                  // subsequent indices are increasingly lighter, wrapping tighter
+                  const STRAND_DEFS = [
+                    // T1 strands:
+                    { width: 3.2,  wrapFreq: 0,   wrapAmp: 0,    colorDark: '#14532d', colorLight: '#15803d', role: 'core'    },  // 0: core
+                    { width: 1.2,  wrapFreq: 2.5, wrapAmp: 1.0,  colorDark: '#16a34a', colorLight: '#4ade80', role: 'growing' },  // 1: T1 growing
+                    // T2 adds:
+                    { width: 2.0,  wrapFreq: 1.4, wrapAmp: 0.7,  colorDark: '#15803d', colorLight: '#22c55e', role: 'wrapped' },  // 2: T2 wrapped (replaces T1 growing, T1 growing moves up)
+                    // T3 adds:
+                    { width: 1.6,  wrapFreq: 1.9, wrapAmp: 0.85, colorDark: '#16a34a', colorLight: '#4ade80', role: 'wrapped' },  // 3: T3 wrapped
+                    // T4 adds:
+                    { width: 1.3,  wrapFreq: 2.2, wrapAmp: 0.95, colorDark: '#22c55e', colorLight: '#86efac', role: 'wrapped' },  // 4: T4 wrapped
+                    // T5 growing strand always at end — thinnest, tightest wrap
+                  ];
+
+                  // Per tier: which strand indices are active, in render order (core first)
+                  // The growing strand is always the last in the list
+                  const TIER_STRAND_SETS = [
+                    null,
+                    [0, 1],          // T1: core + growing
+                    [0, 2, 1],       // T2: thicker core + wrapped + growing (growing is thinner new one)
+                    [0, 2, 3, 1],    // T3: core + 2 wrapped + growing
+                    [0, 2, 3, 4, 1], // T4: core + 3 wrapped + growing
+                    [0, 2, 3, 4, 1], // T5: same as T4 but core is thickest — differentiated by width scale
+                  ];
+
+                  // Scale core width with tier
+                  const coreWidthScale = [0, 1, 1.4, 1.9, 2.5, 3.2][tier];
+
+                  const activeStrands = TIER_STRAND_SETS[tier].map((si, renderIdx) => {
+                    const def = { ...STRAND_DEFS[si] };
+                    if (def.role === 'core') def.width *= coreWidthScale;
+                    const phaseBase = (renderIdx / TIER_STRAND_SETS[tier].length) * Math.PI * 2 + i * 1.3;
+
+                    const pts = [];
+                    for (let s = 0; s <= STEPS; s++) {
+                      const t = s / STEPS;
+
+                      // For custom-path links, interpolate along the drawn pts directly
+                      let bx, by;
+                      if (link.customPathPts && link.customPathPts.length > 1) {
+                        const cpPts = link.customPathPts;
+                        const cpIdx = Math.min(cpPts.length - 2, Math.floor(t * (cpPts.length - 1)));
+                        const frac = t * (cpPts.length - 1) - cpIdx;
+                        bx = cpPts[cpIdx].x + (cpPts[cpIdx+1].x - cpPts[cpIdx].x) * frac;
+                        by = cpPts[cpIdx].y + (cpPts[cpIdx+1].y - cpPts[cpIdx].y) * frac;
+                        // Local tangent-based perp for this segment
+                        const tdx = cpPts[Math.min(cpIdx+1, cpPts.length-1)].x - cpPts[cpIdx].x;
+                        const tdy = cpPts[Math.min(cpIdx+1, cpPts.length-1)].y - cpPts[cpIdx].y;
+                        const tlen = Math.sqrt(tdx*tdx + tdy*tdy) || 1;
+                        const lpx = -tdy / tlen, lpy = tdx / tlen;
+                        const coil = def.role === 'core' ? 0
+                          : Math.sin(t * def.wrapFreq * Math.PI * 2 + phaseBase) * coreRadius * def.wrapAmp
+                            + Math.sin(t * 4.1 * Math.PI * 2 + phaseBase * 0.9) * coreRadius * 0.10;
+                        pts.push({ x: bx + lpx * coil, y: by + lpy * coil, t });
+                      } else {
+                        const spine = spineWiggle(t);
+                        bx = src.renderX + dx * t;
+                        by = src.renderY + dy * t;
+                        let offset;
+                        if (def.role === 'core') {
+                          offset = spine;
+                        } else {
+                          const coil = Math.sin(t * def.wrapFreq * Math.PI * 2 + phaseBase) * coreRadius * def.wrapAmp;
+                          const jitter = def.role === 'growing'
+                            ? Math.sin(t * 7.3 * Math.PI * 2 + phaseBase * 1.7) * coreRadius * 0.18
+                            : Math.sin(t * 4.1 * Math.PI * 2 + phaseBase * 0.9) * coreRadius * 0.10;
+                          offset = spine + coil + jitter;
+                        }
+                        pts.push({ x: bx + perpX * offset, y: by + perpY * offset, t });
+                      }
+                    }
+
+                    return {
+                      ...def,
+                      pts,
+                      d: `M ${pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' L ')}`,
+                      renderIdx,
+                    };
+                  });
+
+                  // --- LEAVES per strand ---
+                  // Leaf character maps to strand role:
+                  //   core    → largest, darkest, fully open
+                  //   wrapped → medium, mid-green, open
+                  //   growing → tiny, lightest, budding (narrow/closed shape)
+                  // ── Leaf lifecycle from score history ────────────────────
+                  // Each leaf position t (0=root, 1=tip) maps to an age in hours
+                  const srcNode = nodes.find(n => n.id === link.source);
+                  const tgtNode = nodes.find(n => n.id === link.target);
+                  const scoreHistory = tgtNode?.scoreHistory || srcNode?.scoreHistory || [];
+                  const now = Date.now();
+                  const HOUR = 3600000;
+
+                  // Score 48h ago vs now
+                  const scoreThen48 = scoreHistory.length > 0
+                    ? (scoreHistory.find(h => (now - h.ts) >= 48 * HOUR) || scoreHistory[0]).score
+                    : score;
+                  const scoreThen24 = scoreHistory.length > 0
+                    ? (scoreHistory.find(h => (now - h.ts) >= 24 * HOUR) || scoreHistory[0]).score
+                    : score;
+                  const delta48 = score - scoreThen48;
+                  const delta24 = score - scoreThen24;
+
+                  // Get leaf visual state from its position along vine (t: 0=root, 1=tip)
+                  // and recent score delta
+                  const getLeafState = (t) => {
+                    // Tip leaves are newest. If score is rising, tip leaves bud first.
+                    // If score is falling, tip leaves shrivel first, root leaves fall last.
+                    const ageHrs = (1 - t) * 48; // root=48h old, tip=just born
+
+                    if (delta48 < -60 && ageHrs < 12) {
+                      // Losing significantly — tip leaves fallen
+                      return 'fallen';
+                    }
+                    if (delta48 < -30 && ageHrs < 24) {
+                      // Losing — newer leaves shrivelling
+                      return ageHrs < 12 ? 'fallen' : 'brown';
+                    }
+                    if (delta24 < -20) {
+                      // Declining recently — tip shrivelling
+                      return ageHrs < 6 ? 'shrivelling' : ageHrs < 18 ? 'brown' : 'full';
+                    }
+                    if (delta48 > 60) {
+                      // Gaining significantly — tip leaves budding/growing
+                      return ageHrs < 6 ? 'budding' : ageHrs < 24 ? 'growing' : 'full';
+                    }
+                    if (delta24 > 20) {
+                      return ageHrs < 12 ? 'budding' : 'growing';
+                    }
+                    return 'full';
+                  };
+
+                  const LIFECYCLE_STYLES = {
+                    budding:     { scale: 0.2, wScale: 0.2,  lScale: 0.2,  color: '#bbf7d0', opacity: 0.9,  curl: 0.5 },
+                    growing:     { scale: 0.55,wScale: 0.55, lScale: 0.55, color: '#4ade80', opacity: 0.85, curl: 0.2 },
+                    full:        { scale: 1.0, wScale: 1.0,  lScale: 1.0,  color: null,       opacity: null, curl: 0 },
+                    shrivelling: { scale: 1.0, wScale: 0.60, lScale: 0.90, color: '#ca8a04', opacity: 0.8,  curl: 0.4 },
+                    brown:       { scale: 1.0, wScale: 0.55, lScale: 0.85, color: '#78350f', opacity: 0.65, curl: 0.7 },
+                    fallen:      { scale: 0,   wScale: 0,    lScale: 0,    color: null,       opacity: 0,    curl: 0 },
+                  };
+
+                  const LEAF_CHARS = {
+                    // 1:4:9 length and width progression (bud=1, wrapped=4, core=9)
+                    core:    { sizeBase: 27, sizeVar: 4.5, colorDark: '#14532d', colorLight: '#15803d', aspectW: 0.32, bud: false },
+                    wrapped: { sizeBase: 12, sizeVar: 2.4, colorDark: '#166534', colorLight: '#22c55e', aspectW: 0.32, bud: false },
+                    growing: { sizeBase: 3,  sizeVar: 0.9, colorDark: '#16a34a', colorLight: '#4ade80', aspectW: 0.32, bud: true  },
+                  };
+                  const leafTierScale = 0.7 + tier * 0.18;
+                  // Double spacing = half as many leaves
+                  const leafSpacing = Math.max(24, 76 - tier * 8);
+
+                  const allLeaves = [];
+                  activeStrands.forEach(({ pts, role, renderIdx }) => {
+                    const lc = LEAF_CHARS[role];
+                    const leafCount = Math.max(2, Math.floor(dist / leafSpacing));
+                    for (let li = 0; li < leafCount; li++) {
+                      const t = (li + 0.5 + renderIdx * 0.3) / leafCount;
+                      if (t > 1) continue;
+                      const ptIdx = Math.min(pts.length - 2, Math.floor(t * (pts.length - 1)));
+                      const p  = pts[ptIdx];
+                      const p2 = pts[Math.min(pts.length - 1, ptIdx + 1)];
+                      if (!p || !p2) continue;
+                      const tangAngle = Math.atan2(p2.y - p.y, p2.x - p.x) * 180 / Math.PI;
+                      const side = ((li + renderIdx) % 2 === 0) ? 1 : -1;
+                      const sv = 0.7 + 0.6 * Math.abs(Math.sin(li * 3.7 + renderIdx * 1.9 + i));
+
+                      // Lifecycle state
+                      const leafState = getLeafState(t);
+                      const ls = LIFECYCLE_STYLES[leafState];
+                      if (ls.scale === 0) continue; // fallen — skip
+
+                      const baseLw = (lc.sizeBase + lc.sizeVar * sv) * leafTierScale;
+                      const lw = baseLw * ls.lScale;        // length
+                      const lh = lw * lc.aspectW * (ls.wScale / ls.lScale); // width independently scaled
+                      const fill = ls.color || (theme.darkMode ? lc.colorDark : lc.colorLight);
+                      const stroke = leafState === 'full' || leafState === 'growing' || leafState === 'budding'
+                        ? (theme.darkMode ? '#0f2d1a' : '#14532d')
+                        : '#78350f';
+                      const opacity = ls.opacity ?? (lc.bud ? 0.7 : 0.88);
+                      // Curl: shrivelling/brown leaves tilt inward more
+                      const curlAngle = tangAngle + side * (42 + ls.curl * 35);
+                      allLeaves.push({ x: p.x, y: p.y, angle: curlAngle, lw, lh, fill, stroke, bud: lc.bud || leafState === 'budding', opacity, shrivelled: ls.curl > 0.3 });
+                    }
+                  });
+
+                  return (
+                    <g key={`link-${i}`}>
+                      {/* Render core first, then wrapped strands, growing strand last (on top) */}
+                      {activeStrands.map(({ d, width, role, colorDark, colorLight }, si) => {
+                        // Compute total path length for dasharray when animating
+                        const pathLen = dist * 1.1; // approximate
+                        return (
+                          <path key={`s-${si}`} d={d} fill="none"
+                            stroke={theme.darkMode ? colorDark : colorLight}
+                            strokeWidth={width}
+                            strokeLinejoin="round" strokeLinecap="round"
+                            opacity={role === 'growing' ? 0.78 : role === 'core' ? 1 : 0.9}
+                            {...(dashOffset !== null ? {
+                              strokeDasharray: pathLen * 3,
+                              strokeDashoffset: (pathLen * 3) * (1 - growingVine.progress),
+                            } : {})}
+                          />
+                        );
+                      })}
+                      {/* Leaves — drawn after strands */}
+                      {allLeaves.map((lf, li) => {
+                        const leafD = (lf.bud || lf.shrivelled)
+                          ? `M 0,0 C ${lf.lw*0.15},${-lf.lh*0.4} ${lf.lw*0.7},${-lf.lh*0.35} ${lf.lw},0 C ${lf.lw*0.7},${lf.lh*0.35} ${lf.lw*0.15},${lf.lh*0.4} 0,0 Z`
+                          : `M 0,0 C ${lf.lw*0.25},${-lf.lh} ${lf.lw*0.75},${-lf.lh} ${lf.lw},0 C ${lf.lw*0.75},${lf.lh} ${lf.lw*0.25},${lf.lh} 0,0 Z`;
+                        const midrib = `M ${lf.lw*0.05},0 L ${lf.lw*0.82},0`;
+                        return (
+                          <g key={`lf-${li}`}
+                            transform={`translate(${lf.x},${lf.y}) rotate(${lf.angle})`}
+                            opacity={lf.opacity}
+                            style={{ pointerEvents: 'none' }}
+                          >
+                            <path d={leafD} fill={lf.fill} stroke={lf.stroke} strokeWidth={0.5} />
+                            {!lf.bud && <path d={midrib} fill="none" stroke={lf.stroke} strokeWidth={0.35} opacity={0.5} />}
+                          </g>
+                        );
+                      })}
+                    </g>
+                  );
+                })}
+              </g>
+            )}
+
+
+            <g className="nodes-layer">
+              {activeRenderNodes.flatMap(node => {
+                const isLifted = liftedNodeId === node.id && viewMode === 'canvas';
+                const scaleRatio = node.radius / 45;
+                const plateWidth = Math.max(100, node.radius * 2.2);
+                const baseScale = viewMode === 'calendar' ? CALENDAR_NODE_SCALE : 1;
+
+                // Hide members of collapsed groups
+                if (viewMode === 'canvas' && node.type !== 'hub' && node.type !== 'flower' && node.id !== 'me') {
+                  const parentLink = links.find(l => (l.source === node.id || l.target === node.id) &&
+                    (nodes.find(n => n.id === (l.source === node.id ? l.target : l.source))?.type === 'hub'));
+                  if (parentLink) {
+                    const hubId = parentLink.source === node.id ? parentLink.target : parentLink.source;
+                    if (collapsedGroups.includes(hubId)) return [];
+                  }
+                }
+                // Flower nodes are rendered separately in the flower type branch
+                if (node.type === 'flower' && viewMode === 'calendar') return [];
+
+                if (viewMode !== 'canvas' || node.type === 'hub' || node.type === 'flower' || node.id === 'me') {
+                  // Hub / Me / flower / calendar: render once normally
+                  const isSelected = selectedNodeId === node.id;
+                  const isHoverTarget = hoverTarget === node.id;
+                  return [(
+                    <g key={node.id}
+                      transform={`translate(${node.renderX}, ${node.renderY}) scale(${baseScale * (isLifted ? 1.15 : 1)})`}
+                      style={{transition: nodeTransition(node.id), transformOrigin: `${node.renderX}px ${node.renderY}px`}}
+                      opacity={node.type==='flower'||node.type==='hub'||node.id==='me'||isTagFiltered(node.id) ? 1 : 0.15}
+                      className="cursor-pointer"
+                      onPointerDown={e => handlePointerDown(e, node.id)}
+                      style={{ WebkitTouchCallout:'none', WebkitUserSelect:'none', userSelect:'none' }}
+                    >
+                      {/* Selection ring in select-for-group mode */}
+                      {selectForGroupMode && selectedForGroup.includes(node.id) && (
+                        <circle cx={0} cy={0} r={node.radius + 14} fill="rgba(22,163,74,0.2)" stroke="#16a34a" strokeWidth="5" style={{pointerEvents:'none'}}/>
+                      )}
+                      {/* Dim unselected in select mode */}
+                      {selectForGroupMode && !selectedForGroup.includes(node.id) && node.type !== 'hub' && node.type !== 'flower' && (
+                        <circle cx={0} cy={0} r={node.radius} fill="rgba(0,0,0,0.5)" style={{pointerEvents:'none'}}/>
+                      )}
+                      {node.type === 'flower' && viewMode === 'canvas' ? (
+                        (() => {
+                          const dim = dimensions[node.dimKey];
+                          if (!dim) return null;
+                          const h = dim.health ?? 1;
+                          const PETALS = 6;
+                          const flowerR = node.radius;
+                          const petalL = flowerR * (0.45 + h * 0.25);
+                          const petalW = petalL * 0.70;
+                          const mainColor = h > 0.5 ? dim.color : `hsl(30,${Math.round(h*60)}%,${30+Math.round(h*20)}%)`;
+                          const centreR = flowerR * 0.50; // large centre for name text
+                          const buildPetals = (scale = 1) => Array.from({length: PETALS}, (_, pi) => {
+                            const pa = (pi / PETALS) * Math.PI * 2;
+                            const L = petalL * scale, W = petalW * scale;
+                            const tx = Math.cos(pa) * L, ty = Math.sin(pa) * L;
+                            const perpA = pa + Math.PI * 0.5;
+                            const cp1x = Math.cos(pa)*L*0.35 + Math.cos(perpA)*W*0.6;
+                            const cp1y = Math.sin(pa)*L*0.35 + Math.sin(perpA)*W*0.6;
+                            const cp2x = Math.cos(pa)*L*0.85 + Math.cos(perpA)*W*0.5;
+                            const cp2y = Math.sin(pa)*L*0.85 + Math.sin(perpA)*W*0.5;
+                            const cp3x = Math.cos(pa)*L*0.85 - Math.cos(perpA)*W*0.5;
+                            const cp3y = Math.sin(pa)*L*0.85 - Math.sin(perpA)*W*0.5;
+                            const cp4x = Math.cos(pa)*L*0.35 - Math.cos(perpA)*W*0.6;
+                            const cp4y = Math.sin(pa)*L*0.35 - Math.sin(perpA)*W*0.6;
+                            return `M 0,0 C ${cp1x},${cp1y} ${cp2x},${cp2y} ${tx},${ty} C ${cp3x},${cp3y} ${cp4x},${cp4y} 0,0`;
+                          }).join(' ');
+                          return (
+                            <g onPointerDown={e => handlePointerDown(e, node.id)}
+                              style={{cursor:'pointer'}}>
+                              {isSelected && <circle r={flowerR + 10} fill="none" stroke="#10B981" strokeWidth="2" strokeDasharray="4 3" />}
+                              {/* Back petals rotated for depth */}
+                              <g transform={`rotate(${360/PETALS/2})`} opacity={0.55}>
+                                <path d={buildPetals(0.88)} fill={mainColor} />
+                              </g>
+                              {/* Main petals */}
+                              <path d={buildPetals()} fill={mainColor} opacity={0.92} />
+                              {/* White accent tips — small inner petals */}
+                              <g transform={`rotate(${360/PETALS/2})`} opacity={0.35}>
+                                <path d={buildPetals(0.55)} fill="white" />
+                              </g>
+                              <path d={buildPetals(0.45)} fill="white" opacity={0.25} />
+                              {/* Centre — name in the disc */}
+                              <circle r={centreR} fill="white" opacity={0.92} />
+                              <circle r={centreR * 0.88} fill={mainColor} />
+                              {/* White SVG icon for each dimension */}
+                              {(() => {
+                                const ic = centreR * 0.55; // icon half-size
+                                const icons = {
+                                  social: ( // three overlapping head silhouettes
+                                    <g fill="white" style={{pointerEvents:'none',userSelect:'none'}}>
+                                      {/* left person */}
+                                      <circle cx={-ic*0.52} cy={-ic*0.22} r={ic*0.28}/>
+                                      <ellipse cx={-ic*0.52} cy={ic*0.42} rx={ic*0.38} ry={ic*0.28}/>
+                                      {/* right person */}
+                                      <circle cx={ic*0.52} cy={-ic*0.22} r={ic*0.28}/>
+                                      <ellipse cx={ic*0.52} cy={ic*0.42} rx={ic*0.38} ry={ic*0.28}/>
+                                      {/* centre person — on top */}
+                                      <circle cx={0} cy={-ic*0.32} r={ic*0.32}/>
+                                      <ellipse cx={0} cy={ic*0.5} rx={ic*0.42} ry={ic*0.3}/>
+                                    </g>
+                                  ),
+                                  creativity: ( // palette with dots
+                                    <g fill="white" style={{pointerEvents:'none',userSelect:'none'}}>
+                                      <ellipse cx={0} cy={ic*0.05} rx={ic*0.82} ry={ic*0.72}/>
+                                      {/* thumb hole */}
+                                      <ellipse cx={ic*0.35} cy={ic*0.55} rx={ic*0.22} ry={ic*0.18} fill={mainColor}/>
+                                      {/* colour dots */}
+                                      <circle cx={-ic*0.42} cy={-ic*0.28} r={ic*0.13} fill={mainColor}/>
+                                      <circle cx={0} cy={-ic*0.52} r={ic*0.13} fill={mainColor}/>
+                                      <circle cx={ic*0.42} cy={-ic*0.28} r={ic*0.13} fill={mainColor}/>
+                                      <circle cx={-ic*0.55} cy={ic*0.1} r={ic*0.13} fill={mainColor}/>
+                                    </g>
+                                  ),
+                                  knowledge: ( // stack of books
+                                    <g fill="white" style={{pointerEvents:'none',userSelect:'none'}}>
+                                      {/* bottom book */}
+                                      <rect x={-ic*0.82} y={ic*0.25} width={ic*1.64} height={ic*0.38} rx={ic*0.06}/>
+                                      {/* middle book - slightly narrower, rotated hint */}
+                                      <rect x={-ic*0.72} y={-ic*0.12} width={ic*1.44} height={ic*0.35} rx={ic*0.06}/>
+                                      {/* top book */}
+                                      <rect x={-ic*0.78} y={-ic*0.48} width={ic*1.56} height={ic*0.35} rx={ic*0.06}/>
+                                      {/* spine lines on each book */}
+                                      <rect x={-ic*0.82} y={ic*0.25} width={ic*0.12} height={ic*0.38} rx={ic*0.03} fill={mainColor}/>
+                                      <rect x={-ic*0.72} y={-ic*0.12} width={ic*0.12} height={ic*0.35} rx={ic*0.03} fill={mainColor}/>
+                                      <rect x={-ic*0.78} y={-ic*0.48} width={ic*0.12} height={ic*0.35} rx={ic*0.03} fill={mainColor}/>
+                                    </g>
+                                  ),
+                                  growth: ( // sprouting plant with two leaves
+                                    <g fill="white" style={{pointerEvents:'none',userSelect:'none'}}>
+                                      {/* stem */}
+                                      <path d={`M 0,${ic*0.75} L 0,${-ic*0.2}`} stroke="white" strokeWidth={ic*0.12} fill="none" strokeLinecap="round"/>
+                                      {/* left leaf */}
+                                      <path d={`M 0,${ic*0.1} C ${-ic*0.7},${ic*0.1} ${-ic*0.75},${-ic*0.45} ${-ic*0.1},${-ic*0.2} Z`}/>
+                                      {/* right leaf */}
+                                      <path d={`M 0,${-ic*0.1} C ${ic*0.7},${-ic*0.1} ${ic*0.75},${-ic*0.55} ${ic*0.05},${-ic*0.3} Z`}/>
+                                      {/* top bud */}
+                                      <ellipse cx={0} cy={-ic*0.52} rx={ic*0.18} ry={ic*0.24}/>
+                                      {/* roots */}
+                                      <path d={`M 0,${ic*0.75} Q ${-ic*0.35},${ic*0.88} ${-ic*0.5},${ic*0.9}`} stroke="white" strokeWidth={ic*0.08} fill="none" strokeLinecap="round"/>
+                                      <path d={`M 0,${ic*0.75} Q ${ic*0.35},${ic*0.88} ${ic*0.5},${ic*0.92}`} stroke="white" strokeWidth={ic*0.08} fill="none" strokeLinecap="round"/>
+                                    </g>
+                                  ),
+                                  health: ( // rounder smoother heart
+                                    <g fill="white" style={{pointerEvents:'none',userSelect:'none'}}>
+                                      <path d={`
+                                        M 0,${ic*0.55}
+                                        C ${-ic*0.4},${ic*0.2} ${-ic*0.95},${-ic*0.05} ${-ic*0.82},${-ic*0.48}
+                                        C ${-ic*0.7},${-ic*0.78} ${-ic*0.3},${-ic*0.82} 0,${-ic*0.5}
+                                        C ${ic*0.3},${-ic*0.82} ${ic*0.7},${-ic*0.78} ${ic*0.82},${-ic*0.48}
+                                        C ${ic*0.95},${-ic*0.05} ${ic*0.4},${ic*0.2} 0,${ic*0.55}
+                                        Z`}/>
+                                    </g>
+                                  ),
+                                };
+                                return icons[node.dimKey] || null;
+                              })()}
+                            </g>
+                          );
+                        })()
+                      ) : node.type === 'hub' && viewMode === 'canvas' ? (
+                        <g transform={`scale(${scaleRatio})`}>
+                          {isSelected && <rect x="-60" y="-80" width="120" height="100" fill="none" stroke="#10B981" strokeWidth="2" strokeDasharray="4 4" rx="8" />}
+                          {/* Collapsed badge */}
+                          {collapsedGroups.includes(node.id) && (() => {
+                            const mc = links.filter(l=>(l.source===node.id||l.target===node.id)&&nodes.find(n=>n.id===(l.source===node.id?l.target:l.source)&&n.type!=='flower'&&n.id!=='me')).length;
+                            return <g transform="translate(28,-50)">
+                              <circle r={14} fill="#10b981"/><text textAnchor="middle" y={5} fontSize="12" fontWeight="900" fill="white" style={{userSelect:'none'}}>{mc}</text>
+                            </g>;
+                          })()}
+
+                          {/* Organic vine strands wrapping the post — match tier of incoming vines */}
+                          {(() => {
+                            const s = calculateHubStrength(node.id);
+                            const hubTier = s < 100 ? 1 : s < 300 ? 2 : s < 600 ? 3 : s < 1000 ? 4 : 5;
+                            const STRAND_DEFS_HUB = [
+                              { w: 2.2, color: theme.darkMode ? '#14532d' : '#15803d', role: 'core' },
+                              { w: 1.0, color: theme.darkMode ? '#16a34a' : '#22c55e', role: 'growing' },
+                              { w: 1.5, color: theme.darkMode ? '#15803d' : '#16a34a', role: 'wrapped' },
+                              { w: 1.2, color: theme.darkMode ? '#16a34a' : '#4ade80', role: 'wrapped' },
+                              { w: 0.9, color: theme.darkMode ? '#22c55e' : '#86efac', role: 'growing' },
+                            ];
+                            const activeStrands = STRAND_DEFS_HUB.slice(0, Math.min(hubTier + 1, STRAND_DEFS_HUB.length));
+                            // Post runs from y=20 down to y=-40 (height=60 units)
+                            // Each strand spirals around the post using a sine wave offset
+                            return activeStrands.map(({ w, color, role }, si) => {
+                              const phase = si * (Math.PI * 2 / activeStrands.length);
+                              const amp = 6 + si * 1.5; // how far strand swings from post centre
+                              const freq = 1.8 + si * 0.4; // coil frequency
+                              const steps = 24;
+                              const pts = [];
+                              for (let k = 0; k <= steps; k++) {
+                                const t = k / steps;
+                                const y = 18 - t * 56; // top of post to bottom
+                                const x = Math.sin(t * freq * Math.PI * 2 + phase) * amp;
+                                pts.push(`${x.toFixed(1)},${y.toFixed(1)}`);
+                              }
+                              return (
+                                <path key={si}
+                                  d={`M ${pts.join(' L ')}`}
+                                  fill="none" stroke={color}
+                                  strokeWidth={w} strokeLinecap="round" strokeLinejoin="round"
+                                  opacity={role === 'growing' ? 0.65 : role === 'core' ? 0.9 : 0.78}
+                                />
+                              );
+                            });
+                          })()}
+
+                          {/* Post and sign — rendered AFTER vines so sign stays readable */}
+                          <ellipse cx="0" cy="20" rx="30" ry="10" fill="rgba(0,0,0,0.15)" />
+                          <rect x="-10" y="-40" width="20" height="60" fill="#8B5A2B" rx="2" />
+                          <rect x="-55" y="-50" width="110" height="32" fill="#A0522D" rx="4" />
+                          <rect x="-55" y="-50" width="110" height="32" fill="none" stroke="#5C3A21" strokeWidth="2" rx="4" />
+                          <text y="-28" textAnchor="middle" fontSize="13" fontWeight="bold" fill="white">
+                            {node.label.length > 12 ? node.label.substring(0, 11) + '...' : node.label}
+                          </text>
+                        </g>
+                      ) : (
+                        // Me node or calendar person
+                        <g>
+                          {isSelected && !isHoverTarget && !isLifted && <circle r={node.radius + 6} fill="none" stroke="#10B981" strokeWidth="3" />}
+                          {isHoverTarget && <circle r={node.radius + 10} fill="none" stroke="#3B82F6" strokeWidth="6" strokeDasharray="6 4" />}
+
+
+                          <circle r={node.radius} fill={theme.darkMode ? "#1e293b" : "white"} stroke={viewMode === 'calendar' ? node.monthColor : "none"} strokeWidth={viewMode === 'calendar' ? 8 : 0} />
+                          <clipPath id={`clip-${node.id}`}><circle r={node.radius - (viewMode === 'calendar' ? 8 : 4)} /></clipPath>
+                          <image href={node.img} x={-node.radius} y={-node.radius} width={node.radius * 2} height={node.radius * 2} clipPath={`url(#clip-${node.id})`} preserveAspectRatio="xMidYMid slice" />
+
+                          {/* Diary + button — bottom-left of Me photo */}
+                          {node.id === 'me' && viewMode === 'canvas' && (
+                            <g transform={`translate(${-node.radius * 0.7}, ${node.radius * 0.7})`}
+                              style={{cursor:'pointer', pointerEvents:'all'}}
+                              onPointerDown={e => { e.stopPropagation(); setDiaryOpen(true); }}
+                            >
+                              <circle r={12} fill="#16a34a" stroke={theme.darkMode ? '#0f172a' : 'white'} strokeWidth={2} />
+                              <text textAnchor="middle" dominantBaseline="middle"
+                                fontSize="16" fontWeight="bold" fill="white"
+                                style={{userSelect:'none', pointerEvents:'none'}}>+</text>
+                            </g>
+                          )}
+
+                          {viewMode === 'canvas' && (
+                            <>
+                              {/* Name label — arc-shaped grey band at bottom of circle */}
+                              {(() => {
+                                const r = node.radius - 3; // clip inside the border
+                                // The label band starts at y = r * 0.52 (roughly bottom third)
+                                const bandTop = r * 0.52;
+                                // Arc path: go from left edge of circle at bandTop,
+                                // arc along the bottom of the circle, close back up as a chord
+                                const halfW = Math.sqrt(Math.max(0, r*r - bandTop*bandTop));
+                                const arcPath = [
+                                  `M ${-halfW},${bandTop}`,
+                                  `A ${r},${r} 0 0,0 ${halfW},${bandTop}`,
+                                  `L ${halfW},${bandTop}`,
+                                  // Arc back down around the bottom of the circle
+                                  `A ${r},${r} 0 0,1 ${-halfW},${bandTop}`,
+                                  'Z'
+                                ].join(' ');
+                                // Simpler: use a rect clipped by the photo clipPath
+                                const labelY = r * 0.55;
+                                const bandH = r * 0.48;
+                                const fs = Math.max(8, r * 0.26);
+                                return (
+                                  <g clipPath={`url(#clip-${node.id})`} style={{pointerEvents:'none'}}>
+                                    <rect x={-r} y={labelY} width={r * 2} height={bandH}
+                                      fill="rgba(55,65,81,0.78)" />
+                                    <text y={labelY + bandH * 0.62} textAnchor="middle"
+                                      fontSize={fs} fontWeight="700" fill="white"
+                                      style={{userSelect:'none'}}>
+                                      {node.label.length > 12 ? node.label.substring(0, 11) + '…' : node.label}
+                                    </text>
+                                  </g>
+                                );
+                              })()}
+                            </>
+                          )}
+                          {viewMode === 'calendar' && (
+                            <>
+                              {/* Arc name label inside circle at bottom */}
+                              <g clipPath={`url(#clip-${node.id})`} style={{pointerEvents:'none'}}>
+                                <rect x={-node.radius} y={node.radius * 0.52}
+                                  width={node.radius * 2} height={node.radius * 0.52}
+                                  fill="rgba(0,0,0,0.65)" />
+                                <text y={node.radius * 0.83} textAnchor="middle"
+                                  fontSize={Math.max(7, node.radius * 0.22)} fontWeight="700" fill="white"
+                                  style={{userSelect:'none'}}>
+                                  {node.label.length > 12 ? node.label.substring(0, 11) + '…' : node.label}
+                                </text>
+                              </g>
+                              {/* Age badge — top-right corner circle */}
+                              <g transform={`translate(${node.radius * 0.62}, ${-node.radius * 0.62})`}>
+                                <circle r={node.radius * 0.28}
+                                  fill={node.isMilestone ? '#FBBF24' : (theme.darkMode ? '#1e293b' : 'white')}
+                                  stroke={node.isMilestone ? '#B45309' : node.monthColor}
+                                  strokeWidth={node.radius * 0.04} />
+                                <text textAnchor="middle" dominantBaseline="middle"
+                                  fontSize={Math.max(6, node.radius * 0.2)}
+                                  fontWeight="900"
+                                  fill={node.isMilestone ? '#451a03' : (theme.darkMode ? '#e2e8f0' : '#1e293b')}
+                                  style={{userSelect:'none'}}>
+                                  {node.age}
+                                </text>
+                              </g>
+                              {/* Star for milestone birthdays — top-left */}
+                              {node.isMilestone && (
+                                <g transform={`translate(${-node.radius * 0.62}, ${-node.radius * 0.62})`}>
+                                  <text textAnchor="middle" dominantBaseline="middle"
+                                    fontSize={node.radius * 0.35} style={{userSelect:'none'}}>⭐</text>
+                                </g>
+                              )}
+                            </>
+                          )}
+                        </g>
+                      )}
+                    </g>
+                  )];
+                }
+
+                // ── Canvas person node: render one copy per group membership ──
+                const gv = node.groupVisibility || {};
+                const groupEntries = Object.entries(gv).filter(([, vis]) => vis >= 2); // vis 2=small, 3=full
+
+                if (groupEntries.length === 0) {
+                  // No group memberships set — render once at own position (unaffiliated)
+                  const isSelected = selectedNodeId === node.id;
+                  const isHoverTarget = hoverTarget === node.id;
+                  const r = node.radius;
+                  const pw = Math.max(100, r * 2.2);
+                  return [(
+                    <g key={node.id}
+                      transform={`translate(${node.renderX}, ${node.renderY}) scale(${isLifted ? 1.15 : 1})`}
+                      style={{transition: nodeTransition(node.id), transformOrigin: `${node.renderX}px ${node.renderY}px`}}
+                      opacity={isTagFiltered(node.id) ? 1 : 0.15}
+                      className="cursor-pointer"
+                      onPointerDown={e => handlePointerDown(e, node.id)}
+                      style={{ WebkitTouchCallout:'none', WebkitUserSelect:'none', userSelect:'none' }}
+                    >
+                      {isSelected && !isHoverTarget && !isLifted && <circle r={r + 6} fill="none" stroke="#10B981" strokeWidth="3" />}
+                      {isHoverTarget && <circle r={r + 10} fill="none" stroke="#3B82F6" strokeWidth="6" strokeDasharray="6 4" />}
+                      <circle r={r} fill={theme.darkMode ? "#1e293b" : "white"} />
+                      <clipPath id={`clip-${node.id}`}><circle r={r - 4} /></clipPath>
+                      <image href={node.img} x={-r} y={-r} width={r * 2} height={r * 2} clipPath={`url(#clip-${node.id})`} preserveAspectRatio="xMidYMid slice" />
+                      {/* Name label — grey arc band inside circle bottom */}
+                      <g clipPath={`url(#clip-${node.id})`} style={{pointerEvents:'none'}}>
+                        <rect x={-r} y={r * 0.52} width={r * 2} height={r * 0.52}
+                          fill="rgba(55,65,81,0.78)" />
+                        <text y={r * 0.82} textAnchor="middle"
+                          fontSize={Math.max(8, r * 0.26)} fontWeight="700" fill="white"
+                          style={{userSelect:'none'}}>
+                          {node.label.length > 12 ? node.label.substring(0, 11) + '…' : node.label}
+                        </text>
+                      </g>
+                    </g>
+                  )];
+                }
+
+                // One copy per group
+                return groupEntries.map(([hubId, vis]) => {
+                  const hub = nodes.find(n => n.id === hubId);
+                  if (!hub) return null;
+
+                  const isSmall = vis === 2;
+                  const copyScale = isSmall ? 0.35 : 1;
+                  const isSelected = selectedNodeId === node.id;
+
+                  // Position this copy near the hub — offset slightly so multiple people don't stack
+                  // Use a deterministic angle based on node+hub ids
+                  const seed = (node.id + hubId).split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+                  const angle = ((seed % 16) / 16) * Math.PI * 2;
+                  const dist = 80 + (node.radius * copyScale);
+                  const rx = hub.x + Math.cos(angle) * dist;
+                  const ry = hub.y + Math.sin(angle) * dist;
+
+                  const r = node.radius;
+                  const pw = Math.max(80, r * 2);
+                  const copyKey = `${node.id}-copy-${hubId}`;
+
+                  return (
+                    <g key={copyKey}
+                      transform={`translate(${rx}, ${ry}) scale(${copyScale})`}
+                      style={{transition: nodeTransition(node.id), transformOrigin: `${rx}px ${ry}px`}}
+                      className="cursor-pointer"
+                      onPointerDown={e => handlePointerDown(e, node.id)}
+                      style={{
+                        WebkitTouchCallout:'none', WebkitUserSelect:'none', userSelect:'none',
+                        filter: isSmall ? 'grayscale(80%) opacity(0.7)' : 'none'
+                      }}
+                    >
+                      {isSelected && <circle r={r + 8} fill="none" stroke="#10B981" strokeWidth="3" />}
+                      <circle r={r} fill={theme.darkMode ? "#1e293b" : "white"} />
+                      <clipPath id={`clip-${copyKey}`}><circle r={r - 4} /></clipPath>
+                      <image href={node.img} x={-r} y={-r} width={r * 2} height={r * 2} clipPath={`url(#clip-${copyKey})`} preserveAspectRatio="xMidYMid slice" />
+                      {!isSmall && (
+                        <g clipPath={`url(#clip-${copyKey})`} style={{pointerEvents:'none'}}>
+                          <rect x={-r} y={r * 0.55} width={r * 2} height={r * 0.48}
+                            fill="rgba(55,65,81,0.78)" />
+                          <text y={r * 0.82} textAnchor="middle"
+                            fontSize={Math.max(8, r * 0.26)} fontWeight="700" fill="white"
+                            style={{userSelect:'none'}}>
+                            {node.label.length > 12 ? node.label.substring(0, 11) + '…' : node.label}
+                          </text>
+                        </g>
+                      )}
+                    </g>
+                  );
+                }).filter(Boolean);
+              })}
+            </g>
+
+            {/* Vine draw: ghost of all pending paths while mode is active */}
+            {vineDrawMode && pendingPaths.map((p, pi) => p.pts.length > 1 && (
+              <polyline key={pi}
+                points={p.pts.map(pt => `${pt.x},${pt.y}`).join(' ')}
+                fill="none" stroke="#22c55e" strokeWidth={2 / transform.scale}
+                strokeLinecap="round" strokeLinejoin="round"
+                strokeDasharray={`${6 / transform.scale} ${5 / transform.scale}`}
+                opacity={0.35}
+                style={{ pointerEvents: 'none' }}
+              />
+            ))}
+            {/* Current stroke being drawn — slightly more visible */}
+            {vineDrawMode && currentStroke.length > 1 && (
+              <g style={{ pointerEvents: 'none' }}>
+                <polyline
+                  points={currentStroke.map(p => `${p.x},${p.y}`).join(' ')}
+                  fill="none" stroke="#22c55e" strokeWidth={2.5 / transform.scale}
+                  strokeLinecap="round" strokeLinejoin="round"
+                  strokeDasharray={`${7 / transform.scale} ${4 / transform.scale}`}
+                  opacity={0.6}
+                />
+                <circle cx={currentStroke[0].x} cy={currentStroke[0].y}
+                  r={9 / transform.scale} fill="#22c55e" opacity={0.35} />
+              </g>
+            )}
+
+            {/* Pending vine connection — dotted preview line */}
+            {vineConnectPrompt && (() => {
+              const src = nodes.find(n => n.id === vineConnectPrompt.srcId);
+              const tgt = nodes.find(n => n.id === vineConnectPrompt.tgtId);
+              if (!src || !tgt) return null;
+              return (
+                <line
+                  x1={src.x} y1={src.y} x2={tgt.x} y2={tgt.y}
+                  stroke="#10b981" strokeWidth={3/transform.scale}
+                  strokeDasharray={(12/transform.scale)+' '+(6/transform.scale)}
+                  opacity="0.9" style={{pointerEvents:'none'}}
+                />
+              );
+            })()}
+
+            {/* Spawn popup — dotted circle at loop end with Friend / Group options */}
+            {spawnPopup && (() => {
+              // Use the actual drawn loop radius — buttons fill the circle
+              const R = spawnPopup.r;
+              // Buttons fill ~70% of the circle width, stacked vertically with a small gap
+              const btnW = R * 1.3;
+              const btnH = R * 0.55;
+              const gap  = R * 0.12;
+              const fs   = Math.max(8, R * 0.28);
+              const sw   = Math.max(1, R * 0.04);
+              const { x, y } = spawnPopup;
+              const totalH = btnH * 2 + gap;
+              return (
+                <g style={{ pointerEvents: 'all' }} key="spawn-popup">
+                  {/* Dotted circle outline */}
+                  <circle cx={x} cy={y} r={R}
+                    fill={theme.darkMode ? 'rgba(15,23,42,0.88)' : 'rgba(255,255,255,0.92)'}
+                    stroke="#22c55e" strokeWidth={sw}
+                    strokeDasharray={`${R * 0.18} ${R * 0.12}`} />
+                  {/* Source label — show who this will connect to */}
+                  {spawnPopup.sourceLabel && (
+                    <text x={x} y={y - totalH/2 - R * 0.18}
+                      textAnchor="middle" fontSize={Math.max(7, R * 0.22)}
+                      fill={theme.darkMode ? '#94a3b8' : '#64748b'}
+                      style={{ userSelect:'none', pointerEvents:'none' }}>
+                      connects to {spawnPopup.sourceLabel}
+                    </text>
+                  )}
+                  {/* Friend button — upper half */}
+                  <g transform={`translate(${x - btnW/2}, ${y - totalH/2})`}
+                    className="cursor-pointer"
+                    onClick={() => {
+                      const newId = `node_${Date.now()}`;
+                      const avatarKeys = Object.keys(AVATARS);
+                      snapshot();
+                      setNodes(prev => [...prev, {
+                        id: newId, label: 'New Friend',
+                        img: AVATARS[avatarKeys[Math.floor(Math.random() * avatarKeys.length)]],
+                        x: spawnPopup.x, y: spawnPopup.y,
+                        interactionScore: 0, pinned: false, type: 'friend',
+                      }]);
+                      if (spawnPopup.sourceNodeId) {
+                        setLinks(prev => [...prev, { source: spawnPopup.sourceNodeId, target: newId }]);
+                      }
+                      setSelectedNodeId(newId);
+                      setSpawnPopup(null);
+                    }}
+                  >
+                    <rect width={btnW} height={btnH} rx={btnH * 0.45} fill="#16a34a" opacity={0.92} />
+                    <text x={btnW/2} y={btnH * 0.64} textAnchor="middle"
+                      fontSize={fs} fontWeight="700" fill="white"
+                      style={{ userSelect:'none', pointerEvents:'none' }}>🌱 Friend</text>
+                  </g>
+                  {/* Group button — lower half */}
+                  <g transform={`translate(${x - btnW/2}, ${y - totalH/2 + btnH + gap})`}
+                    className="cursor-pointer"
+                    onClick={() => {
+                      const newId = `hub_${Date.now()}`;
+                      snapshot();
+                      setNodes(prev => [...prev, {
+                        id: newId, type: 'hub', label: 'New Group',
+                        x: spawnPopup.x, y: spawnPopup.y, pinned: false,
+                      }]);
+                      // Connect to source node if drawn from one, otherwise connect to Me
+                      const linkSrc = spawnPopup.sourceNodeId || 'flower_social';
+                      setLinks(prev => [...prev, { source: linkSrc, target: newId }]);
+                      setGroupModal({ hubId: newId });
+                      setSpawnPopup(null);
+                    }}
+                  >
+                    <rect width={btnW} height={btnH} rx={btnH * 0.45} fill="#0f766e" opacity={0.92} />
+                    <text x={btnW/2} y={btnH * 0.64} textAnchor="middle"
+                      fontSize={fs} fontWeight="700" fill="white"
+                      style={{ userSelect:'none', pointerEvents:'none' }}>🌳 Group</text>
+                  </g>
+                  {/* Dismiss ✕ */}
+                  <g transform={`translate(${x + R * 0.68}, ${y - R * 0.68})`}
+                    className="cursor-pointer"
+                    onClick={() => setSpawnPopup(null)}
+                  >
+                    <circle r={R * 0.22} fill={theme.darkMode ? '#334155' : '#e2e8f0'} />
+                    <text textAnchor="middle" dominantBaseline="middle"
+                      fontSize={R * 0.2} fill={theme.darkMode ? '#e2e8f0' : '#334155'}
+                      style={{ userSelect:'none', pointerEvents:'none' }}>✕</text>
+                  </g>
+                </g>
+              );
+            })()}
+            {macheteMode && slashTrail.length > 1 && (
+              <polyline
+                points={slashTrail.map(p => `${p.x},${p.y}`).join(' ')}
+                fill="none"
+                stroke="#ef4444"
+                strokeWidth={3 / transform.scale}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                opacity={0.85}
+                style={{ pointerEvents: 'none' }}
+              />
+            )}
+          </g>
+        </svg>
+
+        {/* ── Select from Map mode overlay ─────────────────────────────────────── */}
+      {selectForGroupMode && (
+        <div style={{
+          position:'fixed', top:0, left:0, right:0, zIndex:300,
+          display:'flex', flexDirection:'column', gap:6,
+          padding:'12px 16px',
+          background:'#064e3b',
+          borderBottom:'3px solid #16a34a',
+          boxShadow:'0 4px 20px rgba(0,0,0,0.4)',
+        }}>
+          <div style={{display:'flex',gap:10,alignItems:'center',justifyContent:'space-between'}}>
+            <span style={{fontSize:13,fontWeight:700,color:'white'}}>
+              🫂 Tap people to add to group
+            </span>
+            <div style={{display:'flex',gap:8}}>
+              <button onClick={() => {
+                setLinks(prev => {
+                  const toAdd = selectedForGroupRef.current;
+                  const newLinks = [];
+                  toAdd.forEach(id => {
+                    const alreadyLinked = prev.some(l =>
+                      (l.source === selectForGroupMode && l.target === id) ||
+                      (l.source === id && l.target === selectForGroupMode)
+                    );
+                    if (!alreadyLinked) {
+                      if (id === 'me') {
+                        // Connect Me to social node, not the group hub
+                        const meAlreadyLinkedToSocial = prev.some(l =>
+                          (l.source === 'me' && l.target === 'flower_social') ||
+                          (l.source === 'flower_social' && l.target === 'me')
+                        );
+                        if (!meAlreadyLinkedToSocial) {
+                          newLinks.push({ source: 'me', target: 'flower_social' });
+                        }
+                      } else {
+                        newLinks.push({ source: selectForGroupMode, target: id });
+                      }
+                    }
+                  });
+                  return [...prev, ...newLinks];
+                });
+                showToast('Added ' + selectedForGroupRef.current.length + ' people to group');
+                setSelectForGroupMode(null);
+                setSelectedForGroup([]);
+                selectedForGroupRef.current = [];
+              }} style={{padding:'6px 16px',borderRadius:8,background:'#16a34a',color:'white',border:'none',cursor:'pointer',fontSize:13,fontWeight:700}}>
+                Confirm ({selectedForGroup.length})
+              </button>
+              <button onClick={() => { setSelectForGroupMode(null); setSelectedForGroup([]); }}
+                style={{padding:'6px 12px',borderRadius:8,background:'#ef4444',color:'white',border:'none',cursor:'pointer',fontSize:13,fontWeight:600}}>
+                Cancel
+              </button>
+            </div>
+          </div>
+          {selectedForGroup.length > 0 && (
+            <div style={{fontSize:11,color:'#86efac',display:'flex',gap:6,flexWrap:'wrap'}}>
+              {selectedForGroup.map(id => {
+                const n = nodes.find(x => x.id === id);
+                return n ? <span key={id} style={{background:'rgba(255,255,255,0.15)',borderRadius:4,padding:'1px 6px'}}>{n.label}</span> : null;
+              })}
+            </div>
+          )}
+        </div>
+      )}
+        {showTutorial && viewMode === 'canvas' && (
+          <div style={{
+            position:'absolute', top:80, left:16, zIndex:60, width:240,
+            background: theme.darkMode ? 'rgba(15,23,42,0.95)' : 'rgba(255,255,255,0.95)',
+            border:`1px solid ${theme.darkMode?'#334155':'#e2e8f0'}`,
+            borderRadius:16, padding:16,
+            boxShadow:'0 8px 32px rgba(0,0,0,0.3)',
+          }}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+              <span style={{fontWeight:800,fontSize:14,color:'#10b981'}}>🌳 Welcome!</span>
+              <button onClick={()=>setShowTutorial(false)}
+                style={{background:'none',border:'none',cursor:'pointer',color:theme.darkMode?'#94a3b8':'#64748b',fontSize:16}}>✕</button>
+            </div>
+            <ul style={{margin:0,padding:'0 0 0 16px',fontSize:12,color:theme.darkMode?'#94a3b8':'#64748b',lineHeight:1.8}}>
+              <li><strong style={{color:theme.darkMode?'#e2e8f0':'#1e293b'}}>Double-tap</strong> a face to open profile</li>
+              <li><strong style={{color:theme.darkMode?'#e2e8f0':'#1e293b'}}>Hold</strong> to drag and reposition</li>
+              <li><strong style={{color:theme.darkMode?'#e2e8f0':'#1e293b'}}>➕</strong> to add friends or groups</li>
+              <li><strong style={{color:theme.darkMode?'#e2e8f0':'#1e293b'}}>✨ Demo</strong> to see it in action</li>
+            </ul>
+          </div>
+        )}
+
+        {/* Active tag filter indicator — only shown when filters are on */}
+        {viewMode === 'canvas' && activeTags.length > 0 && (
+          <div style={{
+            position:'absolute', top:16, left:'50%', transform:'translateX(-50%)', zIndex:60,
+            display:'flex', gap:6, alignItems:'center',
+            background: theme.darkMode ? 'rgba(15,23,42,0.92)' : 'rgba(255,255,255,0.92)',
+            borderRadius:99, padding:'6px 12px',
+            boxShadow:'0 4px 20px rgba(0,0,0,0.15)',
+            border:`1px solid ${theme.darkMode?'#334155':'#e2e8f0'}`,
+          }}>
+            <span style={{fontSize:11, fontWeight:700, color:'#10b981'}}>🏷 Filtering:</span>
+            {activeTags.map(tag => (
+              <span key={tag} style={{
+                padding:'3px 8px', borderRadius:99, fontSize:11, fontWeight:700,
+                background:'#10b981', color:'white',
+              }}>{tag}</span>
+            ))}
+            <button onClick={() => setActiveTags([])}
+              style={{padding:'3px 8px', borderRadius:99, border:'none', cursor:'pointer', fontSize:10, fontWeight:700, background:'#ef4444', color:'white'}}>✕</button>
+          </div>
+        )}
+        {viewMode === 'calendar' && (
+          <div style={{position:'absolute',top:16,left:'50%',transform:'translateX(-50%)',zIndex:60,
+            display:'flex',gap:6,background:theme.darkMode?'rgba(15,23,42,0.92)':'rgba(255,255,255,0.92)',
+            borderRadius:99,padding:'6px 10px',boxShadow:'0 4px 20px rgba(0,0,0,0.2)',
+            border:`1px solid ${theme.darkMode?'#334155':'#e2e8f0'}`}}>
+            {[
+              { id:'circle', label:'⭕ Circle' },
+              { id:'spiral', label:'🌀 Spiral' },
+              { id:'line',   label:'➡ Line' },
+              { id:'wave',   label:'〰 Wave' },
+              { id:'arc',    label:'🌈 Arc' },
+            ].map(opt => (
+              <button key={opt.id} onClick={() => setCalendarLayout(opt.id)}
+                style={{
+                  padding:'5px 12px', borderRadius:99, border:'none', cursor:'pointer',
+                  fontSize:12, fontWeight:calendarLayout===opt.id?700:500,
+                  background: calendarLayout===opt.id ? '#10b981' : 'transparent',
+                  color: calendarLayout===opt.id ? 'white' : (theme.darkMode?'#94a3b8':'#64748b'),
+                  transition:'all 0.15s',
+                }}>
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        )}
+        <div className={`absolute bottom-6 right-6 flex items-center space-x-2 p-2 rounded-xl shadow-lg border ${theme.darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
+          <button onClick={() => setTransform(p => ({ ...p, scale: Math.max(0.01, p.scale / 1.3) }))} className={`p-2 rounded-lg transition-colors ${theme.darkMode ? 'hover:bg-slate-700 text-slate-300' : 'hover:bg-slate-100 text-slate-600'}`}><ZoomOut className="w-5 h-5" /></button>
+          <span className={`text-xs font-semibold w-12 text-center ${theme.darkMode ? 'text-slate-300' : 'text-slate-500'}`}>{Math.round(transform.scale * 100)}%</span>
+          <button onClick={() => setTransform(p => ({ ...p, scale: Math.min(3, p.scale * 1.3) }))} className={`p-2 rounded-lg transition-colors ${theme.darkMode ? 'hover:bg-slate-700 text-slate-300' : 'hover:bg-slate-100 text-slate-600'}`}><ZoomIn className="w-5 h-5" /></button>
+        </div>
+
+        {/* Toast */}
+        {toastMessage && (
+          <div className="absolute top-6 left-1/2 -translate-x-1/2 bg-slate-800 text-white px-6 py-3 rounded-full shadow-2xl flex items-center space-x-3 z-50 pointer-events-none">
+            <span className="text-sm font-medium">{toastMessage}</span>
+          </div>
+        )}
+      </div>
+
+      {/* ── Vine Connection Prompt ───────────────────────────────────────────── */}
+      {vineConnectPrompt && (() => {
+        const src = nodes.find(n => n.id === vineConnectPrompt.srcId);
+        const tgt = nodes.find(n => n.id === vineConnectPrompt.tgtId);
+        if (!src || !tgt) return null;
+
+        // Convert SVG coords to screen coords for the popup
+        const midSvgX = (src.x + tgt.x) / 2;
+        const midSvgY = (src.y + tgt.y) / 2;
+        const screenX = midSvgX * transform.scale + transform.x;
+        const screenY = midSvgY * transform.scale + transform.y;
+
+        const tiers = [
+          {label:'New',    score:0,   color:'#bef264'},
+          {label:'Friend', score:100, color:'#84cc16'},
+          {label:'Good',   score:300, color:'#166534'},
+          {label:'Close',  score:600, color:'#3b82f6'},
+          {label:'Family', score:800, color:'#9333ea'},
+        ];
+
+        const confirmConnection = (score) => {
+          setLinks(prev => [...prev, { source: vineConnectPrompt.srcId, target: vineConnectPrompt.tgtId }]);
+          // Apply score to the target (further from Me)
+          setNodes(prev => prev.map(n =>
+            n.id === vineConnectPrompt.tgtId
+              ? { ...n, interactionScore: Math.max(n.interactionScore || 0, score) }
+              : n
+          ));
+          showToast('🌱 Connected ' + src.label + ' → ' + tgt.label);
+          setVineConnectPrompt(null);
+        };
+
+        return (
+          <div style={{
+            position:'fixed',
+            left: Math.max(8, Math.min(window.innerWidth-220, screenX-100)),
+            top: Math.max(8, Math.min(window.innerHeight-200, screenY-80)),
+            zIndex:500,
+            background:theme.darkMode?'#0f172a':'white',
+            borderRadius:16,
+            padding:'14px 16px',
+            boxShadow:'0 8px 32px rgba(0,0,0,0.4)',
+            border:'2px solid #10b981',
+            width:200,
+          }}>
+            <div style={{fontSize:12,fontWeight:700,color:theme.darkMode?'#e2e8f0':'#1e293b',marginBottom:4,textAlign:'center'}}>
+              {src.label} ↔ {tgt.label}
+            </div>
+            <div style={{fontSize:11,color:theme.darkMode?'#64748b':'#94a3b8',marginBottom:10,textAlign:'center'}}>
+              What's their friendship?
+            </div>
+            <div style={{display:'flex',flexDirection:'column',gap:6}}>
+              {tiers.map(t => (
+                <button key={t.score} onClick={()=>confirmConnection(t.score)}
+                  style={{
+                    padding:'7px 12px', borderRadius:8, border:'none', cursor:'pointer',
+                    background:t.color+'22', color:t.color,
+                    fontSize:13, fontWeight:700, textAlign:'left',
+                    borderLeft:'4px solid '+t.color,
+                  }}>{t.label}</button>
+              ))}
+            </div>
+            <button onClick={()=>setVineConnectPrompt(null)}
+              style={{marginTop:10,width:'100%',padding:'6px',borderRadius:8,border:'none',
+                background:'none',color:theme.darkMode?'#475569':'#94a3b8',
+                cursor:'pointer',fontSize:12}}>Cancel</button>
+          </div>
+        );
+      })()}
+      {appLocked && (
+        <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:900,
+          background:theme.darkMode?'#0f172a':'#f8fafc',
+          display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:20}}>
+          <div style={{fontSize:48}}>🔒</div>
+          <div style={{fontSize:20,fontWeight:800,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>FriendshipTree</div>
+          <div style={{fontSize:14,color:theme.darkMode?'#94a3b8':'#64748b'}}>Enter PIN to unlock</div>
+          {/* PIN dots */}
+          <div style={{display:'flex',gap:12,margin:'8px 0'}}>
+            {Array.from({length:6}).map((_,i)=>(
+              <div key={i} style={{width:14,height:14,borderRadius:'50%',
+                background:i<pinInput.length?'#10b981':(theme.darkMode?'#334155':'#e2e8f0'),
+                transition:'background 0.15s'}}/>
+            ))}
+          </div>
+          {pinError && <div style={{color:'#ef4444',fontSize:12,fontWeight:600}}>{pinError}</div>}
+          {/* Numpad */}
+          <div style={{display:'grid',gridTemplateColumns:'repeat(3,72px)',gap:10}}>
+            {[1,2,3,4,5,6,7,8,9,'',0,'⌫'].map((d,i)=>(
+              <button key={i} onClick={()=>{
+                if(d==='') return;
+                if(d==='⌫'){handlePinBackspace();return;}
+                const next=(pinInput+String(d)).slice(0,6);
+                setPinInput(next);setPinError('');
+                if(next.length>=4){
+                  setTimeout(()=>{
+                    const stored=localStorage.getItem('ft_pin');
+                    if(next===stored){setAppLocked(false);setPinInput('');}
+                    else{setPinError('Wrong PIN');setPinInput('');}
+                  },150);
+                }
+              }}
+              style={{height:64,borderRadius:12,border:'none',cursor:d===''?'default':'pointer',
+                background:d===''?'transparent':(theme.darkMode?'#1e293b':'white'),
+                fontSize:d==='⌫'?20:22,fontWeight:600,
+                color:theme.darkMode?'#e2e8f0':'#1e293b',
+                boxShadow:d===''?'none':'0 2px 8px rgba(0,0,0,0.15)',
+              }}>{d}</button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── PIN Modal ───────────────────────────────────────────────────────── */}
+      {pinModal && (
+        <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:800,background:'rgba(0,0,0,0.6)',
+          display:'flex',alignItems:'center',justifyContent:'center'}}
+          onClick={e=>{if(e.target===e.currentTarget){setPinModal(null);setPinInput('');}}}>
+          <div style={{background:theme.darkMode?'#0f172a':'white',borderRadius:20,padding:28,
+            width:'min(90vw,320px)',textAlign:'center',boxShadow:'0 25px 60px rgba(0,0,0,0.4)'}}>
+            <div style={{fontSize:32,marginBottom:8}}>{pinModal.mode==='set'?'🔐':'🔒'}</div>
+            <div style={{fontSize:16,fontWeight:800,color:theme.darkMode?'#e2e8f0':'#1e293b',marginBottom:4}}>{pinModal.title}</div>
+            <div style={{fontSize:12,color:theme.darkMode?'#64748b':'#94a3b8',marginBottom:16}}>
+              {pinModal.mode==='set'?'Choose a 4–6 digit PIN':'Enter your PIN to continue'}
+            </div>
+            {/* PIN dots */}
+            <div style={{display:'flex',gap:10,justifyContent:'center',marginBottom:8}}>
+              {Array.from({length:6}).map((_,i)=>(
+                <div key={i} style={{width:12,height:12,borderRadius:'50%',
+                  background:i<pinInput.length?'#10b981':(theme.darkMode?'#334155':'#e2e8f0'),transition:'background 0.15s'}}/>
+              ))}
+            </div>
+            {pinError && <div style={{color:'#ef4444',fontSize:12,fontWeight:600,marginBottom:8}}>{pinError}</div>}
+            {/* Numpad */}
+            <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8,marginTop:8}}>
+              {[1,2,3,4,5,6,7,8,9,'',0,'⌫'].map((d,i)=>(
+                <button key={i} onClick={()=>{
+                  if(d==='') return;
+                  if(d==='⌫'){handlePinBackspace();return;}
+                  handlePinDigit(String(d));
+                }}
+                  style={{padding:'14px 0',borderRadius:10,border:'none',cursor:d===''?'default':'pointer',
+                    background:d===''?'transparent':(theme.darkMode?'#1e293b':'#f8fafc'),
+                    fontSize:d==='⌫'?18:20,fontWeight:600,
+                    color:theme.darkMode?'#e2e8f0':'#1e293b',
+                    boxShadow:d===''?'none':'0 1px 4px rgba(0,0,0,0.1)',
+                  }}>{d}</button>
+              ))}
+            </div>
+            <button onClick={()=>{setPinModal(null);setPinInput('');}}
+              style={{marginTop:16,padding:'8px 24px',borderRadius:99,border:'none',cursor:'pointer',
+                background:'transparent',color:theme.darkMode?'#64748b':'#94a3b8',fontSize:13}}>Cancel</button>
+          </div>
+        </div>
+      )}
+      {mergePrompt && (() => {
+        const nodeA = nodes.find(n => n.id === mergePrompt.a);
+        const nodeB = nodes.find(n => n.id === mergePrompt.b);
+        if (!nodeA || !nodeB) { setMergePrompt(null); return null; }
+        const isGroup = mergePrompt.type === 'group';
+        const dm = theme.darkMode;
+        return (
+          <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:500,background:'rgba(0,0,0,0.6)',display:'flex',alignItems:'center',justifyContent:'center'}}
+            onClick={e => { if(e.target===e.currentTarget) setMergePrompt(null); }}>
+            <div style={{background:dm?'#0f172a':'white',borderRadius:16,padding:24,width:'min(90vw,340px)',boxShadow:'0 25px 60px rgba(0,0,0,0.5)',border:`1px solid ${dm?'#334155':'#e2e8f0'}`}}>
+              <div style={{fontSize:32,textAlign:'center',marginBottom:8}}>{isGroup ? '🌳' : '🤝'}</div>
+              <h3 style={{textAlign:'center',fontWeight:800,fontSize:16,color:dm?'#e2e8f0':'#1e293b',marginBottom:6}}>
+                {isGroup ? 'Merge Groups?' : 'Connect Friends?'}
+              </h3>
+              <p style={{textAlign:'center',fontSize:13,color:dm?'#94a3b8':'#64748b',marginBottom:20}}>
+                {isGroup
+                  ? `Merge "${nodeA.label}" into "${nodeB.label}"? All members will move to ${nodeB.label}.`
+                  : `Add a connection between ${nodeA.label} and ${nodeB.label}?`}
+              </p>
+              <div style={{display:'flex',gap:10}}>
+                <button onClick={() => {
+                  snapshot();
+                  if (isGroup) {
+                    // Move all of A's members to B
+                    const aMembers = links.filter(l => l.source === mergePrompt.a || l.target === mergePrompt.a)
+                      .map(l => l.source === mergePrompt.a ? l.target : l.source)
+                      .filter(id => id !== 'me' && id !== mergePrompt.b);
+                    setLinks(prev => [
+                      ...prev.filter(l => l.source !== mergePrompt.a && l.target !== mergePrompt.a),
+                      ...aMembers.map(id => ({ source: mergePrompt.b, target: id })),
+                    ]);
+                    setNodes(prev => prev.filter(n => n.id !== mergePrompt.a));
+                    showToast(`✅ Groups merged into ${nodeB.label}`);
+                  } else {
+                    setLinks(prev => [...prev, { source: mergePrompt.a, target: mergePrompt.b }]);
+                    showToast(`🌱 ${nodeA.label} and ${nodeB.label} connected!`);
+                  }
+                  setMergePrompt(null);
+                }} style={{flex:1,padding:'10px',borderRadius:10,background:'#10b981',color:'white',border:'none',cursor:'pointer',fontWeight:700,fontSize:14}}>
+                  {isGroup ? '✓ Merge' : '✓ Connect'}
+                </button>
+                <button onClick={() => setMergePrompt(null)}
+                  style={{flex:1,padding:'10px',borderRadius:10,background:dm?'#334155':'#e2e8f0',color:dm?'#e2e8f0':'#334155',border:'none',cursor:'pointer',fontWeight:600,fontSize:14}}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Search Overlay ───────────────────────────────────────────────────── */}
+      {searchOpen && (() => {
+        const dm = theme.darkMode;
+        const q = searchQuery.toLowerCase();
+        const results = q.length > 0 ? nodes.filter(n =>
+          n.label?.toLowerCase().includes(q) && n.id !== 'me' && n.type !== 'flower'
+        ) : [];
+        return (
+          <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:500,background:'rgba(0,0,0,0.5)'}}
+            onClick={e => { if(e.target===e.currentTarget) { setSearchOpen(false); setSearchQuery(''); } }}>
+            <div style={{
+              position:'absolute',top:20,left:'50%',transform:'translateX(-50%)',
+              width:'min(90vw,420px)',background:dm?'#0f172a':'white',
+              borderRadius:16,boxShadow:'0 20px 50px rgba(0,0,0,0.4)',
+              border:`1px solid ${dm?'#334155':'#e2e8f0'}`,overflow:'hidden',
+            }}>
+              <div style={{display:'flex',alignItems:'center',gap:10,padding:'12px 16px',borderBottom:`1px solid ${dm?'#334155':'#e2e8f0'}`}}>
+                <span style={{fontSize:18}}>🔍</span>
+                <input autoFocus value={searchQuery} onChange={e=>setSearchQuery(e.target.value)}
+                  placeholder="Search people and groups…"
+                  style={{flex:1,background:'none',border:'none',outline:'none',fontSize:15,color:dm?'#e2e8f0':'#1e293b'}}
+                  onKeyDown={e=>e.key==='Escape'&&(setSearchOpen(false),setSearchQuery(''))} />
+                <button onClick={()=>{setSearchOpen(false);setSearchQuery('');}}
+                  style={{background:'none',border:'none',cursor:'pointer',fontSize:18,color:dm?'#94a3b8':'#64748b'}}>✕</button>
+              </div>
+              {results.length > 0 && (
+                <div style={{maxHeight:320,overflowY:'auto'}}>
+                  {results.map(n => {
+                    const tier = getTier(n.interactionScore||0, n);
+                    const lvl = FRIENDSHIP_LEVELS.find(l=>l.tier===tier)||FRIENDSHIP_LEVELS[0];
+                    return (
+                      <div key={n.id} onClick={()=>{
+                        setSelectedNodeId(n.id);
+                        setViewMode('canvas');
+                        setSearchOpen(false); setSearchQuery('');
+                      }} style={{display:'flex',alignItems:'center',gap:12,padding:'10px 16px',cursor:'pointer',borderBottom:`1px solid ${dm?'#1e293b':'#f8fafc'}`}}
+                        onMouseEnter={e=>e.currentTarget.style.background=dm?'#1e293b':'#f8fafc'}
+                        onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                        {n.img && <img src={n.img} style={{width:36,height:36,borderRadius:'50%',objectFit:'cover',border:`2px solid ${lvl.color}`}} />}
+                        {n.type==='hub' && <span style={{width:36,height:36,borderRadius:'50%',background:dm?'#334155':'#e2e8f0',display:'flex',alignItems:'center',justifyContent:'center',fontSize:18}}>🌳</span>}
+                        <div style={{flex:1}}>
+                          <div style={{fontWeight:700,fontSize:14,color:dm?'#e2e8f0':'#1e293b'}}>{n.label}</div>
+                          <div style={{fontSize:11,color:lvl.color}}>{lvl.emoji} {lvl.label}</div>
+                        </div>
+                        {(n.tags||[]).map(t=>(
+                          <span key={t} style={{fontSize:10,padding:'2px 6px',borderRadius:99,background:dm?'#334155':'#e2e8f0',color:dm?'#94a3b8':'#64748b'}}>{t}</span>
+                        ))}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {q.length > 0 && results.length === 0 && (
+                <div style={{padding:'20px 16px',textAlign:'center',color:dm?'#475569':'#94a3b8',fontSize:13}}>No results for "{searchQuery}"</div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Photo Crop Modal ─────────────────────────────────────────────────── */}
+      {photoCrop && (() => {
+        const dm = theme.darkMode;
+        const SIZE = 800; // output size px - full quality
+
+        const applyCrop = () => {
+          const img = cropImgRef.current;
+          if (!img) return;
+          const canvas = document.createElement('canvas');
+          canvas.width = SIZE; canvas.height = SIZE;
+          const ctx = canvas.getContext('2d');
+
+          // Circle clip
+          ctx.beginPath();
+          ctx.arc(SIZE/2, SIZE/2, SIZE/2, 0, Math.PI*2);
+          ctx.clip();
+
+          const { x, y, scale } = photoCrop.crop;
+
+          // The preview div is square (containerW = containerH = container size)
+          // The image is displayed with objectFit:'contain' scaled to fit that square
+          // We need to map from screen-space drag offsets back to image-space coordinates
+
+          const iw = img.naturalWidth;
+          const ih = img.naturalHeight;
+
+          // Size of the preview container in CSS pixels (from the rendered element)
+          const previewEl = cropImgRef.current?.parentElement;
+          const containerW = previewEl ? previewEl.offsetWidth : 300;
+          const containerH = previewEl ? previewEl.offsetHeight : 300;
+
+          // How the image fits in the container with objectFit:contain
+          const imgAspect = iw / ih;
+          const containerAspect = containerW / containerH;
+          let renderedW, renderedH;
+          if (imgAspect > containerAspect) {
+            renderedW = containerW;
+            renderedH = containerW / imgAspect;
+          } else {
+            renderedH = containerH;
+            renderedW = containerH * imgAspect;
+          }
+
+          // Scale factor from CSS pixels to image pixels
+          const cssToImg = iw / renderedW;
+
+          // The visible region in image-space:
+          // Center of image + user drag offset (converted to image pixels) / scale
+          const imgCenterX = iw / 2 - (x * cssToImg) / scale;
+          const imgCenterY = ih / 2 - (y * cssToImg) / scale;
+
+          // Half-size of the square region to crop from the image
+          const halfSize = (Math.min(renderedW, renderedH) * cssToImg) / (2 * scale);
+
+          const sx = imgCenterX - halfSize;
+          const sy = imgCenterY - halfSize;
+          const sSize = halfSize * 2;
+
+          ctx.drawImage(img, sx, sy, sSize, sSize, 0, 0, SIZE, SIZE);
+
+          const base64 = canvas.toDataURL('image/png');
+          savePhotoToDB(photoCrop.nodeId, base64);
+          setNodes(prev => prev.map(n => n.id === photoCrop.nodeId ? { ...n, img: base64 } : n));
+          setPhotoCrop(null);
+        };
+
+        return (
+          <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:600,background:'rgba(0,0,0,0.85)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center'}}
+            onClick={e=>{if(e.target===e.currentTarget)setPhotoCrop(null)}}>
+            <div style={{background:dm?'#0f172a':'white',borderRadius:20,overflow:'hidden',width:'min(90vw,380px)',boxShadow:'0 25px 60px rgba(0,0,0,0.6)'}}>
+              {/* Header */}
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'14px 18px',borderBottom:`1px solid ${dm?'#334155':'#e2e8f0'}`}}>
+                <span style={{fontWeight:800,fontSize:15,color:dm?'#e2e8f0':'#1e293b'}}>📷 Crop Photo</span>
+                <button onClick={()=>setPhotoCrop(null)} style={{background:'none',border:'none',cursor:'pointer',fontSize:20,color:dm?'#94a3b8':'#64748b'}}>✕</button>
+              </div>
+
+              {/* Crop area */}
+              <div style={{position:'relative',width:'100%',paddingBottom:'100%',background:'#111',overflow:'hidden',cursor:'move'}}
+                onPointerDown={e=>{
+                  cropDragRef.current = {startX:e.clientX, startY:e.clientY, ox:photoCrop.crop.x, oy:photoCrop.crop.y};
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                }}
+                onPointerMove={e=>{
+                  if(!cropDragRef.current) return;
+                  const dx = e.clientX - cropDragRef.current.startX;
+                  const dy = e.clientY - cropDragRef.current.startY;
+                  setPhotoCrop(p=>({...p, crop:{...p.crop, x:cropDragRef.current.ox+dx, y:cropDragRef.current.oy+dy}}));
+                }}
+                onPointerUp={()=>{cropDragRef.current=null;}}
+                onWheel={e=>{
+                  e.preventDefault();
+                  setPhotoCrop(p=>({...p, crop:{...p.crop, scale:Math.max(0.5,Math.min(4,p.crop.scale*(e.deltaY>0?0.9:1.1)))}}));
+                }}>
+                <img ref={cropImgRef} src={photoCrop.src} alt="crop"
+                  style={{
+                    position:'absolute',
+                    top:'50%', left:'50%',
+                    transform:`translate(calc(-50% + ${photoCrop.crop.x}px), calc(-50% + ${photoCrop.crop.y}px)) scale(${photoCrop.crop.scale})`,
+                    maxWidth:'none', maxHeight:'none',
+                    width:'100%', height:'100%',
+                    objectFit:'contain',
+                    pointerEvents:'none',
+                    userSelect:'none',
+                  }} />
+                {/* Circle overlay */}
+                <svg style={{position:'absolute',top:0,left:0,right:0,bottom:0,width:'100%',height:'100%',pointerEvents:'none'}} viewBox="0 0 100 100" preserveAspectRatio="none">
+                  <mask id="circle-mask">
+                    <rect width="100" height="100" fill="white"/>
+                    <circle cx="50" cy="50" r="50" fill="black"/>
+                  </mask>
+                  <rect width="100" height="100" fill="rgba(0,0,0,0.55)" mask="url(#circle-mask)"/>
+                  <circle cx="50" cy="50" r="49.5" fill="none" stroke="white" strokeWidth="0.5" opacity="0.6"/>
+                </svg>
+              </div>
+
+              {/* Controls */}
+              <div style={{padding:16}}>
+                {/* Zoom slider */}
+                <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:14}}>
+                  <span style={{fontSize:12,color:dm?'#94a3b8':'#64748b'}}>🔍</span>
+                  <input type="range" min="0.5" max="4" step="0.05"
+                    value={photoCrop.crop.scale}
+                    onChange={e=>setPhotoCrop(p=>({...p,crop:{...p.crop,scale:parseFloat(e.target.value)}}))}
+                    style={{flex:1,accentColor:'#10b981'}} />
+                </div>
+                <div style={{display:'flex',gap:10}}>
+                  <button onClick={applyCrop}
+                    style={{flex:1,padding:'11px',borderRadius:10,background:'#10b981',color:'white',border:'none',cursor:'pointer',fontWeight:800,fontSize:14}}>
+                    ✓ Save Photo
+                  </button>
+                  <button onClick={()=>setPhotoCrop(null)}
+                    style={{padding:'11px 16px',borderRadius:10,background:dm?'#334155':'#e2e8f0',color:dm?'#e2e8f0':'#334155',border:'none',cursor:'pointer',fontWeight:600}}>
+                    Cancel
+                  </button>
+                </div>
+                <p style={{fontSize:10,color:dm?'#475569':'#94a3b8',textAlign:'center',marginTop:8}}>Drag to reposition · Scroll or slide to zoom</p>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Avatar Builder Modal ─────────────────────────────────────────────── */}
+      {avatarBuilder && (() => {
+        const targetNode = nodes.find(n => n.id === avatarBuilder.nodeId);
+        if (!targetNode) return null;
+        const dm = theme.darkMode;
+
+        const SKIN_TONES = ['#fde8d8','#f5cba7','#d4956a','#c68642','#8d5524','#4a2912'];
+        const HAIR_COLORS = ['#2d1b00','#8B4513','#d4a017','#f5cba7','#e03030','#9333ea','#1d4ed8','#1a1a1a','#6b7280','#ffffff'];
+        const BG_COLORS = [
+          '#ef4444','#f97316','#eab308','#22c55e','#06b6d4','#3b82f6','#8b5cf6','#ec4899', // rainbow
+          '#1e293b','#0f172a','#ffffff','#f5f5f0', // neutrals
+        ];
+
+        const HAIR_STYLES = [
+          { id: 'buzz',    label: 'Buzz',      path: '<ellipse cx="50" cy="36" rx="26" ry="12" fill="${h}"/>'},
+          { id: 'short',   label: 'Short',     path: '<ellipse cx="50" cy="34" rx="26" ry="14" fill="${h}"/><rect x="24" y="34" width="52" height="10" fill="${h}"/>'},
+          { id: 'sidePart',label: 'Side Part', path: '<ellipse cx="50" cy="34" rx="26" ry="14" fill="${h}"/><rect x="24" y="34" width="52" height="8" fill="${h}"/><ellipse cx="28" cy="42" rx="7" ry="10" fill="${h}"/>'},
+          { id: 'quiff',   label: 'Quiff',     path: '<ellipse cx="50" cy="35" rx="26" ry="13" fill="${h}"/><path d="M34 35 Q50 16 66 35" fill="${h}"/>'},
+          { id: 'caesar',  label: 'Caesar',    path: '<ellipse cx="50" cy="35" rx="26" ry="13" fill="${h}"/><path d="M24 38 Q50 28 76 38" fill="${h}"/>'},
+          { id: 'curly',   label: 'Curly',     path: '<ellipse cx="50" cy="31" rx="28" ry="17" fill="${h}"/><ellipse cx="28" cy="42" rx="10" ry="12" fill="${h}"/><ellipse cx="72" cy="42" rx="10" ry="12" fill="${h}"/>'},
+          { id: 'afro',    label: 'Afro',      path: '<ellipse cx="50" cy="28" rx="30" ry="22" fill="${h}"/><ellipse cx="50" cy="40" rx="24" ry="12" fill="${h}"/>'},
+          { id: 'bob',     label: 'Bob',       path: '<ellipse cx="50" cy="34" rx="26" ry="14" fill="${h}"/><rect x="24" y="34" width="52" height="24" rx="4" fill="${h}"/>'},
+          { id: 'lob',     label: 'Lob',       path: '<ellipse cx="50" cy="33" rx="26" ry="14" fill="${h}"/><rect x="24" y="33" width="10" height="36" fill="${h}"/><rect x="66" y="33" width="10" height="36" fill="${h}"/><ellipse cx="50" cy="33" rx="26" ry="14" fill="${h}"/>'},
+          { id: 'long',    label: 'Long',      path: '<ellipse cx="50" cy="33" rx="26" ry="14" fill="${h}"/><rect x="22" y="33" width="10" height="52" fill="${h}"/><rect x="68" y="33" width="10" height="52" fill="${h}"/><ellipse cx="50" cy="33" rx="26" ry="14" fill="${h}"/>'},
+          { id: 'wavy',    label: 'Wavy',      path: '<ellipse cx="50" cy="33" rx="26" ry="14" fill="${h}"/><path d="M24 40 Q20 56 26 72 Q22 82 28 90" stroke="${h}" stroke-width="9" fill="none" stroke-linecap="round"/><path d="M76 40 Q80 56 74 72 Q78 82 72 90" stroke="${h}" stroke-width="9" fill="none" stroke-linecap="round"/>'},
+          { id: 'ponytail',label: 'Ponytail',  path: '<ellipse cx="50" cy="33" rx="25" ry="13" fill="${h}"/><rect x="25" y="33" width="50" height="8" fill="${h}"/><ellipse cx="75" cy="30" rx="5" ry="8" fill="${h}"/><path d="M75 38 Q84 54 78 72" stroke="${h}" stroke-width="5" fill="none" stroke-linecap="round"/>'},
+          { id: 'bun',     label: 'Bun',       path: '<ellipse cx="50" cy="35" rx="25" ry="13" fill="${h}"/><ellipse cx="50" cy="21" rx="10" ry="10" fill="${h}"/><rect x="46" y="21" width="8" height="15" fill="${h}"/>'},
+          { id: 'bald',    label: 'Bald',      path: ''},
+        ];
+        const FACES = [
+          { id: 'smile',   label: '😊', mouth: '<path d="M44 70 Q50 76 56 70" stroke="#b06060" stroke-width="2.5" fill="none" stroke-linecap="round"/>' },
+          { id: 'grin',    label: '😁', mouth: '<path d="M43 69 Q50 77 57 69" stroke="#b06060" stroke-width="2" fill="none"/><rect x="44" y="70" width="12" height="5" rx="2" fill="white" stroke="#b06060" stroke-width="1"/>' },
+          { id: 'laugh',   label: '😄', mouth: '<ellipse cx="50" cy="73" rx="8" ry="5" fill="#c0504a"/><path d="M42 68 Q50 78 58 68" stroke="#b06060" stroke-width="2" fill="none"/>' },
+          { id: 'neutral', label: '😐', mouth: '<path d="M44 71 L56 71" stroke="#b06060" stroke-width="2.5" stroke-linecap="round"/>' },
+          { id: 'sad',     label: '😢', mouth: '<path d="M44 74 Q50 68 56 74" stroke="#b06060" stroke-width="2.5" fill="none" stroke-linecap="round"/>' },
+          { id: 'cool',    label: '😎', mouth: '<path d="M44 71 Q50 77 56 71" stroke="#b06060" stroke-width="2" fill="none" stroke-linecap="round"/><rect x="38" y="48" width="10" height="6" rx="3" fill="#1a1a2e" opacity="0.85"/><rect x="52" y="48" width="10" height="6" rx="3" fill="#1a1a2e" opacity="0.85"/><path d="M48 51 L52 51" stroke="#1a1a2e" stroke-width="1.5"/>' },
+          { id: 'wink',    label: '😉', mouth: '<path d="M44 71 Q50 77 56 71" stroke="#b06060" stroke-width="2" fill="none" stroke-linecap="round"/><path d="M55 50 Q59 47 62 50" stroke="#1a1a2e" stroke-width="2" fill="none"/><ellipse cx="43" cy="51" rx="3.5" ry="3.5" fill="#1a1a2e"/>' },
+          { id: 'surprised', label: '😮', mouth: '<ellipse cx="50" cy="73" rx="5" ry="6" fill="#c0504a"/>' },
+        ];
+
+        const bg    = avBg;    const setBg    = setAvBg;
+        const skin  = avSkin;  const setSkin  = setAvSkin;
+        const hair  = avHair;  const setHair  = setAvHair;
+        const style = avStyle; const setStyle = setAvStyle;
+        const face  = avFace;  const setFace  = setAvFace;
+
+        const buildImg = (bg2, skin2, hair2, style2, face2) => {
+          const hStyle = HAIR_STYLES.find(s => s.id === style2) || HAIR_STYLES[0];
+          const fStyle = FACES.find(f => f.id === face2) || FACES[0];
+          const hairPath = hStyle.path.replace(/\$\{h\}/g, hair2);
+          return makeAvatar(bg2, skin2, hair2, hairPath + fStyle.mouth);
+        };
+
+        const preview = buildImg(bg, skin, hair, style, face);
+        const swatch = (color, cur, setter, size = 28) => (
+          <button key={color} onClick={() => setter(color)}
+            style={{width:size,height:size,borderRadius:'50%',background:color,border:`3px solid ${color===cur?'white':'transparent'}`,outline:`2px solid ${color===cur?color:'transparent'}`,cursor:'pointer',flexShrink:0}} />
+        );
+
+        const apply = () => {
+          const img = buildImg(bg, skin, hair, style, face);
+          setNodes(prev => prev.map(n => n.id === avatarBuilder.nodeId
+            ? { ...n, img, _avBg: bg, _avSkin: skin, _avHair: hair, _avStyle: style, _avFace: face }
+            : n
+          ));
+          setAvatarBuilder(null);
+        };
+
+        const label = (t) => <p style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.06em',color:dm?'#94a3b8':'#64748b',marginBottom:5,marginTop:8}}>{t}</p>;
+
+        return (
+          <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:400,background:'rgba(0,0,0,0.65)',display:'flex',alignItems:'center',justifyContent:'center'}}
+            onClick={e => { if(e.target===e.currentTarget) setAvatarBuilder(null); }}>
+            <div style={{background:dm?'#0f172a':'white',border:`1px solid ${dm?'#334155':'#e2e8f0'}`,borderRadius:16,width:'min(94vw,380px)',maxHeight:'88vh',display:'flex',flexDirection:'column',overflow:'hidden',boxShadow:'0 25px 60px rgba(0,0,0,0.5)'}}>
+              <div style={{padding:'14px 18px',borderBottom:`1px solid ${dm?'#334155':'#e2e8f0'}`,display:'flex',alignItems:'center',gap:10}}>
+                <span style={{fontSize:18}}>🎨</span>
+                <span style={{flex:1,fontWeight:700,fontSize:15,color:dm?'#e2e8f0':'#1e293b'}}>Build Avatar</span>
+                <button onClick={()=>setAvatarBuilder(null)} style={{background:'none',border:'none',cursor:'pointer',fontSize:18,color:dm?'#94a3b8':'#64748b'}}>✕</button>
+              </div>
+              <div style={{overflowY:'auto',padding:'12px 18px',flex:1}}>
+                {/* Preview */}
+                <div style={{display:'flex',justifyContent:'center',marginBottom:12}}>
+                  <img src={preview} style={{width:80,height:80,borderRadius:'50%',border:`3px solid ${dm?'#334155':'#e2e8f0'}`}} alt="preview"/>
+                </div>
+                {/* Background */}
+                {label('Background')}
+                <div style={{display:'flex',flexWrap:'wrap',gap:6}}>{BG_COLORS.map(c => swatch(c,bg,setBg))}</div>
+                {/* Skin */}
+                {label('Skin Tone')}
+                <div style={{display:'flex',gap:6}}>{SKIN_TONES.map(c => swatch(c,skin,setSkin,32))}</div>
+                {/* Hair colour */}
+                {label('Hair Colour')}
+                <div style={{display:'flex',flexWrap:'wrap',gap:6}}>{HAIR_COLORS.map(c => swatch(c,hair,setHair))}</div>
+                {/* Hair style */}
+                {label('Hair Style')}
+                <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
+                  {HAIR_STYLES.map(s => (
+                    <button key={s.id} onClick={()=>setStyle(s.id)}
+                      style={{padding:'4px 10px',borderRadius:8,border:`2px solid ${style===s.id?(dm?'#22c55e':'#16a34a'):(dm?'#334155':'#e2e8f0')}`,background:style===s.id?(dm?'#14532d33':'#dcfce7'):'transparent',fontSize:12,fontWeight:600,color:dm?'#e2e8f0':'#334155',cursor:'pointer'}}>
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+                {/* Face */}
+                {label('Expression')}
+                <div style={{display:'flex',gap:8}}>
+                  {FACES.map(f => (
+                    <button key={f.id} onClick={()=>setFace(f.id)}
+                      style={{fontSize:22,padding:'4px 6px',borderRadius:8,border:`2px solid ${face===f.id?(dm?'#22c55e':'#16a34a'):'transparent'}`,background:'transparent',cursor:'pointer'}}>
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div style={{padding:'12px 18px',borderTop:`1px solid ${dm?'#334155':'#e2e8f0'}`,display:'flex',gap:8}}>
+                <button onClick={apply} style={{flex:1,padding:'10px',borderRadius:8,background:'#16a34a',color:'white',border:'none',cursor:'pointer',fontWeight:700,fontSize:14}}>
+                  ✓ Apply
+                </button>
+                <button onClick={()=>setAvatarBuilder(null)} style={{padding:'10px 16px',borderRadius:8,background:dm?'#334155':'#e2e8f0',color:dm?'#e2e8f0':'#334155',border:'none',cursor:'pointer',fontWeight:600}}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Flower / Dimension Panel ─────────────────────────────────────────── */}
+      {flowerPanel && (() => {
+        const dim = dimensions[flowerPanel];
+        if (!dim) return null;
+        const dm = theme.darkMode;
+        const bg      = dm ? '#0f172a' : '#ffffff';
+        const border  = dm ? '#334155' : '#e2e8f0';
+        const headBg  = dm ? '#1e293b' : '#f8fafc';
+        const rowBg   = dm ? '#1e293b' : '#f8fafc';
+        const text    = dm ? '#e2e8f0' : '#1e293b';
+        const sub     = dm ? '#94a3b8' : '#64748b';
+        const acts    = dim.activities || [];
+
+        const updateActivity = (actId, field, value) => {
+          setDimensions(prev => ({
+            ...prev,
+            [flowerPanel]: {
+              ...prev[flowerPanel],
+              activities: prev[flowerPanel].activities.map(a =>
+                a.id === actId ? { ...a, [field]: value } : a
+              ),
+            },
+          }));
+        };
+
+        const addActivity = () => {
+          const newAct = { id: `act_${Date.now()}`, name: 'New Activity', pts: 2 };
+          setDimensions(prev => ({
+            ...prev,
+            [flowerPanel]: { ...prev[flowerPanel], activities: [...prev[flowerPanel].activities, newAct] },
+          }));
+        };
+
+        const removeActivity = (actId) => {
+          setDimensions(prev => ({
+            ...prev,
+            [flowerPanel]: {
+              ...prev[flowerPanel],
+              activities: prev[flowerPanel].activities.filter(a => a.id !== actId),
+            },
+          }));
+        };
+
+        const logActivity = (act) => {
+          setDimensions(prev => {
+            const d = prev[flowerPanel];
+            const newLog = [...(d.log || []), {
+              date: new Date().toLocaleDateString('en-GB', { day:'numeric', month:'short' }),
+              category: act.name, note: act.name, pts: act.pts,
+            }];
+            return {
+              ...prev,
+              [flowerPanel]: {
+                ...d,
+                log: newLog,
+                weeklyScore: (d.weeklyScore || 0) + act.pts,
+                health: Math.min(1, (d.health || 0.5) + 0.05),
+              },
+            };
+          });
+          showToast(`${dim.emoji} +${act.pts} pts logged for ${act.name}`);
+        };
+
+        // Drag reorder handlers
+        const onDragStart = (actId) => setDragActivity({ dimKey: flowerPanel, actId });
+        const onDragOver  = (e, overId) => {
+          e.preventDefault();
+          if (!dragActivity || dragActivity.actId === overId) return;
+          setDimensions(prev => {
+            const acts = [...prev[flowerPanel].activities];
+            const fromIdx = acts.findIndex(a => a.id === dragActivity.actId);
+            const toIdx   = acts.findIndex(a => a.id === overId);
+            if (fromIdx < 0 || toIdx < 0) return prev;
+            const [moved] = acts.splice(fromIdx, 1);
+            acts.splice(toIdx, 0, moved);
+            return { ...prev, [flowerPanel]: { ...prev[flowerPanel], activities: acts } };
+          });
+        };
+        const onDragEnd = () => setDragActivity(null);
+
+        return (
+          <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:310,background:'rgba(0,0,0,0.6)',display:'flex',alignItems:'center',justifyContent:'center'}}
+            onClick={e => { if (e.target===e.currentTarget) setFlowerPanel(null); }}>
+            <div style={{background:bg,border:`1px solid ${border}`,borderRadius:16,width:'min(94vw,480px)',maxHeight:'86vh',display:'flex',flexDirection:'column',boxShadow:'0 25px 60px rgba(0,0,0,0.5)',overflow:'hidden'}}>
+
+              {/* Header */}
+              <div style={{padding:'16px 20px',borderBottom:`1px solid ${border}`,background:headBg,display:'flex',alignItems:'center',gap:10}}>
+                <span style={{fontSize:24}}>{dim.emoji}</span>
+                <div style={{flex:1}}>
+                  <div style={{fontWeight:800,fontSize:17,color:dim.color}}>{dim.label}</div>
+                  <div style={{fontSize:11,color:sub}}>
+                    {Math.round((dim.health||0)*100)}% health · {dim.weeklyScore||0}/{dim.weeklyTarget} this week
+                    {dim.autoCalculated && <span style={{marginLeft:6,opacity:0.6}}>(auto-calculated)</span>}
+                  </div>
+                </div>
+                {/* Health bar */}
+                <div style={{width:60,height:6,borderRadius:3,background:dm?'#334155':'#e2e8f0'}}>
+                  <div style={{height:'100%',borderRadius:3,background:dim.color,width:`${Math.round((dim.health||0)*100)}%`}} />
+                </div>
+                <button onClick={()=>setFlowerPanel(null)} style={{background:'none',border:'none',cursor:'pointer',fontSize:18,color:sub}}>✕</button>
+              </div>
+
+              {/* Activity list — draggable */}
+              <div style={{flex:1,overflowY:'auto',padding:'12px 16px'}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+                  <span style={{fontSize:12,fontWeight:700,color:sub,textTransform:'uppercase',letterSpacing:'0.05em'}}>
+                    Activities — drag to reorder by value
+                  </span>
+                  <button onClick={addActivity}
+                    style={{padding:'4px 12px',borderRadius:8,background:dim.color,color:'white',border:'none',cursor:'pointer',fontSize:12,fontWeight:700}}>
+                    + Add
+                  </button>
+                </div>
+
+                {acts.map((act, idx) => (
+                  <div key={act.id}
+                    draggable
+                    onDragStart={() => onDragStart(act.id)}
+                    onDragOver={e => onDragOver(e, act.id)}
+                    onDragEnd={onDragEnd}
+                    style={{
+                      display:'flex', alignItems:'center', gap:10,
+                      padding:'10px 12px', marginBottom:8, borderRadius:10,
+                      border:`1px solid ${dragActivity?.actId===act.id ? dim.color : border}`,
+                      background: dragActivity?.actId===act.id ? dim.color+'18' : rowBg,
+                      cursor:'grab', transition:'border-color 0.15s',
+                    }}
+                  >
+                    {/* Drag handle */}
+                    <span style={{color:sub,fontSize:14,flexShrink:0,cursor:'grab',userSelect:'none'}}>⠿</span>
+
+                    {/* Rank badge */}
+                    <span style={{
+                      flexShrink:0, width:22, height:22, borderRadius:'50%',
+                      background:dim.color, color:'white', fontSize:11, fontWeight:700,
+                      display:'flex',alignItems:'center',justifyContent:'center',
+                    }}>{idx+1}</span>
+
+                    {/* Editable name */}
+                    <input
+                      value={act.name}
+                      onChange={e => updateActivity(act.id, 'name', e.target.value)}
+                      style={{
+                        flex:1, background:'transparent', border:'none', outline:'none',
+                        fontSize:14, fontWeight:600, color:text, minWidth:0,
+                      }}
+                    />
+
+                    {/* Editable points */}
+                    <div style={{display:'flex',alignItems:'center',gap:4,flexShrink:0}}>
+                      <button onClick={()=>updateActivity(act.id,'pts',Math.max(1,act.pts-1))}
+                        style={{width:20,height:20,borderRadius:4,border:`1px solid ${border}`,background:'transparent',cursor:'pointer',color:sub,fontSize:12,display:'flex',alignItems:'center',justifyContent:'center'}}>−</button>
+                      <span style={{fontSize:13,fontWeight:700,color:dim.color,minWidth:24,textAlign:'center'}}>{act.pts}</span>
+                      <button onClick={()=>updateActivity(act.id,'pts',Math.min(10,act.pts+1))}
+                        style={{width:20,height:20,borderRadius:4,border:`1px solid ${border}`,background:'transparent',cursor:'pointer',color:sub,fontSize:12,display:'flex',alignItems:'center',justifyContent:'center'}}>+</button>
+                      <span style={{fontSize:10,color:sub}}>pts</span>
+                    </div>
+
+                    {/* Log button */}
+                    <button onClick={()=>logActivity(act)}
+                      style={{flexShrink:0,padding:'4px 10px',borderRadius:8,background:dim.color,color:'white',border:'none',cursor:'pointer',fontSize:12,fontWeight:700}}>
+                      Log
+                    </button>
+
+                    {/* Remove */}
+                    <button onClick={()=>removeActivity(act.id)}
+                      style={{flexShrink:0,background:'none',border:'none',cursor:'pointer',color:'#ef4444',fontSize:14,opacity:0.5,padding:0}}>✕</button>
+                  </div>
+                ))}
+              </div>
+
+              {/* Recent log */}
+              {dim.log?.length > 0 && (
+                <div style={{padding:'12px 16px',borderTop:`1px solid ${border}`,maxHeight:140,overflowY:'auto'}}>
+                  <p style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.05em',color:sub,marginBottom:6}}>Recent</p>
+                  {[...(dim.log||[])].reverse().slice(0,6).map((e,i)=>(
+                    <div key={i} style={{display:'flex',justifyContent:'space-between',fontSize:12,padding:'3px 0',borderBottom:`1px solid ${dm?'#334155':'#f1f5f9'}`}}>
+                      <span style={{color:text}}>{e.note}</span>
+                      <span style={{color:sub,fontSize:11}}>{e.date}</span>
+                      <span style={{color:dim.color,fontWeight:700,marginLeft:8}}>+{e.pts}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Diary Log Modal ──────────────────────────────────────────────────── */}
+      {diaryOpen && (
+        <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:300,background:'rgba(0,0,0,0.6)',display:'flex',alignItems:'center',justifyContent:'center'}}
+          onClick={e => { if(e.target===e.currentTarget) setDiaryOpen(false); }}>
+          <div style={{background:theme.darkMode?'#0f172a':'white',border:`1px solid ${theme.darkMode?'#334155':'#e2e8f0'}`,borderRadius:16,width:'min(95vw,600px)',maxHeight:'88vh',display:'flex',flexDirection:'column',boxShadow:'0 25px 60px rgba(0,0,0,0.5)',overflow:'hidden'}}>
+            {/* Header */}
+            <div style={{padding:'16px 20px',borderBottom:`1px solid ${theme.darkMode?'#334155':'#e2e8f0'}`,display:'flex',alignItems:'center',gap:10,background:theme.darkMode?'#1e293b':'#f8fafc'}}>
+              <span style={{fontSize:20}}>📓</span>
+              <span style={{fontWeight:700,fontSize:16,color:theme.darkMode?'#e2e8f0':'#1e293b',flex:1}}>Daily Log</span>
+              <button onClick={()=>setDiaryOpen(false)} style={{background:'none',border:'none',cursor:'pointer',fontSize:18,color:theme.darkMode?'#94a3b8':'#64748b'}}>✕</button>
+            </div>
+
+            {/* Text input + voice */}
+            <div style={{padding:'14px 20px',borderBottom:`1px solid ${theme.darkMode?'#334155':'#e2e8f0'}`}}>
+              <div style={{position:'relative'}}>
+                <textarea
+                  value={diaryText}
+                  onChange={e=>setDiaryText(e.target.value)}
+                  placeholder="What did you do today? e.g. 'Went climbing with Charlie for 2hrs, read about chemistry, worked on the app'"
+                  style={{width:'100%',minHeight:90,padding:'10px 44px 10px 12px',borderRadius:10,border:`1px solid ${theme.darkMode?'#334155':'#e2e8f0'}`,background:theme.darkMode?'#1e293b':'white',color:theme.darkMode?'#e2e8f0':'#1e293b',fontSize:14,resize:'vertical',outline:'none',boxSizing:'border-box'}}
+                />
+                <button onClick={toggleVoice} title="Voice input"
+                  style={{position:'absolute',right:10,top:10,background:isListening?'#ef4444':'#16a34a',border:'none',borderRadius:'50%',width:30,height:30,cursor:'pointer',fontSize:14,display:'flex',alignItems:'center',justifyContent:'center',color:'white'}}>
+                  {isListening ? '⏹' : '🎤'}
+                </button>
+              </div>
+              {isListening && <p style={{fontSize:11,color:'#ef4444',marginTop:4}}>🔴 Listening… speak now</p>}
+              <button onClick={parseDiaryWithAI} disabled={diaryLoading || !diaryText.trim()}
+                style={{marginTop:10,width:'100%',padding:'9px',borderRadius:8,background:diaryLoading||!diaryText.trim()?'#64748b':'#16a34a',color:'white',border:'none',cursor:diaryLoading||!diaryText.trim()?'not-allowed':'pointer',fontWeight:700,fontSize:14}}>
+                {diaryLoading ? '⏳ Analysing…' : '✨ Parse with AI'}
+              </button>
+              {diaryError && <p style={{fontSize:12,color:'#ef4444',marginTop:6}}>{diaryError}</p>}
+            </div>
+
+            {/* Suggestions */}
+            {diarySuggestions.filter(s=>!s.confirmed).length > 0 && (
+              <div style={{flex:1,overflowY:'auto',padding:'12px 20px'}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+                  <span style={{fontWeight:700,fontSize:13,color:theme.darkMode?'#94a3b8':'#64748b'}}>
+                    Suggested entries ({diarySuggestions.filter(s=>!s.confirmed).length})
+                  </span>
+                  <button onClick={confirmAllSuggestions}
+                    style={{padding:'5px 14px',borderRadius:8,background:'#16a34a',color:'white',border:'none',cursor:'pointer',fontWeight:700,fontSize:12}}>
+                    ✓ Confirm All
+                  </button>
+                </div>
+                {diarySuggestions.filter(s=>!s.confirmed).map(sug => {
+                  const dim = dimensions[sug.dim];
+                  return (
+                    <div key={sug.id} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',marginBottom:8,borderRadius:10,border:`1px solid ${theme.darkMode?'#334155':'#e2e8f0'}`,background:theme.darkMode?'#1e293b':'#f8fafc'}}>
+                      <span style={{fontSize:20,flexShrink:0}}>{dim?.emoji || '📌'}</span>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:2}}>
+                          <span style={{fontSize:11,fontWeight:700,padding:'2px 7px',borderRadius:99,background:(dim?.color||'#64748b')+'33',color:dim?.color||'#64748b'}}>{dim?.label}</span>
+                          <span style={{fontSize:11,color:theme.darkMode?'#94a3b8':'#64748b'}}>{sug.category}</span>
+                          {sug.friendId && <span style={{fontSize:11,color:'#22c55e'}}>👤 {sug.friendId}</span>}
+                        </div>
+                        <input
+                          value={sug.note}
+                          onChange={e => setDiarySuggestions(prev => prev.map(s => s.id===sug.id ? {...s, note:e.target.value} : s))}
+                          style={{width:'100%',background:'transparent',border:'none',outline:'none',fontSize:13,fontWeight:500,color:theme.darkMode?'#e2e8f0':'#1e293b',cursor:'text'}}
+                        />
+                        <div style={{display:'flex',gap:4,marginTop:4}}>
+                          {[1,2,3,4,5].map(v => (
+                            <button key={v} onClick={()=>setDiarySuggestions(prev=>prev.map(s=>s.id===sug.id?{...s,pts:v}:s))}
+                              style={{width:20,height:20,borderRadius:'50%',border:`1px solid ${sug.pts>=v?(dim?.color||'#22c55e'):(theme.darkMode?'#334155':'#cbd5e1')}`,background:sug.pts>=v?(dim?.color||'#22c55e'):'transparent',cursor:'pointer',fontSize:8,color:'white'}}>
+                            </button>
+                          ))}
+                          <span style={{fontSize:10,color:theme.darkMode?'#94a3b8':'#94a3b8',marginLeft:4}}>{sug.pts} pts</span>
+                        </div>
+                      </div>
+                      <button onClick={()=>confirmSuggestion(sug)}
+                        style={{flexShrink:0,width:32,height:32,borderRadius:8,background:'#16a34a',border:'none',cursor:'pointer',color:'white',fontWeight:700,fontSize:16}}>✓</button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {diarySuggestions.length > 0 && diarySuggestions.every(s=>s.confirmed) && (
+              <div style={{padding:24,textAlign:'center',color:'#22c55e',fontWeight:700}}>✅ All logged!</div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Me Dashboard View ────────────────────────────────────────────────── */}
+      {viewMode === 'me' && (() => {
+        const dm = theme.darkMode;
+        const bg = dm ? '#0f172a' : '#f8fafc';
+        const card = dm ? '#1e293b' : 'white';
+        const border = dm ? '#334155' : '#e2e8f0';
+        const text = dm ? '#e2e8f0' : '#1e293b';
+        const sub = dm ? '#94a3b8' : '#64748b';
+        const TABS = [
+          { id: 'social', label: '🤝 Social' },
+          { id: 'creativity', label: '🎨 Creativity' },
+          { id: 'knowledge', label: '📚 Knowledge' },
+          { id: 'health', label: '💪 Health' },
+          { id: 'growth', label: '🌱 Growth' },
+        ];
+
+        // Trend calculation: sum of pts logged in last 3 days vs 3 days before that
+        const getTrend = (node) => {
+          const log = node.interactionLog || [];
+          const now = new Date();
+          const recent = log.filter(e => {
+            const d = new Date(e.date + ' ' + now.getFullYear());
+            return (now - d) < 1000 * 60 * 60 * 24 * 3;
+          }).reduce((s, e) => s + (e.pts || 0), 0);
+          const prev = log.filter(e => {
+            const d = new Date(e.date + ' ' + now.getFullYear());
+            const age = (now - d) / (1000 * 60 * 60 * 24);
+            return age >= 3 && age < 6;
+          }).reduce((s, e) => s + (e.pts || 0), 0);
+          const currentTier = getTier(node.interactionScore || 0, node);
+          const prevScore = (node.interactionScore || 0) - recent;
+          const prevTier = getTier(Math.max(0, prevScore), node);
+          if (currentTier > prevTier) return 'levelup';
+          const diff = recent - prev;
+          if (diff > 40) return 'up2';
+          if (diff > 10) return 'up1';
+          if (diff < -40) return 'down2';
+          if (diff < -10) return 'down1';
+          return 'stable';
+        };
+
+        const TREND_ICONS = {
+          levelup: { icon: '▲', color: '#fbbf24', size: 18, bold: true, label: 'Level up!' },
+          up2:     { icon: '▲▲', color: '#22c55e', size: 11, bold: true, label: 'Rising fast' },
+          up1:     { icon: '▲', color: '#22c55e', size: 13, bold: false, label: 'Improving' },
+          stable:  { icon: '', color: 'transparent', size: 12, bold: false, label: '' },
+          down1:   { icon: '▼', color: '#ef4444', size: 13, bold: false, label: 'Declining' },
+          down2:   { icon: '▼▼', color: '#ef4444', size: 11, bold: true, label: 'Fading fast' },
+        };
+
+        const people = nodes.filter(n => n.type !== 'hub' && n.type !== 'flower' && n.id !== 'me');
+        const visiblePeople = activeTags.length > 0 ? people.filter(n => isTagFiltered(n.id)) : people;
+
+        return (
+          <div style={{position:'absolute',top:0,left:0,right:0,bottom:0,zIndex:50,background:bg,display:'flex',flexDirection:'column',overflow:'hidden',paddingBottom:56}}>
+            {/* Header */}
+            <div style={{padding:'16px 20px 0',background:card,borderBottom:`1px solid ${border}`,flexShrink:0}}>
+              <h2 style={{textAlign:'center',fontWeight:800,fontSize:20,marginBottom:12,background:'linear-gradient(to right,#10b981,#6366f1)',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent'}}>
+                My Life Dashboard
+              </h2>
+              {/* Tabs */}
+              <div style={{display:'flex',overflowX:'auto',gap:4,paddingBottom:1}}>
+                {TABS.map(tab => (
+                  <button key={tab.id} onClick={()=>setActiveTab(tab.id)}
+                    style={{
+                      padding:'8px 14px',borderRadius:'8px 8px 0 0',border:`1px solid ${border}`,
+                      borderBottom: activeTab===tab.id ? `2px solid ${card}` : `1px solid ${border}`,
+                      background: activeTab===tab.id ? card : dm?'#0f172a':'#f1f5f9',
+                      color: activeTab===tab.id ? text : sub,
+                      fontWeight: activeTab===tab.id ? 700 : 500,
+                      fontSize:13, cursor:'pointer', whiteSpace:'nowrap', flexShrink:0,
+                      marginBottom: activeTab===tab.id ? -1 : 0,
+                    }}>
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Tab content */}
+            <div style={{flex:1,overflowY:'auto',padding:'16px'}}>
+
+              {/* ── Social tab ── */}
+              {activeTab === 'social' && (
+                <div>
+                  {/* Social flower health summary */}
+                  {(() => {
+                    const dim = dimensions.social;
+                    if (!dim) return null;
+                    const h = dim.health ?? 1;
+                    const pct = Math.round(h * 100);
+                    return (
+                      <div style={{background:card,border:`1px solid ${border}`,borderRadius:12,padding:14,marginBottom:14,display:'flex',alignItems:'center',gap:12}}>
+                        <span style={{fontSize:28}}>🤝</span>
+                        <div style={{flex:1}}>
+                          <div style={{fontWeight:700,color:text}}>Social Health</div>
+                          <div style={{height:6,borderRadius:3,background:dm?'#334155':'#e2e8f0',marginTop:4}}>
+                            <div style={{height:'100%',borderRadius:3,width:`${pct}%`,background:h>0.6?dim.color:h>0.3?'#f59e0b':'#ef4444',transition:'width 0.5s'}} />
+                          </div>
+                          <div style={{fontSize:11,color:dim.color,marginTop:3}}>{pct}% · {dim.weeklyScore||0}/{dim.weeklyTarget} interactions this week</div>
+                        </div>
+                        <button onClick={()=>setFlowerPanel('social')}
+                          style={{padding:'6px 12px',borderRadius:8,background:dim.color,color:'white',border:'none',cursor:'pointer',fontSize:11,fontWeight:700}}>
+                          Manage
+                        </button>
+                      </div>
+                    );
+                  })()}
+                  {/* View switcher */}
+                  <div style={{display:'flex',gap:6,marginBottom:8}}>
+                    {[
+                      {id:'grid',      label:'Grid'},
+                      {id:'byScore',   label:'By Score'},
+                      {id:'byMomentum',label:'By Momentum'},
+                    ].map(v => (
+                      <button key={v.id} onClick={()=>setSocialView(v.id)}
+                        style={{
+                          flex:1, padding:'7px 4px', borderRadius:8, border:'none', cursor:'pointer',
+                          fontSize:11, fontWeight: socialView===v.id ? 700 : 500,
+                          background: socialView===v.id ? '#10b981' : (dm?'#1e293b':'#f1f5f9'),
+                          color: socialView===v.id ? 'white' : sub,
+                          transition:'all 0.15s',
+                        }}>{v.label}</button>
+                    ))}
+                  </div>
+                  {/* Bar style toggle — only visible on ranked views */}
+                  {(socialView === 'byScore' || socialView === 'byMomentum') && (
+                    <div style={{display:'flex',gap:6,marginBottom:14}}>
+                      {[
+                        {id:'segments', label:'🌈 Tier colours'},
+                        {id:'solid',    label:'⬛ Solid tier'},
+                      ].map(v => (
+                        <button key={v.id} onClick={()=>setBarStyle(v.id)}
+                          style={{
+                            flex:1, padding:'5px 4px', borderRadius:8, border:`1px solid ${border}`, cursor:'pointer',
+                            fontSize:11, fontWeight: barStyle===v.id ? 700 : 500,
+                            background: barStyle===v.id ? (dm?'#334155':'#e2e8f0') : 'transparent',
+                            color: barStyle===v.id ? text : sub,
+                          }}>{v.label}</button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* GRID VIEW */}
+                  {socialView === 'grid' && (
+                    <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(90px,1fr))',gap:8}}>
+                      {visiblePeople.map(n => {
+                        const tier = getTier(n.interactionScore || 0, n);
+                        const lvl = FRIENDSHIP_LEVELS.find(l => l.tier === tier) || FRIENDSHIP_LEVELS[0];
+                        const trend = getTrend(n);
+                        const ti = TREND_ICONS[trend];
+                        return (
+                          <div key={n.id} onClick={() => { setSelectedNodeId(n.id); setViewMode('canvas'); }}
+                            style={{position:'relative',cursor:'pointer',aspectRatio:'1',borderRadius:10,border:`3px solid ${lvl.color}`,overflow:'hidden',boxShadow:`0 2px 8px ${lvl.color}44`}}>
+                            <img src={n.img} alt={n.label} style={{width:'100%',height:'100%',objectFit:'cover',display:'block'}} />
+                            <div style={{position:'absolute',bottom:0,left:0,right:0,background:'rgba(0,0,0,0.55)',padding:'3px 4px',fontSize:10,fontWeight:700,color:'white',textAlign:'center',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{n.label}</div>
+                            {ti.icon && <div style={{position:'absolute',top:4,right:4,color:ti.color,fontSize:ti.size,fontWeight:ti.bold?900:400,textShadow:'0 1px 3px rgba(0,0,0,0.7)'}}>{ti.icon}</div>}
+                            {trend==='levelup' && <div style={{position:'absolute',top:3,left:3,fontSize:12}}>⭐</div>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* RANKED LIST — by Score or by Momentum */}
+                  {(socialView === 'byScore' || socialView === 'byMomentum') && (() => {
+                    const MAX_SCORE = 1000;
+
+                    // Score 7 days ago estimated from scoreHistory
+                    const scoreWeekAgo = (n) => {
+                      const hist = n.scoreHistory || [];
+                      const weekMs = 7 * 24 * 3600000;
+                      const old = hist.find(h => (Date.now() - h.ts) >= weekMs);
+                      return old ? old.score : (n.interactionScore || 0);
+                    };
+
+                    const momentum = (n) => (n.interactionScore || 0) - scoreWeekAgo(n);
+
+                    const sorted = [...visiblePeople].sort((a, b) =>
+                      socialView === 'byScore'
+                        ? (b.interactionScore || 0) - (a.interactionScore || 0)
+                        : momentum(b) - momentum(a)
+                    );
+
+                    const ROW_H = 64;
+                    const PHOTO_W = 48;
+                    const BAR_AREA = 220; // total px width for the bar section
+
+                    // Axis: left = 0 pts, right = MAX_SCORE pts
+                    // Current score bar from left. Week-ago marker line.
+                    // Green if improved (bar extends right from week-ago), red if declined (bar extends left).
+
+                    return (
+                      <div style={{display:'flex',flexDirection:'column',gap:6}}>
+                        {/* Tier threshold labels */}
+                        <div style={{marginLeft:PHOTO_W+10,position:'relative',height:16,marginBottom:2}}>
+                          {[
+                            { score:100,  label:'T2', color:'#bef264' },
+                            { score:300,  label:'T3', color:'#84cc16' },
+                            { score:600,  label:'T4', color:'#166534' },
+                            { score:1000, label:'T5', color:'#3b82f6' },
+                          ].map(t => (
+                            <span key={t.score} style={{
+                              position:'absolute',
+                              left:`${(t.score/MAX_SCORE)*100}%`,
+                              transform:'translateX(-50%)',
+                              fontSize:8, fontWeight:700,
+                              color:t.color, opacity:0.8,
+                            }}>{t.label}</span>
+                          ))}
+                        </div>
+                        {/* Axis labels */}
+                        <div style={{display:'flex',marginLeft:PHOTO_W+10,fontSize:9,color:sub,marginBottom:2}}>
+                          <span style={{flex:1,textAlign:'left'}}>0</span>
+                          <span style={{flex:1,textAlign:'center'}}>{MAX_SCORE/2}</span>
+                          <span style={{flex:1,textAlign:'right'}}>{MAX_SCORE} pts</span>
+                        </div>
+                        {/* Tier colour axis strip */}
+                        <div style={{marginLeft:PHOTO_W+10,height:4,borderRadius:2,background:`linear-gradient(to right, #84cc16, #22c55e, #16a34a, #15803d, #14532d)`,marginBottom:6,opacity:0.6}} />
+
+                        {sorted.map(n => {
+                          const score  = n.interactionScore || 0;
+                          const prev   = scoreWeekAgo(n);
+                          const delta  = score - prev;
+                          const tier   = getTier(score, n);
+                          const lvl    = FRIENDSHIP_LEVELS.find(l => l.tier === tier) || FRIENDSHIP_LEVELS[0];
+
+                          // Bar widths as fraction of BAR_AREA
+                          const currentPct = score / MAX_SCORE;
+                          const prevPct    = prev  / MAX_SCORE;
+                          const minPct     = Math.min(currentPct, prevPct);
+                          const maxPct     = Math.max(currentPct, prevPct);
+                          const improved   = delta >= 0;
+
+                          return (
+                            <div key={n.id} onClick={()=>{setSelectedNodeId(n.id);setViewMode('canvas');}}
+                              style={{display:'flex',alignItems:'center',gap:10,cursor:'pointer',padding:'4px 0'}}>
+                              {/* Photo */}
+                              <div style={{width:PHOTO_W,height:PHOTO_W,borderRadius:PHOTO_W/2,overflow:'hidden',border:`2.5px solid ${lvl.color}`,flexShrink:0}}>
+                                <img src={n.img} alt={n.label} style={{width:'100%',height:'100%',objectFit:'cover'}} />
+                              </div>
+                              {/* Name + bar */}
+                              <div style={{flex:1,minWidth:0}}>
+                                <div style={{fontSize:11,fontWeight:700,color:text,marginBottom:3,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                                  {n.label}
+                                  <span style={{fontWeight:400,color:sub,marginLeft:6,fontSize:10}}>{score} pts</span>
+                                  {delta !== 0 && <span style={{marginLeft:4,fontSize:10,color:improved?'#22c55e':'#ef4444',fontWeight:700}}>{improved?'+':''}{delta}</span>}
+                                </div>
+                                {/* Bar track */}
+                                <div style={{position:'relative',height:14,borderRadius:4,background:dm?'#1e293b':'#f1f5f9',overflow:'hidden'}}>
+                                {/* Tier threshold lines */}
+                                  {[
+                                    { score: 100,  color: '#bef264' },
+                                    { score: 300,  color: '#84cc16' },
+                                    { score: 600,  color: '#166534' },
+                                    { score: 1000, color: '#3b82f6' },
+                                  ].map(tier => (
+                                    <div key={tier.score} style={{
+                                      position:'absolute', top:0, bottom:0,
+                                      left:`${(tier.score/MAX_SCORE)*100}%`,
+                                      width:1.5,
+                                      background: tier.color,
+                                      opacity:0.45,
+                                    }} />
+                                  ))}
+                                  {/* Current score bar — two modes */}
+                                  {barStyle === 'segments' ? (
+                                    // Hard tier colour segments
+                                    [
+                                      { from: 0,   to: 100,  color: '#bef264' },
+                                      { from: 100,  to: 300,  color: '#84cc16' },
+                                      { from: 300,  to: 600,  color: '#166534' },
+                                      { from: 600,  to: 1000, color: '#3b82f6' },
+                                    ].map(seg => {
+                                      if (score <= seg.from) return null;
+                                      const segEnd = Math.min(score, seg.to);
+                                      return (
+                                        <div key={seg.from} style={{
+                                          position:'absolute', top:0, bottom:0,
+                                          left:`${(seg.from/MAX_SCORE)*100}%`,
+                                          width:`${((segEnd-seg.from)/MAX_SCORE)*100}%`,
+                                          background: seg.color, opacity:0.7,
+                                        }} />
+                                      );
+                                    })
+                                  ) : (
+                                    // Solid — full bar in the current tier's defined colour
+                                    (() => {
+                                      const TIER_COLORS = [
+                                        { maxScore: 100,  color: '#bef264' }, // T1 yellow-green
+                                        { maxScore: 300,  color: '#84cc16' }, // T2 sour green
+                                        { maxScore: 600,  color: '#166534' }, // T3 forest green
+                                        { maxScore: 1000, color: '#3b82f6' }, // T4 blue
+                                      ];
+                                      const tierColor = (TIER_COLORS.find(t => score <= t.maxScore) || TIER_COLORS[3]).color;
+                                      return (
+                                        <div style={{
+                                          position:'absolute', left:0, top:0, bottom:0,
+                                          width:`${currentPct*100}%`,
+                                          background: tierColor,
+                                          borderRadius:4, opacity:0.75,
+                                          transition:'width 0.4s',
+                                        }} />
+                                      );
+                                    })()
+                                  )}
+                                  {/* Delta bar — green if improved, red if declined */}
+                                  <div style={{
+                                    position:'absolute',top:2,bottom:2,
+                                    left:`${minPct*100}%`,
+                                    width:`${(maxPct-minPct)*100}%`,
+                                    background: improved ? '#22c55e' : '#ef4444',
+                                    borderRadius:2,
+                                    opacity:0.85,
+                                    minWidth: delta!==0 ? 3 : 0,
+                                  }} />
+                                  {/* Week-ago marker line */}
+                                  {prev !== score && (
+                                    <div style={{
+                                      position:'absolute',top:0,bottom:0,
+                                      left:`${prevPct*100}%`,
+                                      width:2,
+                                      background: improved ? '#15803d' : '#b91c1c',
+                                      opacity:0.9,
+                                    }} />
+                                  )}
+                                </div>
+                              </div>
+                              {/* Tier emoji */}
+                              <span style={{fontSize:16,flexShrink:0}}>{lvl.emoji}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
+                  {/* Legend */}
+                  <div style={{marginTop:14,display:'flex',flexWrap:'wrap',gap:10}}>
+                    {Object.entries(TREND_ICONS).filter(([,v])=>v.icon).map(([k,v])=>(
+                      <span key={k} style={{fontSize:11,color:sub,display:'flex',alignItems:'center',gap:4}}>
+                        <span style={{color:v.color,fontWeight:v.bold?700:400,fontSize:v.size-2}}>{k==='levelup'?'⭐▲':v.icon}</span>
+                        {v.label}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* ── Dimension tabs — creativity/knowledge/health/growth only ── */}
+              {['creativity','knowledge','health','growth'].includes(activeTab) && (() => {
+                const dim = dimensions[activeTab];
+                if (!dim || !dim.color) return null;
+                const h = dim.health ?? 1;
+                const pct = Math.round(h * 100);
+                return (
+                  <div>
+                    {/* Health summary */}
+                    <div style={{background:card,border:`1px solid ${border}`,borderRadius:12,padding:14,marginBottom:14}}>
+                      <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:8}}>
+                        <span style={{fontSize:28}}>{dim.emoji}</span>
+                        <div style={{flex:1}}>
+                          <div style={{fontWeight:700,color:text}}>{dim.label}</div>
+                          <div style={{fontSize:11,color:dim.color}}>{pct}% health · {dim.weeklyScore||0}/{dim.weeklyTarget} pts this week</div>
+                        </div>
+                        <button onClick={()=>setFlowerPanel(activeTab)}
+                          style={{padding:'6px 14px',borderRadius:8,background:dim.color,color:'white',border:'none',cursor:'pointer',fontWeight:700,fontSize:12}}>
+                          Manage
+                        </button>
+                      </div>
+                      <div style={{height:8,borderRadius:4,background:dm?'#334155':'#e2e8f0'}}>
+                        <div style={{height:'100%',borderRadius:4,width:`${pct}%`,background:h>0.6?dim.color:h>0.3?'#f59e0b':'#ef4444',transition:'width 0.5s'}} />
+                      </div>
+                    </div>
+                    {/* Activities quick-log */}
+                    <p style={{fontSize:11,fontWeight:700,color:sub,textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:8}}>Log an activity</p>
+                    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:16}}>
+                      {(dim.activities||[]).map(act => (
+                        <button key={act.id} onClick={()=>{
+                          setDimensions(prev=>{
+                            const d=prev[activeTab];
+                            return {...prev,[activeTab]:{...d,
+                              log:[...(d.log||[]),{date:new Date().toLocaleDateString('en-GB',{day:'numeric',month:'short'}),category:act.name,note:act.name,pts:act.pts}],
+                              weeklyScore:(d.weeklyScore||0)+act.pts,
+                              health:Math.min(1,(d.health||0.5)+0.04),
+                            }};
+                          });
+                          showToast(`${dim.emoji} +${act.pts} — ${act.name}`);
+                        }} style={{
+                          padding:'10px 12px',borderRadius:10,border:`1px solid ${border}`,
+                          background:card,cursor:'pointer',textAlign:'left',
+                          display:'flex',justifyContent:'space-between',alignItems:'center',
+                        }}>
+                          <span style={{fontSize:13,fontWeight:600,color:text}}>{act.name}</span>
+                          <span style={{fontSize:12,fontWeight:700,color:dim.color,flexShrink:0,marginLeft:6}}>+{act.pts}</span>
+                        </button>
+                      ))}
+                    </div>
+                    {/* Recent log */}
+                    {(dim.log||[]).length > 0 && (
+                      <div>
+                        <p style={{fontSize:11,fontWeight:700,color:sub,textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:8}}>Recent entries</p>
+                        {[...(dim.log||[])].reverse().slice(0,8).map((e,i)=>(
+                          <div key={i} style={{display:'flex',justifyContent:'space-between',padding:'6px 0',borderBottom:`1px solid ${border}`,fontSize:13}}>
+                            <span style={{color:text}}>{e.note}</span>
+                            <span style={{color:sub,fontSize:11,marginLeft:8}}>{e.date}</span>
+                            <span style={{color:dim.color,fontWeight:700,marginLeft:8,flexShrink:0}}>+{e.pts}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Footer */}
+            <div style={{padding:'12px 16px',borderTop:`1px solid ${border}`,background:card,display:'flex',gap:8,flexShrink:0}}>
+              <button onClick={()=>setDiaryOpen(true)}
+                style={{flex:1,padding:'9px',borderRadius:8,background:'#16a34a',color:'white',border:'none',cursor:'pointer',fontWeight:700,fontSize:13}}>
+                📓 Daily Log
+              </button>
+              <button onClick={()=>setViewMode('canvas')}
+                style={{padding:'9px 16px',borderRadius:8,background:dm?'#334155':'#e2e8f0',color:text,border:'none',cursor:'pointer',fontWeight:700,fontSize:13}}>
+                ← Map
+              </button>
+            </div>
+          </div>
+        );
+      })()}
+      {groupModal && (() => {
+        const hub = nodes.find(n => n.id === groupModal.hubId);
+        if (!hub) { setGroupModal(null); return null; }
+
+        // All non-hub, non-flower people INCLUDING Me
+        const people = nodes.filter(n => n.type !== 'hub' && n.type !== 'flower');
+        const visiblePeople = activeTags.length > 0 ? people.filter(n => isTagFiltered(n.id)) : people;
+        const hubs = nodes.filter(n => n.type === 'hub');
+
+        // States:
+        // 0 = empty (not in group, no opinion set yet)
+        // 1 = explicitly excluded — red line (auto-set for people who existed before this group)
+        // 2 = in group, small greyed photo — yellow dot
+        // 3 = in group, full photo — green smiley
+        const getMembership = (personId, hubId) => {
+          const p = nodes.find(n => n.id === personId);
+          const gv = p?.groupVisibility?.[hubId];
+          if (gv !== undefined) return gv;
+          // If linked but no explicit vis recorded, default to 3
+          const linked = links.some(l =>
+            (l.source === personId && l.target === hubId) ||
+            (l.source === hubId && l.target === personId)
+          );
+          if (linked) return 3;
+          return 0;
+        };
+
+        const cycleMembership = (personId, hubId, current) => {
+          // Cycle: 0(empty)→1(excluded)→2(small)→3(full)→0
+          // But if coming from 0 on a fresh click, go to 2 (yellow) first — skipping excluded
+          // Only go to 1 (excluded/red) when cycling back from 3
+          let next;
+          if (current === 0) next = 2;       // empty → small
+          else if (current === 2) next = 3;  // small → full
+          else if (current === 3) next = 1;  // full → excluded
+          else next = 0;                     // excluded → empty
+
+          setLinks(prev => {
+            const hasLink = prev.some(l =>
+              (l.source === personId && l.target === hubId) ||
+              (l.source === hubId   && l.target === personId)
+            );
+            if (next === 0 || next === 1) {
+              return prev.filter(l =>
+                !((l.source === personId && l.target === hubId) ||
+                  (l.source === hubId   && l.target === personId))
+              );
+            } else if (!hasLink) {
+              return [...prev, { source: hubId, target: personId }];
+            }
+            return prev;
+          });
+          setNodes(prev => prev.map(n => {
+            if (n.id !== personId) return n;
+            const gv = { ...(n.groupVisibility || {}) };
+            if (next === 0) { delete gv[hubId]; }
+            else { gv[hubId] = next; }
+            return { ...n, groupVisibility: gv };
+          }));
+        };
+
+        // Initialise newly-created group: pre-existing people start at state 1 (excluded/red)
+        // Do this once when the modal first opens for a brand-new hub
+        const initNewGroup = (hubId) => {
+          setNodes(prev => prev.map(n => {
+            if (n.type === 'hub' || n.id === 'me') return n;
+            const gv = n.groupVisibility || {};
+            if (gv[hubId] === undefined) {
+              return { ...n, groupVisibility: { ...gv, [hubId]: 1 } };
+            }
+            return n;
+          }));
+        };
+
+        // Run init once if this is a freshly created hub (no memberships set yet)
+        const hasAnyMembership = nodes.some(n =>
+          n.groupVisibility && n.groupVisibility[groupModal.hubId] !== undefined
+        );
+        if (!hasAnyMembership) {
+          // Use setTimeout to avoid setState-during-render
+          setTimeout(() => initNewGroup(groupModal.hubId), 0);
+        }
+
+        const dm = theme.darkMode;
+        const bg      = dm ? '#0f172a' : '#ffffff';
+        const border  = dm ? '#334155' : '#e2e8f0';
+        const headBg  = dm ? '#1e293b' : '#f8fafc';
+        const rowEven = dm ? '#1e293b' : '#f8fafc';
+        const text    = dm ? '#e2e8f0' : '#1e293b';
+        const subtext = dm ? '#94a3b8' : '#64748b';
+
+        // Visual for each state
+        const TICK_RENDER = [
+          { label: '',    bg: 'transparent',       border: dm ? '#1e293b' : '#e2e8f0', color: 'transparent', title: 'Not set'                      },
+          { label: '—',   bg: '#ef444422',          border: '#ef4444',                 color: '#ef4444',      title: 'Excluded from this group'      },
+          { label: '●',   bg: '#eab30822',          border: '#eab308',                 color: '#eab308',      title: 'In group — small greyed photo' },
+          { label: '😊',  bg: '#16a34a22',          border: '#16a34a',                 color: '#16a34a',      title: 'In group — full photo'         },
+        ];
+
+        return (
+          <div
+            style={{ position:'fixed', top:0,left:0,right:0,bottom:0, zIndex:200, background:'rgba(0,0,0,0.55)', display:'flex', alignItems:'center', justifyContent:'center' }}
+            onClick={e => { if (e.target === e.currentTarget) setGroupModal(null); }}
+          >
+            <div style={{ background:bg, border:`1px solid ${border}`, borderRadius:16, width:'min(96vw, 780px)', maxHeight:'85vh', display:'flex', flexDirection:'column', boxShadow:'0 25px 60px rgba(0,0,0,0.5)', overflow:'hidden' }}>
+
+              {/* Header */}
+              <div style={{ padding:'18px 24px', borderBottom:`1px solid ${border}`, background:headBg, display:'flex', alignItems:'center', gap:12 }}>
+                <TreePine size={20} color="#16a34a" />
+                <input
+                  value={hub.label}
+                  onChange={e => setNodes(prev => prev.map(n => n.id === hub.id ? { ...n, label: e.target.value } : n))}
+                  style={{ flex:1, background:'transparent', border:'none', outline:'none', fontSize:18, fontWeight:700, color:text }}
+                />
+                <button
+                  onClick={() => {
+                    setLinks(prev => prev.filter(l => l.source !== hub.id && l.target !== hub.id));
+                    setNodes(prev => prev.filter(n => n.id !== hub.id));
+                    setGroupModal(null);
+                    showToast('🗑️ Group deleted');
+                  }}
+                  style={{ padding:'6px 12px', borderRadius:8, background:'#ef4444', border:'none', color:'white', cursor:'pointer', fontSize:12, fontWeight:600 }}
+                >Delete</button>
+                <button
+                  onClick={() => setGroupModal(null)}
+                  style={{ padding:'6px 14px', borderRadius:8, background:dm?'#334155':'#e2e8f0', border:'none', color:text, cursor:'pointer', fontSize:13, fontWeight:600 }}
+                >Done</button>
+              </div>
+
+              {/* Action buttons */}
+              <div style={{ padding:'12px 24px', borderBottom:`1px solid ${border}`, display:'flex', gap:10 }}>
+                <button
+                  onClick={() => {
+                    setGroupModal(null);
+                    setSelectForGroupMode(groupModal.hubId);
+                  }}
+                  style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 16px', borderRadius:8, background:'#16a34a', color:'white', border:'none', cursor:'pointer', fontSize:13, fontWeight:600 }}
+                >
+                  <span>＋</span><span>Select from Map</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setGroupModal(null);
+                    setAddFriendForms(prev => [...prev, { id:'form_'+Date.now(), name:'', parentId: hub.id }]);
+                  }}
+                  style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 16px', borderRadius:8, background:'#0ea5e9', color:'white', border:'none', cursor:'pointer', fontSize:13, fontWeight:600 }}
+                >
+                  <span>👤</span><span>New Friend</span>
+                </button>
+              </div>
+
+              {/* Table */}
+              <div style={{ overflowX:'auto', overflowY:'auto', flex:1 }}>
+                <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+                  <thead>
+                    <tr style={{ background:headBg, position:'sticky', top:0, zIndex:2 }}>
+                      <th style={{ textAlign:'left', padding:'10px 16px', color:subtext, fontWeight:600, borderBottom:`1px solid ${border}`, minWidth:120 }}>Person</th>
+                      {hubs.map(h => (
+                        <th key={h.id} style={{ padding:'10px 12px', color: h.id === hub.id ? '#16a34a' : subtext, fontWeight:600, borderBottom:`1px solid ${border}`, minWidth:90, textAlign:'center', whiteSpace:'nowrap' }}>
+                          {h.id === hub.id ? '★ ' : ''}{h.label}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {people.map((person, pi) => (
+                      <tr key={person.id} style={{ background: pi % 2 === 0 ? rowEven : bg }}>
+                        {/* Person column */}
+                        <td style={{ padding:'8px 16px', borderBottom:`1px solid ${border}` }}>
+                          <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                            <img src={person.img} alt="" style={{ width:28, height:28, borderRadius:'50%', objectFit:'cover', flexShrink:0 }} />
+                            <span style={{ color:text, fontWeight:500 }}>{person.label}</span>
+                          </div>
+                        </td>
+                        {/* Hub columns */}
+                        {hubs.map(h => {
+                          const state = getMembership(person.id, h.id);
+                          const tr = TICK_RENDER[state];
+                          return (
+                            <td key={h.id} style={{ padding:'8px 12px', borderBottom:`1px solid ${border}`, textAlign:'center' }}>
+                              <button
+                                title={tr.title}
+                                onClick={() => cycleMembership(person.id, h.id, state)}
+                                style={{
+                                  width:34, height:34, borderRadius:8,
+                                  background: tr.bg,
+                                  border: `2px solid ${tr.border}`,
+                                  color: tr.color,
+                                  cursor:'pointer', fontSize:state === 3 ? 18 : 15, fontWeight:700,
+                                  display:'inline-flex', alignItems:'center', justifyContent:'center',
+                                  transition:'all 0.15s',
+                                }}
+                              >
+                                {tr.label}
+                              </button>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                    {people.length === 0 && (
+                      <tr><td colSpan={hubs.length + 1} style={{ padding:24, textAlign:'center', color:subtext, fontStyle:'italic' }}>No people added yet. Use Add new people above.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Legend */}
+              <div style={{ padding:'10px 24px', borderTop:`1px solid ${border}`, display:'flex', gap:20, flexWrap:'wrap' }}>
+                {TICK_RENDER.map((tr, i) => (
+                  <span key={i} style={{ display:'flex', alignItems:'center', gap:6, fontSize:11, color:subtext }}>
+                    <span style={{ color: tr.color === 'transparent' ? subtext : tr.color, fontWeight:700, fontSize:14, border:`1px solid ${tr.border}`, borderRadius:4, padding:'1px 5px', background: tr.bg }}>
+                      {tr.label || ' '}
+                    </span>
+                    {tr.title}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+      {/* ── Bottom Tab Bar ────────────────────────────────────────────────────── */}
+      <div style={{
+        position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 200,
+        display: 'flex', alignItems: 'stretch',
+        background: theme.darkMode ? '#0f172a' : 'white',
+        borderTop: `1px solid ${theme.darkMode ? '#334155' : '#e2e8f0'}`,
+        boxShadow: '0 -2px 12px rgba(0,0,0,0.15)',
+        paddingBottom: 'env(safe-area-inset-bottom)',
+      }}>
+        {[
+          { id: 'canvas',   label: 'Map', icon: (active) => (
+            <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+              {/* Vine/plant for map */}
+              <path d="M11 19 L11 10 M11 14 C11 14 7 12 6 8 C9 7 12 10 11 14 M11 12 C11 12 15 10 16 6 C13 5 10 8 11 12" stroke={active?'#10b981':'currentColor'} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+              <circle cx="11" cy="19" r="1.5" fill={active?'#10b981':'currentColor'}/>
+            </svg>
+          )},
+          { id: 'calendar', label: 'Calendar', icon: (active) => <CalendarIcon className="w-5 h-5" /> },
+          { id: 'me',       label: 'Overview', icon: (active) => (
+            <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+              {/* Sideways bar chart */}
+              <rect x="4" y="5" width="8" height="3" rx="1.5" fill={active?'#10b981':'currentColor'}/>
+              <rect x="4" y="10" width="13" height="3" rx="1.5" fill={active?'#10b981':'currentColor'}/>
+              <rect x="4" y="15" width="5" height="3" rx="1.5" fill={active?'#10b981':'currentColor'}/>
+            </svg>
+          )},
+          { id: 'add', label: 'Add', action: () => setShowAddMenu(p=>!p), icon: (active) => (
+            <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+              <circle cx="11" cy="11" r="8" stroke={active?'#10b981':'currentColor'} strokeWidth="1.8"/>
+              <path d="M11 7 L11 15 M7 11 L15 11" stroke={active?'#10b981':'currentColor'} strokeWidth="2" strokeLinecap="round"/>
+            </svg>
+          )},
+        ].map(tab => {
+          const active = tab.action ? (tab.id==='add' ? showAddMenu : false) : viewMode === tab.id;
+          const color = active ? '#10b981' : (theme.darkMode ? '#94a3b8' : '#64748b');
+          return (
+            <button key={tab.id}
+              onClick={() => tab.action ? tab.action() : setViewMode(tab.id)}
+              style={{
+                flex: 1, display: 'flex', flexDirection: 'column',
+                alignItems: 'center', justifyContent: 'center',
+                padding: '8px 4px 6px',
+                background: 'none', border: 'none', cursor: 'pointer',
+                color,
+                borderTop: active ? `2px solid #10b981` : '2px solid transparent',
+                transition: 'color 0.15s',
+              }}>
+              {tab.icon(active)}
+              <span style={{fontSize: 10, fontWeight: active ? 700 : 500, marginTop: 2}}>{tab.label}</span>
+            </button>
+          );
+        })}
+      </div>
+
+    </div>
+  );
+}
+
+// ─── Life Dimensions ─────────────────────────────────────────────────────────
+const mkCat = (name, pts) => ({ id: name.toLowerCase().replace(/\W+/g,'_'), name, pts });
+
+const DEFAULT_DIMENSIONS = {
+  creativity: {
+    label: 'Creativity', emoji: '🎨', color: '#9333ea',   // purple
+    weeklyTarget: 3,
+    activities: [
+      mkCat('Digital / Code', 4),
+      mkCat('Visual Art', 3),
+      mkCat('Writing', 3),
+      mkCat('3D / Making', 4),
+      mkCat('Music', 3),
+      mkCat('Design', 3),
+    ],
+    log: [], weeklyScore: 0, health: 1.0,
+  },
+  knowledge: {
+    label: 'Knowledge', emoji: '📚', color: '#3b82f6',    // blue
+    weeklyTarget: 3,
+    activities: [
+      mkCat('Books', 4),
+      mkCat('Documentaries', 2),
+      mkCat('Courses', 5),
+      mkCat('Deep Dives', 4),
+      mkCat('Podcasts / Audio', 2),
+    ],
+    log: [], weeklyScore: 0, health: 1.0,
+  },
+  health: {
+    label: 'Health', emoji: '💪', color: '#ef4444',        // red
+    weeklyTarget: 3,
+    activities: [
+      mkCat('Climbing', 5),
+      mkCat('Cardio / Running', 4),
+      mkCat('Weights', 4),
+      mkCat('Dance', 3),
+      mkCat('Sport', 4),
+      mkCat('Flexibility', 2),
+    ],
+    log: [], weeklyScore: 0, health: 1.0,
+  },
+  growth: {
+    label: 'Growth', emoji: '🌱', color: '#f97316',        // orange
+    weeklyTarget: 2,
+    activities: [
+      mkCat('Reflection / Journal', 3),
+      mkCat('Applied a Lesson', 5),
+      mkCat('Long-term Goal', 4),
+      mkCat('Rest / Recovery', 2),
+      mkCat('Mental Health Check', 3),
+    ],
+    log: [], weeklyScore: 0, health: 1.0,
+    autoCalculated: true,
+  },
+  social: {
+    label: 'Social', emoji: '🤝', color: '#22c55e',   // green
+    weeklyTarget: 5,
+    activities: [
+      mkCat('Message a friend', 1),
+      mkCat('Coffee / catch-up', 3),
+      mkCat('Night out', 4),
+      mkCat('Trip together', 5),
+      mkCat('Meaningful gesture', 4),
+      mkCat('Check in on someone', 2),
+    ],
+    log: [], weeklyScore: 0, health: 1.0,
+    autoCalculated: true, // feeds from friendship interaction scores
+  },
+};
+
+export default function App() {
+  return <ErrorBoundary><AppInner /></ErrorBoundary>;
+}
