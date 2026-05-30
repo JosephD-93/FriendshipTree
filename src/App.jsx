@@ -7,7 +7,7 @@ import {
   BookUser
 } from 'lucide-react';
 
-const APP_VERSION = '2.1';
+const APP_VERSION = '2.2';
 const INTERACTION_DISTANCE = 70;
 const TIER_COLORS_GLOBAL = ['#bef264','#84cc16','#166534','#3b82f6','#9333ea'];
 const PRIMARY_GROUP_COLORS = ['#ef4444','#3b82f6','#f59e0b','#10b981','#8b5cf6','#ec4899','#06b6d4','#f97316'];
@@ -328,7 +328,8 @@ function AppInner() {
   const [activeTags, setActiveTags] = useState([]); // tags currently filtered on
   const [tagInput, setTagInput] = useState('');     // new tag being typed in panel
   const [addFriendForms, setAddFriendForms] = useState([]);
-  const [photoCrop, setPhotoCrop] = useState(null);
+  const [photoCrop, setPhotoCrop] = useState(null); // {nodeId, src (ORIGINAL), crop}
+  const [partnerFlowerEditor, setPartnerFlowerEditor] = useState(null); // nodeId being edited // {nodeId} - open carousel for this node
   const [avatarBuilder, setAvatarBuilder] = useState(null);
   const cropCanvasRef = useRef(null);
   const cropImgRef = useRef(null);
@@ -353,12 +354,14 @@ function AppInner() {
       return TIER_COLORS_GLOBAL[ti];
     }
     if (photoBorderMode === 'group') {
+      // Use personal colour if set (for ungrouped people)
+      if (node.personalColor) return node.personalColor;
       const hubLink = links.find(l => {
         const otherId = l.source === node.id ? l.target : l.target === node.id ? l.source : null;
         if (!otherId) return false;
         return nodes.find(n => n.id === otherId)?.type === 'hub';
       });
-      if (!hubLink) return '#94a3b8';
+      if (!hubLink) return null; // no group, no personal colour = no border
       const hubId = nodes.find(n=>n.id===hubLink.source)?.type==='hub' ? hubLink.source : hubLink.target;
       if (groupColors[hubId]) return groupColors[hubId];
       const idx = nodes.filter(n=>n.type==='hub').findIndex(n=>n.id===hubId);
@@ -2640,29 +2643,36 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
       {/* Add menu — triggered from bottom tab */}
       {showAddMenu && (
-        <div style={{position:'fixed', bottom:66, right:8, zIndex:200}}>
-          <div className={`w-44 rounded-xl shadow-2xl border overflow-hidden ${theme.darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-            <button onClick={()=>{ setAddFriendForms(prev=>[...prev,{id:`form_${Date.now()}`,name:'',parentId:null}]); setShowAddMenu(false); }}
-              className={`w-full text-left px-4 py-3 text-sm font-medium ${theme.darkMode?'hover:bg-slate-700 text-slate-200':'hover:bg-slate-50 text-slate-700'}`}>
-              👤 Add Friend
-            </button>
-            <div className={`border-t ${theme.darkMode?'border-slate-700':'border-slate-100'}`}/>
-            <button onClick={()=>{addNewHub();setShowAddMenu(false);}}
-              className={`w-full text-left px-4 py-3 text-sm font-medium ${theme.darkMode?'hover:bg-slate-700 text-slate-200':'hover:bg-slate-50 text-slate-700'}`}>
-              🌳 Add Group
-            </button>
-            <div className={`border-t ${theme.darkMode?'border-slate-700':'border-slate-100'}`}/>
-            <label className={`flex items-center gap-2 px-4 py-3 text-sm font-medium cursor-pointer ${theme.darkMode?'hover:bg-slate-700 text-slate-200':'hover:bg-slate-50 text-slate-700'}`}>
-              📦 Import Tree
-              <input type="file" accept=".json" className="hidden" onChange={e=>{ if(e.target.files[0]) importData(e.target.files[0]); setShowAddMenu(false); }}/>
+        <>
+          <div style={{position:'fixed',inset:0,zIndex:199}} onClick={()=>setShowAddMenu(false)}/>
+          <div style={{
+            position:'fixed', bottom:72, right:8, zIndex:200,
+            background:theme.darkMode?'#1e293b':'white',
+            borderRadius:16, overflow:'hidden',
+            boxShadow:'0 -4px 32px rgba(0,0,0,0.3)',
+            border:'1px solid '+(theme.darkMode?'#334155':'#e2e8f0'),
+            minWidth:180,
+          }}>
+            {[
+              {icon:'👤', label:'Add Friend', onClick:()=>{ setAddFriendForms(prev=>[...prev,{id:`form_${Date.now()}`,name:'',parentId:null}]); setShowAddMenu(false); }},
+              {icon:'🌳', label:'Add Group', onClick:()=>{addNewHub();setShowAddMenu(false);}},
+              {icon:'📤', label:'Export Tree', onClick:()=>{exportData();setShowAddMenu(false);}},
+            ].map((item,i,arr)=>(
+              <React.Fragment key={item.label}>
+                <button onClick={item.onClick}
+                  style={{display:'flex',alignItems:'center',gap:12,width:'100%',padding:'14px 18px',background:'none',border:'none',cursor:'pointer',fontSize:14,fontWeight:600,color:theme.darkMode?'#e2e8f0':'#1e293b',textAlign:'left'}}>
+                  <span style={{fontSize:18}}>{item.icon}</span>{item.label}
+                </button>
+                {i<arr.length-1&&<div style={{height:1,background:theme.darkMode?'#334155':'#f1f5f9'}}/>}
+              </React.Fragment>
+            ))}
+            <div style={{height:1,background:theme.darkMode?'#334155':'#f1f5f9'}}/>
+            <label style={{display:'flex',alignItems:'center',gap:12,width:'100%',padding:'14px 18px',cursor:'pointer',fontSize:14,fontWeight:600,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>
+              <span style={{fontSize:18}}>📦</span>Import Tree
+              <input type="file" accept=".json" style={{display:'none'}} onChange={e=>{ if(e.target.files[0]) importData(e.target.files[0]); setShowAddMenu(false); }}/>
             </label>
-            <div className={`border-t ${theme.darkMode?'border-slate-700':'border-slate-100'}`}/>
-            <button onClick={()=>{exportData();setShowAddMenu(false);}}
-              className={`w-full text-left px-4 py-3 text-sm font-medium ${theme.darkMode?'hover:bg-slate-700 text-slate-200':'hover:bg-slate-50 text-slate-700'}`}>
-              📤 Export Tree
-            </button>
           </div>
-        </div>
+        </>
       )}
 
       {/* Sidebar — fixed overlay, slides in from left */}
@@ -2788,6 +2798,18 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           <span className="text-white text-lg opacity-0 hover:opacity-100">✎</span>
                         </div>
                       </button>
+                      {/* Photo carousel dots — if multiple photos */}
+                      {(selectedNode.photos?.length > 1) && (
+                        <div style={{display:'flex',gap:4,marginTop:4,justifyContent:'center'}}>
+                          {selectedNode.photos.map((p,pi)=>(
+                            <button key={pi}
+                              onClick={()=>setNodes(prev=>prev.map(n=>n.id===selectedNode.id?{...n,img:p.cropped,activePhotoIdx:pi}:n))}
+                              style={{width:20,height:20,borderRadius:'50%',overflow:'hidden',border:'2px solid '+(selectedNode.activePhotoIdx===pi?'#10b981':'transparent'),padding:0,cursor:'pointer',background:'none'}}>
+                              <img src={p.cropped} style={{width:'100%',height:'100%',objectFit:'cover'}}/>
+                            </button>
+                          ))}
+                        </div>
+                      )}
                       {/* Picker sheet */}
                       {showPhotoOptions && (
                         <div className={`absolute left-0 top-18 z-50 rounded-xl shadow-xl border overflow-hidden w-44 ${theme.darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}
@@ -2796,8 +2818,20 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           {selectedNode?.img && !selectedNode.img.includes('svg') && (
                             <>
                               <button
-                                onClick={() => {
-                                  setPhotoCrop({ nodeId: selectedNodeId, src: selectedNode.img, crop: { x: 0, y: 0, scale: 1 } });
+                                onClick={async () => {
+                                  // Load original (pre-crop) if available, else use current
+                                  let origSrc = selectedNode.img;
+                                  try {
+                                    const db = idbRef.current || (idbRef.current = await openPhotoDB());
+                                    const tx = db.transaction('photos','readonly');
+                                    const stored = await new Promise((res,rej) => {
+                                      const req = tx.objectStore('photos').get(selectedNodeId + '_orig');
+                                      req.onsuccess = e => res(e.target.result);
+                                      req.onerror = rej;
+                                    });
+                                    if (stored?.dataUrl) origSrc = stored.dataUrl;
+                                  } catch {}
+                                  setPhotoCrop({ nodeId: selectedNodeId, src: origSrc, originalSrc: origSrc, crop: { x:0, y:0, scale:1 } });
                                   setShowPhotoOptions(false);
                                 }}
                                 className={`w-full flex items-center gap-2 px-4 py-3 text-sm font-medium text-left ${theme.darkMode ? 'hover:bg-slate-700 text-slate-200' : 'hover:bg-slate-50 text-slate-700'}`}>
@@ -2813,7 +2847,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                               if (!file) return;
                               const reader = new FileReader();
                               reader.onload = ev => {
-                                setPhotoCrop({ nodeId: selectedNodeId, src: ev.target.result, crop: { x: 0, y: 0, scale: 1 } });
+                                setPhotoCrop({ nodeId: selectedNodeId, src: ev.target.result, originalSrc: ev.target.result, crop: { x: 0, y: 0, scale: 1 } });
                                 setShowPhotoOptions(false);
                               };
                               reader.readAsDataURL(file);
@@ -3025,6 +3059,18 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   <label className={`flex items-center text-xs font-semibold uppercase tracking-wider ${theme.darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                     🏷 Tags
                   </label>
+                  {/* Personal colour — shown in group border mode */}
+                  <div style={{marginBottom:8}}>
+                    <div style={{fontSize:11,fontWeight:600,color:theme.darkMode?'#94a3b8':'#64748b',marginBottom:5}}>🎨 Personal colour (group border mode)</div>
+                    <div style={{display:'flex',gap:5,alignItems:'center',flexWrap:'wrap'}}>
+                      {[...PRIMARY_GROUP_COLORS,'#f1f5f9'].map(c=>(
+                        <button key={c} onClick={()=>updateSelectedNode('personalColor', selectedNode.personalColor===c?null:c)}
+                          style={{width:22,height:22,borderRadius:'50%',background:c,border:'3px solid '+(selectedNode.personalColor===c?'white':'transparent'),boxShadow:selectedNode.personalColor===c?'0 0 0 2px '+c:'none',cursor:'pointer',flexShrink:0}}/>
+                      ))}
+                      <button onClick={()=>updateSelectedNode('personalColor',null)}
+                        style={{fontSize:10,color:theme.darkMode?'#64748b':'#94a3b8',background:'none',border:'none',cursor:'pointer',textDecoration:'underline'}}>clear</button>
+                    </div>
+                  </div>
                   {/* Existing tags */}
                   <div style={{display:'flex',flexWrap:'wrap',gap:5}}>
                     {(selectedNode.tags || []).map(tag => (
@@ -3245,6 +3291,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   {label:'Good',   score:300, color:'#166534'},
                   {label:'Close',  score:600, color:'#3b82f6'},
                   {label:'Family', score:800, color:'#9333ea'},
+                  {label:'💑 Partner', score:1500, color:'#f43f5e'},
                 ].map(tier => (
                   <button key={tier.score}
                     onClick={() => setAddFriendForms(prev => prev.map(f => f.id === form.id ? { ...f, initialScore: tier.score } : f))}
@@ -4740,6 +4787,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           {label:'Good',   score:300, color:'#166534'},
           {label:'Close',  score:600, color:'#3b82f6'},
           {label:'Family', score:800, color:'#9333ea'},
+          {label:'💑 Partner', score:1500, color:'#f43f5e'},
         ];
 
         const confirmConnection = (score) => {
@@ -5071,8 +5119,20 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           ctx.drawImage(img, sx, sy, sSize, sSize, 0, 0, SIZE, SIZE);
 
           const base64 = canvas.toDataURL('image/png');
+          // Store original src for future re-crops
+          const origSrc = photoCrop.originalSrc || photoCrop.src;
           savePhotoToDB(photoCrop.nodeId, base64);
-          setNodes(prev => prev.map(n => n.id === photoCrop.nodeId ? { ...n, img: base64 } : n));
+          // Also save original under a separate key for re-crop
+          savePhotoToDB(photoCrop.nodeId + '_orig', origSrc);
+          setNodes(prev => prev.map(n => {
+            if (n.id !== photoCrop.nodeId) return n;
+            // Add to photos array (carousel), set as active
+            const existingPhotos = n.photos || [];
+            const newPhotos = existingPhotos.find(p => p.orig === origSrc)
+              ? existingPhotos.map(p => p.orig === origSrc ? { ...p, cropped: base64 } : p)
+              : [...existingPhotos, { orig: origSrc, cropped: base64 }];
+            return { ...n, img: base64, photos: newPhotos, activePhotoIdx: newPhotos.length - 1 };
+          }));
           setPhotoCrop(null);
         };
 
