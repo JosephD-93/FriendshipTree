@@ -7,7 +7,7 @@ import {
   BookUser
 } from 'lucide-react';
 
-const APP_VERSION = '2.2';
+const APP_VERSION = '2.4';
 const INTERACTION_DISTANCE = 70;
 const TIER_COLORS_GLOBAL = ['#bef264','#84cc16','#166534','#3b82f6','#9333ea'];
 const PRIMARY_GROUP_COLORS = ['#ef4444','#3b82f6','#f59e0b','#10b981','#8b5cf6','#ec4899','#06b6d4','#f97316'];
@@ -329,7 +329,10 @@ function AppInner() {
   const [tagInput, setTagInput] = useState('');     // new tag being typed in panel
   const [addFriendForms, setAddFriendForms] = useState([]);
   const [photoCrop, setPhotoCrop] = useState(null); // {nodeId, src (ORIGINAL), crop}
-  const [partnerFlowerEditor, setPartnerFlowerEditor] = useState(null); // nodeId being edited // {nodeId} - open carousel for this node
+  const [partnerFlowerEditor, setPartnerFlowerEditor] = useState(null);
+  const [pfAppearanceOpen, setPfAppearanceOpen] = useState(true);
+  const [settingsSections, setSettingsSections] = useState({appearance:true,filters:false,data:false,reset:false,security:false,future:false});
+  const [dataSnapshot, setDataSnapshot] = useState(null); // {nodes, links} saved before destructive reset
   const [avatarBuilder, setAvatarBuilder] = useState(null);
   const cropCanvasRef = useRef(null);
   const cropImgRef = useRef(null);
@@ -376,6 +379,16 @@ function AppInner() {
       return '#f59e0b';
     }
     return null;
+  };
+
+  const saveSnapshot = () => setDataSnapshot({ nodes: JSON.parse(JSON.stringify(nodes)), links: JSON.parse(JSON.stringify(links)) });
+
+  const restoreSnapshot = () => {
+    if (!dataSnapshot) return;
+    setNodes(dataSnapshot.nodes);
+    setLinks(dataSnapshot.links);
+    setDataSnapshot(null);
+    showToast('↩ Data restored');
   };
 
   const openPinModal = (mode, title, onSuccess) => {
@@ -2355,8 +2368,12 @@ Return only the JSON array. If nothing trackable is found, return [].`;
     { tier: 'family', label: 'Family', emoji: '🏠', color: '#f59e0b',
       desc: 'Blood or chosen — these people are home. The bond exists independent of interaction frequency.',
       scoreRange: 'Always' },
+    { tier: 'partner', label: 'Partner', emoji: '💗', color: '#f43f5e',
+      desc: 'Your person. The highest level of connection — romantic or platonic soulmate.',
+      scoreRange: 'Always' },
   ];
   const getTier = (score, node) => {
+    if (node?.isPartner) return 'partner';
     if (node?.isFamily) return 'family';
     return score < 100 ? 1 : score < 300 ? 2 : score < 600 ? 3 : score < 1000 ? 4 : 5;
   };
@@ -2489,13 +2506,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   <SH k="reset" label="🗑️ Reset"/>
                   {settingsSections.reset&&<div style={{padding:'8px 0'}}>
                     {[
-                      {label:'📋 Logs & history',desc:'Keeps tier, sets score to 50% in current tier',title:'Reset Logs?',msg:'Clears logs. Scores set to tier midpoints.',onConfirm:()=>{setNodes(prev=>prev.map(n=>{const s=n.interactionScore||0;const mid=s<100?50:s<300?200:s<600?450:s<1000?800:1200;return{...n,interactionScore:mid,prevScore:mid,log:[]};} ));setDimensions(prev=>{const r={};Object.keys(prev).forEach(k=>{r[k]={...prev[k],log:[],weeklyScore:0};});return r;});showToast('📋 Done');}},
-                      {label:'📓 Diary entries',desc:'Clears all diary entries',title:'Clear Diaries?',msg:'Removes diary entries from all people.',onConfirm:()=>{setNodes(prev=>prev.map(n=>({...n,diaryEntries:[]})));showToast('📓 Diaries cleared');}},
-                      {label:'⭐ Friendship scores',desc:"Reset scores — pick each person's tier on map",title:'Reset Scores?',msg:'Resets all scores. Each person shows tier picker on return.',onConfirm:()=>{setNodes(prev=>prev.map(n=>n.type==='friend'||n.id==='me'?{...n,interactionScore:0,prevScore:0}:n));setTierPickMode(true);showToast('⭐ Tap each person to set their level');}},
-                      {label:'🔗 Connections',desc:'Removes all vines & groups, keeps people',title:'Remove Connections?',msg:'Removes all vines and groups. People and photos stay.',onConfirm:()=>{setNodes(prev=>prev.filter(n=>n.type!=='hub'));setLinks(INITIAL_LINKS);setArchivedLinks([]);try{localStorage.removeItem('ft_links');}catch{}showToast('🔗 Done');}},
-                      {label:'👥 People',desc:'Removes all people, keeps Me',title:'Remove People?',msg:'Deletes all person nodes except Me.',onConfirm:()=>{setNodes(prev=>prev.filter(n=>n.type==='hub'||n.type==='flower'||n.id==='me'));setLinks(prev=>prev.filter(l=>{const sn=nodes.find(n=>n.id===l.source);const tn=nodes.find(n=>n.id===l.target);return(sn?.type==='hub'||sn?.type==='flower'||sn?.id==='me')&&(tn?.type==='hub'||tn?.type==='flower'||tn?.id==='me');}));clearPhotoDB();showToast('👥 Done');}},
-                      {label:'📸 Photos',desc:'Replaces photos with blank avatars',title:'Remove Photos?',msg:'Replaces uploaded photos with default avatars.',onConfirm:()=>{clearPhotoDB();const ak=Object.keys(AVATARS);setNodes(prev=>prev.map(n=>n.type==='friend'||n.id==='me'?{...n,img:AVATARS[ak[Math.floor(Math.random()*ak.length)]]}:n));showToast('📸 Done');}},
-                      {label:'🌳 Groups',desc:'Removes group hubs, keeps people',title:'Remove Groups?',msg:'Deletes all group hubs. People remain.',onConfirm:()=>{setNodes(prev=>prev.filter(n=>n.type!=='hub'));setLinks(prev=>prev.filter(l=>{const sn=nodes.find(n=>n.id===l.source);const tn=nodes.find(n=>n.id===l.target);return sn?.type!=='hub'&&tn?.type!=='hub';}));showToast('🌳 Done');}},
+                      {label:'📋 Logs & history',desc:'Keeps tier, sets score to 50% in current tier',title:'Reset Logs?',msg:'Clears logs. Scores set to tier midpoints.',onConfirm:()=>{saveSnapshot();setNodes(prev=>prev.map(n=>{const s=n.interactionScore||0;const mid=s<100?50:s<300?200:s<600?450:s<1000?800:1200;return{...n,interactionScore:mid,prevScore:mid,log:[]};} ));setDimensions(prev=>{const r={};Object.keys(prev).forEach(k=>{r[k]={...prev[k],log:[],weeklyScore:0};});return r;});showToast('📋 Done');}},
+                      {label:'📓 Diary entries',desc:'Clears all diary entries',title:'Clear Diaries?',msg:'Removes diary entries from all people.',onConfirm:()=>{saveSnapshot();setNodes(prev=>prev.map(n=>({...n,diaryEntries:[]})));showToast('📓 Diaries cleared');}},
+                      {label:'⭐ Friendship scores',desc:"Reset scores — pick each person's tier on map",title:'Reset Scores?',msg:'Resets all scores. Each person shows tier picker on return.',onConfirm:()=>{saveSnapshot();setNodes(prev=>prev.map(n=>n.type==='friend'||n.id==='me'?{...n,interactionScore:0,prevScore:0}:n));setTierPickMode(true);showToast('⭐ Tap each person to set their level');}},
+                      {label:'🔗 Connections',desc:'Removes all vines & groups, keeps people',title:'Remove Connections?',msg:'Removes all vines and groups. People and photos stay.',onConfirm:()=>{saveSnapshot();setNodes(prev=>prev.filter(n=>n.type!=='hub'));setLinks(INITIAL_LINKS);setArchivedLinks([]);try{localStorage.removeItem('ft_links');}catch{}showToast('🔗 Done');}},
+                      {label:'👥 People',desc:'Removes all people, keeps Me',title:'Remove People?',msg:'Deletes all person nodes except Me.',onConfirm:()=>{saveSnapshot();setNodes(prev=>prev.filter(n=>n.type==='hub'||n.type==='flower'||n.id==='me'));setLinks(prev=>prev.filter(l=>{const sn=nodes.find(n=>n.id===l.source);const tn=nodes.find(n=>n.id===l.target);return(sn?.type==='hub'||sn?.type==='flower'||sn?.id==='me')&&(tn?.type==='hub'||tn?.type==='flower'||tn?.id==='me');}));clearPhotoDB();showToast('👥 Done');}},
+                      {label:'📸 Photos',desc:'Replaces photos with blank avatars',title:'Remove Photos?',msg:'Replaces uploaded photos with default avatars.',onConfirm:()=>{saveSnapshot();clearPhotoDB();const ak=Object.keys(AVATARS);setNodes(prev=>prev.map(n=>n.type==='friend'||n.id==='me'?{...n,img:AVATARS[ak[Math.floor(Math.random()*ak.length)]]}:n));showToast('📸 Done');}},
+                      {label:'🌳 Groups',desc:'Removes group hubs, keeps people',title:'Remove Groups?',msg:'Deletes all group hubs. People remain.',onConfirm:()=>{saveSnapshot();setNodes(prev=>prev.filter(n=>n.type!=='hub'));setLinks(prev=>prev.filter(l=>{const sn=nodes.find(n=>n.id===l.source);const tn=nodes.find(n=>n.id===l.target);return sn?.type!=='hub'&&tn?.type!=='hub';}));showToast('🌳 Done');}},
                     ].map((row,i)=>(
                       <div key={i} style={{padding:'10px 0',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}>
                         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8}}>
@@ -2646,13 +2663,16 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         <>
           <div style={{position:'fixed',inset:0,zIndex:199}} onClick={()=>setShowAddMenu(false)}/>
           <div style={{
-            position:'fixed', bottom:72, right:8, zIndex:200,
+            position:'fixed', bottom:68, left:8, right:8, zIndex:200,
             background:theme.darkMode?'#1e293b':'white',
-            borderRadius:16, overflow:'hidden',
-            boxShadow:'0 -4px 32px rgba(0,0,0,0.3)',
+            borderRadius:20, overflow:'hidden',
+            boxShadow:'0 -8px 40px rgba(0,0,0,0.35)',
             border:'1px solid '+(theme.darkMode?'#334155':'#e2e8f0'),
-            minWidth:180,
           }}>
+            {/* Drag handle */}
+            <div style={{display:'flex',justifyContent:'center',padding:'10px 0 4px'}}>
+              <div style={{width:36,height:4,borderRadius:2,background:theme.darkMode?'#475569':'#cbd5e1'}}/>
+            </div>
             {[
               {icon:'👤', label:'Add Friend', onClick:()=>{ setAddFriendForms(prev=>[...prev,{id:`form_${Date.now()}`,name:'',parentId:null}]); setShowAddMenu(false); }},
               {icon:'🌳', label:'Add Group', onClick:()=>{addNewHub();setShowAddMenu(false);}},
@@ -2660,17 +2680,18 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             ].map((item,i,arr)=>(
               <React.Fragment key={item.label}>
                 <button onClick={item.onClick}
-                  style={{display:'flex',alignItems:'center',gap:12,width:'100%',padding:'14px 18px',background:'none',border:'none',cursor:'pointer',fontSize:14,fontWeight:600,color:theme.darkMode?'#e2e8f0':'#1e293b',textAlign:'left'}}>
-                  <span style={{fontSize:18}}>{item.icon}</span>{item.label}
+                  style={{display:'flex',alignItems:'center',gap:14,width:'100%',padding:'16px 22px',background:'none',border:'none',cursor:'pointer',fontSize:15,fontWeight:600,color:theme.darkMode?'#e2e8f0':'#1e293b',textAlign:'left'}}>
+                  <span style={{fontSize:20,width:28,textAlign:'center'}}>{item.icon}</span>{item.label}
                 </button>
-                {i<arr.length-1&&<div style={{height:1,background:theme.darkMode?'#334155':'#f1f5f9'}}/>}
+                {i<arr.length-1&&<div style={{height:1,background:theme.darkMode?'#334155':'#f1f5f9',marginLeft:64}}/>}
               </React.Fragment>
             ))}
-            <div style={{height:1,background:theme.darkMode?'#334155':'#f1f5f9'}}/>
-            <label style={{display:'flex',alignItems:'center',gap:12,width:'100%',padding:'14px 18px',cursor:'pointer',fontSize:14,fontWeight:600,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>
-              <span style={{fontSize:18}}>📦</span>Import Tree
+            <div style={{height:1,background:theme.darkMode?'#334155':'#f1f5f9',marginLeft:64}}/>
+            <label style={{display:'flex',alignItems:'center',gap:14,width:'100%',padding:'16px 22px',cursor:'pointer',fontSize:15,fontWeight:600,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>
+              <span style={{fontSize:20,width:28,textAlign:'center'}}>📦</span>Import Tree
               <input type="file" accept=".json" style={{display:'none'}} onChange={e=>{ if(e.target.files[0]) importData(e.target.files[0]); setShowAddMenu(false); }}/>
             </label>
+            <div style={{height:8}}/>
           </div>
         </>
       )}
@@ -3005,10 +3026,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                 <button
                                   key={lvl.tier}
                                   onClick={() => {
-                                    if (lvl.tier === 'family') {
-                                      setNodes(prev => prev.map(n => n.id === selectedNodeId ? { ...n, isFamily: true } : n));
+                                    if (lvl.tier === 'partner') {
+                                      setNodes(prev => prev.map(n => n.id === selectedNodeId ? { ...n, isPartner: true, isFamily: false } : n));
+                                      setPartnerFlowerEditor(selectedNodeId);
+                                    } else if (lvl.tier === 'family') {
+                                      setNodes(prev => prev.map(n => n.id === selectedNodeId ? { ...n, isFamily: true, isPartner: false } : n));
                                     } else {
-                                      setNodes(prev => prev.map(n => n.id === selectedNodeId ? { ...n, isFamily: false, interactionScore: TIER_SCORE_MAP[lvl.tier] || 0 } : n));
+                                      setNodes(prev => prev.map(n => n.id === selectedNodeId ? { ...n, isFamily: false, isPartner: false, interactionScore: TIER_SCORE_MAP[lvl.tier] || 0 } : n));
                                     }
                                     showToast(`${lvl.emoji} Set to ${lvl.label}`);
                                   }}
@@ -3038,6 +3062,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     );
                   })()}
                 </>
+              )}
+
+              {selectedNode.type !== 'hub' && selectedNode.isPartner && (
+                <button onClick={()=>setPartnerFlowerEditor(selectedNodeId)}
+                  style={{width:'100%',padding:'8px',borderRadius:10,background:'#f43f5e',color:'white',border:'none',cursor:'pointer',fontSize:13,fontWeight:700,marginBottom:4}}>
+                  💗 Customise Partner Flower
+                </button>
               )}
 
               {selectedNode.type !== 'hub' && (
@@ -4339,6 +4370,42 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       <circle r={r} fill={theme.darkMode ? "#1e293b" : "white"} />
                       <clipPath id={`clip-${node.id}`}><circle r={r - 4} /></clipPath>
                       <image href={node.img} x={-r} y={-r} width={r * 2} height={r * 2} clipPath={`url(#clip-${node.id})`} preserveAspectRatio="xMidYMid slice" />
+                      {node.isPartner && (() => {
+                        const pf = node.partnerFlower || {petals:6,petalColor:'#f43f5e',subPetalColor:'#fda4af',petalBorderColor:'#9f1239',subPetalBorderColor:'#fecdd3',borderColor:'#9f1239',pattern:'solid'};
+                        const PETALS = pf.petals || 6;
+                        const pr = r * 1.65, pw = pr * 0.65;
+                        const buildPF = (scale=1) => Array.from({length:PETALS},(_,pi)=>{
+                          const pa=(pi/PETALS)*Math.PI*2;
+                          const L=pr*scale,W=pw*scale,tx=Math.cos(pa)*L,ty=Math.sin(pa)*L,perpA=pa+Math.PI*0.5;
+                          const c1x=Math.cos(pa)*L*0.35+Math.cos(perpA)*W*0.6,c1y=Math.sin(pa)*L*0.35+Math.sin(perpA)*W*0.6;
+                          const c2x=Math.cos(pa)*L*0.85+Math.cos(perpA)*W*0.5,c2y=Math.sin(pa)*L*0.85+Math.sin(perpA)*W*0.5;
+                          const c3x=Math.cos(pa)*L*0.85-Math.cos(perpA)*W*0.5,c3y=Math.sin(pa)*L*0.85-Math.sin(perpA)*W*0.5;
+                          const c4x=Math.cos(pa)*L*0.35-Math.cos(perpA)*W*0.6,c4y=Math.sin(pa)*L*0.35-Math.sin(perpA)*W*0.6;
+                          return `M 0,0 C ${c1x},${c1y} ${c2x},${c2y} ${tx},${ty} C ${c3x},${c3y} ${c4x},${c4y} 0,0`;
+                        }).join(' ');
+                        const pid = `pf-${node.id}`;
+                        const mainFill = pf.pattern==='gradient' ? `url(#${pid}-grad)` : pf.petalColor;
+                        return (
+                          <g style={{pointerEvents:'none'}}>
+                            <defs>
+                              <pattern id={`${pid}-stripes`} width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke={pf.patternColor||pf.subPetalColor} strokeWidth="3"/></pattern>
+                              <pattern id={`${pid}-dots`} width="8" height="8" patternUnits="userSpaceOnUse"><circle cx="4" cy="4" r="2" fill={pf.patternColor||pf.subPetalColor}/></pattern>
+                              <pattern id={`${pid}-hatch`} width="6" height="6" patternUnits="userSpaceOnUse"><line x1="0" y1="3" x2="6" y2="3" stroke={pf.patternColor||pf.subPetalColor} strokeWidth="1.5"/><line x1="3" y1="0" x2="3" y2="6" stroke={pf.patternColor||pf.subPetalColor} strokeWidth="1.5"/></pattern>
+                              <linearGradient id={`${pid}-grad`} x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stopColor={pf.petalColor}/><stop offset="100%" stopColor={pf.subPetalColor}/></linearGradient>
+                            </defs>
+                            <g transform={`rotate(${360/PETALS/2})`} opacity={0.55}>
+                              <path d={buildPF(0.85)} fill={pf.subPetalColor}
+                                stroke={pf.subPetalBorder==='on'?pf.subPetalBorderColor:'none'} strokeWidth={pf.subPetalBorder==='on'?1:0}/>
+                            </g>
+                            <path d={buildPF()} fill={mainFill} opacity={0.9}
+                              stroke={pf.petalBorder==='on'?pf.petalBorderColor:'none'} strokeWidth={pf.petalBorder==='on'?1:0}/>
+                            {pf.pattern&&pf.pattern!=='solid'&&pf.pattern!=='gradient'&&(
+                              <path d={buildPF()} fill={`url(#${pid}-${pf.pattern})`} opacity={0.4}/>
+                            )}
+                            <circle r={r+3} fill="none" stroke={pf.borderColor||'#9f1239'} strokeWidth="3" opacity={0.9}/>
+                          </g>
+                        );
+                      })()}
                       {photoBorderMode !== 'none' && getPhotoBorderColor(node) && (
                         <circle r={r + 3} fill="none" stroke={getPhotoBorderColor(node)} strokeWidth="4" opacity="0.95"/>
                       )}
@@ -4346,14 +4413,15 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       {tierPickMode && (
                         <g>
                           {[
-                            {label:'New',score:50,color:'#bef264'},
-                            {label:'Friend',score:200,color:'#84cc16'},
-                            {label:'Good',score:450,color:'#166534'},
-                            {label:'Close',score:800,color:'#3b82f6'},
-                            {label:'Family',score:1200,color:'#9333ea'},
+                            {label:'Acquaint.',score:50,color:'#84cc16'},
+                            {label:'Friendly',score:200,color:'#22c55e'},
+                            {label:'Good',score:450,color:'#16a34a'},
+                            {label:'Close',score:800,color:'#15803d'},
+                            {label:'Kindred',score:1200,color:'#14532d'},
+                            {label:'Family',score:1500,color:'#f59e0b'},
                           ].map((t,ti)=>{
-                            const bw=r*0.48, bh=r*0.55, gap=2;
-                            const totalW=5*bw+4*gap;
+                            const bw=r*0.42, bh=r*0.52, gap=2;
+                            const totalW=6*bw+5*gap;
                             const sx=-totalW/2+ti*(bw+gap);
                             return (
                               <g key={t.label} transform={`translate(${sx},${r+6})`}
@@ -4580,7 +4648,23 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           </g>
         </svg>
 
-        {/* ── Tier Pick Mode overlay ───────────────────────────────────────────── */}
+        {/* ── Restore banner after reset ────────────────────────────────────────── */}
+      {dataSnapshot && (
+        <div style={{position:'fixed',bottom:68,left:8,right:8,zIndex:450,
+          background:'#1e3a5f',borderRadius:14,padding:'12px 16px',
+          display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,
+          boxShadow:'0 4px 24px rgba(0,0,0,0.4)',border:'1px solid #3b82f6'}}>
+          <span style={{fontSize:13,fontWeight:600,color:'white'}}>↩ Undo last reset?</span>
+          <div style={{display:'flex',gap:8}}>
+            <button onClick={restoreSnapshot}
+              style={{padding:'6px 14px',borderRadius:8,background:'#3b82f6',color:'white',border:'none',cursor:'pointer',fontSize:13,fontWeight:700}}>Restore</button>
+            <button onClick={()=>setDataSnapshot(null)}
+              style={{padding:'6px 10px',borderRadius:8,background:'rgba(255,255,255,0.1)',color:'#94a3b8',border:'none',cursor:'pointer',fontSize:13}}>Dismiss</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Tier Pick Mode overlay ───────────────────────────────────────────── */}
       {tierPickMode && (
         <div style={{position:'fixed',top:0,left:0,right:0,zIndex:300,
           padding:'10px 16px',background:'#1e3a5f',borderBottom:'3px solid #3b82f6',
@@ -5058,7 +5142,218 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         );
       })()}
 
-      {/* ── Photo Crop Modal ─────────────────────────────────────────────────── */}
+      {/* ── Partner Flower Customiser ─────────────────────────────────────────── */}
+      {partnerFlowerEditor && (() => {
+        const pn = nodes.find(n=>n.id===partnerFlowerEditor);
+        if (!pn) return null;
+        const pf = pn.partnerFlower || {petals:6,petalColor:'#f43f5e',subPetalColor:'#fda4af',petalBorder:'none',subPetalBorder:'none',petalBorderColor:'#9f1239',subPetalBorderColor:'#fecdd3',borderColor:'#9f1239',pattern:'solid',size:1.0};
+        const dm = theme.darkMode;
+        const bg = dm?'#0f172a':'white';
+        const brd = dm?'#334155':'#e2e8f0';
+        const sub = dm?'#94a3b8':'#64748b';
+        const update = (key,val) => setNodes(prev=>prev.map(n=>n.id===partnerFlowerEditor?{...n,partnerFlower:{...(n.partnerFlower||{petals:6,petalColor:'#f43f5e',subPetalColor:'#fda4af',petalBorderColor:'#9f1239',subPetalBorderColor:'#fecdd3',borderColor:'#9f1239',pattern:'solid'}),[key]:val}}:n));
+
+        const COLORS = ['#f43f5e','#ec4899','#a855f7','#8b5cf6','#3b82f6','#06b6d4','#10b981','#84cc16','#f59e0b','#ef4444','#ffffff','#000000'];
+        const PATTERNS = [
+          {id:'solid',    label:'Solid'},
+          {id:'stripes',  label:'Stripes'},
+          {id:'dots',     label:'Dots'},
+          {id:'gradient', label:'Fade'},
+          {id:'hatch',    label:'Hatch'},
+        ];
+
+        // Build petal path
+        const PETALS=pf.petals||6;
+        const pr=36,pw=pr*0.65;
+        const buildP=(scale=1,rot=0)=>`<g transform="rotate(${rot})">`+Array.from({length:PETALS},(_,pi)=>{
+          const pa=(pi/PETALS)*Math.PI*2;
+          const L=pr*scale,W=pw*scale,tx=Math.cos(pa)*L,ty=Math.sin(pa)*L;
+          const perpA=pa+Math.PI*0.5;
+          const c1x=Math.cos(pa)*L*0.35+Math.cos(perpA)*W*0.6,c1y=Math.sin(pa)*L*0.35+Math.sin(perpA)*W*0.6;
+          const c2x=Math.cos(pa)*L*0.85+Math.cos(perpA)*W*0.5,c2y=Math.sin(pa)*L*0.85+Math.sin(perpA)*W*0.5;
+          const c3x=Math.cos(pa)*L*0.85-Math.cos(perpA)*W*0.5,c3y=Math.sin(pa)*L*0.85-Math.sin(perpA)*W*0.5;
+          const c4x=Math.cos(pa)*L*0.35-Math.cos(perpA)*W*0.6,c4y=Math.sin(pa)*L*0.35-Math.sin(perpA)*W*0.6;
+          return `M 0,0 C ${c1x},${c1y} ${c2x},${c2y} ${tx},${ty} C ${c3x},${c3y} ${c4x},${c4y} 0,0`;
+        }).join(' ')+'</g>';
+
+        const isLight = (hex) => {
+          const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);
+          return (r*299+g*587+b*114)/1000 > 128;
+        };
+
+        const ColorRow = ({label,k})=>(
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,padding:'4px 0'}}>
+            <span style={{fontSize:12,fontWeight:600,color:sub,flexShrink:0,minWidth:110}}>{label}</span>
+            <div style={{display:'flex',gap:4,flexWrap:'wrap',justifyContent:'flex-end',alignItems:'center'}}>
+              {COLORS.map(c=>{
+                const selected = pf[k]===c;
+                const isBlack = c === '#000000';
+                return (
+                  <button key={c} onClick={()=>update(k,c)}
+                    style={{width:22,height:22,borderRadius:'50%',background:c,
+                      border:'2px solid '+(isBlack?'#6b7280':selected?(isLight(c)?'#1e293b':'white'):'rgba(128,128,128,0.3)'),
+                      boxShadow:selected?'0 0 0 2px '+(isLight(c)?'#1e293b':'white'):'none',
+                      cursor:'pointer',flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center'}}>
+                    {selected&&<span style={{fontSize:10,color:isLight(c)?'#1e293b':'white',lineHeight:1,userSelect:'none'}}>✓</span>}
+                  </button>
+                );
+              })}
+              {/* Lock button — prevents dark/light mode from affecting this colour */}
+              <button onClick={()=>update(k+'_locked', !pf[k+'_locked'])}
+                title="Lock colour against theme changes"
+                style={{width:20,height:20,borderRadius:4,background:pf[k+'_locked']?(dm?'#3b82f6':'#2563eb'):(dm?'#334155':'#e2e8f0'),border:'none',cursor:'pointer',fontSize:10,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                <span style={{fontSize:9}}>{pf[k+'_locked']?'🔒':'🔓'}</span>
+              </button>
+            </div>
+          </div>
+        );
+
+        return (
+          <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:600,background:'rgba(0,0,0,0.7)',display:'flex',alignItems:'flex-end',justifyContent:'center'}}
+            onClick={e=>{if(e.target===e.currentTarget)setPartnerFlowerEditor(null)}}>
+            <div style={{background:bg,borderRadius:'24px 24px 0 0',width:'100%',maxWidth:500,maxHeight:'90vh',display:'flex',flexDirection:'column',boxShadow:'0 -8px 40px rgba(0,0,0,0.4)'}}>
+              {/* Header */}
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'18px 20px 12px',flexShrink:0}}>
+                <span style={{fontSize:16,fontWeight:800,color:dm?'#e2e8f0':'#1e293b'}}>💗 Partner Flower — {pn.label}</span>
+                <button onClick={()=>setPartnerFlowerEditor(null)} style={{background:'none',border:'none',fontSize:20,cursor:'pointer',color:sub}}>✕</button>
+              </div>
+
+              <div style={{overflowY:'auto',flex:1,padding:'0 20px 40px'}}>
+                {/* Live preview */}
+                <div style={{display:'flex',justifyContent:'center',marginBottom:16}}>
+                  <svg width="130" height="130" viewBox="-65 -65 130 130">
+                    <defs>
+                      <pattern id="pf-stripes" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                        <line x1="0" y1="0" x2="0" y2="6" stroke={pf.patternColor||pf.subPetalColor} strokeWidth="3"/>
+                      </pattern>
+                      <pattern id="pf-dots" width="8" height="8" patternUnits="userSpaceOnUse">
+                        <circle cx="4" cy="4" r="2" fill={pf.patternColor||pf.subPetalColor}/>
+                      </pattern>
+                      <pattern id="pf-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(0)">
+                        <line x1="0" y1="3" x2="6" y2="3" stroke={pf.patternColor||pf.subPetalColor} strokeWidth="1.5"/>
+                        <line x1="3" y1="0" x2="3" y2="6" stroke={pf.patternColor||pf.subPetalColor} strokeWidth="1.5"/>
+                      </pattern>
+                      <linearGradient id="pf-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stopColor={pf.petalColor}/>
+                        <stop offset="100%" stopColor={pf.subPetalColor}/>
+                      </linearGradient>
+                    </defs>
+                    {(() => {
+                      const patFill = pf.pattern==='stripes'?'url(#pf-stripes)':pf.pattern==='dots'?'url(#pf-dots)':pf.pattern==='hatch'?'url(#pf-hatch)':pf.pattern==='gradient'?pf.petalColor:null;
+                      const mainFill = pf.pattern==='gradient'?'url(#pf-grad)':pf.petalColor;
+                      const sub85 = Array.from({length:PETALS},(_,pi)=>{
+                        const pa=(pi/PETALS)*Math.PI*2,L=pr*0.85,W=pw*0.85,tx=Math.cos(pa)*L,ty=Math.sin(pa)*L,perpA=pa+Math.PI*0.5;
+                        const c1x=Math.cos(pa)*L*0.35+Math.cos(perpA)*W*0.6,c1y=Math.sin(pa)*L*0.35+Math.sin(perpA)*W*0.6;
+                        const c2x=Math.cos(pa)*L*0.85+Math.cos(perpA)*W*0.5,c2y=Math.sin(pa)*L*0.85+Math.sin(perpA)*W*0.5;
+                        const c3x=Math.cos(pa)*L*0.85-Math.cos(perpA)*W*0.5,c3y=Math.sin(pa)*L*0.85-Math.sin(perpA)*W*0.5;
+                        const c4x=Math.cos(pa)*L*0.35-Math.cos(perpA)*W*0.6,c4y=Math.sin(pa)*L*0.35-Math.sin(perpA)*W*0.6;
+                        return `M 0,0 C ${c1x},${c1y} ${c2x},${c2y} ${tx},${ty} C ${c3x},${c3y} ${c4x},${c4y} 0,0`;
+                      }).join(' ');
+                      const main1 = Array.from({length:PETALS},(_,pi)=>{
+                        const pa=(pi/PETALS)*Math.PI*2,L=pr,W=pw,tx=Math.cos(pa)*L,ty=Math.sin(pa)*L,perpA=pa+Math.PI*0.5;
+                        const c1x=Math.cos(pa)*L*0.35+Math.cos(perpA)*W*0.6,c1y=Math.sin(pa)*L*0.35+Math.sin(perpA)*W*0.6;
+                        const c2x=Math.cos(pa)*L*0.85+Math.cos(perpA)*W*0.5,c2y=Math.sin(pa)*L*0.85+Math.sin(perpA)*W*0.5;
+                        const c3x=Math.cos(pa)*L*0.85-Math.cos(perpA)*W*0.5,c3y=Math.sin(pa)*L*0.85-Math.sin(perpA)*W*0.5;
+                        const c4x=Math.cos(pa)*L*0.35-Math.cos(perpA)*W*0.6,c4y=Math.sin(pa)*L*0.35-Math.sin(perpA)*W*0.6;
+                        return `M 0,0 C ${c1x},${c1y} ${c2x},${c2y} ${tx},${ty} C ${c3x},${c3y} ${c4x},${c4y} 0,0`;
+                      }).join(' ');
+                      return <>
+                        <g transform={`rotate(${360/PETALS/2})`} opacity={0.55}>
+                          <path d={sub85} fill={pf.subPetalColor} stroke={pf.subPetalBorderColor||'none'} strokeWidth={pf.subPetalBorder==='on'?1.5:0}/>
+                        </g>
+                        <path d={main1} fill={mainFill} opacity={0.92} stroke={pf.petalBorderColor||'none'} strokeWidth={pf.petalBorder==='on'?1.5:0}/>
+                        {patFill&&pf.pattern!=='gradient'&&<path d={main1} fill={patFill} opacity={0.4}/>}
+                        <circle r={18} fill={dm?'#1e293b':'white'} stroke={pf.borderColor} strokeWidth="3"/>
+                        <text textAnchor="middle" dominantBaseline="middle" fontSize="14">💗</text>
+                      </>;
+                    })()}
+                  </svg>
+                </div>
+
+                {/* Petals count */}
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
+                  <span style={{fontSize:13,fontWeight:700,color:dm?'#e2e8f0':'#1e293b'}}>Petals</span>
+                  <div style={{display:'flex',gap:6}}>
+                    {[4,5,6,7,8].map(n=>(
+                      <button key={n} onClick={()=>update('petals',n)}
+                        style={{width:34,height:34,borderRadius:8,border:'2px solid '+((pf.petals||6)===n?pf.petalColor:brd),background:(pf.petals||6)===n?pf.petalColor:'transparent',color:(pf.petals||6)===n?'white':(dm?'#e2e8f0':'#1e293b'),fontWeight:700,cursor:'pointer',fontSize:14}}>{n}</button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Pattern */}
+                <div style={{marginBottom:12}}>
+                  <span style={{fontSize:13,fontWeight:700,color:dm?'#e2e8f0':'#1e293b',display:'block',marginBottom:6}}>Petal Pattern</span>
+                  <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:8}}>
+                    {PATTERNS.map(p=>(
+                      <button key={p.id} onClick={()=>update('pattern',p.id)}
+                        style={{padding:'5px 12px',borderRadius:99,fontSize:12,fontWeight:700,cursor:'pointer',border:'2px solid '+((pf.pattern||'solid')===p.id?pf.petalColor:brd),background:(pf.pattern||'solid')===p.id?pf.petalColor:'transparent',color:(pf.pattern||'solid')===p.id?'white':(dm?'#94a3b8':'#64748b')}}>
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                  {/* Pattern colour — shown when a non-solid pattern is active */}
+                  {(pf.pattern||'solid')!=='solid' && (pf.pattern||'solid')!=='gradient' && (
+                    <div style={{padding:'6px 0'}}>
+                      <span style={{fontSize:12,fontWeight:600,color:sub,display:'block',marginBottom:5}}>Pattern colour</span>
+                      <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
+                        {COLORS.map(c=>{
+                          const selected=(pf.patternColor||pf.subPetalColor)===c;
+                          return (
+                            <button key={c} onClick={()=>update('patternColor',c)}
+                              style={{width:22,height:22,borderRadius:'50%',background:c,
+                                border:'2px solid '+(c==='#000000'?'#6b7280':selected?(isLight(c)?'#1e293b':'white'):'rgba(128,128,128,0.3)'),
+                                boxShadow:selected?'0 0 0 2px '+(isLight(c)?'#1e293b':'white'):'none',
+                                cursor:'pointer',flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center'}}>
+                              {selected&&<span style={{fontSize:10,color:isLight(c)?'#1e293b':'white',lineHeight:1,userSelect:'none'}}>✓</span>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  )}
+                </div>
+
+                {/* Appearance section — collapsible */}
+                <button onClick={()=>setPfAppearanceOpen(p=>!p)}
+                  style={{display:'flex',alignItems:'center',justifyContent:'space-between',width:'100%',padding:'10px 0',background:'none',border:'none',borderTop:'1px solid '+brd,cursor:'pointer',color:dm?'#e2e8f0':'#1e293b',marginTop:4}}>
+                  <span style={{fontSize:13,fontWeight:800}}>🎨 Appearance</span>
+                  <span style={{fontSize:12,color:sub}}>{pfAppearanceOpen?'▲':'▼'}</span>
+                </button>
+                {pfAppearanceOpen && (
+                  <div style={{display:'flex',flexDirection:'column',gap:2,padding:'8px 0'}}>
+                    <ColorRow label="Petal fill" k="petalColor"/>
+                    <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'4px 0'}}>
+                      <span style={{fontSize:12,fontWeight:600,color:sub}}>Petal border</span>
+                      <div style={{display:'flex',gap:6,alignItems:'center'}}>
+                        <button onClick={()=>update('petalBorder',pf.petalBorder==='on'?'off':'on')}
+                          style={{padding:'3px 10px',borderRadius:99,fontSize:11,fontWeight:700,cursor:'pointer',border:'none',background:pf.petalBorder==='on'?pf.petalBorderColor:(dm?'#1e293b':'#f1f5f9'),color:pf.petalBorder==='on'?'white':(dm?'#94a3b8':'#64748b')}}>
+                          {pf.petalBorder==='on'?'On':'Off'}
+                        </button>
+                      </div>
+                    </div>
+                    {pf.petalBorder==='on'&&<ColorRow label="Petal border colour" k="petalBorderColor"/>}
+                    <ColorRow label="Sub-petal fill" k="subPetalColor"/>
+                    <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'4px 0'}}>
+                      <span style={{fontSize:12,fontWeight:600,color:sub}}>Sub-petal border</span>
+                      <div style={{display:'flex',gap:6,alignItems:'center'}}>
+                        <button onClick={()=>update('subPetalBorder',pf.subPetalBorder==='on'?'off':'on')}
+                          style={{padding:'3px 10px',borderRadius:99,fontSize:11,fontWeight:700,cursor:'pointer',border:'none',background:pf.subPetalBorder==='on'?pf.subPetalBorderColor:(dm?'#1e293b':'#f1f5f9'),color:pf.subPetalBorder==='on'?'white':(dm?'#94a3b8':'#64748b')}}>
+                          {pf.subPetalBorder==='on'?'On':'Off'}
+                        </button>
+                      </div>
+                    </div>
+                    {pf.subPetalBorder==='on'&&<ColorRow label="Sub-petal border colour" k="subPetalBorderColor"/>}
+                    <ColorRow label="Centre border" k="borderColor"/>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
       {photoCrop && (() => {
         const dm = theme.darkMode;
         const SIZE = 800; // output size px - full quality
