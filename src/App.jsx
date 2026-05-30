@@ -7,7 +7,8 @@ import {
   BookUser
 } from 'lucide-react';
 
-const APP_VERSION = '1.1';
+const APP_VERSION = '1.6';
+const INTERACTION_DISTANCE = 100;
 const MAX_SCORE = 1000;
 const DECAY_RATE_PER_DAY = 5;
 const CALENDAR_NODE_SCALE = 8.4; // 30% smaller than original 15, then 20% more
@@ -271,6 +272,23 @@ function FabMenu(props) {
           </svg>
         </button>
       </div>
+      {/* Floating confirm button below FAB when vine/cut active */}
+      {(vineDrawMode || macheteMode) && (
+        <div style={{position:'fixed',left:px,top:py+FAB+8,zIndex:152,display:'flex',flexDirection:'column',alignItems:'center'}}>
+          <button onClick={()=>{
+            if(vineDrawMode){commitAllPaths();setVineDrawMode(false);setPendingPaths([]);setCurrentStroke([]);}
+            if(macheteMode){setMacheteMode(false);}
+          }} style={{
+            width:FAB,height:FAB,borderRadius:'50%',border:'3px solid white',cursor:'pointer',
+            background:vineDrawMode?'#10b981':'#ef4444',
+            boxShadow:'0 4px 16px rgba(0,0,0,0.35)',color:'white',
+            display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:1,
+          }}>
+            <span style={{fontSize:16,lineHeight:1}}>{vineDrawMode?'🌿':'🪓'}</span>
+            <span style={{fontSize:7,fontWeight:900,letterSpacing:'0.5px'}}>{vineDrawMode?'COMMIT':'STOP'}</span>
+          </button>
+        </div>
+      )}
     </>
   );
 }
@@ -438,7 +456,13 @@ function AppInner() {
   const [selectedNodeId, setSelectedNodeId] = useState(null);
   const [toastMessage, setToastMessage] = useState(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [pinModal, setPinModal] = useState(null); // {mode:'set'|'verify'|'clear', onSuccess, title}
+  const [futureOpen, setFutureOpen] = useState(false);
+  const [newIdea, setNewIdea] = useState('');
+  const [userIdeas, setUserIdeas] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('ft_ideas') || '[]'); } catch { return []; }
+  });
+  const [confirmModal, setConfirmModal] = useState(null);
+  const [pinModal, setPinModal] = useState(null);
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
   const [appLocked, setAppLocked] = useState(false);
@@ -756,13 +780,12 @@ function AppInner() {
         }));
       } else {
         setNodes(prev => prev.map(n => n.id === dragNode.id ? { ...n, x: svgX, y: svgY } : n));
-      }      let closest = null, minDist = INTERACTION_DISTANCE;
+      }      let closest = null, minDist = INTERACTION_DISTANCE * 2; // doubled for easier targeting
       nodes.forEach(n => {
-        if (n.id !== dragNode.id && n.id !== 'me' &&
-            (n.type !== 'flower' || n.id === 'flower_social')) {
-          const d = Math.sqrt((n.x-svgX)**2 + (n.y-svgY)**2);
-          if (d < minDist) { minDist = d; closest = n.id; }
-        }
+        if (n.id === dragNode.id) return; // skip self
+        if (n.type === 'flower' && n.id !== 'flower_social') return; // only social flower counts
+        const d = Math.sqrt((n.x-svgX)**2 + (n.y-svgY)**2);
+        if (d < minDist) { minDist = d; closest = n.id; }
       });
       setHoverTarget(closest);
     }
@@ -848,57 +871,71 @@ function AppInner() {
           (l.source === dragNode.id && l.target === hoverTarget) ||
           (l.source === hoverTarget && l.target === dragNode.id)
         );
-        // Group→Group: offer merge
+        // Group→Group: merge prompt, bounce back
         if (draggedNode?.type === 'hub' && targetNode?.type === 'hub') {
           setNodes(prev => prev.map(n => n.id === dragNode.id ? { ...n, x: dragNode.startX, y: dragNode.startY } : n));
           setMergePrompt({ type: 'group', a: dragNode.id, b: hoverTarget });
-        // Person→Person: offer to connect
-        } else if (!draggedNode?.type && !targetNode?.type && draggedNode?.id !== 'me' && targetNode?.id !== 'me') {
-          const alreadyLinked = links.some(l =>
-            (l.source === dragNode.id && l.target === hoverTarget) ||
-            (l.source === hoverTarget && l.target === dragNode.id)
-          );
-          if (!alreadyLinked) {
-            setNodes(prev => prev.map(n => n.id === dragNode.id ? { ...n, x: dragNode.startX, y: dragNode.startY } : n));
-            setMergePrompt({ type: 'friend', a: dragNode.id, b: hoverTarget });
-          }
-        } else if (targetNode && targetNode.type !== 'hub') {
-          const alreadyLinked = links.some(l =>
-            (l.source === dragNode.id && l.target === hoverTarget) ||
-            (l.source === hoverTarget && l.target === dragNode.id)
-          );
-          if (!alreadyLinked) {
-            setLinks(prev => [...prev, { source: dragNode.id, target: hoverTarget }]);
-            // Don't move the node — snap to hex where they released it
-            if (archived) {
-              setArchivedLinks(prev => prev.filter(l => l !== archived));
-              showToast('🌿 Reconnected — friendship restored at ' + archived.score + ' pts');
-            } else {
-              showToast('🌱 Connected to ' + targetNode.label);
-            }
-          }
-        } else if (targetNode?.type === 'flower' && targetNode?.id === 'flower_social') {
-          // Dropped onto social flower — add link and bounce back to original position
+
+        // Anything→Social flower: connect and bounce back
+        } else if (targetNode?.id === 'flower_social') {
           const alreadyLinked = links.some(l =>
             (l.source === 'flower_social' && l.target === dragNode.id) ||
             (l.source === dragNode.id && l.target === 'flower_social')
           );
+          setNodes(prev => prev.map(n => n.id === dragNode.id ? { ...n, x: dragNode.startX, y: dragNode.startY } : n));
           if (!alreadyLinked) {
             setLinks(prev => [...prev, { source: 'flower_social', target: dragNode.id }]);
             showToast('🌱 Connected to Social');
+          } else {
+            showToast('Already connected to Social');
           }
-          // Bounce back to original position
-          setNodes(prev => prev.map(n =>
-            n.id === dragNode.id ? { ...n, x: dragNode.startX, y: dragNode.startY } : n
-          ));
+
+        // Person/Me→Person/Me: connect prompt, bounce back
+        } else if (targetNode?.type !== 'hub' && targetNode?.type !== 'flower' &&
+                   draggedNode?.type !== 'hub' && draggedNode?.type !== 'flower') {
+          const alreadyLinked = links.some(l =>
+            (l.source === dragNode.id && l.target === hoverTarget) ||
+            (l.source === hoverTarget && l.target === dragNode.id)
+          );
+          setNodes(prev => prev.map(n => n.id === dragNode.id ? { ...n, x: dragNode.startX, y: dragNode.startY } : n));
+          if (!alreadyLinked) {
+            setMergePrompt({ type: 'friend', a: dragNode.id, b: hoverTarget });
+          } else {
+            showToast('Already connected');
+          }
+
+        // Person→Hub: join group, bounce back
         } else if (targetNode?.type === 'hub') {
-          setLinks(prev => [
-            ...prev.filter(l => l.source !== dragNode.id && l.target !== dragNode.id),
-            { source: hoverTarget, target: dragNode.id }
-          ]);
-          setNodes(prev => prev.map(n =>
-            n.id === dragNode.id ? { ...n, x: dragNode.startX, y: dragNode.startY, primaryGroup: hoverTarget } : n
-          ));
+          const alreadyLinked = links.some(l =>
+            (l.source === hoverTarget && l.target === dragNode.id) ||
+            (l.source === dragNode.id && l.target === hoverTarget)
+          );
+          setNodes(prev => prev.map(n => n.id === dragNode.id ? { ...n, x: dragNode.startX, y: dragNode.startY } : n));
+          if (!alreadyLinked) {
+            setLinks(prev => [...prev, { source: hoverTarget, target: dragNode.id }]);
+            showToast('🌱 Added to ' + targetNode.label);
+          }
+
+        // Hub→Person or anything else with a valid target: connect, bounce back
+        } else if (targetNode) {
+          const alreadyLinked = links.some(l =>
+            (l.source === dragNode.id && l.target === hoverTarget) ||
+            (l.source === hoverTarget && l.target === dragNode.id)
+          );
+          setNodes(prev => prev.map(n => n.id === dragNode.id ? { ...n, x: dragNode.startX, y: dragNode.startY } : n));
+          if (!alreadyLinked) {
+            setLinks(prev => [...prev, { source: dragNode.id, target: hoverTarget }]);
+            const archived = archivedLinks.find(l =>
+              (l.source === dragNode.id && l.target === hoverTarget) ||
+              (l.source === hoverTarget && l.target === dragNode.id)
+            );
+            if (archived) {
+              setArchivedLinks(prev => prev.filter(l => l !== archived));
+              showToast('🌿 Reconnected!');
+            } else {
+              showToast('🌱 Connected to ' + targetNode.label);
+            }
+          }
         }
       }
       setDragNode(null);
@@ -2264,9 +2301,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       />}
       {/* Settings panel — full height slide-in from right */}
       {settingsOpen && (
-        <div onClick={e=>{if(e.target===e.currentTarget)setSettingsOpen(false);}}
+        <div
+          onClick={()=>setSettingsOpen(false)}
           style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:400,background:'rgba(0,0,0,0.4)'}}>
-          <div style={{
+          <div onClick={e=>e.stopPropagation()}
+            style={{
             position:'absolute',top:0,right:0,bottom:56,width:'min(100vw,320px)',
             display:'flex',flexDirection:'column',
             background:theme.darkMode?'#0f172a':'white',
@@ -2329,6 +2368,47 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     :<button onClick={requestNotifications} style={{padding:'5px 14px',borderRadius:99,background:'#10b981',color:'white',border:'none',cursor:'pointer',fontSize:12,fontWeight:700}}>Enable</button>}
                 </div>
 
+                {/* Tags — near top, checked = visible */}
+                <div style={{fontSize:11,fontWeight:800,letterSpacing:1,textTransform:'uppercase',color:theme.darkMode?'#475569':'#94a3b8',padding:'4px 0 6px',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                  <span>🏷 Filter Tags</span>
+                  {activeTags.length>0&&activeTags.length<allTags.length&&<button onClick={()=>setActiveTags([])} style={{fontSize:10,color:'#ef4444',background:'none',border:'none',cursor:'pointer',fontWeight:700,textTransform:'none',letterSpacing:0}}>Show all</button>}
+                </div>
+                {allTags.length===0?(
+                  <p style={{fontSize:12,fontStyle:'italic',color:theme.darkMode?'#475569':'#94a3b8',margin:'0 0 12px'}}>No tags yet — add them in a person's panel</p>
+                ):(
+                  <div style={{display:'flex',flexDirection:'column',gap:4,marginBottom:12}}>
+                    {allTags.map(tag=>{
+                      // checked = visible (not in exclusion list)
+                      // activeTags empty = show all; activeTags has items = show only those
+                      // We flip: hiddenTags = tags NOT shown. checked = not hidden.
+                      const hidden = activeTags.length > 0 && !activeTags.includes(tag);
+                      const count = nodes.filter(n=>(n.tags||[]).includes(tag)).length;
+                      return(
+                        <label key={tag} style={{display:'flex',alignItems:'center',gap:10,cursor:'pointer',padding:'3px 0'}}>
+                          <input type="checkbox" checked={!hidden}
+                            onChange={()=>{
+                              if (activeTags.length === 0) {
+                                // Currently showing all — uncheck this tag to hide it = show all others
+                                setActiveTags(allTags.filter(t=>t!==tag));
+                              } else if (activeTags.includes(tag)) {
+                                // Was shown — hide it
+                                const next = activeTags.filter(t=>t!==tag);
+                                setActiveTags(next.length===allTags.length?[]:next);
+                              } else {
+                                // Was hidden — show it
+                                const next = [...activeTags, tag];
+                                setActiveTags(next.length===allTags.length?[]:next);
+                              }
+                            }}
+                            style={{width:16,height:16,accentColor:'#10b981',cursor:'pointer',flexShrink:0}}/>
+                          <span style={{flex:1,fontSize:13,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>{tag}</span>
+                          <span style={{fontSize:11,color:theme.darkMode?'#475569':'#94a3b8'}}>{count}p</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+
                 {/* Section label: Data */}
                 <div style={{fontSize:11,fontWeight:800,letterSpacing:1,textTransform:'uppercase',color:theme.darkMode?'#475569':'#94a3b8',padding:'14px 0 6px'}}>Data</div>
 
@@ -2336,10 +2416,18 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   {label:'🌱 Start Blank', btnLabel:'Reset', btnBg:'#64748b', onClick:()=>{
                     setSettingsOpen(false);
                     const doReset=()=>{clearTimeout(saveTimer.current);setNodes(INITIAL_NODES);setLinks(INITIAL_LINKS);setDimensions(DEFAULT_DIMENSIONS);try{localStorage.removeItem('ft_nodes');localStorage.removeItem('ft_links');localStorage.removeItem('ft_dimensions');}catch{}clearPhotoDB();showToast('🌱 Fresh start!');};
-                    localStorage.getItem('ft_pin')?openPinModal('clear','Confirm Reset',doReset):doReset();
+                    const run = ()=>localStorage.getItem('ft_pin')?openPinModal('clear','Confirm Reset',doReset):doReset();
+                    setConfirmModal({title:'Start Blank?',message:'This will remove all your people and groups. You can reload demo data anytime.',danger:true,onConfirm:run});
                   }},
-                  {label:'✨ Demo Data', btnLabel:'Load', btnBg:'#10b981', onClick:()=>{loadDemoData();setSettingsOpen(false);}},
-                  {label:'🗑️ Clear All',  btnLabel:'Clear', btnBg:'#ef4444', onClick:()=>{setSettingsOpen(false);localStorage.getItem('ft_pin')?openPinModal('clear','Confirm Clear',clearAllData):clearAllData();}},
+                  {label:'✨ Demo Data', btnLabel:'Load', btnBg:'#10b981', onClick:()=>{
+                    setSettingsOpen(false);
+                    setConfirmModal({title:'Load Demo Data?',message:'This will replace your current tree with example data.',danger:false,onConfirm:()=>{loadDemoData();}});
+                  }},
+                  {label:'🗑️ Clear All',  btnLabel:'Clear', btnBg:'#ef4444', onClick:()=>{
+                    setSettingsOpen(false);
+                    const run = ()=>localStorage.getItem('ft_pin')?openPinModal('clear','Confirm Clear',clearAllData):clearAllData();
+                    setConfirmModal({title:'Clear All Data?',message:'This permanently deletes all people, groups, photos and history. This cannot be undone.',danger:true,onConfirm:run});
+                  }},
                 ].map((row,i)=>(
                   <div key={i} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 0',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}>
                     <span style={{fontSize:14,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>{row.label}</span>
@@ -2375,34 +2463,93 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   </div>
                 )}
 
-                {/* Tags */}
-                <div style={{fontSize:11,fontWeight:800,letterSpacing:1,textTransform:'uppercase',color:theme.darkMode?'#475569':'#94a3b8',padding:'14px 0 6px',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-                  <span>🏷 Tags</span>
-                  {activeTags.length>0&&<button onClick={()=>setActiveTags([])} style={{fontSize:10,color:'#ef4444',background:'none',border:'none',cursor:'pointer',fontWeight:700,textTransform:'none',letterSpacing:0}}>Clear all</button>}
-                </div>
-                {allTags.length===0?(
-                  <p style={{fontSize:12,fontStyle:'italic',color:theme.darkMode?'#475569':'#94a3b8',margin:0}}>No tags yet — add them in a person&apos;s panel</p>
-                ):(
-                  <div style={{display:'flex',flexDirection:'column',gap:6}}>
-                    {allTags.map(tag=>{
-                      const on=activeTags.includes(tag);
-                      const count=nodes.filter(n=>(n.tags||[]).includes(tag)).length;
-                      return(
-                        <label key={tag} style={{display:'flex',alignItems:'center',gap:10,cursor:'pointer',padding:'4px 0'}}>
-                          <input type="checkbox" checked={on} onChange={()=>setActiveTags(prev=>on?prev.filter(t=>t!==tag):[...prev,tag])}
-                            style={{width:16,height:16,accentColor:'#10b981',cursor:'pointer',flexShrink:0}}/>
-                          <span style={{flex:1,fontSize:13,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>{tag}</span>
-                          <span style={{fontSize:11,color:theme.darkMode?'#475569':'#94a3b8'}}>{count}p</span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                )}
-
                 {/* Version */}
-                <div style={{textAlign:'center',paddingTop:24}}>
+                <div style={{textAlign:'center',paddingTop:24,paddingBottom:8}}>
                   <span style={{fontSize:11,color:theme.darkMode?'#334155':'#cbd5e1'}}>🌳 FriendshipTree v{APP_VERSION}</span>
                 </div>
+
+                {/* Future Updates */}
+                <div style={{fontSize:11,fontWeight:800,letterSpacing:1,textTransform:'uppercase',color:theme.darkMode?'#475569':'#94a3b8',padding:'14px 0 6px'}}>
+                  🚀 Future Updates
+                </div>
+                {(() => {
+                  const plannedItems = [
+                    'Notification reminders for neglected friendships',
+                    'Photo quality improvement for contact sync',
+                    'Corner-aware FAB fan layout',
+                    'Diary AI analysis improvements',
+                    'Export/share individual person profiles',
+                    'Bulk import from contacts with preview',
+                    'Friendship health decay tuning per person',
+                    'Group colour themes',
+                    'Search across notes and diary entries',
+                  ];
+
+                  const saveIdea = () => {
+                    const trimmed = newIdea.trim();
+                    if (!trimmed) return;
+                    const updated = [...userIdeas, trimmed];
+                    setUserIdeas(updated);
+                    localStorage.setItem('ft_ideas', JSON.stringify(updated));
+                    setNewIdea('');
+                  };
+
+                  const removeIdea = (i) => {
+                    const updated = userIdeas.filter((_,idx)=>idx!==i);
+                    setUserIdeas(updated);
+                    localStorage.setItem('ft_ideas', JSON.stringify(updated));
+                  };
+
+                  return (
+                    <div>
+                      <button onClick={()=>setFutureOpen(p=>!p)} style={{
+                        width:'100%',padding:'8px 12px',borderRadius:10,border:'none',cursor:'pointer',
+                        background:theme.darkMode?'#1e293b':'#f1f5f9',
+                        color:theme.darkMode?'#94a3b8':'#64748b',
+                        fontSize:12,fontWeight:600,textAlign:'left',
+                        display:'flex',justifyContent:'space-between',alignItems:'center',
+                      }}>
+                        <span>View planned features & ideas</span>
+                        <span>{futureOpen?'▲':'▼'}</span>
+                      </button>
+
+                      {futureOpen && (
+                        <div style={{marginTop:8,padding:'12px',borderRadius:10,background:theme.darkMode?'#0f172a':'#f8fafc',border:'1px solid '+(theme.darkMode?'#1e293b':'#e2e8f0')}}>
+                          <div style={{fontSize:11,fontWeight:700,color:theme.darkMode?'#475569':'#94a3b8',marginBottom:8,textTransform:'uppercase',letterSpacing:0.5}}>Planned</div>
+                          {plannedItems.map((item,i)=>(
+                            <div key={i} style={{display:'flex',gap:8,alignItems:'flex-start',marginBottom:5}}>
+                              <span style={{color:'#10b981',flexShrink:0,marginTop:1}}>•</span>
+                              <span style={{fontSize:12,color:theme.darkMode?'#94a3b8':'#475569',lineHeight:1.4}}>{item}</span>
+                            </div>
+                          ))}
+                          {userIdeas.length>0&&(
+                            <>
+                              <div style={{fontSize:11,fontWeight:700,color:theme.darkMode?'#475569':'#94a3b8',margin:'12px 0 8px',textTransform:'uppercase',letterSpacing:0.5}}>Your Ideas</div>
+                              {userIdeas.map((idea,i)=>(
+                                <div key={i} style={{display:'flex',gap:8,alignItems:'flex-start',marginBottom:5}}>
+                                  <span style={{color:'#6366f1',flexShrink:0,marginTop:1}}>•</span>
+                                  <span style={{flex:1,fontSize:12,color:theme.darkMode?'#94a3b8':'#475569',lineHeight:1.4}}>{idea}</span>
+                                  <button onClick={()=>removeIdea(i)} style={{background:'none',border:'none',cursor:'pointer',color:'#ef4444',fontSize:14,padding:0,flexShrink:0,lineHeight:1}}>×</button>
+                                </div>
+                              ))}
+                            </>
+                          )}
+                          <div style={{display:'flex',gap:6,marginTop:12}}>
+                            <input value={newIdea} onChange={e=>setNewIdea(e.target.value)}
+                              onKeyDown={e=>{if(e.key==='Enter')saveIdea();}}
+                              placeholder="Add your idea…"
+                              style={{flex:1,padding:'6px 10px',borderRadius:8,fontSize:12,outline:'none',
+                                border:'1px solid '+(theme.darkMode?'#334155':'#e2e8f0'),
+                                background:theme.darkMode?'#1e293b':'white',
+                                color:theme.darkMode?'#e2e8f0':'#1e293b'}}
+                            />
+                            <button onClick={saveIdea} style={{padding:'6px 12px',borderRadius:8,background:'#6366f1',color:'white',border:'none',cursor:'pointer',fontSize:12,fontWeight:700}}>Add</button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
               </div>
             </div>
@@ -3431,6 +3578,27 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
             {viewMode === 'canvas' && (
               <g>
+                {/* ── Hub stakes — drawn BEFORE links so vines appear in front ── */}
+                {activeRenderNodes.filter(n=>n.type==='hub').map(node=>{
+                  const scaleRatio = node.radius ? node.radius / 40 : 1;
+                  return (
+                    <g key={'stake-'+node.id} transform={`translate(${node.renderX}, ${node.renderY}) scale(${scaleRatio})`} style={{pointerEvents:'none'}}>
+                      <ellipse cx="0" cy="20" rx="30" ry="10" fill="rgba(0,0,0,0.15)" />
+                      <rect x="-10" y="-40" width="20" height="60" fill="#8B5A2B" rx="2" />
+                      {theme.showWeathering && <>
+                        <line x1="-7" y1="-35" x2="-7" y2="15" stroke="#5C3A1A" strokeWidth="1" opacity="0.4"/>
+                        <line x1="-2" y1="-38" x2="-2" y2="18" stroke="#7A4A22" strokeWidth="0.5" opacity="0.3"/>
+                        <line x1="4" y1="-33" x2="4" y2="16" stroke="#5C3A1A" strokeWidth="0.8" opacity="0.35"/>
+                        <ellipse cx="-4" cy="-10" rx="4" ry="3" fill="none" stroke="#5C3A1A" strokeWidth="0.8" opacity="0.4"/>
+                      </>}
+                    </g>
+                  );
+                })}
+              </g>
+            )}
+
+            {viewMode === 'canvas' && (
+              <g>
                 {links.map((link, i) => {
                   const src = activeRenderNodes.find(n => n.id === link.source);
                   const tgt = activeRenderNodes.find(n => n.id === link.target);
@@ -3884,6 +4052,19 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       ) : node.type === 'hub' && viewMode === 'canvas' ? (
                         <g transform={`scale(${scaleRatio})`}>
                           {isSelected && <rect x="-60" y="-80" width="120" height="100" fill="none" stroke="#10B981" strokeWidth="2" strokeDasharray="4 4" rx="8" />}
+
+                          {/* ── SIGN — on top ── */}
+                          <rect x="-55" y="-50" width="110" height="32" fill="#A0522D" rx="4" />
+                          <rect x="-55" y="-50" width="110" height="32" fill="none" stroke="#5C3A21" strokeWidth="2" rx="4" />
+                          {theme.showWeathering && <>
+                            <line x1="-50" y1="-44" x2="50" y2="-44" stroke="#7A3A18" strokeWidth="0.6" opacity="0.3"/>
+                            <line x1="-50" y1="-36" x2="50" y2="-36" stroke="#7A3A18" strokeWidth="0.6" opacity="0.25"/>
+                            <rect x="-55" y="-50" width="110" height="32" fill="rgba(0,0,0,0.08)" rx="4"/>
+                          </>}
+                          <text y="-28" textAnchor="middle" fontSize="13" fontWeight="bold" fill="white">
+                            {node.label.length > 12 ? node.label.substring(0, 11) + '...' : node.label}
+                          </text>
+
                           {/* Collapsed badge */}
                           {collapsedGroups.includes(node.id) && (() => {
                             const mc = links.filter(l=>(l.source===node.id||l.target===node.id)&&nodes.find(n=>n.id===(l.source===node.id?l.target:l.source)&&n.type!=='flower'&&n.id!=='me')).length;
@@ -3891,52 +4072,6 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                               <circle r={14} fill="#10b981"/><text textAnchor="middle" y={5} fontSize="12" fontWeight="900" fill="white" style={{userSelect:'none'}}>{mc}</text>
                             </g>;
                           })()}
-
-                          {/* Organic vine strands wrapping the post — match tier of incoming vines */}
-                          {(() => {
-                            const s = calculateHubStrength(node.id);
-                            const hubTier = s < 100 ? 1 : s < 300 ? 2 : s < 600 ? 3 : s < 1000 ? 4 : 5;
-                            const STRAND_DEFS_HUB = [
-                              { w: 2.2, color: theme.darkMode ? '#14532d' : '#15803d', role: 'core' },
-                              { w: 1.0, color: theme.darkMode ? '#16a34a' : '#22c55e', role: 'growing' },
-                              { w: 1.5, color: theme.darkMode ? '#15803d' : '#16a34a', role: 'wrapped' },
-                              { w: 1.2, color: theme.darkMode ? '#16a34a' : '#4ade80', role: 'wrapped' },
-                              { w: 0.9, color: theme.darkMode ? '#22c55e' : '#86efac', role: 'growing' },
-                            ];
-                            const activeStrands = STRAND_DEFS_HUB.slice(0, Math.min(hubTier + 1, STRAND_DEFS_HUB.length));
-                            // Post runs from y=20 down to y=-40 (height=60 units)
-                            // Each strand spirals around the post using a sine wave offset
-                            return activeStrands.map(({ w, color, role }, si) => {
-                              const phase = si * (Math.PI * 2 / activeStrands.length);
-                              const amp = 6 + si * 1.5; // how far strand swings from post centre
-                              const freq = 1.8 + si * 0.4; // coil frequency
-                              const steps = 24;
-                              const pts = [];
-                              for (let k = 0; k <= steps; k++) {
-                                const t = k / steps;
-                                const y = 18 - t * 56; // top of post to bottom
-                                const x = Math.sin(t * freq * Math.PI * 2 + phase) * amp;
-                                pts.push(`${x.toFixed(1)},${y.toFixed(1)}`);
-                              }
-                              return (
-                                <path key={si}
-                                  d={`M ${pts.join(' L ')}`}
-                                  fill="none" stroke={color}
-                                  strokeWidth={w} strokeLinecap="round" strokeLinejoin="round"
-                                  opacity={role === 'growing' ? 0.65 : role === 'core' ? 0.9 : 0.78}
-                                />
-                              );
-                            });
-                          })()}
-
-                          {/* Post and sign — rendered AFTER vines so sign stays readable */}
-                          <ellipse cx="0" cy="20" rx="30" ry="10" fill="rgba(0,0,0,0.15)" />
-                          <rect x="-10" y="-40" width="20" height="60" fill="#8B5A2B" rx="2" />
-                          <rect x="-55" y="-50" width="110" height="32" fill="#A0522D" rx="4" />
-                          <rect x="-55" y="-50" width="110" height="32" fill="none" stroke="#5C3A21" strokeWidth="2" rx="4" />
-                          <text y="-28" textAnchor="middle" fontSize="13" fontWeight="bold" fill="white">
-                            {node.label.length > 12 ? node.label.substring(0, 11) + '...' : node.label}
-                          </text>
                         </g>
                       ) : (
                         // Me node or calendar person
@@ -4529,6 +4664,28 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 boxShadow:d===''?'none':'0 2px 8px rgba(0,0,0,0.15)',
               }}>{d}</button>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Confirm Modal ───────────────────────────────────────────────────── */}
+      {confirmModal && (
+        <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:900,background:'rgba(0,0,0,0.6)',display:'flex',alignItems:'center',justifyContent:'center'}}
+          onClick={e=>{if(e.target===e.currentTarget)setConfirmModal(null);}}>
+          <div style={{background:theme.darkMode?'#0f172a':'white',borderRadius:20,padding:28,width:'min(90vw,300px)',textAlign:'center',boxShadow:'0 25px 60px rgba(0,0,0,0.4)'}}>
+            <div style={{fontSize:36,marginBottom:10}}>{confirmModal.danger?'⚠️':'❓'}</div>
+            <div style={{fontSize:17,fontWeight:800,color:theme.darkMode?'#e2e8f0':'#1e293b',marginBottom:8}}>{confirmModal.title}</div>
+            <div style={{fontSize:13,color:theme.darkMode?'#94a3b8':'#64748b',marginBottom:22,lineHeight:1.5}}>{confirmModal.message}</div>
+            <div style={{display:'flex',gap:10}}>
+              <button onClick={()=>setConfirmModal(null)}
+                style={{flex:1,padding:'11px',borderRadius:12,border:'none',cursor:'pointer',background:theme.darkMode?'#1e293b':'#f1f5f9',color:theme.darkMode?'#94a3b8':'#64748b',fontSize:14,fontWeight:700}}>
+                Cancel
+              </button>
+              <button onClick={()=>{confirmModal.onConfirm();setConfirmModal(null);}}
+                style={{flex:1,padding:'11px',borderRadius:12,border:'none',cursor:'pointer',background:confirmModal.danger?'#ef4444':'#10b981',color:'white',fontSize:14,fontWeight:700}}>
+                {confirmModal.danger?'Yes, delete':'Confirm'}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -5891,11 +6048,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       }}>
         {[
           { id: 'canvas',   label: 'Map', icon: (active) => (
-            <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
-              {/* Vine/plant for map */}
-              <path d="M11 19 L11 10 M11 14 C11 14 7 12 6 8 C9 7 12 10 11 14 M11 12 C11 12 15 10 16 6 C13 5 10 8 11 12" stroke={active?'#10b981':'currentColor'} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-              <circle cx="11" cy="19" r="1.5" fill={active?'#10b981':'currentColor'}/>
-            </svg>
+            <div style={{position:'relative',display:'inline-flex',alignItems:'center',justifyContent:'center'}}>
+              <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+                <path d="M11 19 L11 10 M11 14 C11 14 7 12 6 8 C9 7 12 10 11 14 M11 12 C11 12 15 10 16 6 C13 5 10 8 11 12" stroke={active?'#10b981':'currentColor'} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                <circle cx="11" cy="19" r="1.5" fill={active?'#10b981':'currentColor'}/>
+              </svg>
+              <span style={{position:'absolute',top:-5,right:-10,fontSize:7,fontWeight:800,background:'#10b981',color:'white',borderRadius:99,padding:'1px 3px',lineHeight:1.3,pointerEvents:'none'}}>v{APP_VERSION}</span>
+            </div>
           )},
           { id: 'calendar', label: 'Calendar', icon: (active) => <CalendarIcon className="w-5 h-5" /> },
           { id: 'me',       label: 'Overview', icon: (active) => (
