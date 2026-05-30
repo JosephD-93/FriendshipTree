@@ -7,8 +7,8 @@ import {
   BookUser
 } from 'lucide-react';
 
-const APP_VERSION = '1.6';
-const INTERACTION_DISTANCE = 100;
+const APP_VERSION = '1.7';
+const INTERACTION_DISTANCE = 70;
 const MAX_SCORE = 1000;
 const DECAY_RATE_PER_DAY = 5;
 const CALENDAR_NODE_SCALE = 8.4; // 30% smaller than original 15, then 20% more
@@ -334,6 +334,15 @@ function AppInner() {
   const idbRef = useRef(null);
 
   // ── IndexedDB for photo storage ───────────────────────────────────────────
+  const [lastCreatedLink, setLastCreatedLink] = useState(null);
+  const lastLinkTimer = useRef(null);
+
+  const showLinkUndo = (source, target) => {
+    clearTimeout(lastLinkTimer.current);
+    setLastCreatedLink({ source, target });
+    lastLinkTimer.current = setTimeout(() => setLastCreatedLink(null), 4000);
+  };
+
   const openPinModal = (mode, title, onSuccess) => {
     setPinModal({ mode, title, onSuccess });
     setPinInput('');
@@ -520,8 +529,8 @@ function AppInner() {
   const [macheteMode, setMacheteMode] = useState(false);
   const [vineDrawMode, setVineDrawMode] = useState(false);
   const [vineConnectPrompt, setVineConnectPrompt] = useState(null);
-  const [pendingPaths, setPendingPaths] = useState([]); // [{pts:[{x,y}]}] accumulated while mode is on
-  const [currentStroke, setCurrentStroke] = useState([]); // [{x,y}] current stroke being drawn
+  const [pendingPaths, setPendingPaths] = useState([]);
+  const [currentStroke, setCurrentStroke] = useState([]);
   const [growingVines, setGrowingVines] = useState([]); // [{id, pathD, totalLen, progress, nodeId}]
   const [spawnPopup, setSpawnPopup] = useState(null); // {x, y, r} SVG coords + actual radius
   const isDrawing = useRef(false);
@@ -780,10 +789,10 @@ function AppInner() {
         }));
       } else {
         setNodes(prev => prev.map(n => n.id === dragNode.id ? { ...n, x: svgX, y: svgY } : n));
-      }      let closest = null, minDist = INTERACTION_DISTANCE * 2; // doubled for easier targeting
+      }      let closest = null, minDist = INTERACTION_DISTANCE;
       nodes.forEach(n => {
-        if (n.id === dragNode.id) return; // skip self
-        if (n.type === 'flower' && n.id !== 'flower_social') return; // only social flower counts
+        if (n.id === dragNode.id) return;
+        if (n.type === 'flower' && n.id !== 'flower_social') return;
         const d = Math.sqrt((n.x-svgX)**2 + (n.y-svgY)**2);
         if (d < minDist) { minDist = d; closest = n.id; }
       });
@@ -885,6 +894,7 @@ function AppInner() {
           setNodes(prev => prev.map(n => n.id === dragNode.id ? { ...n, x: dragNode.startX, y: dragNode.startY } : n));
           if (!alreadyLinked) {
             setLinks(prev => [...prev, { source: 'flower_social', target: dragNode.id }]);
+            showLinkUndo('flower_social', dragNode.id);
             showToast('🌱 Connected to Social');
           } else {
             showToast('Already connected to Social');
@@ -913,6 +923,7 @@ function AppInner() {
           setNodes(prev => prev.map(n => n.id === dragNode.id ? { ...n, x: dragNode.startX, y: dragNode.startY } : n));
           if (!alreadyLinked) {
             setLinks(prev => [...prev, { source: hoverTarget, target: dragNode.id }]);
+            showLinkUndo(hoverTarget, dragNode.id);
             showToast('🌱 Added to ' + targetNode.label);
           }
 
@@ -925,6 +936,7 @@ function AppInner() {
           setNodes(prev => prev.map(n => n.id === dragNode.id ? { ...n, x: dragNode.startX, y: dragNode.startY } : n));
           if (!alreadyLinked) {
             setLinks(prev => [...prev, { source: dragNode.id, target: hoverTarget }]);
+            showLinkUndo(dragNode.id, hoverTarget);
             const archived = archivedLinks.find(l =>
               (l.source === dragNode.id && l.target === hoverTarget) ||
               (l.source === hoverTarget && l.target === dragNode.id)
@@ -3916,11 +3928,10 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   return [(
                     <g key={node.id}
                       transform={`translate(${node.renderX}, ${node.renderY}) scale(${baseScale * (isLifted ? 1.15 : 1)})`}
-                      style={{transition: nodeTransition(node.id), transformOrigin: `${node.renderX}px ${node.renderY}px`}}
+                      style={{transition: nodeTransition(node.id), transformOrigin: `${node.renderX}px ${node.renderY}px`, WebkitTouchCallout:'none', WebkitUserSelect:'none', userSelect:'none'}}
                       opacity={node.type==='flower'||node.type==='hub'||node.id==='me'||isTagFiltered(node.id) ? 1 : 0.15}
                       className="cursor-pointer"
                       onPointerDown={e => handlePointerDown(e, node.id)}
-                      style={{ WebkitTouchCallout:'none', WebkitUserSelect:'none', userSelect:'none' }}
                     >
                       {/* Selection ring in select-for-group mode */}
                       {selectForGroupMode && selectedForGroup.includes(node.id) && (
@@ -3940,7 +3951,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           const petalL = flowerR * (0.45 + h * 0.25);
                           const petalW = petalL * 0.70;
                           const mainColor = h > 0.5 ? dim.color : `hsl(30,${Math.round(h*60)}%,${30+Math.round(h*20)}%)`;
-                          const centreR = flowerR * 0.50; // large centre for name text
+                          const centreR = flowerR * 0.50;
                           const buildPetals = (scale = 1) => Array.from({length: PETALS}, (_, pi) => {
                             const pa = (pi / PETALS) * Math.PI * 2;
                             const L = petalL * scale, W = petalW * scale;
@@ -3960,6 +3971,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                             <g onPointerDown={e => handlePointerDown(e, node.id)}
                               style={{cursor:'pointer'}}>
                               {isSelected && <circle r={flowerR + 10} fill="none" stroke="#10B981" strokeWidth="2" strokeDasharray="4 3" />}
+                              {/* Hover ring when drag target */}
+                              {isHoverTarget && <circle r={flowerR + 14} fill="none" stroke="#3B82F6" strokeWidth="5" strokeDasharray="8 4" opacity={0.9}/>}
                               {/* Back petals rotated for depth */}
                               <g transform={`rotate(${360/PETALS/2})`} opacity={0.55}>
                                 <path d={buildPetals(0.88)} fill={mainColor} />
@@ -4052,6 +4065,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       ) : node.type === 'hub' && viewMode === 'canvas' ? (
                         <g transform={`scale(${scaleRatio})`}>
                           {isSelected && <rect x="-60" y="-80" width="120" height="100" fill="none" stroke="#10B981" strokeWidth="2" strokeDasharray="4 4" rx="8" />}
+                          {isHoverTarget && <rect x="-65" y="-85" width="130" height="110" fill="none" stroke="#3B82F6" strokeWidth="4" strokeDasharray="8 4" rx="10" />}
 
                           {/* ── SIGN — on top ── */}
                           <rect x="-55" y="-50" width="110" height="32" fill="#A0522D" rx="4" />
@@ -4188,11 +4202,10 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   return [(
                     <g key={node.id}
                       transform={`translate(${node.renderX}, ${node.renderY}) scale(${isLifted ? 1.15 : 1})`}
-                      style={{transition: nodeTransition(node.id), transformOrigin: `${node.renderX}px ${node.renderY}px`}}
+                      style={{transition: nodeTransition(node.id), transformOrigin: `${node.renderX}px ${node.renderY}px`, WebkitTouchCallout:'none', WebkitUserSelect:'none', userSelect:'none'}}
                       opacity={isTagFiltered(node.id) ? 1 : 0.15}
                       className="cursor-pointer"
                       onPointerDown={e => handlePointerDown(e, node.id)}
-                      style={{ WebkitTouchCallout:'none', WebkitUserSelect:'none', userSelect:'none' }}
                     >
                       {isSelected && !isHoverTarget && !isLifted && <circle r={r + 6} fill="none" stroke="#10B981" strokeWidth="3" />}
                       {isHoverTarget && <circle r={r + 10} fill="none" stroke="#3B82F6" strokeWidth="6" strokeDasharray="6 4" />}
@@ -4556,7 +4569,41 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         )}
       </div>
 
-      {/* ── Vine Connection Prompt ───────────────────────────────────────────── */}
+      {/* ── Quick undo X button for new links ───────────────────────────────── */}
+      {lastCreatedLink && (() => {
+        const src = nodes.find(n => n.id === lastCreatedLink.source);
+        const tgt = nodes.find(n => n.id === lastCreatedLink.target);
+        if (!src || !tgt) return null;
+        const midSvgX = (src.x + tgt.x) / 2;
+        const midSvgY = (src.y + tgt.y) / 2;
+        const sx = midSvgX * transform.scale + transform.x;
+        const sy = midSvgY * transform.scale + transform.y;
+        return (
+          <div style={{
+            position:'fixed',
+            left: Math.max(8, Math.min(window.innerWidth-52, sx-22)),
+            top: Math.max(8, Math.min(window.innerHeight-80, sy-22)),
+            zIndex:500,
+          }}>
+            <button onClick={() => {
+              setLinks(prev => prev.filter(l =>
+                !(l.source===lastCreatedLink.source && l.target===lastCreatedLink.target) &&
+                !(l.source===lastCreatedLink.target && l.target===lastCreatedLink.source)
+              ));
+              clearTimeout(lastLinkTimer.current);
+              setLastCreatedLink(null);
+              showToast('↩ Connection removed');
+            }} style={{
+              width:44, height:44, borderRadius:'50%',
+              background:'#ef4444', border:'3px solid white',
+              color:'white', fontSize:20, fontWeight:900,
+              cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center',
+              boxShadow:'0 4px 16px rgba(0,0,0,0.4)',
+              lineHeight:1,
+            }}>×</button>
+          </div>
+        );
+      })()}
       {vineConnectPrompt && (() => {
         const src = nodes.find(n => n.id === vineConnectPrompt.srcId);
         const tgt = nodes.find(n => n.id === vineConnectPrompt.tgtId);
@@ -4578,6 +4625,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
         const confirmConnection = (score) => {
           setLinks(prev => [...prev, { source: vineConnectPrompt.srcId, target: vineConnectPrompt.tgtId }]);
+          showLinkUndo(vineConnectPrompt.srcId, vineConnectPrompt.tgtId);
           // Apply score to the target (further from Me)
           setNodes(prev => prev.map(n =>
             n.id === vineConnectPrompt.tgtId
