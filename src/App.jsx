@@ -7,8 +7,10 @@ import {
   BookUser
 } from 'lucide-react';
 
-const APP_VERSION = '1.7';
+const APP_VERSION = '1.8';
 const INTERACTION_DISTANCE = 70;
+const TIER_COLORS_GLOBAL = ['#bef264','#84cc16','#166534','#3b82f6','#9333ea'];
+const PRIMARY_GROUP_COLORS = ['#ef4444','#3b82f6','#f59e0b','#10b981','#8b5cf6','#ec4899','#06b6d4','#f97316'];
 const MAX_SCORE = 1000;
 const DECAY_RATE_PER_DAY = 5;
 const CALENDAR_NODE_SCALE = 8.4; // 30% smaller than original 15, then 20% more
@@ -343,6 +345,36 @@ function AppInner() {
     lastLinkTimer.current = setTimeout(() => setLastCreatedLink(null), 4000);
   };
 
+  const getPhotoBorderColor = (node) => {
+    if (photoBorderMode === 'none') return null;
+    if (photoBorderMode === 'tier') {
+      const s = node.interactionScore || 0;
+      const ti = s < 100 ? 0 : s < 300 ? 1 : s < 600 ? 2 : s < 1000 ? 3 : 4;
+      return TIER_COLORS_GLOBAL[ti];
+    }
+    if (photoBorderMode === 'group') {
+      const hubLink = links.find(l => {
+        const otherId = l.source === node.id ? l.target : l.target === node.id ? l.source : null;
+        if (!otherId) return false;
+        return nodes.find(n => n.id === otherId)?.type === 'hub';
+      });
+      if (!hubLink) return '#94a3b8';
+      const hubId = nodes.find(n=>n.id===hubLink.source)?.type==='hub' ? hubLink.source : hubLink.target;
+      if (groupColors[hubId]) return groupColors[hubId];
+      const idx = nodes.filter(n=>n.type==='hub').findIndex(n=>n.id===hubId);
+      return PRIMARY_GROUP_COLORS[idx % PRIMARY_GROUP_COLORS.length];
+    }
+    if (photoBorderMode === 'momentum') {
+      const s = node.interactionScore || 0;
+      const prev = node.prevScore || s;
+      const delta = s - prev;
+      if (delta > 20) return '#10b981';
+      if (delta < -20) return '#ef4444';
+      return '#f59e0b';
+    }
+    return null;
+  };
+
   const openPinModal = (mode, title, onSuccess) => {
     setPinModal({ mode, title, onSuccess });
     setPinInput('');
@@ -470,6 +502,8 @@ function AppInner() {
   const [userIdeas, setUserIdeas] = useState(() => {
     try { return JSON.parse(localStorage.getItem('ft_ideas') || '[]'); } catch { return []; }
   });
+  const [photoBorderMode, setPhotoBorderMode] = useState('none');
+  const [groupColors, setGroupColors] = useState({});
   const [confirmModal, setConfirmModal] = useState(null);
   const [pinModal, setPinModal] = useState(null);
   const [pinInput, setPinInput] = useState('');
@@ -659,36 +693,52 @@ function AppInner() {
       }, 150);
       // 2s hold — drag node with all directly connected friends
       groupLiftTimer.current = setTimeout(() => {
-        // Only activate if node is already lifted (being dragged)
-        if (!liftedNodeId) return;
-        const draggedNode = nodes.find(n => n.id === nodeId);
-        if (!draggedNode) return;
+        if (!dragNode) return;
+        // Use functional setState to get current nodes/links
+        setNodes(currentNodes => {
+          setLinks(currentLinks => {
+            const draggedNode = currentNodes.find(n => n.id === nodeId);
+            if (!draggedNode) return currentLinks;
 
-        // BFS outward from this node (following source→target links away from centre)
-        const visited = new Set([nodeId]);
-        const queue = [nodeId];
-        while (queue.length > 0) {
-          const curr = queue.shift();
-          links.forEach(l => {
-            if (l.source === curr && !visited.has(l.target)) {
-              const target = nodes.find(n => n.id === l.target);
-              if (target && target.type !== 'flower' && target.id !== 'me') {
-                visited.add(l.target);
-                queue.push(l.target);
+            const visited = new Set([nodeId]);
+
+            if (draggedNode.type === 'hub') {
+              currentLinks.forEach(l => {
+                if (l.source === nodeId) visited.add(l.target);
+                if (l.target === nodeId) visited.add(l.source);
+              });
+              currentNodes.forEach(n => {
+                if (n.type === 'flower' || n.id === 'me') visited.delete(n.id);
+              });
+            } else {
+              const queue = [nodeId];
+              while (queue.length > 0) {
+                const curr = queue.shift();
+                currentLinks.forEach(l => {
+                  if (l.source === curr && !visited.has(l.target)) {
+                    const target = currentNodes.find(n => n.id === l.target);
+                    if (target && target.type !== 'flower' && target.id !== 'me') {
+                      visited.add(l.target);
+                      queue.push(l.target);
+                    }
+                  }
+                });
               }
             }
-          });
-        }
-        if (visited.size <= 1) return; // no children to drag
 
-        // Save origins at current node positions
-        const origins = {};
-        nodes.forEach(n => { if (visited.has(n.id)) origins[n.id] = { x: n.x, y: n.y }; });
-        groupDragOrigins.current = origins;
-        // Update dragNode startX/Y to current position so delta starts from here
-        setDragNode(prev => prev ? { ...prev, startX: draggedNode.x, startY: draggedNode.y } : prev);
-        groupDragIds.current = visited;
-        showToast('🌿 Moving group of ' + visited.size);
+            if (visited.size > 1) {
+              const origins = {};
+              currentNodes.forEach(n => { if (visited.has(n.id)) origins[n.id] = { x: n.x, y: n.y }; });
+              groupDragOrigins.current = origins;
+              setDragNode(prev => prev ? { ...prev, startX: draggedNode.x, startY: draggedNode.y } : prev);
+              groupDragIds.current = visited;
+              showToast('🌿 Moving group of ' + visited.size);
+            }
+
+            return currentLinks;
+          });
+          return currentNodes;
+        });
       }, 2000);
     } else {
       // Background touch — start panning immediately
@@ -848,8 +898,21 @@ function AppInner() {
           showToast(collapsedGroups.includes(ptr.nodeId) ? '📂 Group expanded' : '📁 Group collapsed');
           lastTapRef.current.delete(ptr.nodeId);
           lastTapRef.current.delete(ptr.nodeId + '_count');
+        } else if (tapCount >= 3 && tappedNode?.id === 'flower_social') {
+          // Triple-tap social flower: open social settings panel
+          setFlowerPanel('social');
+          lastTapRef.current.delete(ptr.nodeId);
+          lastTapRef.current.delete(ptr.nodeId + '_count');
         } else if (tapCount >= 2) {
           if (tappedNode?.type === 'hub') setGroupModal({ hubId: ptr.nodeId });
+          else if (tappedNode?.id === 'flower_social') {
+            // Double-tap social flower: cycle border mode
+            const modes = ['none','tier','group','momentum'];
+            const labels = ['No border','Tier colour','Group colour','Momentum colour'];
+            const next = modes[(modes.indexOf(photoBorderMode) + 1) % modes.length];
+            setPhotoBorderMode(next);
+            showToast('🌸 Border: ' + labels[modes.indexOf(next)]);
+          }
           else if (tappedNode?.type === 'flower') setFlowerPanel(tappedNode.dimKey);
           else if (tappedNode?.id === 'me') setSelectedNodeId('me');
           else setSelectedNodeId(ptr.nodeId);
@@ -2226,7 +2289,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
   const isTagFiltered = (nodeId) => tagFilteredIds === null || tagFilteredIds.has(nodeId);
 
   const nodeTransition = (nodeId) =>
-    liftedNodeId === nodeId ? 'none' : 'transform 0.25s cubic-bezier(0.34,1.56,0.64,1)';
+    liftedNodeId === nodeId ? 'transform 0.15s ease-out, opacity 0.15s ease-out' : 'transform 0.25s cubic-bezier(0.34,1.56,0.64,1), opacity 0.25s ease';
 
   const activeRenderNodes = viewMode === 'calendar' ? calendarRenderNodes : nodes.map(node => {
     return { ...node, renderX: node.x, renderY: node.y, radius: getNodeRadius(node) };
@@ -3927,9 +3990,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   const isHoverTarget = hoverTarget === node.id;
                   return [(
                     <g key={node.id}
-                      transform={`translate(${node.renderX}, ${node.renderY}) scale(${baseScale * (isLifted ? 1.15 : 1)})`}
-                      style={{transition: nodeTransition(node.id), transformOrigin: `${node.renderX}px ${node.renderY}px`, WebkitTouchCallout:'none', WebkitUserSelect:'none', userSelect:'none'}}
-                      opacity={node.type==='flower'||node.type==='hub'||node.id==='me'||isTagFiltered(node.id) ? 1 : 0.15}
+                      transform={`translate(${node.renderX}, ${node.renderY}) scale(${isLifted ? baseScale * 1.1 : baseScale})`}
+                      style={{transition: nodeTransition(node.id), WebkitTouchCallout:'none', WebkitUserSelect:'none', userSelect:'none'}}
+                      opacity={isLifted ? 0.72 : (node.type==='flower'||node.type==='hub'||node.id==='me'||isTagFiltered(node.id) ? 1 : 0.15)}
                       className="cursor-pointer"
                       onPointerDown={e => handlePointerDown(e, node.id)}
                     >
@@ -4092,11 +4155,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         <g>
                           {isSelected && !isHoverTarget && !isLifted && <circle r={node.radius + 6} fill="none" stroke="#10B981" strokeWidth="3" />}
                           {isHoverTarget && <circle r={node.radius + 10} fill="none" stroke="#3B82F6" strokeWidth="6" strokeDasharray="6 4" />}
-
-
                           <circle r={node.radius} fill={theme.darkMode ? "#1e293b" : "white"} stroke={viewMode === 'calendar' ? node.monthColor : "none"} strokeWidth={viewMode === 'calendar' ? 8 : 0} />
                           <clipPath id={`clip-${node.id}`}><circle r={node.radius - (viewMode === 'calendar' ? 8 : 4)} /></clipPath>
                           <image href={node.img} x={-node.radius} y={-node.radius} width={node.radius * 2} height={node.radius * 2} clipPath={`url(#clip-${node.id})`} preserveAspectRatio="xMidYMid slice" />
+                          {/* Photo border — drawn after image so it's visible on top */}
+                          {photoBorderMode !== 'none' && node.type !== 'hub' && node.type !== 'flower' && node.id !== 'me' && getPhotoBorderColor(node) && (
+                            <circle r={node.radius + 3} fill="none" stroke={getPhotoBorderColor(node)} strokeWidth="4" opacity="0.95"/>
+                          )}
 
                           {/* Diary + button — bottom-left of Me photo */}
                           {node.id === 'me' && viewMode === 'canvas' && (
@@ -4201,9 +4266,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   const pw = Math.max(100, r * 2.2);
                   return [(
                     <g key={node.id}
-                      transform={`translate(${node.renderX}, ${node.renderY}) scale(${isLifted ? 1.15 : 1})`}
-                      style={{transition: nodeTransition(node.id), transformOrigin: `${node.renderX}px ${node.renderY}px`, WebkitTouchCallout:'none', WebkitUserSelect:'none', userSelect:'none'}}
-                      opacity={isTagFiltered(node.id) ? 1 : 0.15}
+                      transform={`translate(${node.renderX}, ${node.renderY}) scale(${isLifted ? 1.1 : 1})`}
+                      style={{transition: nodeTransition(node.id), WebkitTouchCallout:'none', WebkitUserSelect:'none', userSelect:'none'}}
+                      opacity={isLifted ? 0.72 : (isTagFiltered(node.id) ? 1 : 0.15)}
                       className="cursor-pointer"
                       onPointerDown={e => handlePointerDown(e, node.id)}
                     >
@@ -4212,6 +4277,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       <circle r={r} fill={theme.darkMode ? "#1e293b" : "white"} />
                       <clipPath id={`clip-${node.id}`}><circle r={r - 4} /></clipPath>
                       <image href={node.img} x={-r} y={-r} width={r * 2} height={r * 2} clipPath={`url(#clip-${node.id})`} preserveAspectRatio="xMidYMid slice" />
+                      {photoBorderMode !== 'none' && getPhotoBorderColor(node) && (
+                        <circle r={r + 3} fill="none" stroke={getPhotoBorderColor(node)} strokeWidth="4" opacity="0.95"/>
+                      )}
                       {/* Name label — grey arc band inside circle bottom */}
                       <g clipPath={`url(#clip-${node.id})`} style={{pointerEvents:'none'}}>
                         <rect x={-r} y={r * 0.52} width={r * 2} height={r * 0.52}
@@ -5990,6 +6058,15 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   onClick={() => setGroupModal(null)}
                   style={{ padding:'6px 14px', borderRadius:8, background:dm?'#334155':'#e2e8f0', border:'none', color:text, cursor:'pointer', fontSize:13, fontWeight:600 }}
                 >Done</button>
+              </div>
+
+              {/* Group colour picker */}
+              <div style={{ padding:'10px 24px', borderBottom:`1px solid ${border}`, display:'flex', alignItems:'center', gap:10 }}>
+                <span style={{fontSize:12,color:dm?'#94a3b8':'#64748b',fontWeight:600}}>Group colour:</span>
+                {PRIMARY_GROUP_COLORS.map(c => (
+                  <button key={c} onClick={()=>setGroupColors(prev=>({...prev,[hub.id]:c}))}
+                    style={{width:22,height:22,borderRadius:'50%',background:c,border:(groupColors[hub.id]||PRIMARY_GROUP_COLORS[nodes.filter(n=>n.type==='hub').findIndex(n=>n.id===hub.id)%PRIMARY_GROUP_COLORS.length])===c?'3px solid white':'2px solid transparent',cursor:'pointer',boxShadow:(groupColors[hub.id]||PRIMARY_GROUP_COLORS[nodes.filter(n=>n.type==='hub').findIndex(n=>n.id===hub.id)%PRIMARY_GROUP_COLORS.length])===c?'0 0 0 2px '+c:'none'}}/>
+                ))}
               </div>
 
               {/* Action buttons */}
