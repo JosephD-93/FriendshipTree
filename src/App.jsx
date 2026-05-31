@@ -2879,161 +2879,84 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
               {selectedNode.type !== 'hub' && selectedNode.id !== 'me' && (
                 <>
-                  {/* Photo block: main photo left, [3-photo strip + tier badge] right */}
-                  <div style={{display:'flex',gap:0,alignItems:'stretch',marginBottom:8}}>
+                  {/* Photo block: square main photo LEFT + 2×2 grid RIGHT */}
+                  {(()=>{
+                    const lvl = getLevel(selectedNode.interactionScore||0, selectedNode);
+                    const bd = selectedNode.birthday||'';
+                    let daysUntil = null;
+                    if(bd){
+                      const MONTHS={Jan:1,Feb:2,Mar:3,Apr:4,May:5,Jun:6,Jul:7,Aug:8,Sep:9,Oct:10,Nov:11,Dec:12};
+                      const parts=bd.split(' ');let day=null,month=null;
+                      parts.forEach(p=>{const n=parseInt(p.replace(/\D/g,''));if(MONTHS[p.replace(/\d/g,'').trim()])month=MONTHS[p.replace(/\d/g,'').trim()];else if(!isNaN(n)&&n>=1&&n<=31&&day===null)day=n;});
+                      if(day&&month){const now=new Date(),next=new Date(now.getFullYear(),month-1,day);if(next<now)next.setFullYear(next.getFullYear()+1);daysUntil=Math.round((next-now)/(1000*60*60*24));}
+                    }
+                    const photos = selectedNode.photos||[];
+                    const div = '2px solid '+(theme.darkMode?'#0f172a':'white');
+                    return (
+                      <div style={{display:'flex',gap:0,alignItems:'stretch',marginBottom:8,borderRadius:14,overflow:'hidden',border:'5px solid '+lvl.color}}>
 
-                    {/* Main photo */}
-                    <div style={{flexShrink:0,position:'relative'}}>
-                      <div style={{
-                        width:130,height:130,
-                        borderRadius:'14px 0 0 14px',
-                        overflow:'hidden',
-                        border:'5px solid '+getLevel(selectedNode.interactionScore||0,selectedNode).color,
-                        borderRight:'none',
-                        cursor:'pointer',
-                      }} onClick={()=>{
-                        let origSrc = selectedNode.img;
-                        openPhotoDB().then(db=>{
-                          const tx=db.transaction('photos','readonly');
-                          const req=tx.objectStore('photos').get(selectedNodeId+'_orig');
-                          req.onsuccess=e=>{
-                            if(e.target.result&&e.target.result.dataUrl) origSrc=e.target.result.dataUrl;
-                            setPhotoCrop({nodeId:selectedNodeId,src:origSrc,originalSrc:origSrc,crop:{x:0,y:0,scale:1}});
-                          };
-                          req.onerror=()=>setPhotoCrop({nodeId:selectedNodeId,src:origSrc,originalSrc:origSrc,crop:{x:0,y:0,scale:1}});
-                        }).catch(()=>setPhotoCrop({nodeId:selectedNodeId,src:origSrc,originalSrc:origSrc,crop:{x:0,y:0,scale:1}}));
-                      }}>
-                        <img src={selectedNode.img} alt="Profile" style={{width:'100%',height:'100%',objectFit:'cover'}}/>
-                      </div>
-                      <button title="Build avatar"
-                        onClick={e=>{
-                          e.stopPropagation();
-                          const n=nodes.find(nd=>nd.id===selectedNodeId);
-                          setAvBg((n&&n._avBg)||'#4f46e5');
-                          setAvSkin((n&&n._avSkin)||'#f4c2a1');
-                          setAvHair((n&&n._avHair)||'#2d1b00');
-                          setAvStyle((n&&n._avStyle)||'medium');
-                          setAvFace((n&&n._avFace)||'smile');
-                          setAvatarBuilder({nodeId:selectedNodeId});
-                        }}
-                        style={{position:'absolute',bottom:4,left:4,width:20,height:20,borderRadius:'50%',background:theme.darkMode?'#334155':'#e2e8f0',border:'2px solid '+(theme.darkMode?'#0f172a':'white'),cursor:'pointer',fontSize:10,display:'flex',alignItems:'center',justifyContent:'center'}}>
-                        🎨
-                      </button>
-                    </div>
+                        {/* Main photo — square, left */}
+                        <div style={{flexShrink:0,position:'relative',width:130,cursor:'pointer'}}
+                          onClick={()=>{
+                            let origSrc=selectedNode.img;
+                            openPhotoDB().then(db=>{const tx=db.transaction('photos','readonly');const req=tx.objectStore('photos').get(selectedNodeId+'_orig');req.onsuccess=e=>{if(e.target.result&&e.target.result.dataUrl)origSrc=e.target.result.dataUrl;setPhotoCrop({nodeId:selectedNodeId,src:origSrc,originalSrc:origSrc,crop:{x:0,y:0,scale:1}});};req.onerror=()=>setPhotoCrop({nodeId:selectedNodeId,src:origSrc,originalSrc:origSrc,crop:{x:0,y:0,scale:1}});}).catch(()=>setPhotoCrop({nodeId:selectedNodeId,src:origSrc,originalSrc:origSrc,crop:{x:0,y:0,scale:1}}));
+                          }}>
+                          <img src={selectedNode.img} alt="Profile" style={{width:'100%',height:'100%',objectFit:'cover',display:'block'}}/>
+                          <button title="Build avatar"
+                            onClick={e=>{e.stopPropagation();const n=nodes.find(nd=>nd.id===selectedNodeId);setAvBg((n&&n._avBg)||'#4f46e5');setAvSkin((n&&n._avSkin)||'#f4c2a1');setAvHair((n&&n._avHair)||'#2d1b00');setAvStyle((n&&n._avStyle)||'medium');setAvFace((n&&n._avFace)||'smile');setAvatarBuilder({nodeId:selectedNodeId});}}
+                            style={{position:'absolute',bottom:4,left:4,width:20,height:20,borderRadius:'50%',background:theme.darkMode?'#334155':'#e2e8f0',border:'2px solid '+(theme.darkMode?'#0f172a':'white'),cursor:'pointer',fontSize:10,display:'flex',alignItems:'center',justifyContent:'center'}}>
+                            🎨
+                          </button>
+                        </div>
 
-                    {/* Right column: 3-photo strip (top 2/3) + tier badge (bottom 1/3) */}
-                    <div style={{flex:1,height:130,display:'flex',flexDirection:'column',minWidth:0,borderRadius:'0 14px 14px 0',overflow:'hidden',border:'5px solid '+getLevel(selectedNode.interactionScore||0,selectedNode).color,borderLeft:'none'}}>
+                        {/* Right: 2×2 grid */}
+                        <div style={{flex:1,display:'grid',gridTemplateColumns:'1fr 1fr',gridTemplateRows:'1fr 1fr',borderLeft:div,minWidth:0}}>
 
-                      {/* 3-photo strip — top ~75px */}
-                      <div style={{display:'flex',flex:'0 0 75px',overflow:'hidden'}}>
-                        {[0,1,2].map(idx=>{
-                          const photos = selectedNode.photos||[];
-                          const p = photos[idx];
-                          const isThird = idx===2;
-                          const hasMore = photos.length>2;
-                          if(!p){
-                            if(photos.length!==idx) return <div key={idx} style={{flex:1,background:theme.darkMode?'#1e293b':'#f1f5f9'}}/>;
-                            return (
-                              <label key={idx} style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',background:theme.darkMode?'#334155':'#f1f5f9',cursor:'pointer',borderLeft:idx>0?'2px solid '+(theme.darkMode?'#0f172a':'white'):'none'}}>
-                                <span style={{fontSize:20,color:theme.darkMode?'#64748b':'#94a3b8'}}>+</span>
-                                <input type="file" accept="image/*" style={{display:'none'}} onChange={e=>{
-                                  const file=e.target.files[0];if(!file)return;
-                                  const reader=new FileReader();
-                                  reader.onload=ev=>setPhotoCrop({nodeId:selectedNodeId,src:ev.target.result,originalSrc:ev.target.result,crop:{x:0,y:0,scale:1}});
-                                  reader.readAsDataURL(file);
-                                }}/>
-                              </label>
-                            );
-                          }
-                          return (
-                            <button key={idx}
-                              onClick={()=>isThird&&hasMore?(setSlideIdx(0),setPhotoSlideshow(selectedNodeId)):setNodes(prev=>prev.map(n=>n.id===selectedNode.id?{...n,img:p.cropped,activePhotoIdx:idx}:n))}
-                              style={{flex:1,padding:0,border:'none',cursor:'pointer',position:'relative',overflow:'hidden',borderLeft:idx>0?'2px solid '+(theme.darkMode?'#0f172a':'white'):'none',display:'block'}}>
-                              <img src={p.cropped} style={{width:'100%',height:'100%',objectFit:'cover'}}/>
-                              {isThird&&hasMore&&(
-                                <div style={{position:'absolute',top:0,left:0,right:0,bottom:0,background:'rgba(0,0,0,0.5)',display:'flex',alignItems:'center',justifyContent:'center'}}>
-                                  <span style={{color:'white',fontWeight:800,fontSize:13}}>+{photos.length-2}</span>
-                                </div>
-                              )}
+                          {/* Top-left: Add photos — shows first empty slot or photo */}
+                          {photos.length>0 ? (
+                            <button
+                              onClick={()=>{setSlideIdx(0);setPhotoSlideshow(selectedNodeId);}}
+                              style={{padding:0,border:'none',borderRight:div,borderBottom:div,cursor:'pointer',position:'relative',overflow:'hidden',background:theme.darkMode?'#1e293b':'#f1f5f9'}}>
+                              <img src={photos[0].cropped} style={{width:'100%',height:'100%',objectFit:'cover'}}/>
+                              {photos.length>1&&<div style={{position:'absolute',bottom:3,right:3,background:'rgba(0,0,0,0.6)',borderRadius:4,padding:'1px 4px',fontSize:9,color:'white',fontWeight:700}}>+{photos.length}</div>}
                             </button>
-                          );
-                        })}
-                      </div>
-
-                      {/* Birthday + add photo — two equal squares */}
-                      {(()=>{
-                        const bd = selectedNode.birthday||'';
-                        let daysUntil = null;
-                        if(bd){
-                          const MONTHS = {Jan:1,Feb:2,Mar:3,Apr:4,May:5,Jun:6,Jul:7,Aug:8,Sep:9,Oct:10,Nov:11,Dec:12};
-                          const parts = bd.split(' ');
-                          let day=null,month=null;
-                          parts.forEach(p=>{
-                            const n=parseInt(p.replace(/\D/g,''));
-                            if(MONTHS[p.replace(/\d/g,'').trim()]) month=MONTHS[p.replace(/\d/g,'').trim()];
-                            else if(!isNaN(n)&&n>=1&&n<=31&&day===null) day=n;
-                          });
-                          if(day&&month){
-                            const now=new Date(), next=new Date(now.getFullYear(),month-1,day);
-                            if(next<now) next.setFullYear(next.getFullYear()+1);
-                            daysUntil=Math.round((next-now)/(1000*60*60*24));
-                          }
-                        }
-                        const sqStyle = {flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:2,background:theme.darkMode?'#1e293b':'#f8fafc',cursor:'pointer',borderTop:'2px solid '+(theme.darkMode?'#0f172a':'white')};
-                        return (
-                          <div style={{display:'flex',flex:'0 0 48px'}}>
-                            {/* Add photo square */}
-                            <label style={{...sqStyle,borderRight:'1px solid '+(theme.darkMode?'#0f172a':'white')}}>
+                          ) : (
+                            <label style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:2,background:theme.darkMode?'#1e293b':'#f8fafc',cursor:'pointer',borderRight:div,borderBottom:div}}>
                               <span style={{fontSize:18,color:theme.darkMode?'#64748b':'#94a3b8',lineHeight:1}}>+</span>
-                              <span style={{fontSize:8,color:theme.darkMode?'#64748b':'#94a3b8',fontWeight:600}}>Photo</span>
-                              <input type="file" accept="image/*" style={{display:'none'}} onChange={e=>{
-                                const file=e.target.files[0];if(!file)return;
-                                const reader=new FileReader();
-                                reader.onload=ev=>setPhotoCrop({nodeId:selectedNodeId,src:ev.target.result,originalSrc:ev.target.result,crop:{x:0,y:0,scale:1}});
-                                reader.readAsDataURL(file);
-                              }}/>
+                              <span style={{fontSize:8,color:theme.darkMode?'#64748b':'#94a3b8',fontWeight:600}}>Add photo</span>
+                              <input type="file" accept="image/*" style={{display:'none'}} onChange={e=>{const file=e.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=ev=>setPhotoCrop({nodeId:selectedNodeId,src:ev.target.result,originalSrc:ev.target.result,crop:{x:0,y:0,scale:1}});reader.readAsDataURL(file);}}/>
                             </label>
-                            {/* Birthday square */}
-                            <label style={{...sqStyle,position:'relative',borderLeft:'1px solid '+(theme.darkMode?'#0f172a':'white')}}>
-                              <span style={{fontSize:18,lineHeight:1}}>🎂</span>
-                              {bd ? (
-                                <span style={{fontSize:8,fontWeight:700,color:daysUntil===0?'#f43f5e':daysUntil!==null&&daysUntil<=7?'#f59e0b':(theme.darkMode?'#94a3b8':'#64748b'),textAlign:'center',lineHeight:1.2}}>
-                                  {daysUntil===0?'Today!':daysUntil===1?'Tmrw!':daysUntil!==null?daysUntil+'d':bd.slice(0,6)}
-                                </span>
-                              ) : (
-                                <span style={{fontSize:8,color:theme.darkMode?'#64748b':'#94a3b8',fontWeight:600}}>Birthday</span>
-                              )}
-                              <input type="text"
-                                defaultValue={bd}
-                                onBlur={e=>updateSelectedNode('birthday',normaliseBirthday(e.target.value))}
-                                onKeyDown={e=>{if(e.key==='Enter'){updateSelectedNode('birthday',normaliseBirthday(e.target.value));e.target.blur();}}}
-                                placeholder="11 Mar"
-                                style={{position:'absolute',top:0,left:0,right:0,bottom:0,opacity:0,cursor:'pointer',width:'100%',border:'none',background:'none'}}
-                                onClick={e=>e.stopPropagation()}
-                              />
-                            </label>
-                          </div>
-                        );
-                      })()}
+                          )}
 
-                      {/* Tier badge — bottom, clickable */}
-                      <div onClick={()=>{setShowLevelPanel(true);setShowLevelSetter(true);}}
-                        style={{
-                          flex:1,cursor:'pointer',
-                          background:getLevel(selectedNode.interactionScore||0,selectedNode).color,
-                          padding:'0 10px',
-                          display:'flex',flexDirection:'column',justifyContent:'center',
-                          borderTop:'2px solid rgba(255,255,255,0.15)',
-                        }}>
-                        <span style={{fontSize:12,fontWeight:900,color:'white',lineHeight:1.2}}>
-                          {getLevel(selectedNode.interactionScore||0,selectedNode).label}
-                        </span>
-                        <span style={{fontSize:9,color:'rgba(255,255,255,0.7)'}}>
-                          tap to change
-                        </span>
+                          {/* Top-right: Birthday */}
+                          <label style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:2,background:theme.darkMode?'#1e293b':'#f8fafc',cursor:'pointer',borderBottom:div,position:'relative'}}>
+                            <span style={{fontSize:18,lineHeight:1}}>🎂</span>
+                            {bd ? (
+                              <>
+                                <span style={{fontSize:8,fontWeight:700,color:theme.darkMode?'#e2e8f0':'#334155',textAlign:'center',lineHeight:1.2,maxWidth:'90%',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{bd}</span>
+                                {daysUntil!==null&&<span style={{fontSize:8,fontWeight:700,color:daysUntil===0?'#f43f5e':daysUntil<=7?'#f59e0b':'#94a3b8'}}>{daysUntil===0?'Today!':daysUntil===1?'Tmrw!':daysUntil+'d'}</span>}
+                              </>
+                            ) : (
+                              <span style={{fontSize:8,color:theme.darkMode?'#64748b':'#94a3b8',fontWeight:600}}>Birthday</span>
+                            )}
+                            <input type="text" defaultValue={bd}
+                              onBlur={e=>updateSelectedNode('birthday',normaliseBirthday(e.target.value))}
+                              onKeyDown={e=>{if(e.key==='Enter'){updateSelectedNode('birthday',normaliseBirthday(e.target.value));e.target.blur();}}}
+                              placeholder="11 Mar 93"
+                              style={{position:'absolute',top:0,left:0,right:0,bottom:0,opacity:0,cursor:'pointer',width:'100%',border:'none',background:'none'}}
+                              onClick={e=>e.stopPropagation()}/>
+                          </label>
+
+                          {/* Bottom: Tier badge — spans both columns */}
+                          <div onClick={()=>{setShowLevelPanel(true);setShowLevelSetter(true);}}
+                            style={{gridColumn:'1 / -1',cursor:'pointer',background:lvl.color,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:1,padding:'4px 8px'}}>
+                            <span style={{fontSize:12,fontWeight:900,color:'white',lineHeight:1.2}}>{lvl.label}</span>
+                            <span style={{fontSize:8,color:'rgba(255,255,255,0.7)'}}>tap to change</span>
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  </div>
+                    );
+                  })()}
 
                   {/* AKA bar */}
                   {selectedNode.contactName && selectedNode.contactName !== selectedNode.label && (
@@ -6204,27 +6127,158 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           setGroupPhotoSrc(null); setFaceRings([]);
         };
 
+        // Zoom/pan state stored in refs to avoid re-render on every touch
+        const viewRef = useRef({x:0,y:0,scale:1});
+        const panRef = useRef(null);
+        const pinchRef = useRef(null);
+
+        const clampView = (v) => {
+          const minS = 1, maxS = 8;
+          const s = Math.max(minS, Math.min(maxS, v.scale));
+          const maxX = CANVAS_W*(s-1), maxY = CANVAS_W*(s-1);
+          return {scale:s, x:Math.max(-maxX, Math.min(0,v.x)), y:Math.max(-maxY, Math.min(0,v.y))};
+        };
+
+        // Convert screen coords (relative to SVG) -> image coords
+        const toImg = (sx, sy) => {
+          const v = viewRef.current;
+          return {x: (sx - v.x) / v.scale, y: (sy - v.y) / v.scale};
+        };
+
+        const onSvgWheel = (e) => {
+          e.preventDefault();
+          const rect = e.currentTarget.getBoundingClientRect();
+          const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+          const delta = e.deltaY > 0 ? 0.85 : 1.18;
+          const v = viewRef.current;
+          const ns = Math.max(1, Math.min(8, v.scale * delta));
+          const nx = mx - (mx - v.x) * (ns / v.scale);
+          const ny = my - (my - v.y) * (ns / v.scale);
+          viewRef.current = clampView({scale:ns, x:nx, y:ny});
+          svgRef.current && (svgRef.current.style.transform = `translate(${viewRef.current.x}px,${viewRef.current.y}px) scale(${viewRef.current.scale})`);
+        };
+
+        const svgRef = useRef(null);
+
+        const onSvgTouchStart = (e) => {
+          if (dragRingRef.current) return; // ring drag takes priority
+          if (e.touches.length === 1) {
+            panRef.current = {sx: e.touches[0].clientX, sy: e.touches[0].clientY, ox: viewRef.current.x, oy: viewRef.current.y};
+          } else if (e.touches.length === 2) {
+            const dx = e.touches[0].clientX - e.touches[1].clientX;
+            const dy = e.touches[0].clientY - e.touches[1].clientY;
+            pinchRef.current = {dist: Math.sqrt(dx*dx+dy*dy), scale: viewRef.current.scale,
+              mx:(e.touches[0].clientX+e.touches[1].clientX)/2, my:(e.touches[0].clientY+e.touches[1].clientY)/2,
+              ox: viewRef.current.x, oy: viewRef.current.y};
+          }
+        };
+
+        const onSvgTouchMove = (e) => {
+          e.preventDefault();
+          if (dragRingRef.current) { onMove(e); return; }
+          const v = viewRef.current;
+          if (e.touches.length === 1 && panRef.current) {
+            const dx = e.touches[0].clientX - panRef.current.sx;
+            const dy = e.touches[0].clientY - panRef.current.sy;
+            viewRef.current = clampView({scale:v.scale, x:panRef.current.ox+dx, y:panRef.current.oy+dy});
+          } else if (e.touches.length === 2 && pinchRef.current) {
+            const dx = e.touches[0].clientX - e.touches[1].clientX;
+            const dy = e.touches[0].clientY - e.touches[1].clientY;
+            const dist = Math.sqrt(dx*dx+dy*dy);
+            const ns = Math.max(1, Math.min(8, pinchRef.current.scale * (dist / pinchRef.current.dist)));
+            const {mx,my,ox,oy,scale:os} = pinchRef.current;
+            viewRef.current = clampView({scale:ns, x:mx-(mx-ox)*(ns/os), y:my-(my-oy)*(ns/os)});
+          }
+          if (svgRef.current) {
+            const vv = viewRef.current;
+            svgRef.current.style.transform = `translate(${vv.x}px,${vv.y}px) scale(${vv.scale})`;
+          }
+        };
+
+        const onSvgTouchEnd = (e) => {
+          if (e.touches.length < 2) pinchRef.current = null;
+          if (e.touches.length === 0) panRef.current = null;
+          onUp();
+        };
+
+        // Ring drag start needs to work in image-space, accounting for zoom
+        const startDragZoom = (e, ringId, mode) => {
+          e.stopPropagation();
+          const rect = e.currentTarget.closest('.tagger-wrap').getBoundingClientRect();
+          const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+          const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+          // Convert to image space
+          const img = toImg(clientX - rect.left, clientY - rect.top);
+          const ring = faceRings.find(r => r.id === ringId);
+          dragRingRef.current = {id:ringId, mode, sx:img.x, sy:img.y, ox:ring.x, oy:ring.y, or:ring.r};
+        };
+
+        const onMoveZoom = (e) => {
+          if (!dragRingRef.current) return;
+          const rect = e.currentTarget.getBoundingClientRect();
+          const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+          const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+          const img = toImg(clientX - rect.left, clientY - rect.top);
+          const {id, mode, sx, sy, ox, oy} = dragRingRef.current;
+          setFaceRings(prev => prev.map(r => {
+            if (r.id !== id) return r;
+            if (mode === 'move') return {...r, x:Math.max(r.r,Math.min(CANVAS_W-r.r,ox+(img.x-sx))), y:Math.max(r.r,Math.min(CANVAS_W-r.r,oy+(img.y-sy)))};
+            return {...r, r:Math.max(20,Math.min(CANVAS_W/2,Math.sqrt(Math.pow(img.x-r.x,2)+Math.pow(img.y-r.y,2))))};
+          }));
+        };
+
         if (tagStep === 'place') return (
-          <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:700,background:'rgba(0,0,0,0.85)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'flex-end'}}>
-            <div style={{background:dm?'#0f172a':'white',borderRadius:'24px 24px 0 0',width:'100%',maxWidth:480,maxHeight:'92vh',display:'flex',flexDirection:'column',overflow:'hidden'}}>
-              <div style={{padding:'16px 20px 8px',display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}}>
-                <div>
-                  <div style={{fontSize:15,fontWeight:800,color:dm?'#e2e8f0':'#1e293b'}}>👥 Tag People</div>
-                  <div style={{fontSize:11,color:dm?'#64748b':'#94a3b8',marginTop:2}}>Drag rings onto faces · use handle to resize</div>
-                </div>
-                <button onClick={()=>{setGroupPhotoSrc(null);setFaceRings([]);}} style={{background:'none',border:'none',fontSize:22,cursor:'pointer',color:dm?'#64748b':'#94a3b8'}}>✕</button>
+          <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:700,background:'#000',display:'flex',flexDirection:'column'}}>
+            {/* Header */}
+            <div style={{padding:'14px 20px 8px',display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0,background:dm?'#0f172a':'#1e293b'}}>
+              <div>
+                <div style={{fontSize:15,fontWeight:800,color:'white'}}>👥 Tag People</div>
+                <div style={{fontSize:11,color:'#94a3b8',marginTop:1}}>Pinch to zoom · drag rings onto faces</div>
               </div>
-              <div style={{flex:1,overflow:'hidden',background:'#000',display:'flex',alignItems:'center',justifyContent:'center'}}>
-                <svg width={CANVAS_W} height={CANVAS_W} style={{display:'block',touchAction:'none',userSelect:'none'}}
-                  onMouseMove={onMove} onTouchMove={e=>{e.preventDefault();onMove(e);}}
-                  onMouseUp={onUp} onTouchEnd={onUp} onMouseLeave={onUp}>
+              <button onClick={()=>{setGroupPhotoSrc(null);setFaceRings([]);}} style={{background:'rgba(255,255,255,0.1)',border:'none',borderRadius:'50%',width:32,height:32,fontSize:16,cursor:'pointer',color:'white',display:'flex',alignItems:'center',justifyContent:'center'}}>✕</button>
+            </div>
+
+            {/* Zoomable photo canvas */}
+            <div className="tagger-wrap" style={{flex:1,overflow:'hidden',position:'relative',background:'#000',cursor:'grab'}}
+              onMouseMove={onMoveZoom} onMouseUp={()=>{dragRingRef.current=null;panRef.current=null;}} onMouseLeave={()=>{dragRingRef.current=null;panRef.current=null;}}
+              onTouchStart={onSvgTouchStart} onTouchMove={onSvgTouchMove} onTouchEnd={onSvgTouchEnd}
+              onWheel={onSvgWheel}
+              onMouseDown={e=>{
+                if(dragRingRef.current) return;
+                panRef.current={sx:e.clientX,sy:e.clientY,ox:viewRef.current.x,oy:viewRef.current.y};
+              }}
+              onMouseMoveCapture={e=>{
+                if(panRef.current&&!dragRingRef.current){
+                  viewRef.current=clampView({scale:viewRef.current.scale,x:panRef.current.ox+(e.clientX-panRef.current.sx),y:panRef.current.oy+(e.clientY-panRef.current.sy)});
+                  if(svgRef.current){const vv=viewRef.current;svgRef.current.style.transform=`translate(${vv.x}px,${vv.y}px) scale(${vv.scale})`;}
+                }
+                onMoveZoom(e);
+              }}
+            >
+              {/* Zoom buttons */}
+              <div style={{position:'absolute',bottom:12,right:12,zIndex:10,display:'flex',flexDirection:'column',gap:4}}>
+                {[['＋',1.4],['－',0.7],['⟲',null]].map(([label,delta])=>(
+                  <button key={label} onMouseDown={e=>{e.stopPropagation();}}
+                    onClick={()=>{
+                      if(!delta){viewRef.current={x:0,y:0,scale:1};}
+                      else{const v=viewRef.current;viewRef.current=clampView({scale:v.scale*delta,x:v.x,y:v.y});}
+                      if(svgRef.current){const vv=viewRef.current;svgRef.current.style.transform=`translate(${vv.x}px,${vv.y}px) scale(${vv.scale})`;}
+                    }}
+                    style={{width:36,height:36,borderRadius:8,background:'rgba(0,0,0,0.6)',color:'white',border:'none',cursor:'pointer',fontSize:label==='⟲'?14:18,fontWeight:700,display:'flex',alignItems:'center',justifyContent:'center'}}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              <div ref={svgRef} style={{position:'absolute',top:0,left:0,transformOrigin:'0 0',willChange:'transform'}}>
+                <svg width={CANVAS_W} height={CANVAS_W} style={{display:'block',touchAction:'none',userSelect:'none'}}>
                   <image href={groupPhotoSrc} x="0" y="0" width={CANVAS_W} height={CANVAS_W} preserveAspectRatio="xMidYMid meet"/>
                   {faceRings.map((ring, ri) => (
                     <g key={ring.id}>
                       <circle cx={ring.x} cy={ring.y} r={ring.r} fill="rgba(59,130,246,0.12)" stroke="#3b82f6" strokeWidth="2.5" strokeDasharray="6 3" style={{cursor:'move',touchAction:'none'}}
-                        onMouseDown={e=>startDrag(e,ring.id,'move')} onTouchStart={e=>startDrag(e,ring.id,'move')}/>
+                        onMouseDown={e=>startDragZoom(e,ring.id,'move')} onTouchStart={e=>{e.stopPropagation();startDragZoom(e,ring.id,'move');}}/>
                       <circle cx={ring.x+ring.r*0.707} cy={ring.y+ring.r*0.707} r={8} fill="#3b82f6" style={{cursor:'nwse-resize',touchAction:'none'}}
-                        onMouseDown={e=>startDrag(e,ring.id,'resize')} onTouchStart={e=>startDrag(e,ring.id,'resize')}/>
+                        onMouseDown={e=>startDragZoom(e,ring.id,'resize')} onTouchStart={e=>{e.stopPropagation();startDragZoom(e,ring.id,'resize');}}/>
                       <g style={{cursor:'pointer'}} onMouseDown={e=>{e.stopPropagation();setFaceRings(prev=>prev.filter(r=>r.id!==ring.id));}}>
                         <circle cx={ring.x-ring.r*0.707} cy={ring.y-ring.r*0.707} r={10} fill="#ef4444"/>
                         <text x={ring.x-ring.r*0.707} y={ring.y-ring.r*0.707} textAnchor="middle" dominantBaseline="middle" fontSize="12" fill="white" style={{pointerEvents:'none'}}>x</text>
@@ -6235,15 +6289,17 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   ))}
                 </svg>
               </div>
-              <div style={{padding:'12px 20px 24px',flexShrink:0,display:'flex',flexDirection:'column',gap:8}}>
-                <button onClick={addRing} style={{width:'100%',padding:'10px',borderRadius:10,background:dm?'#1e293b':'#f1f5f9',color:dm?'#94a3b8':'#64748b',border:'1.5px dashed '+(dm?'#334155':'#cbd5e1'),cursor:'pointer',fontSize:13,fontWeight:700}}>
-                  + Add another face
-                </button>
-                <button onClick={()=>{if(faceRings.length>0){setTagStep('identify');setTagCurrent(0);}}} disabled={faceRings.length===0}
-                  style={{width:'100%',padding:'12px',borderRadius:10,background:faceRings.length>0?'#3b82f6':'#94a3b8',color:'white',border:'none',cursor:faceRings.length>0?'pointer':'default',fontSize:14,fontWeight:800}}>
-                  Identify {faceRings.length} {faceRings.length===1?'person':'people'} →
-                </button>
-              </div>
+            </div>
+
+            {/* Bottom bar */}
+            <div style={{padding:'12px 20px 28px',flexShrink:0,display:'flex',flexDirection:'column',gap:8,background:dm?'#0f172a':'#1e293b'}}>
+              <button onClick={addRing} style={{width:'100%',padding:'10px',borderRadius:10,background:'rgba(255,255,255,0.08)',color:'#94a3b8',border:'1.5px dashed #475569',cursor:'pointer',fontSize:13,fontWeight:700}}>
+                + Add another face
+              </button>
+              <button onClick={()=>{if(faceRings.length>0){setTagStep('identify');setTagCurrent(0);}}} disabled={faceRings.length===0}
+                style={{width:'100%',padding:'12px',borderRadius:10,background:faceRings.length>0?'#3b82f6':'#475569',color:'white',border:'none',cursor:faceRings.length>0?'pointer':'default',fontSize:14,fontWeight:800}}>
+                Identify {faceRings.length} {faceRings.length===1?'person':'people'} →
+              </button>
             </div>
           </div>
         );
