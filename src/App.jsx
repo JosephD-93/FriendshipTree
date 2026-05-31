@@ -328,7 +328,17 @@ function AppInner() {
   const [activeTags, setActiveTags] = useState([]); // tags currently filtered on
   const [tagInput, setTagInput] = useState('');     // new tag being typed in panel
   const [addFriendForms, setAddFriendForms] = useState([]);
-  const [photoCrop, setPhotoCrop] = useState(null); // {nodeId, src (ORIGINAL), crop}
+  const [photoSlideshow, setPhotoSlideshow] = useState(null); // nodeId
+  const [slideIdx, setSlideIdx] = useState(0);
+  const [photoCrop, setPhotoCrop] = useState(null);
+  // Group photo tagger
+  const [groupPhotoSrc, setGroupPhotoSrc] = useState(null);   // base64 of the group photo
+  const [faceRings, setFaceRings] = useState([]);              // [{id,x,y,r,name,assignedNodeId}]
+  const [tagStep, setTagStep] = useState('place');             // 'place' | 'identify'
+  const [tagCurrent, setTagCurrent] = useState(0);            // index into faceRings being identified
+  const [groupPhotoOriginNode, setGroupPhotoOriginNode] = useState(null); // nodeId photo was opened from
+  const dragRingRef = useRef(null);                            // {id, startX, startY, startCx, startCy}
+  const [tagNameInput, setTagNameInput] = useState('');
   const [partnerFlowerEditor, setPartnerFlowerEditor] = useState(null);
   const [pfAppearanceOpen, setPfAppearanceOpen] = useState(true);
   const [pfSelectedPart, setPfSelectedPart] = useState('main');
@@ -604,6 +614,7 @@ function AppInner() {
   const [showTutorial, setShowTutorial] = useState(false);
   const [showLevelPanel, setShowLevelPanel] = useState(false);
   const [showLevelSetter, setShowLevelSetter] = useState(false);
+  const [showPersonalColorPicker, setShowPersonalColorPicker] = useState(false);
   const [groupModal, setGroupModal] = useState(null);
   const [selectForGroupMode, setSelectForGroupMode] = useState(null);
   const [selectedForGroup, setSelectedForGroup] = useState([]);
@@ -2698,7 +2709,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       {/* Add menu — triggered from bottom tab */}
       {showAddMenu && (
         <>
-          <div style={{position:'fixed',inset:0,zIndex:199}} onClick={()=>setShowAddMenu(false)}/>
+          <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:199}} onClick={()=>setShowAddMenu(false)}/>
           <div style={{
             position:'fixed', bottom:68, right:8, zIndex:200,
             background:theme.darkMode?'#1e293b':'white',
@@ -2717,9 +2728,27 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   style={{display:'flex',alignItems:'center',gap:12,width:'100%',padding:'13px 18px',background:'none',border:'none',cursor:'pointer',fontSize:14,fontWeight:600,color:theme.darkMode?'#e2e8f0':'#1e293b',textAlign:'left',whiteSpace:'nowrap'}}>
                   <span style={{fontSize:18,width:24,textAlign:'center'}}>{item.icon}</span>{item.label}
                 </button>
-                {i<arr.length-1&&<div style={{height:1,background:theme.darkMode?'#334155':'#f1f5f9',marginLeft:54}}/>}
+                <div style={{height:1,background:theme.darkMode?'#334155':'#f1f5f9',marginLeft:54}}/>
               </React.Fragment>
             ))}
+            {/* Group photo tagger — needs label for file input */}
+            <label style={{display:'flex',alignItems:'center',gap:12,width:'100%',padding:'13px 18px',cursor:'pointer',fontSize:14,fontWeight:600,color:theme.darkMode?'#e2e8f0':'#1e293b',whiteSpace:'nowrap'}}>
+              <span style={{fontSize:18,width:24,textAlign:'center'}}>👥</span>
+              Tag Group Photo
+              <input type="file" accept="image/*" style={{display:'none'}} onChange={e=>{
+                const file=e.target.files[0]; if(!file)return;
+                const reader=new FileReader();
+                reader.onload=ev=>{
+                  const nr=320*0.18;
+                  setGroupPhotoSrc(ev.target.result);
+                  setGroupPhotoOriginNode(null);
+                  setFaceRings([{id:Date.now(),x:160,y:160,r:nr,name:'',assignedNodeId:null}]);
+                  setTagStep('place'); setTagCurrent(0); setTagNameInput('');
+                  setShowAddMenu(false);
+                };
+                reader.readAsDataURL(file);
+              }}/>
+            </label>
             <div style={{height:1,background:theme.darkMode?'#334155':'#f1f5f9',marginLeft:54}}/>
             <label style={{display:'flex',alignItems:'center',gap:12,width:'100%',padding:'13px 18px',cursor:'pointer',fontSize:14,fontWeight:600,color:theme.darkMode?'#e2e8f0':'#1e293b',whiteSpace:'nowrap'}}>
               <span style={{fontSize:18,width:24,textAlign:'center'}}>📦</span>Import Tree
@@ -2738,9 +2767,20 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           transform: selectedNode || addFriendForms.length > 0 ? 'translateX(0)' : 'translateX(-100%)',
           paddingBottom: 56,
         }}>
-        <div className={`p-6 border-b flex justify-between items-center ${theme.darkMode ? 'border-slate-700 bg-slate-800' : 'border-slate-100 bg-slate-50'}`}>
-          <h1 className="text-2xl font-bold" style={{ background: 'linear-gradient(to right, #10b981, #14b8a6)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>Friendship Tree</h1>
-          {selectedNode && <button onClick={() => { setSelectedNodeId(null); setAddFriendForms([]); setShowPhotoOptions(false); }} className={`p-2 rounded-full ${theme.darkMode ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-200 hover:bg-slate-300'}`}><X className="w-4 h-4" /></button>}
+        <div className={`border-b flex justify-between items-center ${theme.darkMode ? 'border-slate-700 bg-slate-800' : 'border-slate-100 bg-slate-50'}`}
+          style={{padding:'8px 16px',minHeight:0}}>
+          <input
+            type="text"
+            value={!selectedNode ? '' : selectedNode.id==='me' ? 'Me' : selectedNode.type==='hub' ? selectedNode.label : (selectedNode.label && selectedNode.label!=='New Friend' ? selectedNode.label : '')}
+            placeholder={!selectedNode ? '' : selectedNode.type==='hub' ? 'Group name' : 'Name'}
+            onChange={e=>{
+              if(selectedNode && selectedNode.id!=='me'){
+                updateSelectedNode('label', e.target.value || 'New Friend');
+              }
+            }}
+            style={{fontSize:15,fontWeight:700,color:theme.darkMode?'#e2e8f0':'#1e293b',background:'none',border:'none',outline:'none',flex:1,minWidth:0}}
+          />
+          {selectedNode && <button onClick={() => { setSelectedNodeId(null); setAddFriendForms([]); setShowPhotoOptions(false); }} className={`p-1.5 rounded-full flex-shrink-0 ${theme.darkMode ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-200 hover:bg-slate-300'}`}><X className="w-3.5 h-3.5" /></button>}
         </div>
 
         <div className="flex-1 overflow-y-auto p-6">
@@ -2839,131 +2879,168 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
               {selectedNode.type !== 'hub' && selectedNode.id !== 'me' && (
                 <>
-                  <div className="flex items-start space-x-3">
-                    {/* Main profile photo */}
-                    <div style={{position:'relative',flexShrink:0}}>
-                      <div style={{width:64,height:64,borderRadius:'50%',overflow:'hidden',border:'2px solid '+(theme.darkMode?'#334155':'#d1fae5')}}>
+                  {/* Photo block: main photo left, [3-photo strip + tier badge] right */}
+                  <div style={{display:'flex',gap:0,alignItems:'stretch',marginBottom:8}}>
+
+                    {/* Main photo */}
+                    <div style={{flexShrink:0,position:'relative'}}>
+                      <div style={{
+                        width:130,height:130,
+                        borderRadius:'14px 0 0 14px',
+                        overflow:'hidden',
+                        border:'5px solid '+getLevel(selectedNode.interactionScore||0,selectedNode).color,
+                        borderRight:'none',
+                        cursor:'pointer',
+                      }} onClick={()=>{
+                        let origSrc = selectedNode.img;
+                        openPhotoDB().then(db=>{
+                          const tx=db.transaction('photos','readonly');
+                          const req=tx.objectStore('photos').get(selectedNodeId+'_orig');
+                          req.onsuccess=e=>{
+                            if(e.target.result&&e.target.result.dataUrl) origSrc=e.target.result.dataUrl;
+                            setPhotoCrop({nodeId:selectedNodeId,src:origSrc,originalSrc:origSrc,crop:{x:0,y:0,scale:1}});
+                          };
+                          req.onerror=()=>setPhotoCrop({nodeId:selectedNodeId,src:origSrc,originalSrc:origSrc,crop:{x:0,y:0,scale:1}});
+                        }).catch(()=>setPhotoCrop({nodeId:selectedNodeId,src:origSrc,originalSrc:origSrc,crop:{x:0,y:0,scale:1}}));
+                      }}>
                         <img src={selectedNode.img} alt="Profile" style={{width:'100%',height:'100%',objectFit:'cover'}}/>
                       </div>
-                      {/* Edit + Add buttons below photo */}
-                      <div style={{display:'flex',gap:3,marginTop:4,justifyContent:'center'}}>
-                        {/* Edit current photo */}
-                        <button title="Edit crop"
-                          onClick={() => {
-                            let origSrc = selectedNode.img;
-                            openPhotoDB().then(db => {
-                              const tx = db.transaction('photos','readonly');
-                              const req = tx.objectStore('photos').get(selectedNodeId + '_orig');
-                              req.onsuccess = e => {
-                                if (e.target.result?.dataUrl) origSrc = e.target.result.dataUrl;
-                                setPhotoCrop({ nodeId: selectedNodeId, src: origSrc, originalSrc: origSrc, crop: { x:0, y:0, scale:1 } });
-                              };
-                              req.onerror = () => setPhotoCrop({ nodeId: selectedNodeId, src: origSrc, originalSrc: origSrc, crop: { x:0, y:0, scale:1 } });
-                            }).catch(() => setPhotoCrop({ nodeId: selectedNodeId, src: origSrc, originalSrc: origSrc, crop: { x:0, y:0, scale:1 } }));
-                          }}
-                          style={{width:26,height:26,borderRadius:7,background:theme.darkMode?'#334155':'#f1f5f9',border:'none',cursor:'pointer',fontSize:13,display:'flex',alignItems:'center',justifyContent:'center'}}>
-                          ✂️
-                        </button>
-                        {/* Add new photo */}
-                        <label title="Add photo" style={{width:26,height:26,borderRadius:7,background:theme.darkMode?'#334155':'#f1f5f9',cursor:'pointer',fontSize:13,display:'flex',alignItems:'center',justifyContent:'center'}}>
-                          ➕
-                          <input type="file" accept="image/*" style={{display:'none'}} onChange={e => {
-                            const file = e.target.files[0];
-                            if (!file) return;
-                            const reader = new FileReader();
-                            reader.onload = ev => {
-                              setPhotoCrop({ nodeId: selectedNodeId, src: ev.target.result, originalSrc: ev.target.result, crop: { x:0, y:0, scale:1 } });
-                            };
-                            reader.readAsDataURL(file);
-                          }}/>
-                        </label>
-                        {/* Avatar builder */}
-                        <button title="Build avatar"
-                          onClick={() => {
-                            const n = nodes.find(nd => nd.id === selectedNodeId);
-                            setAvBg(n?._avBg || '#4f46e5');
-                            setAvSkin(n?._avSkin || '#f4c2a1');
-                            setAvHair(n?._avHair || '#2d1b00');
-                            setAvStyle(n?._avStyle || 'medium');
-                            setAvFace(n?._avFace || 'smile');
-                            setAvatarBuilder({ nodeId: selectedNodeId });
-                          }}
-                          style={{width:26,height:26,borderRadius:7,background:theme.darkMode?'#334155':'#f1f5f9',border:'none',cursor:'pointer',fontSize:13,display:'flex',alignItems:'center',justifyContent:'center'}}>
-                          🎨
-                        </button>
-                      </div>
+                      <button title="Build avatar"
+                        onClick={e=>{
+                          e.stopPropagation();
+                          const n=nodes.find(nd=>nd.id===selectedNodeId);
+                          setAvBg((n&&n._avBg)||'#4f46e5');
+                          setAvSkin((n&&n._avSkin)||'#f4c2a1');
+                          setAvHair((n&&n._avHair)||'#2d1b00');
+                          setAvStyle((n&&n._avStyle)||'medium');
+                          setAvFace((n&&n._avFace)||'smile');
+                          setAvatarBuilder({nodeId:selectedNodeId});
+                        }}
+                        style={{position:'absolute',bottom:4,left:4,width:20,height:20,borderRadius:'50%',background:theme.darkMode?'#334155':'#e2e8f0',border:'2px solid '+(theme.darkMode?'#0f172a':'white'),cursor:'pointer',fontSize:10,display:'flex',alignItems:'center',justifyContent:'center'}}>
+                        🎨
+                      </button>
                     </div>
 
-                    {/* Photo gallery — thumbnails */}
-                    <div style={{flex:1,minWidth:0}}>
-                      {(selectedNode.photos?.length > 0) ? (
-                        <div style={{display:'flex',flexWrap:'wrap',gap:4}}>
-                          {selectedNode.photos.map((p,pi)=>(
-                            <div key={pi} style={{position:'relative'}}>
-                              <button
-                                onClick={()=>setNodes(prev=>prev.map(n=>n.id===selectedNode.id?{...n,img:p.cropped,activePhotoIdx:pi}:n))}
-                                style={{width:40,height:40,borderRadius:8,overflow:'hidden',border:'2.5px solid '+(selectedNode.activePhotoIdx===pi?'#10b981':'transparent'),padding:0,cursor:'pointer',background:'none',display:'block'}}>
-                                <img src={p.cropped} style={{width:'100%',height:'100%',objectFit:'cover'}}/>
-                              </button>
-                              {/* Delete photo button */}
-                              <button onClick={()=>{
-                                const updated = (selectedNode.photos||[]).filter((_,i)=>i!==pi);
-                                const newActive = Math.max(0, (selectedNode.activePhotoIdx||0)-1);
-                                const newImg = updated.length>0 ? updated[Math.min(newActive,updated.length-1)].cropped : selectedNode.img;
-                                setNodes(prev=>prev.map(n=>n.id===selectedNode.id?{...n,photos:updated,activePhotoIdx:newActive,img:updated.length>0?newImg:n.img}:n));
-                              }} style={{position:'absolute',top:-4,right:-4,width:14,height:14,borderRadius:'50%',background:'#ef4444',border:'none',cursor:'pointer',color:'white',fontSize:9,display:'flex',alignItems:'center',justifyContent:'center',lineHeight:1,padding:0}}>×</button>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div style={{fontSize:11,color:theme.darkMode?'#475569':'#94a3b8',fontStyle:'italic',paddingTop:4}}>
-                          No photos yet — tap ➕ to add
-                        </div>
-                      )}
-                    </div>{/* end gallery */}
-                  </div>{/* end flex items-start */}
+                    {/* Right column: 3-photo strip (top 2/3) + tier badge (bottom 1/3) */}
+                    <div style={{flex:1,height:130,display:'flex',flexDirection:'column',minWidth:0,borderRadius:'0 14px 14px 0',overflow:'hidden',border:'5px solid '+getLevel(selectedNode.interactionScore||0,selectedNode).color,borderLeft:'none'}}>
 
-                  {/* Name input */}
-                  <div className="flex-1">
-                    <input
-                      type="text"
-                      value={selectedNode.label === 'New Friend' ? '' : selectedNode.label || ''}
-                      placeholder="New Friend"
-                      autoCapitalize="words"
-                      onChange={e => {
-                        const val = e.target.value.replace(/\b\w/g, c => c.toUpperCase());
-                        updateSelectedNode('label', val || 'New Friend');
-                      }}
-                      onFocus={e => {
-                        if (selectedNode.label === 'New Friend') e.target.select();
-                      }}
-                      className={`w-full font-bold text-lg bg-transparent border-b outline-none focus:border-emerald-500 transition-colors ${theme.darkMode ? 'border-slate-600 text-slate-100 placeholder-slate-500' : 'border-slate-300 text-slate-900 placeholder-slate-400'}`}
-                    />
-                      {/* AKA bar — shown when contact name differs from display name */}
-                      {selectedNode.contactName && selectedNode.contactName !== selectedNode.label && (
-                        <div style={{
-                          fontSize:10, color:theme.darkMode?'#64748b':'#94a3b8',
-                          marginTop:2, fontStyle:'italic',
-                        }}>aka {selectedNode.contactName}</div>
-                      )}
-                      {/* Friendship Level Badge — tap to expand log */}
-                      {(() => {
-                        const score = selectedNode.interactionScore || 0;
-                        const lvl = getLevel(score, selectedNode);
+                      {/* 3-photo strip — top ~75px */}
+                      <div style={{display:'flex',flex:'0 0 75px',overflow:'hidden'}}>
+                        {[0,1,2].map(idx=>{
+                          const photos = selectedNode.photos||[];
+                          const p = photos[idx];
+                          const isThird = idx===2;
+                          const hasMore = photos.length>2;
+                          if(!p){
+                            if(photos.length!==idx) return <div key={idx} style={{flex:1,background:theme.darkMode?'#1e293b':'#f1f5f9'}}/>;
+                            return (
+                              <label key={idx} style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',background:theme.darkMode?'#334155':'#f1f5f9',cursor:'pointer',borderLeft:idx>0?'2px solid '+(theme.darkMode?'#0f172a':'white'):'none'}}>
+                                <span style={{fontSize:20,color:theme.darkMode?'#64748b':'#94a3b8'}}>+</span>
+                                <input type="file" accept="image/*" style={{display:'none'}} onChange={e=>{
+                                  const file=e.target.files[0];if(!file)return;
+                                  const reader=new FileReader();
+                                  reader.onload=ev=>setPhotoCrop({nodeId:selectedNodeId,src:ev.target.result,originalSrc:ev.target.result,crop:{x:0,y:0,scale:1}});
+                                  reader.readAsDataURL(file);
+                                }}/>
+                              </label>
+                            );
+                          }
+                          return (
+                            <button key={idx}
+                              onClick={()=>isThird&&hasMore?(setSlideIdx(0),setPhotoSlideshow(selectedNodeId)):setNodes(prev=>prev.map(n=>n.id===selectedNode.id?{...n,img:p.cropped,activePhotoIdx:idx}:n))}
+                              style={{flex:1,padding:0,border:'none',cursor:'pointer',position:'relative',overflow:'hidden',borderLeft:idx>0?'2px solid '+(theme.darkMode?'#0f172a':'white'):'none',display:'block'}}>
+                              <img src={p.cropped} style={{width:'100%',height:'100%',objectFit:'cover'}}/>
+                              {isThird&&hasMore&&(
+                                <div style={{position:'absolute',top:0,left:0,right:0,bottom:0,background:'rgba(0,0,0,0.5)',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                                  <span style={{color:'white',fontWeight:800,fontSize:13}}>+{photos.length-2}</span>
+                                </div>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Birthday + add photo — two equal squares */}
+                      {(()=>{
+                        const bd = selectedNode.birthday||'';
+                        let daysUntil = null;
+                        if(bd){
+                          const MONTHS = {Jan:1,Feb:2,Mar:3,Apr:4,May:5,Jun:6,Jul:7,Aug:8,Sep:9,Oct:10,Nov:11,Dec:12};
+                          const parts = bd.split(' ');
+                          let day=null,month=null;
+                          parts.forEach(p=>{
+                            const n=parseInt(p.replace(/\D/g,''));
+                            if(MONTHS[p.replace(/\d/g,'').trim()]) month=MONTHS[p.replace(/\d/g,'').trim()];
+                            else if(!isNaN(n)&&n>=1&&n<=31&&day===null) day=n;
+                          });
+                          if(day&&month){
+                            const now=new Date(), next=new Date(now.getFullYear(),month-1,day);
+                            if(next<now) next.setFullYear(next.getFullYear()+1);
+                            daysUntil=Math.round((next-now)/(1000*60*60*24));
+                          }
+                        }
+                        const sqStyle = {flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:2,background:theme.darkMode?'#1e293b':'#f8fafc',cursor:'pointer',borderTop:'2px solid '+(theme.darkMode?'#0f172a':'white')};
                         return (
-                          <button
-                            onClick={() => { setShowLevelPanel(p => !p); setShowLevelSetter(false); }}
-                            className="mt-1 flex items-center space-x-1 text-xs font-semibold px-2 py-0.5 rounded-full transition-all hover:opacity-80"
-                            style={{ backgroundColor: lvl.color + '33', color: lvl.color, border: `1px solid ${lvl.color}66` }}
-                          >
-                            <span>{lvl.emoji}</span>
-                            <span>{lvl.label}</span>
-                            <span className="opacity-60">· {score} pts</span>
-                            <span className="opacity-50 ml-1">{showLevelPanel ? '▲' : '▼'}</span>
-                          </button>
+                          <div style={{display:'flex',flex:'0 0 48px'}}>
+                            {/* Add photo square */}
+                            <label style={{...sqStyle,borderRight:'1px solid '+(theme.darkMode?'#0f172a':'white')}}>
+                              <span style={{fontSize:18,color:theme.darkMode?'#64748b':'#94a3b8',lineHeight:1}}>+</span>
+                              <span style={{fontSize:8,color:theme.darkMode?'#64748b':'#94a3b8',fontWeight:600}}>Photo</span>
+                              <input type="file" accept="image/*" style={{display:'none'}} onChange={e=>{
+                                const file=e.target.files[0];if(!file)return;
+                                const reader=new FileReader();
+                                reader.onload=ev=>setPhotoCrop({nodeId:selectedNodeId,src:ev.target.result,originalSrc:ev.target.result,crop:{x:0,y:0,scale:1}});
+                                reader.readAsDataURL(file);
+                              }}/>
+                            </label>
+                            {/* Birthday square */}
+                            <label style={{...sqStyle,position:'relative',borderLeft:'1px solid '+(theme.darkMode?'#0f172a':'white')}}>
+                              <span style={{fontSize:18,lineHeight:1}}>🎂</span>
+                              {bd ? (
+                                <span style={{fontSize:8,fontWeight:700,color:daysUntil===0?'#f43f5e':daysUntil!==null&&daysUntil<=7?'#f59e0b':(theme.darkMode?'#94a3b8':'#64748b'),textAlign:'center',lineHeight:1.2}}>
+                                  {daysUntil===0?'Today!':daysUntil===1?'Tmrw!':daysUntil!==null?daysUntil+'d':bd.slice(0,6)}
+                                </span>
+                              ) : (
+                                <span style={{fontSize:8,color:theme.darkMode?'#64748b':'#94a3b8',fontWeight:600}}>Birthday</span>
+                              )}
+                              <input type="text"
+                                defaultValue={bd}
+                                onBlur={e=>updateSelectedNode('birthday',normaliseBirthday(e.target.value))}
+                                onKeyDown={e=>{if(e.key==='Enter'){updateSelectedNode('birthday',normaliseBirthday(e.target.value));e.target.blur();}}}
+                                placeholder="11 Mar"
+                                style={{position:'absolute',top:0,left:0,right:0,bottom:0,opacity:0,cursor:'pointer',width:'100%',border:'none',background:'none'}}
+                                onClick={e=>e.stopPropagation()}
+                              />
+                            </label>
+                          </div>
                         );
                       })()}
+
+                      {/* Tier badge — bottom, clickable */}
+                      <div onClick={()=>{setShowLevelPanel(true);setShowLevelSetter(true);}}
+                        style={{
+                          flex:1,cursor:'pointer',
+                          background:getLevel(selectedNode.interactionScore||0,selectedNode).color,
+                          padding:'0 10px',
+                          display:'flex',flexDirection:'column',justifyContent:'center',
+                          borderTop:'2px solid rgba(255,255,255,0.15)',
+                        }}>
+                        <span style={{fontSize:12,fontWeight:900,color:'white',lineHeight:1.2}}>
+                          {getLevel(selectedNode.interactionScore||0,selectedNode).label}
+                        </span>
+                        <span style={{fontSize:9,color:'rgba(255,255,255,0.7)'}}>
+                          tap to change
+                        </span>
+                      </div>
                     </div>
+                  </div>
+
+                  {/* AKA bar */}
+                  {selectedNode.contactName && selectedNode.contactName !== selectedNode.label && (
+                    <div style={{fontSize:10,color:theme.darkMode?'#64748b':'#94a3b8',fontStyle:'italic',marginBottom:4}}>
+                      aka {selectedNode.contactName}
+                    </div>
+                  )}
 
                   {/* Sync banner — shown at top until dismissed or synced */}
                   {!selectedNode.syncDismissed && !selectedNode.phone && (
@@ -3094,105 +3171,36 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 </>
               )}
 
-              {selectedNode.type !== 'hub' && selectedNode.isPartner && (
-                <button onClick={()=>{setPfSelectedPart('main');setPfColorPickerFor(null);setPfTab('design');setPartnerFlowerEditor(selectedNodeId);}}
-                  style={{width:'100%',padding:'8px',borderRadius:10,background:'#f43f5e',color:'white',border:'none',cursor:'pointer',fontSize:13,fontWeight:700,marginBottom:4}}>
-                  💗 Customise Partner Flower
-                </button>
-              )}
-
-              {selectedNode.type !== 'hub' && !selectedNode.isPartner && (
-                <button onClick={()=>{setPfSelectedPart('main');setPfColorPickerFor(null);setPfTab('design');setPartnerFlowerEditor(selectedNodeId);}}
-                  style={{width:'100%',padding:'8px',borderRadius:10,background:selectedNode.partnerFlower?'linear-gradient(135deg,#a855f7,#3b82f6)':'linear-gradient(135deg,#334155,#475569)',color:'white',border:'none',cursor:'pointer',fontSize:13,fontWeight:700,marginBottom:4}}>
-                  🌸 {selectedNode.partnerFlower?'Edit Flower':'Add Flower'}
-                </button>
-              )}
-
               {selectedNode.type !== 'hub' && (
-                <div className="flex items-center gap-3">
-                  <label className={`flex items-center text-xs font-semibold uppercase tracking-wider whitespace-nowrap flex-shrink-0 ${theme.darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                    <CalendarIcon className="w-3 h-3 mr-1" /> Birthday
-                  </label>
-                  <input type="text" value={selectedNode.birthday || ''}
-                    onChange={e => updateSelectedNode('birthday', e.target.value)}
-                    onBlur={e => updateSelectedNode('birthday', normaliseBirthday(e.target.value))}
-                    className={`flex-1 px-2 py-1 border rounded-md focus:ring-1 focus:ring-emerald-500 outline-none text-xs ${panelBg}`}
-                    placeholder="e.g. 11 Mar 93" />
-                </div>
+                <button
+                  onClick={()=>{setPfSelectedPart('main');setPfColorPickerFor(null);setPfTab('design');setPartnerFlowerEditor(selectedNodeId);}}
+                  style={{width:'100%',borderRadius:12,border:'2px solid '+(theme.darkMode?'#334155':'#e2e8f0'),background:theme.darkMode?'#1e293b':'#f8fafc',cursor:'pointer',padding:'8px',display:'flex',alignItems:'center',gap:10,marginBottom:4}}>
+                  <svg width={36} height={36} viewBox="-22 -22 44 44" style={{flexShrink:0}}>
+                    {selectedNode.partnerFlower ? (()=>{
+                      const pf = selectedNode.partnerFlower;
+                      const pr = 10*(1+(pf.petalLength||0.55)), pw = pr*0.65;
+                      const mainPath = Array.from({length:pf.petals||6},(_,pi)=>{
+                        const pa=(pi/(pf.petals||6))*Math.PI*2,tx=Math.cos(pa)*pr,ty=Math.sin(pa)*pr,perpA=pa+Math.PI*0.5;
+                        const c1x=Math.cos(pa)*pr*0.35+Math.cos(perpA)*pw*0.6,c1y=Math.sin(pa)*pr*0.35+Math.sin(perpA)*pw*0.6;
+                        const c2x=Math.cos(pa)*pr*0.85+Math.cos(perpA)*pw*0.5,c2y=Math.sin(pa)*pr*0.85+Math.sin(perpA)*pw*0.5;
+                        const c3x=Math.cos(pa)*pr*0.85-Math.cos(perpA)*pw*0.5,c3y=Math.sin(pa)*pr*0.85-Math.sin(perpA)*pw*0.5;
+                        const c4x=Math.cos(pa)*pr*0.35-Math.cos(perpA)*pw*0.6,c4y=Math.sin(pa)*pr*0.35-Math.sin(perpA)*pw*0.6;
+                        return 'M 0,0 C '+c1x+','+c1y+' '+c2x+','+c2y+' '+tx+','+ty+' C '+c3x+','+c3y+' '+c4x+','+c4y+' 0,0';
+                      }).join(' ');
+                      return (<>
+                        <path d={mainPath} fill={pf.petalColor||'#f43f5e'}/>
+                        <circle r={6} fill={theme.darkMode?'#1e293b':'white'} stroke={pf.borderColor||pf.petalColor} strokeWidth="1.5"/>
+                      </>);
+                    })() : (
+                      <text textAnchor="middle" dominantBaseline="middle" fontSize="24">🌸</text>
+                    )}
+                  </svg>
+                  <span style={{fontSize:12,fontWeight:700,color:theme.darkMode?'#94a3b8':'#64748b'}}>
+                    {selectedNode.partnerFlower ? 'Edit Flower' : 'Add Flower'}
+                  </span>
+                </button>
               )}
 
-              {/* Tags */}
-              {selectedNode.type !== 'hub' && selectedNode.type !== 'flower' && (
-                <div className="flex flex-col gap-1.5">
-                  <label className={`flex items-center text-xs font-semibold uppercase tracking-wider ${theme.darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                    🏷 Tags
-                  </label>
-                  {/* Personal colour — shown in group border mode */}
-                  <div style={{marginBottom:8}}>
-                    <div style={{fontSize:11,fontWeight:600,color:theme.darkMode?'#94a3b8':'#64748b',marginBottom:5}}>🎨 Personal colour (group border mode)</div>
-                    <div style={{display:'flex',gap:5,alignItems:'center',flexWrap:'wrap'}}>
-                      {[...PRIMARY_GROUP_COLORS,'#f1f5f9'].map(c=>(
-                        <button key={c} onClick={()=>updateSelectedNode('personalColor', selectedNode.personalColor===c?null:c)}
-                          style={{width:22,height:22,borderRadius:'50%',background:c,border:'3px solid '+(selectedNode.personalColor===c?'white':'transparent'),boxShadow:selectedNode.personalColor===c?'0 0 0 2px '+c:'none',cursor:'pointer',flexShrink:0}}/>
-                      ))}
-                      <button onClick={()=>updateSelectedNode('personalColor',null)}
-                        style={{fontSize:10,color:theme.darkMode?'#64748b':'#94a3b8',background:'none',border:'none',cursor:'pointer',textDecoration:'underline'}}>clear</button>
-                    </div>
-                  </div>
-                  {/* Existing tags */}
-                  <div style={{display:'flex',flexWrap:'wrap',gap:5}}>
-                    {(selectedNode.tags || []).map(tag => (
-                      <span key={tag} style={{
-                        display:'flex',alignItems:'center',gap:4,
-                        padding:'2px 8px',borderRadius:99,fontSize:11,fontWeight:600,
-                        background:theme.darkMode?'#334155':'#e2e8f0',
-                        color:theme.darkMode?'#e2e8f0':'#334155',
-                      }}>
-                        {tag}
-                        <button onClick={() => updateSelectedNode('tags', (selectedNode.tags||[]).filter(t=>t!==tag))}
-                          style={{background:'none',border:'none',cursor:'pointer',padding:0,lineHeight:1,fontSize:12,color:theme.darkMode?'#94a3b8':'#64748b'}}>✕</button>
-                      </span>
-                    ))}
-                  </div>
-                  {/* Add tag input */}
-                  <div style={{display:'flex',gap:6}}>
-                    <input
-                      type="text" value={tagInput}
-                      onChange={e => setTagInput(e.target.value)}
-                      onKeyDown={e => {
-                        if ((e.key==='Enter'||e.key===',') && tagInput.trim()) {
-                          const t = tagInput.trim().replace(/,$/,'');
-                          if (t && !(selectedNode.tags||[]).includes(t)) {
-                            updateSelectedNode('tags', [...(selectedNode.tags||[]), t]);
-                          }
-                          setTagInput('');
-                          e.preventDefault();
-                        }
-                      }}
-                      placeholder="Add tag…"
-                      className={`flex-1 px-2 py-1 border rounded-md focus:ring-1 focus:ring-emerald-500 outline-none text-xs ${panelBg}`}
-                    />
-                    <button onClick={() => {
-                      const t = tagInput.trim();
-                      if (t && !(selectedNode.tags||[]).includes(t)) {
-                        updateSelectedNode('tags', [...(selectedNode.tags||[]), t]);
-                      }
-                      setTagInput('');
-                    }} style={{padding:'2px 10px',borderRadius:8,background:'#10b981',color:'white',border:'none',cursor:'pointer',fontSize:12,fontWeight:700}}>+</button>
-                  </div>
-                  {/* Suggest existing tags */}
-                  {allTags.filter(t=>!(selectedNode.tags||[]).includes(t)).length > 0 && (
-                    <div style={{display:'flex',flexWrap:'wrap',gap:4}}>
-                      {allTags.filter(t=>!(selectedNode.tags||[]).includes(t)).map(t=>(
-                        <button key={t} onClick={()=>updateSelectedNode('tags',[...(selectedNode.tags||[]),t])}
-                          style={{padding:'1px 7px',borderRadius:99,fontSize:10,border:`1px dashed ${theme.darkMode?'#475569':'#cbd5e1'}`,background:'transparent',cursor:'pointer',color:theme.darkMode?'#94a3b8':'#64748b'}}>
-                          +{t}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
 
               {selectedNode.type !== 'hub' && selectedNode.id !== 'me' && (
                 <div className={`pt-4 border-t ${theme.darkMode ? 'border-slate-700' : 'border-slate-200'}`}>
@@ -3219,6 +3227,71 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       <span className="text-[10px] font-bold">Meaningful Gesture (+80)</span>
                     </button>
                   </div>
+                </div>
+              )}
+
+
+              {/* Tags */}
+              {selectedNode.type !== 'hub' && selectedNode.type !== 'flower' && (
+                <div style={{display:'flex',flexDirection:'column',gap:6}}>
+                  {/* Tags row: label + chips + add input + personal colour circle */}
+                  <div style={{display:'flex',alignItems:'center',gap:5,flexWrap:'wrap'}}>
+                    <span style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:1,color:theme.darkMode?'#64748b':'#94a3b8',flexShrink:0}}>🏷</span>
+                    {/* Existing tag chips */}
+                    {(selectedNode.tags || []).map(tag => (
+                      <span key={tag} style={{display:'flex',alignItems:'center',gap:3,padding:'2px 7px',borderRadius:99,fontSize:11,fontWeight:600,background:theme.darkMode?'#334155':'#e2e8f0',color:theme.darkMode?'#e2e8f0':'#334155',flexShrink:0}}>
+                        {tag}
+                        <button onClick={() => updateSelectedNode('tags', (selectedNode.tags||[]).filter(t=>t!==tag))}
+                          style={{background:'none',border:'none',cursor:'pointer',padding:0,lineHeight:1,fontSize:11,color:theme.darkMode?'#94a3b8':'#64748b'}}>✕</button>
+                      </span>
+                    ))}
+                    {/* Add tag input */}
+                    <input type="text" value={tagInput}
+                      onChange={e => setTagInput(e.target.value)}
+                      onKeyDown={e => {
+                        if ((e.key==='Enter'||e.key===',') && tagInput.trim()) {
+                          const t = tagInput.trim().replace(/,$/,'');
+                          if (t && !(selectedNode.tags||[]).includes(t)) updateSelectedNode('tags', [...(selectedNode.tags||[]), t]);
+                          setTagInput(''); e.preventDefault();
+                        }
+                      }}
+                      placeholder="+ tag"
+                      style={{width:52,padding:'2px 6px',borderRadius:8,border:'1px solid '+(theme.darkMode?'#334155':'#e2e8f0'),background:'transparent',color:theme.darkMode?'#e2e8f0':'#1e293b',fontSize:11,outline:'none',flexShrink:0}}
+                    />
+                    {/* Personal colour — single circle, opens popup */}
+                    <div style={{position:'relative',marginLeft:'auto',flexShrink:0}}>
+                      <button
+                        onClick={()=>setShowPersonalColorPicker(p=>!p)}
+                        style={{width:22,height:22,borderRadius:'50%',
+                          background:selectedNode.personalColor||'transparent',
+                          border:'2px solid '+(selectedNode.personalColor?(theme.darkMode?'#334155':'#d1d5db'):'#94a3b8'),
+                          cursor:'pointer',
+                          backgroundImage:selectedNode.personalColor?undefined:'repeating-linear-gradient(45deg,#ccc 0,#ccc 2px,transparent 0,transparent 50%)',
+                          backgroundSize:'6px 6px',
+                        }}/>
+                      {showPersonalColorPicker && (
+                        <div style={{position:'absolute',right:0,top:'110%',zIndex:50,background:theme.darkMode?'#1e293b':'white',borderRadius:12,padding:8,boxShadow:'0 8px 24px rgba(0,0,0,0.3)',border:'1px solid '+(theme.darkMode?'#334155':'#e2e8f0'),display:'flex',flexWrap:'wrap',gap:5,width:150}}>
+                          {[...PRIMARY_GROUP_COLORS,'#f43f5e','#f97316','#eab308','#84cc16','#a855f7','#06b6d4'].map(c=>(
+                            <button key={c} onClick={()=>{updateSelectedNode('personalColor',selectedNode.personalColor===c?null:c);setShowPersonalColorPicker(false);}}
+                              style={{width:22,height:22,borderRadius:'50%',background:c,border:'2.5px solid '+(selectedNode.personalColor===c?'white':'transparent'),boxShadow:selectedNode.personalColor===c?'0 0 0 2px '+c:'none',cursor:'pointer'}}/>
+                          ))}
+                          <button onClick={()=>{updateSelectedNode('personalColor',null);setShowPersonalColorPicker(false);}}
+                            style={{width:22,height:22,borderRadius:'50%',background:'none',border:'1.5px dashed #94a3b8',cursor:'pointer',fontSize:10,color:'#94a3b8',display:'flex',alignItems:'center',justifyContent:'center'}}>✕</button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  {/* Suggested tags */}
+                  {allTags.filter(t=>!(selectedNode.tags||[]).includes(t)).length > 0 && (
+                    <div style={{display:'flex',flexWrap:'wrap',gap:4}}>
+                      {allTags.filter(t=>!(selectedNode.tags||[]).includes(t)).map(t=>(
+                        <button key={t} onClick={()=>updateSelectedNode('tags',[...(selectedNode.tags||[]),t])}
+                          style={{padding:'1px 7px',borderRadius:99,fontSize:10,border:'1px dashed '+(theme.darkMode?'#475569':'#cbd5e1'),background:'transparent',cursor:'pointer',color:theme.darkMode?'#94a3b8':'#64748b'}}>
+                          +{t}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -5831,6 +5904,68 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           </div>
         );
       })()}
+      {/* ── Photo Slideshow ─────────────────────────────────────────────── */}
+      {photoSlideshow && (() => {
+        const sn = nodes.find(n=>n.id===photoSlideshow);
+        if(!sn) return null;
+        const photos = sn.photos||[];
+        if(photos.length===0){setPhotoSlideshow(null);return null;}
+        const safeIdx = Math.min(slideIdx, photos.length-1);
+        return (
+          <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:900,background:'#000',display:'flex',flexDirection:'column'}}
+            onClick={()=>setPhotoSlideshow(null)}>
+            {/* Header */}
+            <div style={{position:'absolute',top:0,left:0,right:0,zIndex:2,display:'flex',justifyContent:'space-between',alignItems:'center',padding:'16px 20px',background:'linear-gradient(to bottom,rgba(0,0,0,0.7),transparent)'}}>
+              <span style={{color:'white',fontSize:14,fontWeight:700}}>{sn.label}</span>
+              <div style={{display:'flex',alignItems:'center',gap:12}}>
+                <span style={{color:'rgba(255,255,255,0.6)',fontSize:12}}>{safeIdx+1} / {photos.length}</span>
+                {/* Add photo */}
+                <label style={{cursor:'pointer'}} onClick={e=>e.stopPropagation()}>
+                  <span style={{color:'white',fontSize:22,lineHeight:1}}>+</span>
+                  <input type="file" accept="image/*" style={{display:'none'}} onChange={e=>{
+                    const file=e.target.files[0];if(!file)return;
+                    const reader=new FileReader();
+                    reader.onload=ev=>setPhotoCrop({nodeId:photoSlideshow,src:ev.target.result,originalSrc:ev.target.result,crop:{x:0,y:0,scale:1}});
+                    reader.readAsDataURL(file);
+                  }}/>
+                </label>
+                <button onClick={()=>setPhotoSlideshow(null)} style={{background:'none',border:'none',color:'white',fontSize:24,cursor:'pointer',lineHeight:1}}>✕</button>
+              </div>
+            </div>
+
+            {/* Main image */}
+            <div style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',position:'relative'}} onClick={e=>e.stopPropagation()}>
+              <img src={photos[safeIdx].cropped} alt="" style={{maxWidth:'100%',maxHeight:'100%',objectFit:'contain'}}/>
+
+              {/* Prev/Next */}
+              {safeIdx>0&&<button onClick={()=>setSlideIdx(safeIdx-1)}
+                style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)',background:'rgba(0,0,0,0.5)',border:'none',color:'white',fontSize:24,cursor:'pointer',borderRadius:'50%',width:40,height:40,display:'flex',alignItems:'center',justifyContent:'center'}}>‹</button>}
+              {safeIdx<photos.length-1&&<button onClick={()=>setSlideIdx(safeIdx+1)}
+                style={{position:'absolute',right:12,top:'50%',transform:'translateY(-50%)',background:'rgba(0,0,0,0.5)',border:'none',color:'white',fontSize:24,cursor:'pointer',borderRadius:'50%',width:40,height:40,display:'flex',alignItems:'center',justifyContent:'center'}}>›</button>}
+            </div>
+
+            {/* Thumbnail strip */}
+            <div style={{flexShrink:0,display:'flex',gap:4,padding:'12px 16px',overflowX:'auto',background:'linear-gradient(to top,rgba(0,0,0,0.8),transparent)'}}
+              onClick={e=>e.stopPropagation()}>
+              {photos.map((p,pi)=>(
+                <div key={pi} style={{position:'relative',flexShrink:0}}>
+                  <button onClick={()=>setSlideIdx(pi)}
+                    style={{width:52,height:52,borderRadius:6,overflow:'hidden',padding:0,border:'2.5px solid '+(pi===safeIdx?'white':'transparent'),cursor:'pointer',display:'block',background:'none'}}>
+                    <img src={p.cropped} style={{width:'100%',height:'100%',objectFit:'cover'}}/>
+                  </button>
+                  <button onClick={()=>{
+                    const updated=photos.filter((_,i)=>i!==pi);
+                    setNodes(prev=>prev.map(n=>n.id===photoSlideshow?{...n,photos:updated,img:updated.length>0?updated[0].cropped:n.img}:n));
+                    if(updated.length===0)setPhotoSlideshow(null);
+                    else setSlideIdx(Math.min(safeIdx,updated.length-1));
+                  }} style={{position:'absolute',top:-4,right:-4,width:16,height:16,borderRadius:'50%',background:'#ef4444',border:'none',cursor:'pointer',color:'white',fontSize:9,display:'flex',alignItems:'center',justifyContent:'center',lineHeight:1,padding:0}}>×</button>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
       {photoCrop && (() => {
         const dm = theme.darkMode;
         const SIZE = 800; // output size px - full quality
@@ -5977,7 +6112,198 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     Cancel
                   </button>
                 </div>
+                {/* Tag other faces in this photo */}
+                <button onClick={()=>{
+                  // Open group tagger with this same photo
+                  const W=300, cx=W/2, cy=W/2, r=W*0.18;
+                  setGroupPhotoSrc(photoCrop.originalSrc || photoCrop.src);
+                  setGroupPhotoOriginNode(photoCrop.nodeId);
+                  setFaceRings([{id:Date.now(),x:cx,y:cy,r,name:'',assignedNodeId:null}]);
+                  setTagStep('place');
+                  setTagCurrent(0);
+                  setPhotoCrop(null);
+                }} style={{width:'100%',padding:'9px',borderRadius:10,background:dm?'#1e293b':'#f1f5f9',color:dm?'#94a3b8':'#64748b',border:'1px dashed '+(dm?'#334155':'#cbd5e1'),cursor:'pointer',fontWeight:700,fontSize:13,marginTop:2}}>
+                  👥 Tag other faces in this photo
+                </button>
                 <p style={{fontSize:10,color:dm?'#475569':'#94a3b8',textAlign:'center',marginTop:8}}>Drag to reposition · Scroll or slide to zoom</p>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Group Photo Tagger ───────────────────────────────────────────────── */}
+      {groupPhotoSrc && (() => {
+        const dm = theme.darkMode;
+        const CANVAS_W = 320;
+        const friendNodes = nodes.filter(n => n.type === 'friend' || n.id === 'me');
+
+        const startDrag = (e, ringId, mode) => {
+          e.stopPropagation();
+          const rect = e.currentTarget.closest('svg').getBoundingClientRect();
+          const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+          const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+          const sx = clientX - rect.left, sy = clientY - rect.top;
+          const ring = faceRings.find(r => r.id === ringId);
+          dragRingRef.current = {id: ringId, mode, sx, sy, ox: ring.x, oy: ring.y, or: ring.r};
+        };
+
+        const onMove = (e) => {
+          if (!dragRingRef.current) return;
+          const rect = e.currentTarget.getBoundingClientRect();
+          const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+          const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+          const cx = clientX - rect.left, cy = clientY - rect.top;
+          const {id, mode, sx, sy, ox, oy} = dragRingRef.current;
+          setFaceRings(prev => prev.map(r => {
+            if (r.id !== id) return r;
+            if (mode === 'move') return {...r, x: Math.max(r.r, Math.min(CANVAS_W-r.r, ox+(cx-sx))), y: Math.max(r.r, Math.min(CANVAS_W-r.r, oy+(cy-sy)))};
+            return {...r, r: Math.max(20, Math.min(CANVAS_W/2, Math.sqrt(Math.pow(cx-r.x,2)+Math.pow(cy-r.y,2))))};
+          }));
+        };
+
+        const onUp = () => { dragRingRef.current = null; };
+
+        const addRing = () => {
+          const nr = CANVAS_W * 0.18;
+          setFaceRings(prev => [...prev, {id: Date.now(), x: CANVAS_W/2, y: CANVAS_W/2, r: nr, name:'', assignedNodeId:null}]);
+        };
+
+        const cropFace = (ring) => new Promise(resolve => {
+          const img = new Image();
+          img.onload = () => {
+            const sx = img.naturalWidth / CANVAS_W, sy = img.naturalHeight / CANVAS_W;
+            const size = 400;
+            const c = document.createElement('canvas');
+            c.width = size; c.height = size;
+            const ctx = c.getContext('2d');
+            ctx.beginPath(); ctx.arc(size/2,size/2,size/2,0,Math.PI*2); ctx.clip();
+            const rr = ring.r * Math.max(sx,sy);
+            ctx.drawImage(img, ring.x*sx-rr, ring.y*sy-rr, rr*2, rr*2, 0, 0, size, size);
+            resolve(c.toDataURL('image/png'));
+          };
+          img.src = groupPhotoSrc;
+        });
+
+        const finishTagging = async () => {
+          for (const ring of faceRings) {
+            if (ring.assignedNodeId === '__skip__' || (!ring.assignedNodeId && !ring.name.trim())) continue;
+            const cropped = await cropFace(ring);
+            if (ring.assignedNodeId === '__new__' || !ring.assignedNodeId) {
+              const newId = 'friend_' + Date.now() + '_' + Math.random().toString(36).slice(2,6);
+              setNodes(prev => [...prev, {id:newId, type:'friend', label:ring.name||'Friend', img:cropped, x:200+Math.random()*300, y:200+Math.random()*300, interactionScore:0, photos:[{cropped,orig:cropped}], activePhotoIdx:0}]);
+              showToast('+ Added ' + (ring.name||'Friend'));
+            } else {
+              setNodes(prev => prev.map(n => {
+                if (n.id !== ring.assignedNodeId) return n;
+                const photos = [...(n.photos||[]), {cropped,orig:cropped}];
+                return {...n, img:cropped, photos, activePhotoIdx:photos.length-1};
+              }));
+            }
+          }
+          setGroupPhotoSrc(null); setFaceRings([]);
+        };
+
+        if (tagStep === 'place') return (
+          <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:700,background:'rgba(0,0,0,0.85)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'flex-end'}}>
+            <div style={{background:dm?'#0f172a':'white',borderRadius:'24px 24px 0 0',width:'100%',maxWidth:480,maxHeight:'92vh',display:'flex',flexDirection:'column',overflow:'hidden'}}>
+              <div style={{padding:'16px 20px 8px',display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}}>
+                <div>
+                  <div style={{fontSize:15,fontWeight:800,color:dm?'#e2e8f0':'#1e293b'}}>👥 Tag People</div>
+                  <div style={{fontSize:11,color:dm?'#64748b':'#94a3b8',marginTop:2}}>Drag rings onto faces · use handle to resize</div>
+                </div>
+                <button onClick={()=>{setGroupPhotoSrc(null);setFaceRings([]);}} style={{background:'none',border:'none',fontSize:22,cursor:'pointer',color:dm?'#64748b':'#94a3b8'}}>✕</button>
+              </div>
+              <div style={{flex:1,overflow:'hidden',background:'#000',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                <svg width={CANVAS_W} height={CANVAS_W} style={{display:'block',touchAction:'none',userSelect:'none'}}
+                  onMouseMove={onMove} onTouchMove={e=>{e.preventDefault();onMove(e);}}
+                  onMouseUp={onUp} onTouchEnd={onUp} onMouseLeave={onUp}>
+                  <image href={groupPhotoSrc} x="0" y="0" width={CANVAS_W} height={CANVAS_W} preserveAspectRatio="xMidYMid meet"/>
+                  {faceRings.map((ring, ri) => (
+                    <g key={ring.id}>
+                      <circle cx={ring.x} cy={ring.y} r={ring.r} fill="rgba(59,130,246,0.12)" stroke="#3b82f6" strokeWidth="2.5" strokeDasharray="6 3" style={{cursor:'move',touchAction:'none'}}
+                        onMouseDown={e=>startDrag(e,ring.id,'move')} onTouchStart={e=>startDrag(e,ring.id,'move')}/>
+                      <circle cx={ring.x+ring.r*0.707} cy={ring.y+ring.r*0.707} r={8} fill="#3b82f6" style={{cursor:'nwse-resize',touchAction:'none'}}
+                        onMouseDown={e=>startDrag(e,ring.id,'resize')} onTouchStart={e=>startDrag(e,ring.id,'resize')}/>
+                      <g style={{cursor:'pointer'}} onMouseDown={e=>{e.stopPropagation();setFaceRings(prev=>prev.filter(r=>r.id!==ring.id));}}>
+                        <circle cx={ring.x-ring.r*0.707} cy={ring.y-ring.r*0.707} r={10} fill="#ef4444"/>
+                        <text x={ring.x-ring.r*0.707} y={ring.y-ring.r*0.707} textAnchor="middle" dominantBaseline="middle" fontSize="12" fill="white" style={{pointerEvents:'none'}}>x</text>
+                      </g>
+                      <text x={ring.x} y={ring.y+ring.r+14} textAnchor="middle" fontSize="11" fontWeight="700" fill="white"
+                        style={{filter:'drop-shadow(0 1px 2px rgba(0,0,0,0.8))',pointerEvents:'none'}}>{ring.name||('Face '+(ri+1))}</text>
+                    </g>
+                  ))}
+                </svg>
+              </div>
+              <div style={{padding:'12px 20px 24px',flexShrink:0,display:'flex',flexDirection:'column',gap:8}}>
+                <button onClick={addRing} style={{width:'100%',padding:'10px',borderRadius:10,background:dm?'#1e293b':'#f1f5f9',color:dm?'#94a3b8':'#64748b',border:'1.5px dashed '+(dm?'#334155':'#cbd5e1'),cursor:'pointer',fontSize:13,fontWeight:700}}>
+                  + Add another face
+                </button>
+                <button onClick={()=>{if(faceRings.length>0){setTagStep('identify');setTagCurrent(0);}}} disabled={faceRings.length===0}
+                  style={{width:'100%',padding:'12px',borderRadius:10,background:faceRings.length>0?'#3b82f6':'#94a3b8',color:'white',border:'none',cursor:faceRings.length>0?'pointer':'default',fontSize:14,fontWeight:800}}>
+                  Identify {faceRings.length} {faceRings.length===1?'person':'people'} →
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+
+        // Identify step
+        const ring = faceRings[tagCurrent];
+        if (!ring) { finishTagging(); return null; }
+        return (
+          <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:700,background:'rgba(0,0,0,0.85)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'flex-end'}}>
+            <div style={{background:dm?'#0f172a':'white',borderRadius:'24px 24px 0 0',width:'100%',maxWidth:480,maxHeight:'92vh',display:'flex',flexDirection:'column',overflow:'hidden'}}>
+              <div style={{padding:'16px 20px 8px',flexShrink:0}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                  <div style={{fontSize:11,color:dm?'#64748b':'#94a3b8'}}>Person {tagCurrent+1} of {faceRings.length}</div>
+                  <button onClick={()=>{setGroupPhotoSrc(null);setFaceRings([]);}} style={{background:'none',border:'none',fontSize:20,cursor:'pointer',color:dm?'#64748b':'#94a3b8'}}>✕</button>
+                </div>
+                <div style={{fontSize:16,fontWeight:800,color:dm?'#e2e8f0':'#1e293b',marginTop:4}}>Who is this?</div>
+              </div>
+              <div style={{display:'flex',justifyContent:'center',padding:'8px 0',flexShrink:0}}>
+                <div style={{width:110,height:110,borderRadius:'50%',overflow:'hidden',border:'3px solid #3b82f6'}}>
+                  <svg width={110} height={110} viewBox={(ring.x-ring.r)+' '+(ring.y-ring.r)+' '+(ring.r*2)+' '+(ring.r*2)}>
+                    <image href={groupPhotoSrc} x="0" y="0" width={CANVAS_W} height={CANVAS_W}/>
+                  </svg>
+                </div>
+              </div>
+              <div style={{padding:'0 20px 8px',flexShrink:0}}>
+                <input type="text" value={tagNameInput} onChange={e=>setTagNameInput(e.target.value)}
+                  placeholder="Type name or pick below…"
+                  style={{width:'100%',padding:'10px 12px',borderRadius:10,border:'1.5px solid '+(dm?'#334155':'#e2e8f0'),background:dm?'#1e293b':'#f8fafc',color:dm?'#e2e8f0':'#1e293b',fontSize:14,outline:'none',boxSizing:'border-box'}}/>
+              </div>
+              <div style={{flex:1,overflowY:'auto',padding:'0 20px'}}>
+                <button onClick={()=>{
+                  setFaceRings(prev=>prev.map((r,i)=>i===tagCurrent?{...r,assignedNodeId:'__skip__'}:r));
+                  if(tagCurrent+1>=faceRings.length) finishTagging(); else {setTagCurrent(tagCurrent+1);setTagNameInput('');}
+                }} style={{width:'100%',padding:'8px',borderRadius:8,background:'transparent',border:'1px dashed '+(dm?'#334155':'#cbd5e1'),color:dm?'#64748b':'#94a3b8',cursor:'pointer',fontSize:12,fontWeight:600,marginBottom:8}}>
+                  Skip
+                </button>
+                {friendNodes.filter(n=>!tagNameInput||n.label.toLowerCase().includes(tagNameInput.toLowerCase())).map(n=>(
+                  <button key={n.id} onClick={()=>{
+                    setFaceRings(prev=>prev.map((r,i)=>i===tagCurrent?{...r,assignedNodeId:n.id,name:n.label}:r));
+                    if(tagCurrent+1>=faceRings.length) finishTagging(); else {setTagCurrent(tagCurrent+1);setTagNameInput('');}
+                  }} style={{width:'100%',display:'flex',alignItems:'center',gap:10,padding:'8px 10px',borderRadius:10,background:dm?'#1e293b':'#f8fafc',border:'1px solid '+(dm?'#334155':'#e2e8f0'),cursor:'pointer',marginBottom:6}}>
+                    <img src={n.img} style={{width:36,height:36,borderRadius:'50%',objectFit:'cover',flexShrink:0}} alt=""/>
+                    <span style={{fontSize:13,fontWeight:600,color:dm?'#e2e8f0':'#1e293b'}}>{n.label}</span>
+                  </button>
+                ))}
+                {tagNameInput.trim()&&!friendNodes.some(n=>n.label.toLowerCase()===tagNameInput.trim().toLowerCase())&&(
+                  <button onClick={()=>{
+                    setFaceRings(prev=>prev.map((r,i)=>i===tagCurrent?{...r,assignedNodeId:'__new__',name:tagNameInput.trim()}:r));
+                    if(tagCurrent+1>=faceRings.length) finishTagging(); else {setTagCurrent(tagCurrent+1);setTagNameInput('');}
+                  }} style={{width:'100%',display:'flex',alignItems:'center',gap:10,padding:'8px 10px',borderRadius:10,background:'#3b82f622',border:'1.5px solid #3b82f6',cursor:'pointer',marginBottom:6}}>
+                    <div style={{width:36,height:36,borderRadius:'50%',background:'#3b82f6',display:'flex',alignItems:'center',justifyContent:'center',fontSize:20,flexShrink:0,color:'white'}}>+</div>
+                    <span style={{fontSize:13,fontWeight:700,color:'#3b82f6'}}>Create "{tagNameInput.trim()}"</span>
+                  </button>
+                )}
+              </div>
+              <div style={{padding:'12px 20px 24px',flexShrink:0}}>
+                {tagCurrent>0&&<button onClick={()=>{setTagCurrent(tagCurrent-1);setTagNameInput(faceRings[tagCurrent-1].name||'');}}
+                  style={{width:'100%',padding:'9px',borderRadius:10,background:dm?'#1e293b':'#f1f5f9',color:dm?'#94a3b8':'#64748b',border:'none',cursor:'pointer',fontSize:13,fontWeight:600}}>
+                  Back
+                </button>}
               </div>
             </div>
           </div>
