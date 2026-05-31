@@ -337,8 +337,14 @@ function AppInner() {
   const [tagStep, setTagStep] = useState('place');             // 'place' | 'identify'
   const [tagCurrent, setTagCurrent] = useState(0);            // index into faceRings being identified
   const [groupPhotoOriginNode, setGroupPhotoOriginNode] = useState(null); // nodeId photo was opened from
-  const dragRingRef = useRef(null);                            // {id, startX, startY, startCx, startCy}
+  const dragRingRef = useRef(null);
+  const groupPhotoViewRef = useRef({x:0,y:0,scale:1});
+  const groupPhotoPanRef = useRef(null);
+  const groupPhotoPinchRef = useRef(null);
+  const groupPhotoSvgRef = useRef(null);
   const [tagNameInput, setTagNameInput] = useState('');
+  const [faceDetecting, setFaceDetecting] = useState(false);
+  const faceApiLoadedRef = useRef(false);
   const [partnerFlowerEditor, setPartnerFlowerEditor] = useState(null);
   const [pfAppearanceOpen, setPfAppearanceOpen] = useState(true);
   const [pfSelectedPart, setPfSelectedPart] = useState('main');
@@ -615,6 +621,8 @@ function AppInner() {
   const [showLevelPanel, setShowLevelPanel] = useState(false);
   const [showLevelSetter, setShowLevelSetter] = useState(false);
   const [showPersonalColorPicker, setShowPersonalColorPicker] = useState(false);
+  const [showMapKey, setShowMapKey] = useState(false);
+  const [showContactDetails, setShowContactDetails] = useState(false);
   const [groupModal, setGroupModal] = useState(null);
   const [selectForGroupMode, setSelectForGroupMode] = useState(null);
   const [selectedForGroup, setSelectedForGroup] = useState([]);
@@ -756,26 +764,26 @@ function AppInner() {
         setLiftedNodeId(nodeId);
       }, 150);
       // 2s hold — drag node with all directly connected friends
+      const dragNodeId = nodeId; // capture in closure
       groupLiftTimer.current = setTimeout(() => {
-        if (!dragNode) return;
         // Use functional setState to get current nodes/links
         setNodes(currentNodes => {
           setLinks(currentLinks => {
-            const draggedNode = currentNodes.find(n => n.id === nodeId);
+            const draggedNode = currentNodes.find(n => n.id === dragNodeId);
             if (!draggedNode) return currentLinks;
 
-            const visited = new Set([nodeId]);
+            const visited = new Set([dragNodeId]);
 
             if (draggedNode.type === 'hub') {
               currentLinks.forEach(l => {
-                if (l.source === nodeId) visited.add(l.target);
-                if (l.target === nodeId) visited.add(l.source);
+                if (l.source === dragNodeId) visited.add(l.target);
+                if (l.target === dragNodeId) visited.add(l.source);
               });
               currentNodes.forEach(n => {
                 if (n.type === 'flower' || n.id === 'me') visited.delete(n.id);
               });
             } else {
-              const queue = [nodeId];
+              const queue = [dragNodeId];
               while (queue.length > 0) {
                 const curr = queue.shift();
                 currentLinks.forEach(l => {
@@ -796,14 +804,14 @@ function AppInner() {
               groupDragOrigins.current = origins;
               setDragNode(prev => prev ? { ...prev, startX: draggedNode.x, startY: draggedNode.y } : prev);
               groupDragIds.current = visited;
-              showToast('🌿 Moving group of ' + visited.size);
+              showToast('🌿 Moving group · ' + (visited.size-1) + ' member' + (visited.size-1===1?'':'s'));
             }
 
             return currentLinks;
           });
           return currentNodes;
         });
-      }, 2000);
+      }, 800);
     } else {
       // Background touch — start panning immediately
       setIsPanning(true);
@@ -895,9 +903,11 @@ function AppInner() {
       if (groupDragIds.current) {
         const dx = svgX - dragNode.startX;
         const dy = svgY - dragNode.startY;
+        const groupIds = groupDragIds.current; // capture before async
+        const groupOrigins = groupDragOrigins.current;
         setNodes(prev => prev.map(n => {
-          if (!groupDragIds.current.has(n.id)) return n;
-          const orig = groupDragOrigins.current[n.id];
+          if (!groupIds || !groupIds.has(n.id)) return n;
+          const orig = groupOrigins[n.id];
           if (!orig) return n;
           return { ...n, x: orig.x + dx, y: orig.y + dy };
         }));
@@ -1455,16 +1465,16 @@ function AppInner() {
           pts: additionalPoints,
           date: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }),
         };
-        const newLog = [...(n.interactionLog || []), logEntry].slice(-50); // keep last 50
-        // Feed social flower — friendship interactions boost social health
+        const newLog = [...(n.interactionLog || []), logEntry].slice(-50);
+        const prevScore = n.interactionScore || 0;
+        // Feed social flower
         setDimensions(prev => {
           const s = prev.social || {};
           return { ...prev, social: { ...s, weeklyScore: (s.weeklyScore || 0) + Math.ceil(additionalPoints / 10) } };
         });
-        // Record score history for leaf lifecycle
         const historyEntry = { score: newScore, ts: Date.now() };
-        const newHistory = [...(n.scoreHistory || []), historyEntry].slice(-48); // keep last 48 entries
-        return { ...n, interactionScore: newScore, dailyMessages: newDailyMessages, interactionLog: newLog, scoreHistory: newHistory };
+        const newHistory = [...(n.scoreHistory || []), historyEntry].slice(-48);
+        return { ...n, interactionScore: newScore, prevScore, dailyMessages: newDailyMessages, interactionLog: newLog, scoreHistory: newHistory };
       }
       return n;
     }));
@@ -1481,9 +1491,10 @@ function AppInner() {
     return shared / Math.max(al.length, bl.length);
   };
 
-  const createFriendFromForm = (formId, img, blob = null) => {
+  const createFriendFromForm = (formId, img, blob = null, nameOverride = null) => {
     const form = addFriendForms.find(f => f.id === formId);
     if (!form) return;
+    const resolvedName = nameOverride || form.name;
     const newId = `node_${Date.now()}`;
     const avatarKeys = Object.keys(AVATARS);
     // Place near parent if one set, otherwise random open space
@@ -1494,7 +1505,7 @@ function AppInner() {
     snapshot();
     setNodes(prev => [...prev, {
       id: newId,
-      label: form.name.trim() || 'New Friend',
+      label: resolvedName.trim() || 'New Friend',
       img: img || AVATARS[avatarKeys[Math.floor(Math.random()*avatarKeys.length)]],
       x: clearPos.x, y: clearPos.y,
       interactionScore: form.initialScore || 0,
@@ -1509,7 +1520,7 @@ function AppInner() {
     }
     setSelectedNodeId(newId);
     setAddFriendForms(prev => prev.filter(f => f.id !== formId));
-    showToast('🌱 ' + (form.name.trim() || 'New Friend') + ' added');
+    showToast('🌱 ' + (resolvedName.trim() || 'New Friend') + ' added');
   };
 
   const handleImportContact = async () => {
@@ -2067,27 +2078,83 @@ function AppInner() {
   useEffect(() => { try { localStorage.setItem('ft_links', JSON.stringify(links)); } catch {} }, [links]);
   useEffect(() => { try { localStorage.setItem('ft_dimensions', JSON.stringify(dimensions)); } catch {} }, [dimensions]);
 
-  const exportData = () => {
-    const data = { nodes, links, dimensions, version: 1, exportedAt: new Date().toISOString() };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `friendshiptree-${new Date().toLocaleDateString('en-GB').replace(/\//g,'-')}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    showToast('📦 Tree exported!');
+  const exportData = async () => {
+    showToast('📦 Preparing export…');
+    try {
+      // Collect all IndexedDB photos
+      const db = idbRef.current || (idbRef.current = await openPhotoDB());
+      const allPhotos = await new Promise((resolve, reject) => {
+        const tx = db.transaction('photos', 'readonly');
+        const store = tx.objectStore('photos');
+        const req = store.getAll();
+        req.onsuccess = e => resolve(e.target.result || []);
+        req.onerror = reject;
+      });
+      // Build a map: key -> dataUrl
+      const photoMap = {};
+      allPhotos.forEach(p => { if (p && p.key && p.dataUrl) photoMap[p.key] = p.dataUrl; });
+
+      const data = {
+        nodes,
+        links,
+        dimensions,
+        photoMap,
+        version: 2,
+        exportedAt: new Date().toISOString(),
+      };
+      const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `friendshiptree-${new Date().toLocaleDateString('en-GB').replace(/\//g,'-')}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      const photoCount = Object.keys(photoMap).length;
+      showToast(`📦 Exported! (${photoCount} photo${photoCount!==1?'s':''} included)`);
+    } catch(err) {
+      console.error('Export error:', err);
+      // Fallback: export without photos
+      const data = { nodes, links, dimensions, version: 1, exportedAt: new Date().toISOString() };
+      const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `friendshiptree-${new Date().toLocaleDateString('en-GB').replace(/\//g,'-')}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast('📦 Exported (photos not included)');
+    }
   };
 
   const importData = (file) => {
     const reader = new FileReader();
-    reader.onload = e => {
+    reader.onload = async e => {
       try {
         const data = JSON.parse(e.target.result);
         if (data.nodes) setNodes(data.nodes);
         if (data.links) setLinks(data.links);
         if (data.dimensions) setDimensions(prev => ({ ...prev, ...data.dimensions }));
-        showToast('✅ Tree imported!');
+
+        // Restore IndexedDB photos if present
+        if (data.photoMap && Object.keys(data.photoMap).length > 0) {
+          try {
+            const db = idbRef.current || (idbRef.current = await openPhotoDB());
+            const tx = db.transaction('photos', 'readwrite');
+            const store = tx.objectStore('photos');
+            let count = 0;
+            for (const [key, dataUrl] of Object.entries(data.photoMap)) {
+              store.put({ key, dataUrl });
+              count++;
+            }
+            await new Promise((resolve, reject) => { tx.oncomplete = resolve; tx.onerror = reject; });
+            showToast(`✅ Tree imported! (${count} photo${count!==1?'s':''} restored)`);
+          } catch(photoErr) {
+            console.warn('Photo restore failed:', photoErr);
+            showToast('✅ Tree imported (photos could not be restored)');
+          }
+        } else {
+          showToast('✅ Tree imported!');
+        }
       } catch { showToast('❌ Invalid file — could not import'); }
     };
     reader.readAsText(file);
@@ -2419,6 +2486,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
   };
 
   return (
+    <>
+    <style>{`@keyframes spin{to{transform:rotate(360deg)}} @keyframes fadein{from{opacity:0}to{opacity:1}}`}</style>
     <div className={`fixed inset-0 font-sans overflow-hidden transition-colors duration-300 ${bgClass}`}
       style={{
         display:'flex', flexDirection:'column',
@@ -2554,7 +2623,15 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   <SH k="reset" label="🗑️ Reset"/>
                   {settingsSections.reset&&<div style={{padding:'8px 0'}}>
                     {[
-                      {label:'📋 Logs & history',desc:'Keeps tier, sets score to 50% in current tier',title:'Reset Logs?',msg:'Clears logs. Scores set to tier midpoints.',onConfirm:()=>{setNodes(prev=>prev.map(n=>{const s=n.interactionScore||0;const mid=s<100?50:s<300?200:s<600?450:s<1000?800:1200;return{...n,interactionScore:mid,prevScore:mid,log:[]};} ));setDimensions(prev=>{const r={};Object.keys(prev).forEach(k=>{r[k]={...prev[k],log:[],weeklyScore:0};});return r;});showToast('📋 Done');}},
+                      {label:'📋 Logs & history',desc:'Clears interaction logs, keeps tier',title:'Reset Logs?',msg:'Clears all interaction logs and score history. Scores set to tier midpoints.',onConfirm:()=>{
+                        setNodes(prev=>prev.map(n=>{
+                          const s=n.interactionScore||0;
+                          const mid=s<100?50:s<300?200:s<600?450:s<1000?800:1200;
+                          return{...n,interactionScore:mid,prevScore:mid,interactionLog:[],scoreHistory:[],dailyMessages:0};
+                        }));
+                        setDimensions(prev=>{const r={};Object.keys(prev).forEach(k=>{r[k]={...prev[k],log:[],weeklyScore:0};});return r;});
+                        showToast('📋 Logs cleared');
+                      }},
                       {label:'📓 Diary entries',desc:'Clears all diary entries',title:'Clear Diaries?',msg:'Removes diary entries from all people.',onConfirm:()=>{setNodes(prev=>prev.map(n=>({...n,diaryEntries:[]})));showToast('📓 Diaries cleared');}},
                       {label:'⭐ Friendship scores',desc:"Reset scores — pick each person's tier on map",title:'Reset Scores?',msg:'Resets all scores. Each person shows tier picker on return.',onConfirm:()=>{setNodes(prev=>prev.map(n=>n.type==='friend'||n.id==='me'?{...n,interactionScore:0,prevScore:0}:n));setTierPickMode(true);showToast('⭐ Tap each person to set their level');}},
                       {label:'🔗 Connections',desc:'Removes all vines & groups, keeps people',title:'Remove Connections?',msg:'Removes all vines and groups. People and photos stay.',onConfirm:()=>{setNodes(prev=>prev.filter(n=>n.type!=='hub'));setLinks(INITIAL_LINKS);setArchivedLinks([]);try{localStorage.removeItem('ft_links');}catch{}showToast('🔗 Done');}},
@@ -2930,14 +3007,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
                           {/* Top-right: Birthday */}
                           <label style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:2,background:theme.darkMode?'#1e293b':'#f8fafc',cursor:'pointer',borderBottom:div,position:'relative'}}>
-                            <span style={{fontSize:18,lineHeight:1}}>🎂</span>
                             {bd ? (
                               <>
-                                <span style={{fontSize:8,fontWeight:700,color:theme.darkMode?'#e2e8f0':'#334155',textAlign:'center',lineHeight:1.2,maxWidth:'90%',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{bd}</span>
-                                {daysUntil!==null&&<span style={{fontSize:8,fontWeight:700,color:daysUntil===0?'#f43f5e':daysUntil<=7?'#f59e0b':'#94a3b8'}}>{daysUntil===0?'Today!':daysUntil===1?'Tmrw!':daysUntil+'d'}</span>}
+                                <span style={{fontSize:10,fontWeight:700,color:theme.darkMode?'#e2e8f0':'#334155',textAlign:'center',lineHeight:1.2,maxWidth:'90%',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{bd}</span>
+                                {daysUntil!==null&&<span style={{fontSize:9,fontWeight:700,color:daysUntil===0?'#f43f5e':daysUntil<=7?'#f59e0b':'#94a3b8'}}>{daysUntil===0?'Today!':daysUntil===1?'Tmrw!':daysUntil+'d'}</span>}
                               </>
                             ) : (
-                              <span style={{fontSize:8,color:theme.darkMode?'#64748b':'#94a3b8',fontWeight:600}}>Birthday</span>
+                              <span style={{fontSize:9,color:theme.darkMode?'#64748b':'#94a3b8',fontWeight:600}}>Birthday</span>
                             )}
                             <input type="text" defaultValue={bd}
                               onBlur={e=>updateSelectedNode('birthday',normaliseBirthday(e.target.value))}
@@ -2948,10 +3024,24 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           </label>
 
                           {/* Bottom: Tier badge — spans both columns */}
-                          <div onClick={()=>{setShowLevelPanel(true);setShowLevelSetter(true);}}
-                            style={{gridColumn:'1 / -1',cursor:'pointer',background:lvl.color,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:1,padding:'4px 8px'}}>
-                            <span style={{fontSize:12,fontWeight:900,color:'white',lineHeight:1.2}}>{lvl.label}</span>
-                            <span style={{fontSize:8,color:'rgba(255,255,255,0.7)'}}>tap to change</span>
+                          <div onClick={()=>{setShowLevelPanel(p=>!p);if(!showLevelPanel)setShowLevelSetter(false);}}
+                            style={{gridColumn:'1 / -1',cursor:'pointer',background:lvl.color,display:'flex',flexDirection:'column',justifyContent:'center',gap:2,padding:'6px 8px',position:'relative',overflow:'hidden'}}>
+                            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                              <span style={{fontSize:12,fontWeight:900,color:'white',lineHeight:1.2}}>{lvl.label}</span>
+                              <span style={{fontSize:8,color:'rgba(255,255,255,0.7)'}}>{selectedNode.interactionScore||0} pts {showLevelPanel?'▲':'▼'}</span>
+                            </div>
+                            {/* Score bar — position within current tier */}
+                            {(()=>{
+                              const score = selectedNode.interactionScore||0;
+                              const tierMin = lvl.tier==='partner'?1500:lvl.tier==='family'?1200:lvl.tier===5?1000:lvl.tier===4?600:lvl.tier===3?300:lvl.tier===2?100:0;
+                              const tierMax = lvl.tier==='partner'?2000:lvl.tier==='family'?1500:lvl.tier===5?1500:lvl.tier===4?1000:lvl.tier===3?600:lvl.tier===2?300:100;
+                              const pct = Math.min(1, Math.max(0, (score-tierMin)/(tierMax-tierMin)));
+                              return (
+                                <div style={{height:4,background:'rgba(0,0,0,0.2)',borderRadius:2,overflow:'hidden'}}>
+                                  <div style={{height:'100%',width:(pct*100)+'%',background:'rgba(255,255,255,0.8)',borderRadius:2,transition:'width 0.4s ease'}}/>
+                                </div>
+                              );
+                            })()}
                           </div>
                         </div>
                       </div>
@@ -3050,10 +3140,26 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           </button>
 
                           {showLevelSetter && (
-                            <div className="mt-2 space-y-1.5">
+                            <div className="mt-2">
+                              {/* Key toggle */}
+                              <div style={{display:'flex',justifyContent:'flex-end',marginBottom:6}}>
+                                <button onClick={()=>setShowMapKey(p=>!p)}
+                                  style={{padding:'2px 8px',borderRadius:99,fontSize:10,fontWeight:700,border:'1px solid '+(showMapKey?(theme.darkMode?'#4b5563':'#cbd5e1'):'transparent'),background:'transparent',color:theme.darkMode?'#64748b':'#94a3b8',cursor:'pointer',display:'flex',alignItems:'center',gap:3}}>
+                                  🔑 {showMapKey?'Hide descriptions':'Show descriptions'}
+                                </button>
+                              </div>
+                            <div className="space-y-1.5">
                               {FRIENDSHIP_LEVELS.map(lvl => (
+                                <React.Fragment key={lvl.tier}>
+                                  {/* Separator before special tiers */}
+                                  {lvl.tier === 'family' && (
+                                    <div style={{display:'flex',alignItems:'center',gap:6,margin:'6px 0 4px',opacity:0.5}}>
+                                      <div style={{flex:1,height:1,background:theme.darkMode?'#334155':'#e2e8f0'}}/>
+                                      <span style={{fontSize:9,fontWeight:700,letterSpacing:1,color:theme.darkMode?'#64748b':'#94a3b8',textTransform:'uppercase'}}>Relationship</span>
+                                      <div style={{flex:1,height:1,background:theme.darkMode?'#334155':'#e2e8f0'}}/>
+                                    </div>
+                                  )}
                                 <button
-                                  key={lvl.tier}
                                   onClick={() => {
                                     if (lvl.tier === 'partner') {
                                       setNodes(prev => prev.map(n => n.id === selectedNodeId ? { ...n, isPartner: true, isFamily: false } : n));
@@ -3080,11 +3186,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                         <span className="text-xs font-bold" style={{ color: lvl.color }}>{lvl.label}</span>
                                         <span className="text-[9px] opacity-50">{lvl.scoreRange}</span>
                                       </div>
-                                      <p className={`text-[10px] leading-tight mt-0.5 opacity-70 ${theme.darkMode ? 'text-slate-400' : 'text-slate-500'}`}>{lvl.desc}</p>
+                                      <p className={`text-[10px] leading-tight mt-0.5 opacity-70 ${theme.darkMode ? 'text-slate-400' : 'text-slate-500'}`}>{showMapKey ? lvl.desc : lvl.scoreRange}</p>
                                     </div>
                                   </div>
                                 </button>
+                                </React.Fragment>
                               ))}
+                            </div>
                             </div>
                           )}
                         </div>
@@ -3093,37 +3201,6 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   })()}
                 </>
               )}
-
-              {selectedNode.type !== 'hub' && (
-                <button
-                  onClick={()=>{setPfSelectedPart('main');setPfColorPickerFor(null);setPfTab('design');setPartnerFlowerEditor(selectedNodeId);}}
-                  style={{width:'100%',borderRadius:12,border:'2px solid '+(theme.darkMode?'#334155':'#e2e8f0'),background:theme.darkMode?'#1e293b':'#f8fafc',cursor:'pointer',padding:'8px',display:'flex',alignItems:'center',gap:10,marginBottom:4}}>
-                  <svg width={36} height={36} viewBox="-22 -22 44 44" style={{flexShrink:0}}>
-                    {selectedNode.partnerFlower ? (()=>{
-                      const pf = selectedNode.partnerFlower;
-                      const pr = 10*(1+(pf.petalLength||0.55)), pw = pr*0.65;
-                      const mainPath = Array.from({length:pf.petals||6},(_,pi)=>{
-                        const pa=(pi/(pf.petals||6))*Math.PI*2,tx=Math.cos(pa)*pr,ty=Math.sin(pa)*pr,perpA=pa+Math.PI*0.5;
-                        const c1x=Math.cos(pa)*pr*0.35+Math.cos(perpA)*pw*0.6,c1y=Math.sin(pa)*pr*0.35+Math.sin(perpA)*pw*0.6;
-                        const c2x=Math.cos(pa)*pr*0.85+Math.cos(perpA)*pw*0.5,c2y=Math.sin(pa)*pr*0.85+Math.sin(perpA)*pw*0.5;
-                        const c3x=Math.cos(pa)*pr*0.85-Math.cos(perpA)*pw*0.5,c3y=Math.sin(pa)*pr*0.85-Math.sin(perpA)*pw*0.5;
-                        const c4x=Math.cos(pa)*pr*0.35-Math.cos(perpA)*pw*0.6,c4y=Math.sin(pa)*pr*0.35-Math.sin(perpA)*pw*0.6;
-                        return 'M 0,0 C '+c1x+','+c1y+' '+c2x+','+c2y+' '+tx+','+ty+' C '+c3x+','+c3y+' '+c4x+','+c4y+' 0,0';
-                      }).join(' ');
-                      return (<>
-                        <path d={mainPath} fill={pf.petalColor||'#f43f5e'}/>
-                        <circle r={6} fill={theme.darkMode?'#1e293b':'white'} stroke={pf.borderColor||pf.petalColor} strokeWidth="1.5"/>
-                      </>);
-                    })() : (
-                      <text textAnchor="middle" dominantBaseline="middle" fontSize="24">🌸</text>
-                    )}
-                  </svg>
-                  <span style={{fontSize:12,fontWeight:700,color:theme.darkMode?'#94a3b8':'#64748b'}}>
-                    {selectedNode.partnerFlower ? 'Edit Flower' : 'Add Flower'}
-                  </span>
-                </button>
-              )}
-
 
               {selectedNode.type !== 'hub' && selectedNode.id !== 'me' && (
                 <div className={`pt-4 border-t ${theme.darkMode ? 'border-slate-700' : 'border-slate-200'}`}>
@@ -3153,46 +3230,106 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 </div>
               )}
 
+              {/* Edit/Add Flower — below manual logs */}
+              {selectedNode.type !== 'hub' && (
+                <button
+                  onClick={()=>{setPfSelectedPart('main');setPfColorPickerFor(null);setPfTab('design');setPartnerFlowerEditor(selectedNodeId);}}
+                  style={{width:'100%',borderRadius:12,border:'2px solid '+(theme.darkMode?'#334155':'#e2e8f0'),background:theme.darkMode?'#1e293b':'#f8fafc',cursor:'pointer',padding:'8px',display:'flex',alignItems:'center',gap:10,marginTop:12}}>
+                  <svg width={36} height={36} viewBox="-22 -22 44 44" style={{flexShrink:0}}>
+                    {selectedNode.partnerFlower ? (()=>{
+                      const pf = selectedNode.partnerFlower;
+                      const pr = 10*(1+(pf.petalLength||0.55)), pw = pr*0.65;
+                      const mainPath = Array.from({length:pf.petals||6},(_,pi)=>{
+                        const pa=(pi/(pf.petals||6))*Math.PI*2,tx=Math.cos(pa)*pr,ty=Math.sin(pa)*pr,perpA=pa+Math.PI*0.5;
+                        const c1x=Math.cos(pa)*pr*0.35+Math.cos(perpA)*pw*0.6,c1y=Math.sin(pa)*pr*0.35+Math.sin(perpA)*pw*0.6;
+                        const c2x=Math.cos(pa)*pr*0.85+Math.cos(perpA)*pw*0.5,c2y=Math.sin(pa)*pr*0.85+Math.sin(perpA)*pw*0.5;
+                        const c3x=Math.cos(pa)*pr*0.85-Math.cos(perpA)*pw*0.5,c3y=Math.sin(pa)*pr*0.85-Math.sin(perpA)*pw*0.5;
+                        const c4x=Math.cos(pa)*pr*0.35-Math.cos(perpA)*pw*0.6,c4y=Math.sin(pa)*pr*0.35-Math.sin(perpA)*pw*0.6;
+                        return 'M 0,0 C '+c1x+','+c1y+' '+c2x+','+c2y+' '+tx+','+ty+' C '+c3x+','+c3y+' '+c4x+','+c4y+' 0,0';
+                      }).join(' ');
+                      return (<>
+                        <path d={mainPath} fill={pf.petalColor||'#f43f5e'}/>
+                        <circle r={6} fill={theme.darkMode?'#1e293b':'white'} stroke={pf.borderColor||pf.petalColor} strokeWidth="1.5"/>
+                      </>);
+                    })() : (
+                      <text textAnchor="middle" dominantBaseline="middle" fontSize="24">🌸</text>
+                    )}
+                  </svg>
+                  <span style={{fontSize:12,fontWeight:700,color:theme.darkMode?'#94a3b8':'#64748b'}}>
+                    {selectedNode.partnerFlower ? 'Edit Flower' : 'Add Flower'}
+                  </span>
+                </button>
+              )}
+
+              {/* Contact details — collapsible */}
+              {selectedNode.type !== 'hub' && selectedNode.id !== 'me' && (
+                <div className={`border-t ${theme.darkMode?'border-slate-700':'border-slate-200'}`}>
+                  <button
+                    onClick={()=>setShowContactDetails(p=>!p)}
+                    style={{width:'100%',display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 0',background:'none',border:'none',cursor:'pointer'}}>
+                    <span style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:1,color:theme.darkMode?'#64748b':'#94a3b8',display:'flex',alignItems:'center',gap:5}}>
+                      Contact Details
+                      {(selectedNode.phone||selectedNode.email||selectedNode.address)&&(
+                        <span style={{width:6,height:6,borderRadius:'50%',background:'#10b981',display:'inline-block'}}/>
+                      )}
+                    </span>
+                    <span style={{fontSize:12,color:theme.darkMode?'#64748b':'#94a3b8'}}>{showContactDetails?'▲':'▼'}</span>
+                  </button>
+                  {showContactDetails&&(
+                    <div style={{borderRadius:12,border:'1px solid '+(theme.darkMode?'#334155':'#e2e8f0'),overflow:'hidden',marginBottom:8}}>
+                      <div style={{display:'flex',alignItems:'center',gap:8,padding:'8px 12px',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}>
+                        <input type="tel" value={selectedNode.phone||''}
+                          onChange={e=>updateSelectedNode('phone',e.target.value)}
+                          placeholder="Phone number"
+                          style={{flex:1,background:'none',border:'none',outline:'none',fontSize:13,color:theme.darkMode?'#e2e8f0':'#1e293b',fontWeight:selectedNode.phone?600:400}}
+                        />
+                        {selectedNode.phone&&<a href={'tel:'+selectedNode.phone} style={{fontSize:11,color:'#3b82f6',textDecoration:'none',flexShrink:0,fontWeight:600}}>Call</a>}
+                      </div>
+                      <div style={{display:'flex',alignItems:'center',gap:8,padding:'8px 12px',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}>
+                        <input type="email" value={selectedNode.email||''}
+                          onChange={e=>updateSelectedNode('email',e.target.value)}
+                          placeholder="Email address"
+                          style={{flex:1,background:'none',border:'none',outline:'none',fontSize:13,color:theme.darkMode?'#e2e8f0':'#1e293b',fontWeight:selectedNode.email?600:400}}
+                        />
+                        {selectedNode.email&&<a href={'mailto:'+selectedNode.email} style={{fontSize:11,color:'#3b82f6',textDecoration:'none',flexShrink:0,fontWeight:600}}>Mail</a>}
+                      </div>
+                      <div style={{display:'flex',alignItems:'flex-start',gap:8,padding:'8px 12px'}}>
+                        <textarea value={selectedNode.address||''}
+                          onChange={e=>updateSelectedNode('address',e.target.value)}
+                          placeholder="Address"
+                          rows={selectedNode.address?2:1}
+                          style={{flex:1,background:'none',border:'none',outline:'none',fontSize:13,color:theme.darkMode?'#e2e8f0':'#1e293b',fontWeight:selectedNode.address?600:400,resize:'none',fontFamily:'inherit',lineHeight:1.4}}
+                        />
+                        {selectedNode.address&&<a href={'https://maps.google.com/?q='+encodeURIComponent(selectedNode.address)} target="_blank" rel="noopener noreferrer" style={{fontSize:11,color:'#3b82f6',textDecoration:'none',flexShrink:0,fontWeight:600,marginTop:1}}>Map</a>}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Tags */}
               {selectedNode.type !== 'hub' && selectedNode.type !== 'flower' && (
-                <div style={{display:'flex',flexDirection:'column',gap:6}}>
-                  {/* Tags row: label + chips + add input + personal colour circle */}
-                  <div style={{display:'flex',alignItems:'center',gap:5,flexWrap:'wrap'}}>
-                    <span style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:1,color:theme.darkMode?'#64748b':'#94a3b8',flexShrink:0}}>🏷</span>
-                    {/* Existing tag chips */}
-                    {(selectedNode.tags || []).map(tag => (
-                      <span key={tag} style={{display:'flex',alignItems:'center',gap:3,padding:'2px 7px',borderRadius:99,fontSize:11,fontWeight:600,background:theme.darkMode?'#334155':'#e2e8f0',color:theme.darkMode?'#e2e8f0':'#334155',flexShrink:0}}>
-                        {tag}
-                        <button onClick={() => updateSelectedNode('tags', (selectedNode.tags||[]).filter(t=>t!==tag))}
-                          style={{background:'none',border:'none',cursor:'pointer',padding:0,lineHeight:1,fontSize:11,color:theme.darkMode?'#94a3b8':'#64748b'}}>✕</button>
-                      </span>
-                    ))}
-                    {/* Add tag input */}
+                <div style={{borderTop:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9'),paddingTop:10}}>
+                  {/* Header row: label + add input + colour dot */}
+                  <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:6}}>
+                    <span style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:1,color:theme.darkMode?'#64748b':'#94a3b8',flex:1}}>Tags</span>
                     <input type="text" value={tagInput}
-                      onChange={e => setTagInput(e.target.value)}
-                      onKeyDown={e => {
-                        if ((e.key==='Enter'||e.key===',') && tagInput.trim()) {
-                          const t = tagInput.trim().replace(/,$/,'');
-                          if (t && !(selectedNode.tags||[]).includes(t)) updateSelectedNode('tags', [...(selectedNode.tags||[]), t]);
-                          setTagInput(''); e.preventDefault();
+                      onChange={e=>setTagInput(e.target.value)}
+                      onKeyDown={e=>{
+                        if((e.key==='Enter'||e.key===',')&&tagInput.trim()){
+                          const t=tagInput.trim().replace(/,$/,'');
+                          if(t&&!(selectedNode.tags||[]).includes(t))updateSelectedNode('tags',[...(selectedNode.tags||[]),t]);
+                          setTagInput('');e.preventDefault();
                         }
                       }}
-                      placeholder="+ tag"
-                      style={{width:52,padding:'2px 6px',borderRadius:8,border:'1px solid '+(theme.darkMode?'#334155':'#e2e8f0'),background:'transparent',color:theme.darkMode?'#e2e8f0':'#1e293b',fontSize:11,outline:'none',flexShrink:0}}
+                      placeholder="Add tag…"
+                      style={{width:80,padding:'3px 8px',borderRadius:8,border:'1px solid '+(theme.darkMode?'#334155':'#e2e8f0'),background:theme.darkMode?'#1e293b':'#f8fafc',color:theme.darkMode?'#e2e8f0':'#1e293b',fontSize:11,outline:'none'}}
                     />
-                    {/* Personal colour — single circle, opens popup */}
-                    <div style={{position:'relative',marginLeft:'auto',flexShrink:0}}>
-                      <button
-                        onClick={()=>setShowPersonalColorPicker(p=>!p)}
-                        style={{width:22,height:22,borderRadius:'50%',
-                          background:selectedNode.personalColor||'transparent',
-                          border:'2px solid '+(selectedNode.personalColor?(theme.darkMode?'#334155':'#d1d5db'):'#94a3b8'),
-                          cursor:'pointer',
-                          backgroundImage:selectedNode.personalColor?undefined:'repeating-linear-gradient(45deg,#ccc 0,#ccc 2px,transparent 0,transparent 50%)',
-                          backgroundSize:'6px 6px',
-                        }}/>
-                      {showPersonalColorPicker && (
+                    {/* Personal colour dot */}
+                    <div style={{position:'relative',flexShrink:0}}>
+                      <button onClick={()=>setShowPersonalColorPicker(p=>!p)}
+                        style={{width:20,height:20,borderRadius:'50%',background:selectedNode.personalColor||'transparent',border:'2px solid '+(selectedNode.personalColor?selectedNode.personalColor:'#94a3b8'),cursor:'pointer',backgroundImage:selectedNode.personalColor?undefined:'repeating-linear-gradient(45deg,#ccc 0,#ccc 2px,transparent 0,transparent 50%)',backgroundSize:'6px 6px'}}/>
+                      {showPersonalColorPicker&&(
                         <div style={{position:'absolute',right:0,top:'110%',zIndex:50,background:theme.darkMode?'#1e293b':'white',borderRadius:12,padding:8,boxShadow:'0 8px 24px rgba(0,0,0,0.3)',border:'1px solid '+(theme.darkMode?'#334155':'#e2e8f0'),display:'flex',flexWrap:'wrap',gap:5,width:150}}>
                           {[...PRIMARY_GROUP_COLORS,'#f43f5e','#f97316','#eab308','#84cc16','#a855f7','#06b6d4'].map(c=>(
                             <button key={c} onClick={()=>{updateSelectedNode('personalColor',selectedNode.personalColor===c?null:c);setShowPersonalColorPicker(false);}}
@@ -3204,12 +3341,24 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       )}
                     </div>
                   </div>
+                  {/* Tag chips */}
+                  {(selectedNode.tags||[]).length>0&&(
+                    <div style={{display:'flex',flexWrap:'wrap',gap:4,marginBottom:4}}>
+                      {(selectedNode.tags||[]).map(tag=>(
+                        <span key={tag} style={{display:'flex',alignItems:'center',gap:3,padding:'3px 9px',borderRadius:99,fontSize:11,fontWeight:600,background:theme.darkMode?'#334155':'#e8f5e9',color:theme.darkMode?'#e2e8f0':'#1b5e20'}}>
+                          {tag}
+                          <button onClick={()=>updateSelectedNode('tags',(selectedNode.tags||[]).filter(t=>t!==tag))}
+                            style={{background:'none',border:'none',cursor:'pointer',padding:0,lineHeight:1,fontSize:10,color:theme.darkMode?'#94a3b8':'#4caf50'}}>✕</button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   {/* Suggested tags */}
-                  {allTags.filter(t=>!(selectedNode.tags||[]).includes(t)).length > 0 && (
+                  {allTags.filter(t=>!(selectedNode.tags||[]).includes(t)).length>0&&(
                     <div style={{display:'flex',flexWrap:'wrap',gap:4}}>
                       {allTags.filter(t=>!(selectedNode.tags||[]).includes(t)).map(t=>(
                         <button key={t} onClick={()=>updateSelectedNode('tags',[...(selectedNode.tags||[]),t])}
-                          style={{padding:'1px 7px',borderRadius:99,fontSize:10,border:'1px dashed '+(theme.darkMode?'#475569':'#cbd5e1'),background:'transparent',cursor:'pointer',color:theme.darkMode?'#94a3b8':'#64748b'}}>
+                          style={{padding:'2px 8px',borderRadius:99,fontSize:10,border:'1px dashed '+(theme.darkMode?'#475569':'#cbd5e1'),background:'transparent',cursor:'pointer',color:theme.darkMode?'#94a3b8':'#64748b'}}>
                           +{t}
                         </button>
                       ))}
@@ -3234,6 +3383,51 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       className={`w-full text-center font-bold text-lg bg-transparent border-b outline-none focus:border-emerald-500 ${theme.darkMode ? 'text-slate-100 placeholder-slate-500 border-slate-600' : 'text-slate-900 placeholder-slate-400 border-slate-300'}`}
                     />
                   </div>
+
+                  {/* Group flower */}
+                  <button
+                    onClick={()=>{setPfSelectedPart('main');setPfColorPickerFor(null);setPfTab('design');setPartnerFlowerEditor(selectedNodeId);}}
+                    style={{width:'100%',borderRadius:12,border:'2px solid '+(theme.darkMode?'#334155':'#e2e8f0'),background:theme.darkMode?'#1e293b':'#f8fafc',cursor:'pointer',padding:'8px 12px',display:'flex',alignItems:'center',gap:10}}>
+                    <svg width={36} height={36} viewBox="-22 -22 44 44" style={{flexShrink:0}}>
+                      {selectedNode.partnerFlower ? (()=>{
+                        const pf=selectedNode.partnerFlower;
+                        const pr=10*(1+(pf.petalLength||0.55)),pw=pr*0.65;
+                        const mainPath=Array.from({length:pf.petals||6},(_,pi)=>{
+                          const pa=(pi/(pf.petals||6))*Math.PI*2,tx=Math.cos(pa)*pr,ty=Math.sin(pa)*pr,perpA=pa+Math.PI*0.5;
+                          const c1x=Math.cos(pa)*pr*0.35+Math.cos(perpA)*pw*0.6,c1y=Math.sin(pa)*pr*0.35+Math.sin(perpA)*pw*0.6;
+                          const c2x=Math.cos(pa)*pr*0.85+Math.cos(perpA)*pw*0.5,c2y=Math.sin(pa)*pr*0.85+Math.sin(perpA)*pw*0.5;
+                          const c3x=Math.cos(pa)*pr*0.85-Math.cos(perpA)*pw*0.5,c3y=Math.sin(pa)*pr*0.85-Math.sin(perpA)*pw*0.5;
+                          const c4x=Math.cos(pa)*pr*0.35-Math.cos(perpA)*pw*0.6,c4y=Math.sin(pa)*pr*0.35-Math.sin(perpA)*pw*0.6;
+                          return 'M 0,0 C '+c1x+','+c1y+' '+c2x+','+c2y+' '+tx+','+ty+' C '+c3x+','+c3y+' '+c4x+','+c4y+' 0,0';
+                        }).join(' ');
+                        return (<><path d={mainPath} fill={pf.petalColor||'#10b981'}/><circle r={6} fill={theme.darkMode?'#1e293b':'white'} stroke={pf.borderColor||pf.petalColor} strokeWidth="1.5"/></>);
+                      })() : (
+                        <text textAnchor="middle" dominantBaseline="middle" fontSize="22">🌸</text>
+                      )}
+                    </svg>
+                    <div style={{textAlign:'left',flex:1,minWidth:0}}>
+                      <div style={{fontSize:12,fontWeight:700,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>
+                        {selectedNode.partnerFlower ? 'Edit Group Flower' : 'Add Group Flower'}
+                      </div>
+                      <div style={{fontSize:10,color:theme.darkMode?'#64748b':'#94a3b8',marginTop:1}}>
+                        {selectedNode.partnerFlower
+                          ? (selectedNode.groupFlowerActive!==false ? 'Showing on all members · tap to toggle' : 'Hidden from members · tap to toggle')
+                          : 'Assign a flower design to all members'}
+                      </div>
+                    </div>
+                    {/* Toggle on/off */}
+                    {selectedNode.partnerFlower && (
+                      <button
+                        onPointerDown={e=>{e.stopPropagation();}}
+                        onClick={e=>{e.stopPropagation();updateSelectedNode('groupFlowerActive',selectedNode.groupFlowerActive===false?true:false);}}
+                        style={{flexShrink:0,width:38,height:22,borderRadius:11,border:'none',cursor:'pointer',
+                          background:selectedNode.groupFlowerActive===false?'#334155':'#10b981',
+                          position:'relative',transition:'background 0.2s'}}>
+                        <div style={{position:'absolute',top:3,width:16,height:16,borderRadius:'50%',background:'white',transition:'left 0.2s',
+                          left:selectedNode.groupFlowerActive===false?3:19}}/>
+                      </button>
+                    )}
+                  </button>
                   {(() => {
                     const severed = archivedLinks.filter(l => l.source === selectedNode.id || l.target === selectedNode.id);
                     if (severed.length === 0) return null;
@@ -3307,7 +3501,51 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
               {selectedNode.id !== 'me' && (
                 <div className={`pt-4 border-t space-y-2 ${theme.darkMode ? 'border-slate-700' : 'border-slate-100'}`}>
-                  {/* Sync button at bottom — shown when dismissed from top or already synced */}
+                  {/* Add Friend via this person */}
+                  {selectedNode.type !== 'hub' && selectedNode.id !== 'me' && (
+                    <button
+                      onClick={() => {
+                        setAddFriendForms(prev => [...prev, { id: `form_${Date.now()}`, name: '', parentId: selectedNodeId }]);
+                        setTimeout(()=>document.querySelector('.add-friend-form-input')?.focus(),100);
+                      }}
+                      className="w-full flex items-center justify-center space-x-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg transition-all active:scale-95 font-medium"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>Add Friend via {selectedNode.label}</span>
+                    </button>
+                  )}
+                  {/* Add to Group */}
+                  {selectedNode.type !== 'hub' && selectedNode.id !== 'me' && (
+                    <div>
+                      <button onClick={()=>setShowAddToGroup(p=>!p)}
+                        className={`w-full flex items-center justify-center space-x-2 px-4 py-2 rounded-lg transition-all active:scale-95 font-medium border ${theme.darkMode?'bg-slate-700 hover:bg-slate-600 text-slate-200 border-slate-600':'bg-white hover:bg-slate-50 text-slate-700 border-slate-200'}`}>
+                        <TreePine className="w-4 h-4 text-emerald-500"/>
+                        <span>{showAddToGroup?'Cancel':'Add to Group'}</span>
+                      </button>
+                      {showAddToGroup&&(
+                        <div className={`mt-2 rounded-xl border overflow-hidden ${theme.darkMode?'border-slate-700':'border-slate-200'}`}>
+                          {nodes.filter(n=>n.type==='hub').map(hub=>{
+                            const linked=links.some(l=>(l.source===hub.id&&l.target===selectedNodeId)||(l.source===selectedNodeId&&l.target===hub.id));
+                            return (
+                              <button key={hub.id} onClick={()=>{
+                                if(!linked){snapshot();setLinks(prev=>[...prev,{source:hub.id,target:selectedNodeId}]);showToast('Added to '+hub.label);}
+                                setShowAddToGroup(false);
+                              }} className={`w-full text-left px-4 py-2.5 text-sm font-medium transition-colors flex items-center justify-between ${linked?(theme.darkMode?'text-slate-500 bg-slate-800':'text-slate-400 bg-slate-50'):(theme.darkMode?'text-slate-200 hover:bg-slate-700':'text-slate-700 hover:bg-slate-50')}`}>
+                                <span>🌳 {hub.label}</span>
+                                {linked&&<span className="text-xs opacity-50">already in</span>}
+                              </button>
+                            );
+                          })}
+                          {nodes.filter(n=>n.type==='hub').length===0&&(
+                            <div className={`px-4 py-3 text-sm ${theme.darkMode?'text-slate-400':'text-slate-500'}`}>No groups yet</div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {/* Gap before resync/delete */}
+                  <div style={{height:4}}/>
+                  {/* Sync button */}
                   {selectedNode.type !== 'hub' && (selectedNode.syncDismissed || selectedNode.phone) && (
                     <button onClick={handleImportContact} className={`w-full flex items-center justify-center space-x-2 px-3 py-1.5 rounded-lg font-medium text-xs border opacity-60 hover:opacity-100 transition-opacity ${theme.darkMode ? 'bg-slate-800 border-slate-700 text-slate-400' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>
                       <BookUser className="w-3 h-3" /><span>{selectedNode.phone ? 'Re-sync with Contacts' : 'Sync with Contacts'}</span>
@@ -3328,7 +3566,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         </div>
 
         <div className={`p-4 border-t space-y-2 ${theme.darkMode ? 'border-slate-700 bg-slate-800' : 'border-slate-200 bg-slate-50'}`}>
-          {/* One row per queued friend */}
+          {/* Queued add-friend forms */}
           {addFriendForms.map((form, fi) => (
             <div key={form.id} className={`rounded-xl border p-2.5 space-y-1.5 ${theme.darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'}`}>
               <input
@@ -3336,7 +3574,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 type="text"
                 value={form.name}
                 onChange={e => {
-                  const val = e.target.value.replace(/\b\w/g, c => c.toUpperCase());
+                  const val = e.target.value;
                   setAddFriendForms(prev => prev.map(f => f.id === form.id ? { ...f, name: val } : f));
                 }}
                 onKeyDown={e => {
@@ -3386,7 +3624,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           await new Promise(res => { br.onload = e => { img = e.target.result; res(); }; br.readAsDataURL(blob); });
                         }
                         setAddFriendForms(prev => prev.map(f => f.id === form.id ? { ...f, name } : f));
-                        createFriendFromForm(form.id, img, blob);
+                        createFriendFromForm(form.id, img, blob, name);
                         return;
                       }
                     }
@@ -3403,71 +3641,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             </div>
           ))}
 
-          {/* Add another friend row button — always visible */}
-          <button
-            onClick={() => {
-              const parentId = selectedNodeId && selectedNodeId !== 'me' && nodes.find(n => n.id === selectedNodeId && n.type !== 'flower')
-                ? selectedNodeId
-                : 'flower_social';
-              setAddFriendForms(prev => [...prev, { id: `form_${Date.now()}`, name: '', parentId }]);
-            }}
-            className="w-full flex items-center justify-center space-x-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg shadow-sm transition-all active:scale-95 font-medium"
-          >
-            <Plus className="w-4 h-4" />
-            <span>
-              {selectedNodeId && selectedNodeId !== 'me' && nodes.find(n => n.id === selectedNodeId && n.type !== 'flower')
-                ? `Add Friend via ${nodes.find(n => n.id === selectedNodeId)?.label}`
-                : 'Add Friend'}
-            </span>
-          </button>
           {selectedNodeId === 'me' && (
-            <>
-              <button onClick={addNewHub} className={`w-full flex items-center justify-center space-x-2 px-4 py-2 rounded-lg shadow-sm transition-all active:scale-95 font-medium border ${theme.darkMode ? 'bg-slate-700 hover:bg-slate-600 text-slate-200 border-slate-600' : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200'}`}>
-                <TreePine className="w-4 h-4 text-emerald-500" /><span>Add Group</span>
-              </button>
-              <button onClick={()=>{setPfSelectedPart('main');setPfColorPickerFor(null);setPfTab('design');setPartnerFlowerEditor('me');}}
-                style={{width:'100%',padding:'8px',borderRadius:10,background:'linear-gradient(135deg,#f43f5e,#a855f7)',color:'white',border:'none',cursor:'pointer',fontSize:13,fontWeight:700,marginTop:4}}>
-                🌸 My Flower
-              </button>
-            </>
-          )}
-          {selectedNodeId && selectedNodeId !== 'me' && nodes.find(n => n.id === selectedNodeId && n.type !== 'flower' && n.type !== 'hub') && (
-            <div>
-              <button onClick={() => setShowAddToGroup(p => !p)}
-                className={`w-full flex items-center justify-center space-x-2 px-4 py-2 rounded-lg shadow-sm transition-all active:scale-95 font-medium border ${theme.darkMode ? 'bg-slate-700 hover:bg-slate-600 text-slate-200 border-slate-600' : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200'}`}>
-                <TreePine className="w-4 h-4 text-emerald-500" />
-                <span>Add to Group</span>
-              </button>
-              {showAddToGroup && (
-                <div className={`mt-2 rounded-xl border overflow-hidden ${theme.darkMode ? 'border-slate-700' : 'border-slate-200'}`}>
-                  {nodes.filter(n => n.type === 'hub').map(hub => {
-                    const alreadyLinked = links.some(l =>
-                      (l.source === hub.id && l.target === selectedNodeId) ||
-                      (l.source === selectedNodeId && l.target === hub.id)
-                    );
-                    return (
-                      <button key={hub.id}
-                        onClick={() => {
-                          if (!alreadyLinked) {
-                            snapshot();
-                            setLinks(prev => [...prev, { source: hub.id, target: selectedNodeId }]);
-                            showToast(`Added to ${hub.label}`);
-                          }
-                          setShowAddToGroup(false);
-                        }}
-                        className={`w-full text-left px-4 py-2.5 text-sm font-medium transition-colors flex items-center justify-between
-                          ${alreadyLinked
-                            ? theme.darkMode ? 'text-slate-500 bg-slate-800' : 'text-slate-400 bg-slate-50'
-                            : theme.darkMode ? 'text-slate-200 hover:bg-slate-700' : 'text-slate-700 hover:bg-slate-50'
-                          }`}>
-                        <span>🌳 {hub.label}</span>
-                        {alreadyLinked && <span className="text-xs opacity-50">already in</span>}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
+            <button onClick={()=>{setPfSelectedPart('main');setPfColorPickerFor(null);setPfTab('design');setPartnerFlowerEditor('me');}}
+              style={{width:'100%',padding:'8px',borderRadius:10,background:'linear-gradient(135deg,#f43f5e,#a855f7)',color:'white',border:'none',cursor:'pointer',fontSize:13,fontWeight:700}}>
+              🌸 My Flower
+            </button>
           )}
         </div>
       </div>
@@ -4456,9 +4634,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       {isHoverTarget && <circle r={r + 10} fill="none" stroke="#3B82F6" strokeWidth="6" strokeDasharray="6 4" />}
 
                       {/* Partner flower — drawn BEFORE image so it's behind the photo */}
-                      {/* Flower — renders around person if they have one */}
-                      {node.partnerFlower && (() => {
-                        const pf = node.partnerFlower || {petals:6,petalColor:'#f43f5e',subPetalColor:'#fda4af',petalBorderColor:'#9f1239',subPetalBorderColor:'#fecdd3',borderColor:'#9f1239',pattern:'solid',petalLength:0.55};
+                      {/* Flower — personal or group override */}
+                      {(()=>{
+                        const connHubs = links.filter(l=>l.source===node.id||l.target===node.id).map(l=>l.source===node.id?l.target:l.source).map(id=>nodes.find(n=>n.id===id)).filter(n=>n&&n.type==='hub'&&n.partnerFlower&&n.groupFlowerActive!==false);
+                        const pf = connHubs.length>0 ? connHubs[0].partnerFlower : node.partnerFlower;
+                        if (!pf) return null;
                         const PETALS = pf.petals || 6;
                         const petalLen = pf.petalLength ?? 0.55;
                         const pr = r * (1 + petalLen), pw = pr * 0.65;
@@ -6128,9 +6308,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         };
 
         // Zoom/pan state stored in refs to avoid re-render on every touch
-        const viewRef = useRef({x:0,y:0,scale:1});
-        const panRef = useRef(null);
-        const pinchRef = useRef(null);
+        const viewRef = groupPhotoViewRef;
+        const panRef = groupPhotoPanRef;
+        const pinchRef = groupPhotoPinchRef;
 
         const clampView = (v) => {
           const minS = 1, maxS = 8;
@@ -6158,7 +6338,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           svgRef.current && (svgRef.current.style.transform = `translate(${viewRef.current.x}px,${viewRef.current.y}px) scale(${viewRef.current.scale})`);
         };
 
-        const svgRef = useRef(null);
+        const svgRef = groupPhotoSvgRef;
 
         const onSvgTouchStart = (e) => {
           if (dragRingRef.current) return; // ring drag takes priority
@@ -6227,6 +6407,64 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           }));
         };
 
+        // Load face-api.js and detect faces
+        const detectFaces = async () => {
+          setFaceDetecting(true);
+          try {
+            // Load face-api.js from CDN if not already loaded
+            if (!faceApiLoadedRef.current) {
+              await new Promise((resolve, reject) => {
+                if (window.faceapi) { resolve(); return; }
+                const script = document.createElement('script');
+                script.src = 'https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js';
+                script.onload = resolve;
+                script.onerror = reject;
+                document.head.appendChild(script);
+              });
+              // Load tiny models from CDN
+              const MODEL_URL = 'https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/weights';
+              await Promise.all([
+                window.faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+                window.faceapi.nets.faceLandmark68TinyNet.loadFromUri(MODEL_URL),
+              ]);
+              faceApiLoadedRef.current = true;
+            }
+
+            // Draw image to canvas to get ImageData
+            const img = new Image();
+            img.src = groupPhotoSrc;
+            await new Promise(r => { img.onload = r; });
+
+            const detections = await window.faceapi
+              .detectAllFaces(img, new window.faceapi.TinyFaceDetectorOptions({inputSize:416, scoreThreshold:0.4}));
+
+            if (detections.length === 0) {
+              showToast('No faces detected — try adjusting the photo or place rings manually');
+              setFaceDetecting(false);
+              return;
+            }
+
+            // Scale detections to CANVAS_W
+            const scaleX = CANVAS_W / img.naturalWidth;
+            const scaleY = CANVAS_W / img.naturalHeight;
+
+            const rings = detections.map((det, i) => {
+              const box = det.box;
+              const cx = (box.x + box.width/2) * scaleX;
+              const cy = (box.y + box.height/2) * scaleY;
+              const r = Math.max(box.width, box.height) * 0.6 * Math.max(scaleX, scaleY);
+              return {id: Date.now()+i, x:cx, y:cy, r:Math.max(20, r), name:'', assignedNodeId:null};
+            });
+
+            setFaceRings(rings);
+            showToast('Found ' + rings.length + ' face' + (rings.length===1?'':'s') + ' — adjust rings then continue');
+          } catch(err) {
+            showToast('Detection failed — place rings manually');
+            console.error(err);
+          }
+          setFaceDetecting(false);
+        };
+
         if (tagStep === 'place') return (
           <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:700,background:'#000',display:'flex',flexDirection:'column'}}>
             {/* Header */}
@@ -6293,8 +6531,21 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
             {/* Bottom bar */}
             <div style={{padding:'12px 20px 28px',flexShrink:0,display:'flex',flexDirection:'column',gap:8,background:dm?'#0f172a':'#1e293b'}}>
+              {/* Auto-detect button */}
+              <button onClick={detectFaces} disabled={faceDetecting}
+                style={{width:'100%',padding:'10px',borderRadius:10,
+                  background:faceDetecting?'#334155':'linear-gradient(135deg,#6366f1,#3b82f6)',
+                  color:'white',border:'none',cursor:faceDetecting?'default':'pointer',fontSize:13,fontWeight:700,
+                  display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>
+                {faceDetecting ? (
+                  <>
+                    <span style={{display:'inline-block',width:14,height:14,border:'2px solid rgba(255,255,255,0.3)',borderTopColor:'white',borderRadius:'50%',animation:'spin 0.8s linear infinite'}}/>
+                    Detecting faces…
+                  </>
+                ) : '🤖 Auto-detect faces'}
+              </button>
               <button onClick={addRing} style={{width:'100%',padding:'10px',borderRadius:10,background:'rgba(255,255,255,0.08)',color:'#94a3b8',border:'1.5px dashed #475569',cursor:'pointer',fontSize:13,fontWeight:700}}>
-                + Add another face
+                + Add face manually
               </button>
               <button onClick={()=>{if(faceRings.length>0){setTagStep('identify');setTagCurrent(0);}}} disabled={faceRings.length===0}
                 style={{width:'100%',padding:'12px',borderRadius:10,background:faceRings.length>0?'#3b82f6':'#475569',color:'white',border:'none',cursor:faceRings.length>0?'pointer':'default',fontSize:14,fontWeight:800}}>
@@ -6847,10 +7098,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         return (
           <div style={{position:'absolute',top:0,left:0,right:0,bottom:0,zIndex:50,background:bg,display:'flex',flexDirection:'column',overflow:'hidden',paddingBottom:56}}>
             {/* Header */}
-            <div style={{padding:'16px 20px 0',background:card,borderBottom:`1px solid ${border}`,flexShrink:0}}>
-              <h2 style={{textAlign:'center',fontWeight:800,fontSize:20,marginBottom:12,background:'linear-gradient(to right,#10b981,#6366f1)',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent'}}>
-                My Life Dashboard
-              </h2>
+            <div style={{padding:'12px 20px 0',background:card,borderBottom:`1px solid ${border}`,flexShrink:0}}>
               {/* Tabs */}
               <div style={{display:'flex',overflowX:'auto',gap:4,paddingBottom:1}}>
                 {TABS.map(tab => (
@@ -6883,18 +7131,22 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     const h = dim.health ?? 1;
                     const pct = Math.round(h * 100);
                     return (
-                      <div style={{background:card,border:`1px solid ${border}`,borderRadius:12,padding:14,marginBottom:14,display:'flex',alignItems:'center',gap:12}}>
-                        <span style={{fontSize:28}}>🤝</span>
+                      <div style={{background:card,border:`1px solid ${border}`,borderRadius:12,padding:'10px 14px',marginBottom:14,display:'flex',alignItems:'center',gap:12}}>
+                        <span style={{fontSize:24}}>🤝</span>
                         <div style={{flex:1}}>
-                          <div style={{fontWeight:700,color:text}}>Social Health</div>
+                          <div style={{fontWeight:700,fontSize:13,color:text}}>Social Health</div>
                           <div style={{height:6,borderRadius:3,background:dm?'#334155':'#e2e8f0',marginTop:4}}>
                             <div style={{height:'100%',borderRadius:3,width:`${pct}%`,background:h>0.6?dim.color:h>0.3?'#f59e0b':'#ef4444',transition:'width 0.5s'}} />
                           </div>
-                          <div style={{fontSize:11,color:dim.color,marginTop:3}}>{pct}% · {dim.weeklyScore||0}/{dim.weeklyTarget} interactions this week</div>
+                          <div style={{fontSize:10,color:dim.color,marginTop:2}}>{pct}% · {dim.weeklyScore||0}/{dim.weeklyTarget} this week</div>
                         </div>
                         <button onClick={()=>setFlowerPanel('social')}
-                          style={{padding:'6px 12px',borderRadius:8,background:dim.color,color:'white',border:'none',cursor:'pointer',fontSize:11,fontWeight:700}}>
+                          style={{padding:'4px 8px',borderRadius:6,background:dim.color,color:'white',border:'none',cursor:'pointer',fontSize:10,fontWeight:700,flexShrink:0}}>
                           Manage
+                        </button>
+                        <button onClick={()=>setDiaryOpen(true)}
+                          style={{padding:'4px 10px',borderRadius:6,background:'#16a34a',color:'white',border:'none',cursor:'pointer',fontSize:11,fontWeight:700,flexShrink:0}}>
+                          📓 Log
                         </button>
                       </div>
                     );
@@ -6935,36 +7187,220 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   )}
 
                   {/* GRID VIEW */}
-                  {socialView === 'grid' && (
-                    <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(90px,1fr))',gap:8}}>
-                      {visiblePeople.map(n => {
-                        const tier = getTier(n.interactionScore || 0, n);
-                        const lvl = FRIENDSHIP_LEVELS.find(l => l.tier === tier) || FRIENDSHIP_LEVELS[0];
-                        const trend = getTrend(n);
-                        const ti = TREND_ICONS[trend];
-                        return (
-                          <div key={n.id} onClick={() => { setSelectedNodeId(n.id); setViewMode('canvas'); }}
-                            style={{position:'relative',cursor:'pointer',aspectRatio:'1',borderRadius:10,border:`3px solid ${lvl.color}`,overflow:'hidden',boxShadow:`0 2px 8px ${lvl.color}44`}}>
-                            <img src={n.img} alt={n.label} style={{width:'100%',height:'100%',objectFit:'cover',display:'block'}} />
-                            <div style={{position:'absolute',bottom:0,left:0,right:0,background:'rgba(0,0,0,0.55)',padding:'3px 4px',fontSize:10,fontWeight:700,color:'white',textAlign:'center',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{n.label}</div>
-                            {ti.icon && <div style={{position:'absolute',top:4,right:4,color:ti.color,fontSize:ti.size,fontWeight:ti.bold?900:400,textShadow:'0 1px 3px rgba(0,0,0,0.7)'}}>{ti.icon}</div>}
-                            {trend==='levelup' && <div style={{position:'absolute',top:3,left:3,fontSize:12}}>⭐</div>}
+                  {socialView === 'grid' && (() => {
+                    const R = 28;
+                    const HEX_W = R * 2;
+                    const HEX_H = Math.sqrt(3) * R;
+                    const COL_W = HEX_W * 0.75;
+                    const ROW_H = HEX_H;
+
+                    const hexToPx = (q, r) => ({
+                      x: COL_W * q,
+                      y: ROW_H * r + (Math.abs(q) % 2 !== 0 ? ROW_H / 2 : 0),
+                    });
+
+                    const hexPts = Array.from({length:6}, (_, i) => {
+                      const a = (Math.PI / 3) * i;
+                      return (R * Math.cos(a)).toFixed(2) + ',' + (R * Math.sin(a)).toFixed(2);
+                    }).join(' ');
+
+                    const neighbours = (q, r) => {
+                      const odd = Math.abs(q) % 2 !== 0;
+                      return [
+                        [q+1, r+(odd?1:0)], [q+1, r+(odd?0:-1)],
+                        [q,   r+1],         [q,   r-1],
+                        [q-1, r+(odd?1:0)], [q-1, r+(odd?0:-1)],
+                      ];
+                    };
+
+                    const spiral = (count, cq, cr, used) => {
+                      const cells = [];
+                      if (!used.has(cq+','+cr)) { cells.push({q:cq,r:cr}); used.add(cq+','+cr); }
+                      let frontier = [{q:cq,r:cr}];
+                      while (cells.length < count) {
+                        const next = [];
+                        for (const {q,r} of frontier) {
+                          for (const [nq,nr] of neighbours(q,r)) {
+                            const k = nq+','+nr;
+                            if (!used.has(k)) { used.add(k); next.push({q:nq,r:nr}); cells.push({q:nq,r:nr}); if(cells.length>=count) break; }
+                          }
+                          if (cells.length >= count) break;
+                        }
+                        frontier = next;
+                        if (!frontier.length) break;
+                      }
+                      return cells;
+                    };
+
+                    const GROUP_COLORS = ['#3b82f6','#ef4444','#f59e0b','#10b981','#8b5cf6','#ec4899','#06b6d4','#f97316'];
+                    const hubs = nodes.filter(n => n.type === 'hub');
+                    const hubColor = {};
+                    hubs.forEach((h,i) => { hubColor[h.id] = GROUP_COLORS[i % GROUP_COLORS.length]; });
+
+                    const personHub = {};
+                    visiblePeople.forEach(n => {
+                      const h = hubs.find(h => links.some(l =>
+                        (l.source===h.id&&l.target===n.id)||(l.source===n.id&&l.target===h.id)));
+                      if (h) personHub[n.id] = h.id;
+                    });
+
+                    const clusters = [];
+                    hubs.forEach(h => {
+                      const members = visiblePeople.filter(n => personHub[n.id] === h.id);
+                      if (members.length > 0) clusters.push({hubId:h.id, color:hubColor[h.id], members});
+                    });
+                    const ungrouped = visiblePeople.filter(n => !personHub[n.id]);
+                    if (ungrouped.length > 0) clusters.push({hubId:null, color:null, members:ungrouped});
+
+                    if (visiblePeople.length === 0) return (
+                      <div style={{textAlign:'center',color:sub,padding:40}}>No people to show</div>
+                    );
+
+                    // Use actual hub positions from the map to place cluster origins
+                    // Scale map coords → hex coords
+                    const allX = visiblePeople.map(n=>n.x||0);
+                    const allY = visiblePeople.map(n=>n.y||0);
+                    const mapMinX=Math.min(...allX), mapMaxX=Math.max(...allX);
+                    const mapMinY=Math.min(...allY), mapMaxY=Math.max(...allY);
+                    const mapW=mapMaxX-mapMinX||1, mapH=mapMaxY-mapMinY||1;
+                    // Scale so the whole map fits in ~8×6 hex area
+                    const SCALE_Q = 7/mapW, SCALE_R = 5/mapH;
+                    const mapToHex = (x,y) => ({
+                      q: Math.round(((x-mapMinX)*SCALE_Q)),
+                      r: Math.round(((y-mapMinY)*SCALE_R)),
+                    });
+
+                    const used = new Set();
+                    const assignments = [];
+                    const GAP = 1; // exactly 1 hex gap between clusters
+
+                    // Place each cluster centred at its hub's map position
+                    clusters.forEach(({hubId, color, members}) => {
+                      const hub = nodes.find(n=>n.id===hubId);
+                      let oq, or;
+                      if (hub) {
+                        const hx = mapToHex(hub.x||0, hub.y||0);
+                        oq = hx.q; or = hx.r;
+                      } else {
+                        const cx = members.reduce((s,n)=>s+(n.x||0),0)/members.length;
+                        const cy = members.reduce((s,n)=>s+(n.y||0),0)/members.length;
+                        const hx = mapToHex(cx,cy);
+                        oq = hx.q; or = hx.r;
+                      }
+                      // Place cluster using spiral — it internally avoids 'used' cells
+                      // Pass a copy of used so spiral doesn't permanently modify it for origin-finding
+                      const cells = spiral(members.length, oq, or, used);
+                      // Mark used
+                      cells.forEach(c => used.add(c.q+','+c.r));
+                      members.forEach((n,i)=>{
+                        if(cells[i]) assignments.push({node:n, q:cells[i].q, r:cells[i].r, color});
+                      });
+                    });
+
+                    const pxs = assignments.map(a => hexToPx(a.q, a.r));
+                    const minX = Math.min(...pxs.map(p=>p.x)) - R;
+                    const maxX = Math.max(...pxs.map(p=>p.x)) + R;
+                    const minY = Math.min(...pxs.map(p=>p.y)) - R;
+                    const maxY = Math.max(...pxs.map(p=>p.y)) + R;
+                    const PAD = 6;
+                    const W = maxX - minX + PAD*2;
+                    const H = maxY - minY + PAD*2;
+
+                    return (
+                      <div style={{overflowX:'auto',width:'100%'}}>
+                        <svg width={W} height={H} style={{display:'block'}}>
+                          <defs>
+                            {assignments.map(({node:n}) => (
+                              <clipPath key={'c'+n.id} id={'c'+n.id}>
+                                <polygon points={hexPts}/>
+                              </clipPath>
+                            ))}
+                          </defs>
+                          {/* Background hex grid */}
+                          {(()=>{
+                            const qs=assignments.map(a=>a.q), rs=assignments.map(a=>a.r);
+                            const cells=[];
+                            for(let q=Math.min(...qs)-2;q<=Math.max(...qs)+2;q++){
+                              for(let r=Math.min(...rs)-2;r<=Math.max(...rs)+2;r++){
+                                const c=hexToPx(q,r);
+                                const cx=c.x-minX+PAD, cy=c.y-minY+PAD;
+                                cells.push(
+                                  <polygon key={`bg${q}_${r}`}
+                                    points={Array.from({length:6},(_,i)=>{
+                                      const a=Math.PI/3*i;
+                                      return `${cx+(R-0.5)*Math.cos(a)},${cy+(R-0.5)*Math.sin(a)}`;
+                                    }).join(' ')}
+                                    fill="none"
+                                    stroke={dm?'rgba(255,255,255,0.08)':'rgba(100,116,139,0.15)'}
+                                    strokeWidth={1}
+                                  />
+                                );
+                              }
+                            }
+                            return cells;
+                          })()}
+                          {assignments.map(({node:n, q, r, color}) => {
+                            const px = hexToPx(q, r);
+                            const cx = px.x - minX + PAD;
+                            const cy = px.y - minY + PAD;
+                            const lvl = getLevel(n.interactionScore||0, n);
+                            const borderCol = color || lvl.color;
+                            return (
+                              <g key={n.id} transform={'translate('+cx+','+cy+')'}
+                                onClick={()=>{setSelectedNodeId(n.id);setViewMode('canvas');}}
+                                style={{cursor:'pointer'}}>
+                                {color && <polygon points={hexPts} fill={color} opacity={0.15}/>}
+                                <image href={n.img} x={-R} y={-R} width={R*2} height={R*2}
+                                  preserveAspectRatio="xMidYMid slice" clipPath={'url(#c'+n.id+')'}/>
+                                {/* Dark scrim at bottom of hex for name readability */}
+                                <clipPath id={'cs'+n.id}>
+                                  <polygon points={hexPts}/>
+                                </clipPath>
+                                <rect x={-R} y={R*0.3} width={R*2} height={R*0.7}
+                                  fill="rgba(0,0,0,0.55)" clipPath={'url(#cs'+n.id+')'}/>
+                                <polygon points={hexPts} fill="none" stroke={borderCol} strokeWidth={2.5}/>
+                                {/* Name inside hex */}
+                                <text y={R*0.7} textAnchor="middle"
+                                  fontSize={R > 20 ? 8.5 : 7} fontWeight="700" fill="white"
+                                  style={{userSelect:'none',pointerEvents:'none',
+                                    filter:'drop-shadow(0 1px 1px rgba(0,0,0,0.8))'}}>
+                                  {n.label.length>10?n.label.slice(0,9)+'…':n.label}
+                                </text>
+                              </g>
+                            );
+                          })}
+                        </svg>
+                        {hubs.length > 0 && (
+                          <div style={{display:'flex',flexWrap:'wrap',gap:8,padding:'6px 8px',justifyContent:'center'}}>
+                            {hubs.map((h,i) => (
+                              <span key={h.id} style={{display:'flex',alignItems:'center',gap:4,fontSize:10,fontWeight:600,color:text}}>
+                                <span style={{width:10,height:10,borderRadius:2,background:GROUP_COLORS[i%GROUP_COLORS.length],flexShrink:0,display:'inline-block'}}/>
+                                {h.label}
+                              </span>
+                            ))}
                           </div>
-                        );
-                      })}
-                    </div>
-                  )}
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   {/* RANKED LIST — by Score or by Momentum */}
                   {(socialView === 'byScore' || socialView === 'byMomentum') && (() => {
                     const MAX_SCORE = 1000;
 
-                    // Score 7 days ago estimated from scoreHistory
+                    // Score 7 days ago — use history if available, else prevScore, else 90% of current
                     const scoreWeekAgo = (n) => {
                       const hist = n.scoreHistory || [];
-                      const weekMs = 7 * 24 * 3600000;
-                      const old = hist.find(h => (Date.now() - h.ts) >= weekMs);
-                      return old ? old.score : (n.interactionScore || 0);
+                      if (hist.length >= 2) {
+                        const weekMs = 7 * 24 * 3600000;
+                        const old = hist.find(h => (Date.now() - h.ts) >= weekMs);
+                        if (old) return old.score;
+                        // Less than a week of history — use oldest entry
+                        return hist[0].score;
+                      }
+                      // Fall back to prevScore if available
+                      if (n.prevScore !== undefined && n.prevScore !== n.interactionScore) return n.prevScore;
+                      return n.interactionScore || 0;
                     };
 
                     const momentum = (n) => (n.interactionScore || 0) - scoreWeekAgo(n);
@@ -7036,8 +7472,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                               <div style={{flex:1,minWidth:0}}>
                                 <div style={{fontSize:11,fontWeight:700,color:text,marginBottom:3,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
                                   {n.label}
-                                  <span style={{fontWeight:400,color:sub,marginLeft:6,fontSize:10}}>{score} pts</span>
-                                  {delta !== 0 && <span style={{marginLeft:4,fontSize:10,color:improved?'#22c55e':'#ef4444',fontWeight:700}}>{improved?'+':''}{delta}</span>}
+                                  {delta !== 0 && <span style={{marginLeft:6,fontSize:10,color:improved?'#22c55e':'#ef4444',fontWeight:700}}>{improved?'+':''}{delta}</span>}
                                 </div>
                                 {/* Bar track */}
                                 <div style={{position:'relative',height:14,borderRadius:4,background:dm?'#1e293b':'#f1f5f9',overflow:'hidden'}}>
@@ -7056,7 +7491,35 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                       opacity:0.45,
                                     }} />
                                   ))}
-                                  {/* Current score bar — two modes */}
+                                  {/* Ghost bar */}
+                                  {prev !== score && prev > 0 && (
+                                    improved ? (
+                                      // Improvement: white semi-transparent overlay from 0 to prev position
+                                      // sits ON TOP of current bar to show "where they were"
+                                      null // rendered after current bar below
+                                    ) : (
+                                      // Decline: red ghost at old (higher) position, behind current bar
+                                      <div style={{
+                                        position:'absolute', left:0, top:0, bottom:0,
+                                        width:`${prevPct*100}%`,
+                                        background:'#fca5a5',
+                                        borderRadius:4,
+                                        opacity:0.5,
+                                      }} />
+                                    )
+                                  )}
+                                  {/* Ghost edge line for decline */}
+                                  {prev !== score && prev > 0 && !improved && (
+                                    <div style={{
+                                      position:'absolute', top:0, bottom:0,
+                                      left:`${prevPct*100}%`,
+                                      width:2,
+                                      background:'#f87171',
+                                      opacity:0.9,
+                                      transform:'translateX(-1px)',
+                                    }} />
+                                  )}
+                                  {/* Current score bar */}
                                   {barStyle === 'segments' ? (
                                     // Hard tier colour segments
                                     [
@@ -7097,30 +7560,15 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                       );
                                     })()
                                   )}
-                                  {/* Delta bar — green if improved, red if declined */}
-                                  <div style={{
-                                    position:'absolute',top:2,bottom:2,
-                                    left:`${minPct*100}%`,
-                                    width:`${(maxPct-minPct)*100}%`,
-                                    background: improved ? '#22c55e' : '#ef4444',
-                                    borderRadius:2,
-                                    opacity:0.85,
-                                    minWidth: delta!==0 ? 3 : 0,
-                                  }} />
-                                  {/* Week-ago marker line */}
-                                  {prev !== score && (
-                                    <div style={{
-                                      position:'absolute',top:0,bottom:0,
-                                      left:`${prevPct*100}%`,
-                                      width:2,
-                                      background: improved ? '#15803d' : '#b91c1c',
-                                      opacity:0.9,
-                                    }} />
+                                  {/* Improvement ghost: white overlay 0→prev on top of current bar */}
+                                  {prev !== score && prev > 0 && improved && (
+                                    <>
+                                      <div style={{position:'absolute',left:0,top:0,bottom:0,width:`${prevPct*100}%`,background:'rgba(255,255,255,0.28)',borderRadius:'4px 0 0 4px',pointerEvents:'none'}}/>
+                                      <div style={{position:'absolute',top:0,bottom:0,left:`${prevPct*100}%`,width:2,background:'rgba(255,255,255,0.75)',transform:'translateX(-1px)',pointerEvents:'none'}}/>
+                                    </>
                                   )}
                                 </div>
                               </div>
-                              {/* Tier emoji */}
-                              <span style={{fontSize:16,flexShrink:0}}>{lvl.emoji}</span>
                             </div>
                           );
                         })}
@@ -7206,17 +7654,6 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               })()}
             </div>
 
-            {/* Footer */}
-            <div style={{padding:'12px 16px',borderTop:`1px solid ${border}`,background:card,display:'flex',gap:8,flexShrink:0}}>
-              <button onClick={()=>setDiaryOpen(true)}
-                style={{flex:1,padding:'9px',borderRadius:8,background:'#16a34a',color:'white',border:'none',cursor:'pointer',fontWeight:700,fontSize:13}}>
-                📓 Daily Log
-              </button>
-              <button onClick={()=>setViewMode('canvas')}
-                style={{padding:'9px 16px',borderRadius:8,background:dm?'#334155':'#e2e8f0',color:text,border:'none',cursor:'pointer',fontWeight:700,fontSize:13}}>
-                ← Map
-              </button>
-            </div>
           </div>
         );
       })()}
@@ -7385,7 +7822,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
                   <thead>
                     <tr style={{ background:headBg, position:'sticky', top:0, zIndex:2 }}>
-                      <th style={{ textAlign:'left', padding:'10px 16px', color:subtext, fontWeight:600, borderBottom:`1px solid ${border}`, minWidth:120 }}>Person</th>
+                      <th style={{ textAlign:'left', padding:'10px 16px', color:subtext, fontWeight:600, borderBottom:`1px solid ${border}`, minWidth:120, position:'sticky', left:0, zIndex:3, background:headBg }}>Person</th>
                       {hubs.map(h => (
                         <th key={h.id} style={{ padding:'10px 12px', color: h.id === hub.id ? '#16a34a' : subtext, fontWeight:600, borderBottom:`1px solid ${border}`, minWidth:90, textAlign:'center', whiteSpace:'nowrap' }}>
                           {h.id === hub.id ? '★ ' : ''}{h.label}
@@ -7397,7 +7834,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     {people.map((person, pi) => (
                       <tr key={person.id} style={{ background: pi % 2 === 0 ? rowEven : bg }}>
                         {/* Person column */}
-                        <td style={{ padding:'8px 16px', borderBottom:`1px solid ${border}` }}>
+                        <td style={{ padding:'8px 16px', borderBottom:`1px solid ${border}`, position:'sticky', left:0, zIndex:1, background: pi % 2 === 0 ? rowEven : bg }}>
                           <div style={{ display:'flex', alignItems:'center', gap:8 }}>
                             <img src={person.img} alt="" style={{ width:28, height:28, borderRadius:'50%', objectFit:'cover', flexShrink:0 }} />
                             <span style={{ color:text, fontWeight:500 }}>{person.label}</span>
@@ -7436,16 +7873,30 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 </table>
               </div>
 
-              {/* Legend */}
-              <div style={{ padding:'10px 24px', borderTop:`1px solid ${border}`, display:'flex', gap:20, flexWrap:'wrap' }}>
-                {TICK_RENDER.map((tr, i) => (
-                  <span key={i} style={{ display:'flex', alignItems:'center', gap:6, fontSize:11, color:subtext }}>
-                    <span style={{ color: tr.color === 'transparent' ? subtext : tr.color, fontWeight:700, fontSize:14, border:`1px solid ${tr.border}`, borderRadius:4, padding:'1px 5px', background: tr.bg }}>
-                      {tr.label || ' '}
-                    </span>
-                    {tr.title}
-                  </span>
-                ))}
+              {/* Legend — toggled by key button */}
+              <div style={{ padding:'8px 16px', borderTop:`1px solid ${border}`, display:'flex', alignItems:'center', gap:10 }}>
+                <button
+                  onClick={()=>setShowMapKey(p=>!p)}
+                  style={{ display:'flex', alignItems:'center', gap:6, padding:'5px 12px', borderRadius:8,
+                    background: showMapKey ? '#3b82f6' : (dm?'#1e293b':'#f1f5f9'),
+                    color: showMapKey ? 'white' : subtext,
+                    border: `1px solid ${showMapKey ? '#3b82f6' : border}`,
+                    cursor:'pointer', fontSize:12, fontWeight:600, flexShrink:0 }}>
+                  🔑 Key {showMapKey ? '▲' : '▼'}
+                </button>
+                {showMapKey && (
+                  <div style={{ display:'flex', gap:16, flexWrap:'wrap', flex:1 }}>
+                    {TICK_RENDER.map((tr, i) => (
+                      <span key={i} style={{ display:'flex', alignItems:'center', gap:5, fontSize:11, color:subtext }}>
+                        <span style={{ color: tr.color === 'transparent' ? subtext : tr.color, fontWeight:700, fontSize:13,
+                          border:`1px solid ${tr.border}`, borderRadius:4, padding:'1px 5px', background: tr.bg }}>
+                          {tr.label || ' '}
+                        </span>
+                        {tr.title}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -7508,6 +7959,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       </div>
 
     </div>
+    </>
   );
 }
 
