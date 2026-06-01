@@ -345,7 +345,16 @@ function AppInner() {
   const [tagNameInput, setTagNameInput] = useState('');
   const [faceDetecting, setFaceDetecting] = useState(false);
   const faceApiLoadedRef = useRef(false);
+  const origFlowerRef = useRef(null);
   const [partnerFlowerEditor, setPartnerFlowerEditor] = useState(null);
+  // Reset flower snapshot when editor opens/closes
+  React.useEffect(() => {
+    if (!partnerFlowerEditor) { origFlowerRef.current = null; return; }
+    const n = nodes.find(n=>n.id===partnerFlowerEditor);
+    if (n && origFlowerRef.current === null) {
+      origFlowerRef.current = n.partnerFlower ? JSON.parse(JSON.stringify(n.partnerFlower)) : null;
+    }
+  }, [partnerFlowerEditor]);
   const [pfAppearanceOpen, setPfAppearanceOpen] = useState(true);
   const [pfSelectedPart, setPfSelectedPart] = useState('main');
   const [pfColorPickerFor, setPfColorPickerFor] = useState(null);
@@ -2956,7 +2965,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
               {selectedNode.type !== 'hub' && selectedNode.id !== 'me' && (
                 <>
-                  {/* Photo block: square main photo LEFT + 2×2 grid RIGHT */}
+                  {/* Photo block: circular main photo LEFT + 2×2 grid RIGHT */}
                   {(()=>{
                     const lvl = getLevel(selectedNode.interactionScore||0, selectedNode);
                     const bd = selectedNode.birthday||'';
@@ -2970,43 +2979,49 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     const photos = selectedNode.photos||[];
                     const div = '2px solid '+(theme.darkMode?'#0f172a':'white');
                     return (
-                      <div style={{display:'flex',gap:0,alignItems:'stretch',marginBottom:8,borderRadius:14,overflow:'hidden',border:'5px solid '+lvl.color}}>
+                      <div style={{display:'flex',gap:12,alignItems:'center',marginBottom:12,padding:'4px 0'}}>
 
-                        {/* Main photo — square, left */}
-                        <div style={{flexShrink:0,position:'relative',width:130,cursor:'pointer'}}
+                        {/* Main photo — circle with tier colour border */}
+                        <div style={{flexShrink:0,position:'relative',cursor:'pointer',
+                          width:106,height:106,
+                          borderRadius:'50%',
+                          border:`4px solid ${lvl.color}`,
+                          boxShadow:`0 0 0 2px ${theme.darkMode?'#0f172a':'white'}, 0 4px 16px ${lvl.color}55`,
+                        }}
                           onClick={()=>{
                             let origSrc=selectedNode.img;
                             openPhotoDB().then(db=>{const tx=db.transaction('photos','readonly');const req=tx.objectStore('photos').get(selectedNodeId+'_orig');req.onsuccess=e=>{if(e.target.result&&e.target.result.dataUrl)origSrc=e.target.result.dataUrl;setPhotoCrop({nodeId:selectedNodeId,src:origSrc,originalSrc:origSrc,crop:{x:0,y:0,scale:1}});};req.onerror=()=>setPhotoCrop({nodeId:selectedNodeId,src:origSrc,originalSrc:origSrc,crop:{x:0,y:0,scale:1}});}).catch(()=>setPhotoCrop({nodeId:selectedNodeId,src:origSrc,originalSrc:origSrc,crop:{x:0,y:0,scale:1}}));
                           }}>
-                          <img src={selectedNode.img} alt="Profile" style={{width:'100%',height:'100%',objectFit:'cover',display:'block'}}/>
+                          <img src={selectedNode.img} alt="Profile"
+                            style={{width:'100%',height:'100%',borderRadius:'50%',objectFit:'cover',display:'block'}}/>
                           <button title="Build avatar"
                             onClick={e=>{e.stopPropagation();const n=nodes.find(nd=>nd.id===selectedNodeId);setAvBg((n&&n._avBg)||'#4f46e5');setAvSkin((n&&n._avSkin)||'#f4c2a1');setAvHair((n&&n._avHair)||'#2d1b00');setAvStyle((n&&n._avStyle)||'medium');setAvFace((n&&n._avFace)||'smile');setAvatarBuilder({nodeId:selectedNodeId});}}
-                            style={{position:'absolute',bottom:4,left:4,width:20,height:20,borderRadius:'50%',background:theme.darkMode?'#334155':'#e2e8f0',border:'2px solid '+(theme.darkMode?'#0f172a':'white'),cursor:'pointer',fontSize:10,display:'flex',alignItems:'center',justifyContent:'center'}}>
+                            style={{position:'absolute',bottom:2,right:2,width:22,height:22,borderRadius:'50%',background:theme.darkMode?'#334155':'#e2e8f0',border:'2px solid '+(theme.darkMode?'#0f172a':'white'),cursor:'pointer',fontSize:11,display:'flex',alignItems:'center',justifyContent:'center',zIndex:2}}>
                             🎨
                           </button>
                         </div>
 
                         {/* Right: 2×2 grid */}
-                        <div style={{flex:1,display:'grid',gridTemplateColumns:'1fr 1fr',gridTemplateRows:'1fr 1fr',borderLeft:div,minWidth:0}}>
+                        <div style={{flex:1,display:'grid',gridTemplateColumns:'1fr 1fr',gridTemplateRows:'1fr 1fr',gap:4,minWidth:0}}>
 
                           {/* Top-left: Add photos — shows first empty slot or photo */}
                           {photos.length>0 ? (
                             <button
                               onClick={()=>{setSlideIdx(0);setPhotoSlideshow(selectedNodeId);}}
-                              style={{padding:0,border:'none',borderRight:div,borderBottom:div,cursor:'pointer',position:'relative',overflow:'hidden',background:theme.darkMode?'#1e293b':'#f1f5f9'}}>
+                              style={{padding:0,border:'none',borderRadius:8,cursor:'pointer',position:'relative',overflow:'hidden',background:theme.darkMode?'#1e293b':'#f1f5f9',aspectRatio:'1'}}>
                               <img src={photos[0].cropped} style={{width:'100%',height:'100%',objectFit:'cover'}}/>
                               {photos.length>1&&<div style={{position:'absolute',bottom:3,right:3,background:'rgba(0,0,0,0.6)',borderRadius:4,padding:'1px 4px',fontSize:9,color:'white',fontWeight:700}}>+{photos.length}</div>}
                             </button>
                           ) : (
-                            <label style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:2,background:theme.darkMode?'#1e293b':'#f8fafc',cursor:'pointer',borderRight:div,borderBottom:div}}>
+                            <label style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:2,background:theme.darkMode?'#1e293b':'#f8fafc',cursor:'pointer',borderRadius:8,aspectRatio:'1',border:'1.5px dashed '+(theme.darkMode?'#334155':'#cbd5e1')}}>
                               <span style={{fontSize:18,color:theme.darkMode?'#64748b':'#94a3b8',lineHeight:1}}>+</span>
-                              <span style={{fontSize:8,color:theme.darkMode?'#64748b':'#94a3b8',fontWeight:600}}>Add photo</span>
+                              <span style={{fontSize:8,color:theme.darkMode?'#64748b':'#94a3b8',fontWeight:600}}>Photo</span>
                               <input type="file" accept="image/*" style={{display:'none'}} onChange={e=>{const file=e.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=ev=>setPhotoCrop({nodeId:selectedNodeId,src:ev.target.result,originalSrc:ev.target.result,crop:{x:0,y:0,scale:1}});reader.readAsDataURL(file);}}/>
                             </label>
                           )}
 
                           {/* Top-right: Birthday */}
-                          <label style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:2,background:theme.darkMode?'#1e293b':'#f8fafc',cursor:'pointer',borderBottom:div,position:'relative'}}>
+                          <label style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:2,background:theme.darkMode?'#1e293b':'#f8fafc',cursor:'pointer',borderRadius:8,position:'relative',border:'1.5px solid '+(theme.darkMode?'#334155':'#e2e8f0')}}>
                             {bd ? (
                               <>
                                 <span style={{fontSize:10,fontWeight:700,color:theme.darkMode?'#e2e8f0':'#334155',textAlign:'center',lineHeight:1.2,maxWidth:'90%',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{bd}</span>
@@ -3023,21 +3038,20 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                               onClick={e=>e.stopPropagation()}/>
                           </label>
 
-                          {/* Bottom: Tier badge — spans both columns */}
+                          {/* Bottom: Tier badge — spans both columns, rounded, shorter */}
                           <div onClick={()=>{setShowLevelPanel(p=>!p);if(!showLevelPanel)setShowLevelSetter(false);}}
-                            style={{gridColumn:'1 / -1',cursor:'pointer',background:lvl.color,display:'flex',flexDirection:'column',justifyContent:'center',gap:2,padding:'6px 8px',position:'relative',overflow:'hidden'}}>
+                            style={{gridColumn:'1 / -1',cursor:'pointer',background:lvl.color,borderRadius:8,display:'flex',flexDirection:'column',justifyContent:'center',gap:2,padding:'5px 8px',position:'relative',overflow:'hidden'}}>
                             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-                              <span style={{fontSize:12,fontWeight:900,color:'white',lineHeight:1.2}}>{lvl.label}</span>
+                              <span style={{fontSize:11,fontWeight:800,color:'white',lineHeight:1.2}}>{lvl.label}</span>
                               <span style={{fontSize:8,color:'rgba(255,255,255,0.7)'}}>{selectedNode.interactionScore||0} pts {showLevelPanel?'▲':'▼'}</span>
                             </div>
-                            {/* Score bar — position within current tier */}
                             {(()=>{
                               const score = selectedNode.interactionScore||0;
                               const tierMin = lvl.tier==='partner'?1500:lvl.tier==='family'?1200:lvl.tier===5?1000:lvl.tier===4?600:lvl.tier===3?300:lvl.tier===2?100:0;
                               const tierMax = lvl.tier==='partner'?2000:lvl.tier==='family'?1500:lvl.tier===5?1500:lvl.tier===4?1000:lvl.tier===3?600:lvl.tier===2?300:100;
                               const pct = Math.min(1, Math.max(0, (score-tierMin)/(tierMax-tierMin)));
                               return (
-                                <div style={{height:4,background:'rgba(0,0,0,0.2)',borderRadius:2,overflow:'hidden'}}>
+                                <div style={{height:3,background:'rgba(0,0,0,0.2)',borderRadius:2,overflow:'hidden'}}>
                                   <div style={{height:'100%',width:(pct*100)+'%',background:'rgba(255,255,255,0.8)',borderRadius:2,transition:'width 0.4s ease'}}/>
                                 </div>
                               );
@@ -3407,24 +3421,26 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     </svg>
                     <div style={{textAlign:'left',flex:1,minWidth:0}}>
                       <div style={{fontSize:12,fontWeight:700,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>
-                        {selectedNode.partnerFlower ? 'Edit Group Flower' : 'Add Group Flower'}
+                        {selectedNode.partnerFlower ? 'Group Flower' : 'Add Group Flower'}
                       </div>
                       <div style={{fontSize:10,color:theme.darkMode?'#64748b':'#94a3b8',marginTop:1}}>
                         {selectedNode.partnerFlower
-                          ? (selectedNode.groupFlowerActive!==false ? 'Showing on all members · tap to toggle' : 'Hidden from members · tap to toggle')
-                          : 'Assign a flower design to all members'}
+                          ? (selectedNode.groupFlowerActive!==false
+                              ? '✅ On — showing on all members'
+                              : '⭕ Off — members show personal flowers')
+                          : 'Design a shared flower for this group'}
                       </div>
                     </div>
                     {/* Toggle on/off */}
                     {selectedNode.partnerFlower && (
                       <button
                         onPointerDown={e=>{e.stopPropagation();}}
-                        onClick={e=>{e.stopPropagation();updateSelectedNode('groupFlowerActive',selectedNode.groupFlowerActive===false?true:false);}}
-                        style={{flexShrink:0,width:38,height:22,borderRadius:11,border:'none',cursor:'pointer',
+                        onClick={e=>{e.stopPropagation();updateSelectedNode('groupFlowerActive',selectedNode.groupFlowerActive===false?true:false);showToast(selectedNode.groupFlowerActive===false?'🌸 Group flower on':'⭕ Group flower off');}}
+                        style={{flexShrink:0,width:42,height:24,borderRadius:12,border:'none',cursor:'pointer',
                           background:selectedNode.groupFlowerActive===false?'#334155':'#10b981',
                           position:'relative',transition:'background 0.2s'}}>
-                        <div style={{position:'absolute',top:3,width:16,height:16,borderRadius:'50%',background:'white',transition:'left 0.2s',
-                          left:selectedNode.groupFlowerActive===false?3:19}}/>
+                        <div style={{position:'absolute',top:3,width:18,height:18,borderRadius:'50%',background:'white',transition:'left 0.2s',
+                          left:selectedNode.groupFlowerActive===false?3:21}}/>
                       </button>
                     )}
                   </button>
@@ -3551,14 +3567,35 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       <BookUser className="w-3 h-3" /><span>{selectedNode.phone ? 'Re-sync with Contacts' : 'Sync with Contacts'}</span>
                     </button>
                   )}
-                  <button onClick={() => {
-                    snapshot();
-                    setNodes(p => p.filter(n => n.id !== selectedNodeId));
-                    setLinks(p => p.filter(l => l.source !== selectedNodeId && l.target !== selectedNodeId));
-                    setSelectedNodeId(null);
-                  }} className="w-full flex items-center justify-center space-x-2 px-4 py-2 text-red-500 bg-red-500/10 hover:bg-red-500/20 rounded-lg transition-colors font-medium">
-                    <Trash2 className="w-4 h-4" /><span>Remove {selectedNode.type === 'hub' ? 'Group' : 'Friend'}</span>
-                  </button>
+                  {/* Add group photo — only for hubs */}
+                  {selectedNode.type === 'hub' && (
+                    <label style={{display:'flex',alignItems:'center',justifyContent:'center',gap:8,width:'100%',padding:'9px',borderRadius:10,background:theme.darkMode?'#1e293b':'#f1f5f9',color:theme.darkMode?'#94a3b8':'#64748b',border:'1.5px dashed '+(theme.darkMode?'#334155':'#cbd5e1'),cursor:'pointer',fontSize:13,fontWeight:700}}>
+                      👥 Tag Group Photo
+                      <input type="file" accept="image/*" style={{display:'none'}} onChange={e=>{
+                        const file=e.target.files[0]; if(!file)return;
+                        const reader=new FileReader();
+                        reader.onload=ev=>{
+                          const nr=320*0.18;
+                          setGroupPhotoSrc(ev.target.result);
+                          setGroupPhotoOriginNode(selectedNodeId);
+                          setFaceRings([{id:Date.now(),x:160,y:160,r:nr,name:'',assignedNodeId:null}]);
+                          setTagStep('place'); setTagCurrent(0); setTagNameInput('');
+                        };
+                        reader.readAsDataURL(file);
+                      }}/>
+                    </label>
+                  )}
+                  {/* Delete — always at the very bottom */}
+                  <div style={{marginTop:16,paddingTop:12,borderTop:'1px solid '+(theme.darkMode?'#334155':'#fee2e2')}}>
+                    <button onClick={() => {
+                      snapshot();
+                      setNodes(p => p.filter(n => n.id !== selectedNodeId));
+                      setLinks(p => p.filter(l => l.source !== selectedNodeId && l.target !== selectedNodeId));
+                      setSelectedNodeId(null);
+                    }} className="w-full flex items-center justify-center space-x-2 px-4 py-2 text-red-500 bg-red-500/10 hover:bg-red-500/20 rounded-lg transition-colors font-medium">
+                      <Trash2 className="w-4 h-4" /><span>Remove {selectedNode.type === 'hub' ? 'Group' : 'Friend'}</span>
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -3752,6 +3789,88 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             {/* Background fill */}
             <rect x="-50000" y="-50000" width="100000" height="100000"
               fill={theme.darkMode ? '#0f172a' : '#f8fafc'} />
+
+            {/* Vine group borders — same strand style as friend links */}
+            {viewMode === 'canvas' && nodes.filter(n=>n.type==='hub').map(hub => {
+              const color = groupColors[hub.id] || '#10b981';
+              const memberIds = new Set(
+                links.filter(l=>l.source===hub.id||l.target===hub.id)
+                  .map(l=>l.source===hub.id?l.target:l.source)
+              );
+              const members = nodes.filter(n=>memberIds.has(n.id)&&n.x!=null&&n.type!=='flower');
+              if (members.length < 2) return null;
+
+              // Convex hull of members + hub
+              const allPts = [...members.map(n=>({x:n.x,y:n.y,id:n.id})), {x:hub.x,y:hub.y,id:hub.id}];
+              const cross = (O,A,B) => (A.x-O.x)*(B.y-O.y)-(A.y-O.y)*(B.x-O.x);
+              const sorted = [...allPts].sort((a,b)=>a.x-b.x||a.y-b.y);
+              const lower=[]; for(const p of sorted){while(lower.length>=2&&cross(lower[lower.length-2],lower[lower.length-1],p)<=0)lower.pop();lower.push(p);}
+              const upper=[]; for(const p of [...sorted].reverse()){while(upper.length>=2&&cross(upper[upper.length-2],upper[upper.length-1],p)<=0)upper.pop();upper.push(p);}
+              const hull=[...lower.slice(0,-1),...upper.slice(0,-1)];
+              if(hull.length<2) return null;
+
+              // Expand hull outward by NODE_RADIUS
+              const NODE_R = 38;
+              const hcx=hull.reduce((s,p)=>s+p.x,0)/hull.length;
+              const hcy=hull.reduce((s,p)=>s+p.y,0)/hull.length;
+              const expanded = hull.map(p=>{
+                const dx=p.x-hcx,dy=p.y-hcy,dist=Math.sqrt(dx*dx+dy*dy)||1;
+                return {x:p.x+dx/dist*NODE_R, y:p.y+dy/dist*NODE_R};
+              });
+
+              // Render vine segments between adjacent hull points — same strand style as links
+              const STEPS = 30;
+              const strands = [
+                {width:3.2, wrapFreq:0,   wrapAmp:0,    color:color, opacity:0.7},
+                {width:1.2, wrapFreq:2.5, wrapAmp:1.0,  color:color, opacity:0.5},
+              ];
+
+              const segments = [];
+              for(let i=0;i<expanded.length;i++){
+                const A=expanded[i], B=expanded[(i+1)%expanded.length];
+                const dx=B.x-A.x, dy=B.y-A.y;
+                const len=Math.sqrt(dx*dx+dy*dy)||1;
+                const px=-dy/len, py=dx/len; // perpendicular
+
+                strands.forEach((strand,si)=>{
+                  const pts=[];
+                  for(let s=0;s<=STEPS;s++){
+                    const t=s/STEPS;
+                    const bx=A.x+dx*t, by=A.y+dy*t;
+                    const wave = strand.wrapAmp>0 ? Math.sin(t*Math.PI*2*strand.wrapFreq + si*1.3)*strand.wrapAmp : 0;
+                    pts.push({x:bx+px*wave, y:by+py*wave});
+                  }
+                  const d='M '+pts.map(p=>p.x.toFixed(1)+','+p.y.toFixed(1)).join(' L ');
+                  segments.push(
+                    <path key={`${hub.id}-seg${i}-s${si}`} d={d}
+                      fill="none" stroke={strand.color} strokeWidth={strand.width}
+                      strokeLinecap="round" strokeLinejoin="round"
+                      opacity={strand.opacity}/>
+                  );
+
+                  // Small leaf at midpoint of each segment
+                  if(si===0){
+                    const mx=A.x+dx*0.5, my=A.y+dy*0.5;
+                    const angle=Math.atan2(dy,dx)*180/Math.PI;
+                    segments.push(
+                      <g key={`${hub.id}-leaf${i}`} transform={`translate(${mx},${my}) rotate(${angle})`} opacity={0.65}>
+                        <path d="M 0,0 C 4,-5 10,-4 12,0 C 10,4 4,5 0,0 Z" fill={color}/>
+                        <line x1="0" y1="0" x2="12" y2="0" stroke={color} strokeWidth={0.7} opacity={0.5}/>
+                      </g>
+                    );
+                  }
+                });
+              }
+
+              return (
+                <g key={hub.id} style={{pointerEvents:'none'}}>
+                  {/* Subtle fill */}
+                  <path d={'M '+expanded.map(p=>`${p.x},${p.y}`).join(' L ')+' Z'}
+                    fill={color} opacity={0.05}/>
+                  {segments}
+                </g>
+              );
+            })}
 
             {/* Hex grid — visible only while dragging, shows held hex + neighbours */}
             {viewMode === 'canvas' && liftedNodeId && hexSnapPos && (() => {
@@ -5597,15 +5716,41 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           );
         };
 
+        const hasChanges = JSON.stringify(pf) !== JSON.stringify(origFlowerRef.current);
+
+        const handleClose = (save) => {
+          if (!save && hasChanges) {
+            if (!window.confirm('Discard unsaved flower changes?')) return;
+            setNodes(prev => prev.map(n => n.id === partnerFlowerEditor ? {...n, partnerFlower: origFlowerRef.current} : n));
+          }
+          origFlowerRef.current = null;
+          setPartnerFlowerEditor(null); setColorPickerFor(null);
+        };
+
         return (
           <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:600,background:'rgba(0,0,0,0.75)',display:'flex',alignItems:'flex-end',justifyContent:'center'}}
-            onClick={e=>{if(e.target===e.currentTarget){setPartnerFlowerEditor(null);setColorPickerFor(null);}}}>
+            onClick={e=>{if(e.target===e.currentTarget) handleClose(false);}}>
             <div onClick={e=>e.stopPropagation()} style={{background:bg,borderRadius:'24px 24px 0 0',width:'100%',maxWidth:520,maxHeight:'92vh',display:'flex',flexDirection:'column',boxShadow:'0 -8px 48px rgba(0,0,0,0.4)'}}>
 
               {/* Header */}
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'16px 20px 8px',flexShrink:0}}>
                 <span style={{fontSize:16,fontWeight:800,color:txt}}>🌸 {pn.label}'s Flower</span>
-                <button onClick={()=>setPartnerFlowerEditor(null)} style={{background:'none',border:'none',fontSize:22,cursor:'pointer',color:sub}}>✕</button>
+                <div style={{display:'flex',gap:8,alignItems:'center'}}>
+                  {hasChanges && (
+                    <button onClick={()=>handleClose(false)}
+                      style={{padding:'6px 14px',borderRadius:8,background:dm?'#334155':'#e2e8f0',color:dm?'#e2e8f0':'#334155',border:'none',cursor:'pointer',fontSize:12,fontWeight:700}}>
+                      Cancel
+                    </button>
+                  )}
+                  <button onClick={()=>handleClose(true)}
+                    style={{padding:'6px 16px',borderRadius:8,
+                      background:hasChanges?pf.petalColor||'#10b981':(dm?'#334155':'#e2e8f0'),
+                      color:hasChanges?'white':(dm?'#94a3b8':'#64748b'),
+                      border:'none',cursor:'pointer',fontSize:13,fontWeight:800,transition:'all 0.15s',
+                      boxShadow:hasChanges?'0 2px 8px rgba(0,0,0,0.25)':'none'}}>
+                    {hasChanges ? '✓ Save' : 'Done'}
+                  </button>
+                </div>
               </div>
 
               {/* Tabs */}
@@ -6289,22 +6434,63 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         });
 
         const finishTagging = async () => {
+          const toastMessages = [];
+          const newNodes = [];
+          const photoUpdates = {}; // nodeId -> {img, photos}
+
           for (const ring of faceRings) {
             if (ring.assignedNodeId === '__skip__' || (!ring.assignedNodeId && !ring.name.trim())) continue;
             const cropped = await cropFace(ring);
             if (ring.assignedNodeId === '__new__' || !ring.assignedNodeId) {
               const newId = 'friend_' + Date.now() + '_' + Math.random().toString(36).slice(2,6);
-              setNodes(prev => [...prev, {id:newId, type:'friend', label:ring.name||'Friend', img:cropped, x:200+Math.random()*300, y:200+Math.random()*300, interactionScore:0, photos:[{cropped,orig:cropped}], activePhotoIdx:0}]);
-              showToast('+ Added ' + (ring.name||'Friend'));
+              newNodes.push({
+                id: newId, type:'friend',
+                label: ring.name.trim() || 'Friend',
+                img: cropped,
+                x: 200 + Math.random()*400,
+                y: 200 + Math.random()*300,
+                interactionScore: 0,
+                photos: [{cropped, orig:cropped}],
+                activePhotoIdx: 0,
+              });
+              // Link to origin group if opened from a hub
+              toastMessages.push('+ Added ' + (ring.name.trim()||'Friend'));
             } else {
-              setNodes(prev => prev.map(n => {
-                if (n.id !== ring.assignedNodeId) return n;
-                const photos = [...(n.photos||[]), {cropped,orig:cropped}];
-                return {...n, img:cropped, photos, activePhotoIdx:photos.length-1};
-              }));
+              photoUpdates[ring.assignedNodeId] = cropped;
+              toastMessages.push('📸 Updated ' + (ring.name||ring.assignedNodeId));
             }
           }
-          setGroupPhotoSrc(null); setFaceRings([]);
+
+          // Batch update nodes in one call
+          if (newNodes.length > 0 || Object.keys(photoUpdates).length > 0) {
+            setNodes(prev => {
+              let updated = prev.map(n => {
+                if (photoUpdates[n.id]) {
+                  const cropped = photoUpdates[n.id];
+                  const photos = [...(n.photos||[]), {cropped, orig:cropped}];
+                  return {...n, img:cropped, photos, activePhotoIdx:photos.length-1};
+                }
+                return n;
+              });
+              // Link new nodes to origin hub if applicable
+              return [...updated, ...newNodes];
+            });
+            if (groupPhotoOriginNode) {
+              setLinks(prev => [
+                ...prev,
+                ...newNodes
+                  .filter(n => !prev.some(l => (l.source===groupPhotoOriginNode&&l.target===n.id)||(l.target===groupPhotoOriginNode&&l.source===n.id)))
+                  .map(n => ({source: groupPhotoOriginNode, target: n.id}))
+              ]);
+            }
+          }
+
+          toastMessages.forEach((msg, i) => setTimeout(()=>showToast(msg), i*400));
+          setGroupPhotoSrc(null);
+          setFaceRings([]);
+          setTagStep('place');
+          setTagCurrent(0);
+          setTagNameInput('');
         };
 
         // Zoom/pan state stored in refs to avoid re-render on every touch
@@ -6313,7 +6499,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         const pinchRef = groupPhotoPinchRef;
 
         const clampView = (v) => {
-          const minS = 1, maxS = 8;
+          const minS = 1, maxS = 20;
           const s = Math.max(minS, Math.min(maxS, v.scale));
           const maxX = CANVAS_W*(s-1), maxY = CANVAS_W*(s-1);
           return {scale:s, x:Math.max(-maxX, Math.min(0,v.x)), y:Math.max(-maxY, Math.min(0,v.y))};
@@ -6331,7 +6517,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           const mx = e.clientX - rect.left, my = e.clientY - rect.top;
           const delta = e.deltaY > 0 ? 0.85 : 1.18;
           const v = viewRef.current;
-          const ns = Math.max(1, Math.min(8, v.scale * delta));
+          const ns = Math.max(1, Math.min(20, v.scale * delta));
           const nx = mx - (mx - v.x) * (ns / v.scale);
           const ny = my - (my - v.y) * (ns / v.scale);
           viewRef.current = clampView({scale:ns, x:nx, y:ny});
@@ -6365,7 +6551,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             const dx = e.touches[0].clientX - e.touches[1].clientX;
             const dy = e.touches[0].clientY - e.touches[1].clientY;
             const dist = Math.sqrt(dx*dx+dy*dy);
-            const ns = Math.max(1, Math.min(8, pinchRef.current.scale * (dist / pinchRef.current.dist)));
+            const ns = Math.max(1, Math.min(20, pinchRef.current.scale * (dist / pinchRef.current.dist)));
             const {mx,my,ox,oy,scale:os} = pinchRef.current;
             viewRef.current = clampView({scale:ns, x:mx-(mx-ox)*(ns/os), y:my-(my-oy)*(ns/os)});
           }
@@ -6430,13 +6616,24 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               faceApiLoadedRef.current = true;
             }
 
-            // Draw image to canvas to get ImageData
+            // Draw image to canvas — face-api works better with canvas
             const img = new Image();
-            img.src = groupPhotoSrc;
-            await new Promise(r => { img.onload = r; });
+            img.crossOrigin = 'anonymous';
+            await new Promise((resolve, reject) => {
+              img.onload = resolve;
+              img.onerror = reject;
+              img.src = groupPhotoSrc;
+            });
+            const canvas = document.createElement('canvas');
+            canvas.width = img.naturalWidth || 640;
+            canvas.height = img.naturalHeight || 480;
+            canvas.getContext('2d').drawImage(img, 0, 0);
 
-            const detections = await window.faceapi
-              .detectAllFaces(img, new window.faceapi.TinyFaceDetectorOptions({inputSize:416, scoreThreshold:0.4}));
+            const options = new window.faceapi.TinyFaceDetectorOptions({
+              inputSize: 416,
+              scoreThreshold: 0.3,
+            });
+            const detections = await window.faceapi.detectAllFaces(canvas, options);
 
             if (detections.length === 0) {
               showToast('No faces detected — try adjusting the photo or place rings manually');
@@ -6444,9 +6641,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               return;
             }
 
-            // Scale detections to CANVAS_W
-            const scaleX = CANVAS_W / img.naturalWidth;
-            const scaleY = CANVAS_W / img.naturalHeight;
+            // Scale detections from canvas coords to CANVAS_W
+            const scaleX = CANVAS_W / canvas.width;
+            const scaleY = CANVAS_W / canvas.height;
 
             const rings = detections.map((det, i) => {
               const box = det.box;
@@ -7260,25 +7457,16 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       if (h) personHub[n.id] = h.id;
                     });
 
-                    const scoreFn = n => n.interactionScore || 0;
-                    const prevFn = n => {
-                      const hist = n.scoreHistory || [];
-                      if (hist.length >= 2) return hist[0].score;
-                      if (n.prevScore !== undefined) return n.prevScore;
-                      return scoreFn(n);
-                    };
-                    const momentumFn = n => scoreFn(n) - prevFn(n);
-                    const sortFn = socialView === 'gridMomentum'
-                      ? (a,b) => momentumFn(b) - momentumFn(a)
-                      : (a,b) => scoreFn(b) - scoreFn(a);
+                    // Grid view: always preserve map position order (sort by map y then x)
+                    const mapOrder = (a,b) => (a.y||0)-(b.y||0) || (a.x||0)-(b.x||0);
 
                     const clusters = [];
                     const seen = new Set();
                     hubs.forEach(h => {
-                      const members = visiblePeople.filter(n=>!seen.has(n.id)&&personHub[n.id]===h.id).sort(sortFn);
+                      const members = visiblePeople.filter(n=>!seen.has(n.id)&&personHub[n.id]===h.id).sort(mapOrder);
                       if (members.length > 0) { members.forEach(n=>seen.add(n.id)); clusters.push({hubId:h.id, color:hubColor[h.id], members}); }
                     });
-                    const ungrouped = visiblePeople.filter(n=>!seen.has(n.id)).sort(sortFn);
+                    const ungrouped = visiblePeople.filter(n=>!seen.has(n.id)).sort(mapOrder);
                     if (ungrouped.length > 0) clusters.push({hubId:null, color:null, members:ungrouped});
 
                     if (visiblePeople.length === 0) return (
@@ -7843,25 +8031,16 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             <div style={{ background:bg, border:`1px solid ${border}`, borderRadius:16, width:'min(96vw, 780px)', maxHeight:'85vh', display:'flex', flexDirection:'column', boxShadow:'0 25px 60px rgba(0,0,0,0.5)', overflow:'hidden' }}>
 
               {/* Header */}
-              <div style={{ padding:'18px 24px', borderBottom:`1px solid ${border}`, background:headBg, display:'flex', alignItems:'center', gap:12 }}>
-                <TreePine size={20} color="#16a34a" />
+              <div style={{ padding:'14px 20px', borderBottom:`1px solid ${border}`, background:headBg, display:'flex', alignItems:'center', gap:12 }}>
+                <TreePine size={18} color="#16a34a" style={{flexShrink:0}}/>
                 <input
                   value={hub.label}
                   onChange={e => setNodes(prev => prev.map(n => n.id === hub.id ? { ...n, label: e.target.value } : n))}
-                  style={{ flex:1, background:'transparent', border:'none', outline:'none', fontSize:18, fontWeight:700, color:text }}
+                  style={{ flex:1, background:'transparent', border:'none', outline:'none', fontSize:17, fontWeight:700, color:text }}
                 />
                 <button
-                  onClick={() => {
-                    setLinks(prev => prev.filter(l => l.source !== hub.id && l.target !== hub.id));
-                    setNodes(prev => prev.filter(n => n.id !== hub.id));
-                    setGroupModal(null);
-                    showToast('🗑️ Group deleted');
-                  }}
-                  style={{ padding:'6px 12px', borderRadius:8, background:'#ef4444', border:'none', color:'white', cursor:'pointer', fontSize:12, fontWeight:600 }}
-                >Delete</button>
-                <button
                   onClick={() => setGroupModal(null)}
-                  style={{ padding:'6px 14px', borderRadius:8, background:dm?'#334155':'#e2e8f0', border:'none', color:text, cursor:'pointer', fontSize:13, fontWeight:600 }}
+                  style={{ padding:'5px 12px', borderRadius:8, background:dm?'#334155':'#e2e8f0', border:'none', color:text, cursor:'pointer', fontSize:13, fontWeight:600, flexShrink:0 }}
                 >Done</button>
               </div>
 
@@ -7952,30 +8131,75 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 </table>
               </div>
 
-              {/* Legend — toggled by key button */}
-              <div style={{ padding:'8px 16px', borderTop:`1px solid ${border}`, display:'flex', alignItems:'center', gap:10 }}>
+              {/* Bottom row: Group Flower + Key + Delete — all in one line */}
+              <div style={{padding:'8px 12px',borderTop:`1px solid ${border}`,display:'flex',alignItems:'center',gap:6}}>
+                {/* Group Flower */}
                 <button
-                  onClick={()=>setShowMapKey(p=>!p)}
-                  style={{ display:'flex', alignItems:'center', gap:6, padding:'5px 12px', borderRadius:8,
-                    background: showMapKey ? '#3b82f6' : (dm?'#1e293b':'#f1f5f9'),
-                    color: showMapKey ? 'white' : subtext,
-                    border: `1px solid ${showMapKey ? '#3b82f6' : border}`,
-                    cursor:'pointer', fontSize:12, fontWeight:600, flexShrink:0 }}>
-                  🔑 Key {showMapKey ? '▲' : '▼'}
+                  onClick={()=>{
+                    if(!hub.partnerFlower){
+                      setGroupModal(null);
+                      setSelectedNodeId(hub.id);
+                      setPfSelectedPart('main');setPfColorPickerFor(null);setPfTab('design');
+                      setPartnerFlowerEditor(hub.id);
+                    } else {
+                      setNodes(prev=>prev.map(n=>n.id===hub.id?{...n,groupFlowerActive:n.groupFlowerActive===false?true:false}:n));
+                      showToast(hub.groupFlowerActive===false?'🌸 Group flower on':'⭕ Group flower off');
+                    }
+                  }}
+                  style={{display:'flex',alignItems:'center',gap:5,padding:'6px 10px',borderRadius:8,
+                    background:hub.partnerFlower&&hub.groupFlowerActive!==false?'#10b98122':dm?'#1e293b':'#f1f5f9',
+                    border:`1.5px solid ${hub.partnerFlower&&hub.groupFlowerActive!==false?'#10b981':border}`,
+                    cursor:'pointer',flexShrink:0}}>
+                  <svg width={18} height={18} viewBox="-22 -22 44 44">
+                    {hub.partnerFlower ? (()=>{
+                      const pf=hub.partnerFlower;
+                      const pr=10*(1+(pf.petalLength||0.55)),pw=pr*0.65;
+                      const mp=Array.from({length:pf.petals||6},(_,pi)=>{
+                        const pa=(pi/(pf.petals||6))*Math.PI*2,tx=Math.cos(pa)*pr,ty=Math.sin(pa)*pr,pp=pa+Math.PI*0.5;
+                        return `M 0,0 C ${Math.cos(pa)*pr*0.35+Math.cos(pp)*pw*0.6},${Math.sin(pa)*pr*0.35+Math.sin(pp)*pw*0.6} ${Math.cos(pa)*pr*0.85+Math.cos(pp)*pw*0.5},${Math.sin(pa)*pr*0.85+Math.sin(pp)*pw*0.5} ${tx},${ty} C ${Math.cos(pa)*pr*0.85-Math.cos(pp)*pw*0.5},${Math.sin(pa)*pr*0.85-Math.sin(pp)*pw*0.5} ${Math.cos(pa)*pr*0.35-Math.cos(pp)*pw*0.6},${Math.sin(pa)*pr*0.35-Math.sin(pp)*pw*0.6} 0,0`;
+                      }).join(' ');
+                      return (<><path d={mp} fill={pf.petalColor||'#10b981'}/><circle r={5} fill={dm?'#1e293b':'white'} stroke={pf.borderColor||pf.petalColor} strokeWidth="1.5"/></>);
+                    })() : <text textAnchor="middle" dominantBaseline="middle" fontSize="16">🌸</text>}
+                  </svg>
+                  <span style={{fontSize:11,fontWeight:700,color:hub.partnerFlower&&hub.groupFlowerActive!==false?'#10b981':subtext}}>
+                    {hub.partnerFlower ? (hub.groupFlowerActive===false?'Flower off':'Flower on') : 'Add Flower'}
+                  </span>
                 </button>
+
+                {/* Key toggle */}
+                <button onClick={()=>setShowMapKey(p=>!p)}
+                  style={{display:'flex',alignItems:'center',gap:4,padding:'6px 10px',borderRadius:8,
+                    background:showMapKey?'#3b82f622':(dm?'#1e293b':'#f1f5f9'),
+                    border:`1.5px solid ${showMapKey?'#3b82f6':border}`,
+                    cursor:'pointer',fontSize:11,fontWeight:700,
+                    color:showMapKey?'#3b82f6':subtext,flexShrink:0}}>
+                  🔑 {showMapKey?'Key on':'Key'}
+                </button>
+
                 {showMapKey && (
-                  <div style={{ display:'flex', gap:16, flexWrap:'wrap', flex:1 }}>
-                    {TICK_RENDER.map((tr, i) => (
-                      <span key={i} style={{ display:'flex', alignItems:'center', gap:5, fontSize:11, color:subtext }}>
-                        <span style={{ color: tr.color === 'transparent' ? subtext : tr.color, fontWeight:700, fontSize:13,
-                          border:`1px solid ${tr.border}`, borderRadius:4, padding:'1px 5px', background: tr.bg }}>
-                          {tr.label || ' '}
-                        </span>
+                  <div style={{display:'flex',gap:8,flexWrap:'wrap',flex:1,fontSize:10,color:subtext}}>
+                    {TICK_RENDER.map((tr,i)=>(
+                      <span key={i} style={{display:'flex',alignItems:'center',gap:3}}>
+                        <span style={{color:tr.color==='transparent'?subtext:tr.color,fontWeight:700,border:`1px solid ${tr.border}`,borderRadius:3,padding:'0 4px',background:tr.bg,fontSize:11}}>{tr.label||' '}</span>
                         {tr.title}
                       </span>
                     ))}
                   </div>
                 )}
+
+                {!showMapKey && <div style={{flex:1}}/>}
+
+                {/* Delete group */}
+                <button onClick={()=>{
+                  if(!window.confirm('Delete this group?'))return;
+                  snapshot();
+                  setNodes(p=>p.filter(n=>n.id!==hub.id));
+                  setLinks(p=>p.filter(l=>l.source!==hub.id&&l.target!==hub.id));
+                  setGroupModal(null);
+                  showToast('🗑 Group deleted');
+                }} style={{padding:'6px 10px',borderRadius:8,background:'rgba(239,68,68,0.1)',color:'#ef4444',border:'1px solid rgba(239,68,68,0.3)',cursor:'pointer',fontSize:11,fontWeight:700,flexShrink:0}}>
+                  🗑 Delete
+                </button>
               </div>
             </div>
           </div>
