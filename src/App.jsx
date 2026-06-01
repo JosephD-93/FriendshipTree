@@ -323,7 +323,7 @@ function AppInner() {
   const [flowerPanel, setFlowerPanel] = useState(null);
   const [dragActivity, setDragActivity] = useState(null);
   const [activeTab, setActiveTab] = useState('social');
-  const [socialView, setSocialView] = useState('grid'); // 'grid' | 'byScore' | 'byMomentum'
+  const [socialView, setSocialView] = useState('gridScore'); // 'gridScore'|'gridMomentum'|'barScore'|'barMomentum'
   const [barStyle, setBarStyle] = useState('segments');
   const [activeTags, setActiveTags] = useState([]); // tags currently filtered on
   const [tagInput, setTagInput] = useState('');     // new tag being typed in panel
@@ -7151,25 +7151,41 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       </div>
                     );
                   })()}
-                  {/* View switcher */}
-                  <div style={{display:'flex',gap:6,marginBottom:8}}>
-                    {[
-                      {id:'grid',      label:'Grid'},
-                      {id:'byScore',   label:'By Score'},
-                      {id:'byMomentum',label:'By Momentum'},
-                    ].map(v => (
-                      <button key={v.id} onClick={()=>setSocialView(v.id)}
-                        style={{
-                          flex:1, padding:'7px 4px', borderRadius:8, border:'none', cursor:'pointer',
-                          fontSize:11, fontWeight: socialView===v.id ? 700 : 500,
-                          background: socialView===v.id ? '#10b981' : (dm?'#1e293b':'#f1f5f9'),
-                          color: socialView===v.id ? 'white' : sub,
-                          transition:'all 0.15s',
-                        }}>{v.label}</button>
-                    ))}
+                  {/* View switcher — 2 levels */}
+                  <div style={{display:'flex',flexDirection:'column',gap:6,marginBottom:8}}>
+                    {/* Level 1: Grid vs Bar */}
+                    <div style={{display:'flex',gap:4,background:dm?'#1e293b':'#f1f5f9',borderRadius:10,padding:3}}>
+                      {[{id:'grid',label:'⬡ Grid'},{id:'bar',label:'▬ Bar'}].map(v=>(
+                        <button key={v.id} onClick={()=>setSocialView(
+                          v.id==='grid'
+                            ? (socialView==='barMomentum'?'gridMomentum':'gridScore')
+                            : (socialView==='gridMomentum'?'barMomentum':'barScore')
+                        )}
+                          style={{flex:1,padding:'6px 4px',borderRadius:8,border:'none',cursor:'pointer',
+                            fontSize:12,fontWeight:700,transition:'all 0.15s',
+                            background:(socialView.startsWith(v.id))?'#10b981':'transparent',
+                            color:(socialView.startsWith(v.id))?'white':sub}}>
+                          {v.label}
+                        </button>
+                      ))}
+                    </div>
+                    {/* Level 2: Score vs Momentum */}
+                    <div style={{display:'flex',gap:4,background:dm?'#1e293b':'#f1f5f9',borderRadius:10,padding:3}}>
+                      {[{id:'Score',label:'⭐ Score'},{id:'Momentum',label:'⚡ Momentum'}].map(v=>(
+                        <button key={v.id} onClick={()=>setSocialView(
+                          (socialView.startsWith('grid')?'grid':'bar')+v.id
+                        )}
+                          style={{flex:1,padding:'6px 4px',borderRadius:8,border:'none',cursor:'pointer',
+                            fontSize:12,fontWeight:700,transition:'all 0.15s',
+                            background:socialView.endsWith(v.id)?'#6366f1':'transparent',
+                            color:socialView.endsWith(v.id)?'white':sub}}>
+                          {v.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                   {/* Bar style toggle — only visible on ranked views */}
-                  {(socialView === 'byScore' || socialView === 'byMomentum') && (
+                  {(socialView === 'barScore' || socialView === 'barMomentum') && (
                     <div style={{display:'flex',gap:6,marginBottom:14}}>
                       {[
                         {id:'segments', label:'🌈 Tier colours'},
@@ -7187,7 +7203,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   )}
 
                   {/* GRID VIEW */}
-                  {socialView === 'grid' && (() => {
+                  {(socialView === 'gridScore' || socialView === 'gridMomentum') && (() => {
                     const R = 28;
                     const HEX_W = R * 2;
                     const HEX_H = Math.sqrt(3) * R;
@@ -7244,12 +7260,25 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       if (h) personHub[n.id] = h.id;
                     });
 
+                    const scoreFn = n => n.interactionScore || 0;
+                    const prevFn = n => {
+                      const hist = n.scoreHistory || [];
+                      if (hist.length >= 2) return hist[0].score;
+                      if (n.prevScore !== undefined) return n.prevScore;
+                      return scoreFn(n);
+                    };
+                    const momentumFn = n => scoreFn(n) - prevFn(n);
+                    const sortFn = socialView === 'gridMomentum'
+                      ? (a,b) => momentumFn(b) - momentumFn(a)
+                      : (a,b) => scoreFn(b) - scoreFn(a);
+
                     const clusters = [];
+                    const seen = new Set();
                     hubs.forEach(h => {
-                      const members = visiblePeople.filter(n => personHub[n.id] === h.id);
-                      if (members.length > 0) clusters.push({hubId:h.id, color:hubColor[h.id], members});
+                      const members = visiblePeople.filter(n=>!seen.has(n.id)&&personHub[n.id]===h.id).sort(sortFn);
+                      if (members.length > 0) { members.forEach(n=>seen.add(n.id)); clusters.push({hubId:h.id, color:hubColor[h.id], members}); }
                     });
-                    const ungrouped = visiblePeople.filter(n => !personHub[n.id]);
+                    const ungrouped = visiblePeople.filter(n=>!seen.has(n.id)).sort(sortFn);
                     if (ungrouped.length > 0) clusters.push({hubId:null, color:null, members:ungrouped});
 
                     if (visiblePeople.length === 0) return (
@@ -7302,33 +7331,48 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     const maxX = Math.max(...pxs.map(p=>p.x)) + R;
                     const minY = Math.min(...pxs.map(p=>p.y)) - R;
                     const maxY = Math.max(...pxs.map(p=>p.y)) + R;
-                    const PAD = 6;
-                    const W = maxX - minX + PAD*2;
-                    const H = maxY - minY + PAD*2;
+                    const PAD = R;
+                    // Scale to fill ~360px wide (phone width) while preserving layout
+                    const TARGET_W = 360;
+                    const rawW = maxX - minX + PAD*2;
+                    const rawH = maxY - minY + PAD*2;
+                    const scale = Math.max(1, TARGET_W / rawW);
+                    const W = rawW * scale;
+                    const H = rawH * scale;
 
                     return (
-                      <div style={{overflowX:'auto',width:'100%'}}>
-                        <svg width={W} height={H} style={{display:'block'}}>
+                      <div style={{width:'100%'}}>
+                        <svg width="100%" viewBox={`0 0 ${W} ${H}`}
+                          preserveAspectRatio="xMidYMid meet"
+                          style={{display:'block', width:'100%', height:'auto', minHeight: Math.max(H, 200)}}>
                           <defs>
-                            {assignments.map(({node:n}) => (
-                              <clipPath key={'c'+n.id} id={'c'+n.id}>
-                                <polygon points={hexPts}/>
-                              </clipPath>
-                            ))}
+                            {(()=>{
+                              const SR = R * scale;
+                              const sPts = Array.from({length:6},(_,i)=>{
+                                const a=(Math.PI/3)*i;
+                                return (SR*Math.cos(a)).toFixed(2)+','+(SR*Math.sin(a)).toFixed(2);
+                              }).join(' ');
+                              return assignments.map(({node:n})=>(
+                                <clipPath key={'c'+n.id} id={'c'+n.id}>
+                                  <polygon points={sPts}/>
+                                </clipPath>
+                              ));
+                            })()}
                           </defs>
                           {/* Background hex grid */}
                           {(()=>{
+                            const SR = R * scale;
                             const qs=assignments.map(a=>a.q), rs=assignments.map(a=>a.r);
                             const cells=[];
                             for(let q=Math.min(...qs)-2;q<=Math.max(...qs)+2;q++){
                               for(let r=Math.min(...rs)-2;r<=Math.max(...rs)+2;r++){
                                 const c=hexToPx(q,r);
-                                const cx=c.x-minX+PAD, cy=c.y-minY+PAD;
+                                const cx=(c.x-minX+PAD)*scale, cy=(c.y-minY+PAD)*scale;
                                 cells.push(
                                   <polygon key={`bg${q}_${r}`}
                                     points={Array.from({length:6},(_,i)=>{
                                       const a=Math.PI/3*i;
-                                      return `${cx+(R-0.5)*Math.cos(a)},${cy+(R-0.5)*Math.sin(a)}`;
+                                      return `${cx+(SR-0.5)*Math.cos(a)},${cy+(SR-0.5)*Math.sin(a)}`;
                                     }).join(' ')}
                                     fill="none"
                                     stroke={dm?'rgba(255,255,255,0.08)':'rgba(100,116,139,0.15)'}
@@ -7341,29 +7385,64 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           })()}
                           {assignments.map(({node:n, q, r, color}) => {
                             const px = hexToPx(q, r);
-                            const cx = px.x - minX + PAD;
-                            const cy = px.y - minY + PAD;
+                            const cx = (px.x - minX + PAD) * scale;
+                            const cy = (px.y - minY + PAD) * scale;
+                            const SR = R * scale;
+
+                            // Score view: size shrinks for lower scores
+                            const maxScore = Math.max(...visiblePeople.map(p=>p.interactionScore||0), 1);
+                            const scorePct = Math.min(1, (n.interactionScore||0) / maxScore);
+                            const sizeScale = socialView === 'gridScore'
+                              ? 0.45 + scorePct * 0.55  // range: 45%–100% of full size
+                              : 1;
+                            const IR = SR * sizeScale; // image radius
+
+                            // Momentum view: desaturate if score declining significantly
+                            let desatFilter = '';
+                            if (socialView === 'gridMomentum') {
+                              const hist = n.scoreHistory || [];
+                              const monthMs = 30 * 24 * 3600000;
+                              const oldScore = hist.length >= 2
+                                ? (hist.find(h=>(Date.now()-h.ts)>=monthMs)||hist[0]).score
+                                : (n.prevScore ?? n.interactionScore ?? 0);
+                              const current = n.interactionScore || 0;
+                              const drop = oldScore > 0 ? (oldScore - current) / oldScore : 0;
+                              // drop > 20% = significant decline
+                              const saturation = drop > 0.2
+                                ? Math.max(0, 1 - (drop - 0.2) * 3) // 0%–20% drop = full colour, 20%–53% = fades to grey
+                                : 1;
+                              if (saturation < 1) desatFilter = `saturate(${(saturation*100).toFixed(0)}%) brightness(${(0.6+saturation*0.4).toFixed(2)})`;
+                            }
+
+                            const scaledPts = Array.from({length:6}, (_, i) => {
+                              const a = (Math.PI / 3) * i;
+                              return (IR * Math.cos(a)).toFixed(2) + ',' + (IR * Math.sin(a)).toFixed(2);
+                            }).join(' ');
+                            const hexOutlinePts = Array.from({length:6}, (_, i) => {
+                              const a = (Math.PI / 3) * i;
+                              return (SR * Math.cos(a)).toFixed(2) + ',' + (SR * Math.sin(a)).toFixed(2);
+                            }).join(' ');
                             const lvl = getLevel(n.interactionScore||0, n);
                             const borderCol = color || lvl.color;
                             return (
                               <g key={n.id} transform={'translate('+cx+','+cy+')'}
                                 onClick={()=>{setSelectedNodeId(n.id);setViewMode('canvas');}}
                                 style={{cursor:'pointer'}}>
-                                {color && <polygon points={hexPts} fill={color} opacity={0.15}/>}
-                                <image href={n.img} x={-R} y={-R} width={R*2} height={R*2}
-                                  preserveAspectRatio="xMidYMid slice" clipPath={'url(#c'+n.id+')'}/>
-                                {/* Dark scrim at bottom of hex for name readability */}
+                                {/* Hex outline always full size */}
+                                <polygon points={hexOutlinePts} fill={color?color:'transparent'} opacity={color?0.08:0}/>
+                                {/* Photo — sized by score, desaturated by momentum drop */}
+                                <image href={n.img} x={-IR} y={-IR} width={IR*2} height={IR*2}
+                                  preserveAspectRatio="xMidYMid slice" clipPath={'url(#c'+n.id+')'}
+                                  style={desatFilter?{filter:desatFilter}:{}}/>
                                 <clipPath id={'cs'+n.id}>
-                                  <polygon points={hexPts}/>
+                                  <polygon points={scaledPts}/>
                                 </clipPath>
-                                <rect x={-R} y={R*0.3} width={R*2} height={R*0.7}
+                                <rect x={-IR} y={IR*0.3} width={IR*2} height={IR*0.7}
                                   fill="rgba(0,0,0,0.55)" clipPath={'url(#cs'+n.id+')'}/>
-                                <polygon points={hexPts} fill="none" stroke={borderCol} strokeWidth={2.5}/>
-                                {/* Name inside hex */}
-                                <text y={R*0.7} textAnchor="middle"
-                                  fontSize={R > 20 ? 8.5 : 7} fontWeight="700" fill="white"
-                                  style={{userSelect:'none',pointerEvents:'none',
-                                    filter:'drop-shadow(0 1px 1px rgba(0,0,0,0.8))'}}>
+                                <polygon points={hexOutlinePts} fill="none" stroke={borderCol} strokeWidth={2.5}/>
+                                <text y={IR*0.75} textAnchor="middle"
+                                  fontSize={Math.max(6.5, IR*0.28)} fontWeight="700" fill="white"
+                                  style={{userSelect:'none',pointerEvents:'none',filter:'drop-shadow(0 1px 1px rgba(0,0,0,0.8))'}}>
                                   {n.label.length>10?n.label.slice(0,9)+'…':n.label}
                                 </text>
                               </g>
@@ -7385,7 +7464,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   })()}
 
                   {/* RANKED LIST — by Score or by Momentum */}
-                  {(socialView === 'byScore' || socialView === 'byMomentum') && (() => {
+                  {(socialView === 'barScore' || socialView === 'barMomentum') && (() => {
                     const MAX_SCORE = 1000;
 
                     // Score 7 days ago — use history if available, else prevScore, else 90% of current
@@ -7406,7 +7485,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     const momentum = (n) => (n.interactionScore || 0) - scoreWeekAgo(n);
 
                     const sorted = [...visiblePeople].sort((a, b) =>
-                      socialView === 'byScore'
+                      socialView === 'barScore'
                         ? (b.interactionScore || 0) - (a.interactionScore || 0)
                         : momentum(b) - momentum(a)
                     );
