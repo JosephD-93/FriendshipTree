@@ -581,6 +581,7 @@ function AppInner() {
   useEffect(() => { if (settingsOpen) settingsOpenTime.current = Date.now(); }, [settingsOpen]);
   const [tierPickMode, setTierPickMode] = useState(false);
   const [photoBorderMode, setPhotoBorderMode] = useState('none');
+  const [showVineBorders, setShowVineBorders] = useState(true);
   const [groupColors, setGroupColors] = useState({});
   const [confirmModal, setConfirmModal] = useState(null);
   const [pinModal, setPinModal] = useState(null);
@@ -2573,7 +2574,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
                   <SH k="appearance" label="🎨 Appearance"/>
                   {settingsSections.appearance&&<div style={{padding:'8px 0'}}>
-                    {[{label:'Weathered Hubs',ctrl:<input type="checkbox" checked={theme.showWeathering} onChange={e=>setTheme(p=>({...p,showWeathering:e.target.checked}))} style={{width:18,height:18,accentColor:'#10b981'}}/>},{label:'🌙 Dark Mode',ctrl:<input type="checkbox" checked={theme.darkMode} onChange={e=>setTheme(p=>({...p,darkMode:e.target.checked}))} style={{width:18,height:18,accentColor:'#10b981'}}/>}].map((row,i)=>(
+                    {[{label:'Weathered Hubs',ctrl:<input type="checkbox" checked={theme.showWeathering} onChange={e=>setTheme(p=>({...p,showWeathering:e.target.checked}))} style={{width:18,height:18,accentColor:'#10b981'}}/>},{label:'🌙 Dark Mode',ctrl:<input type="checkbox" checked={theme.darkMode} onChange={e=>setTheme(p=>({...p,darkMode:e.target.checked}))} style={{width:18,height:18,accentColor:'#10b981'}}/>},{label:'🌿 Group Vine Borders',ctrl:<input type="checkbox" checked={showVineBorders} onChange={e=>setShowVineBorders(e.target.checked)} style={{width:18,height:18,accentColor:'#10b981'}}/>}].map((row,i)=>(
                       <div key={i} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 0',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}><span style={{fontSize:14,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>{row.label}</span>{row.ctrl}</div>
                     ))}
                     <div style={{padding:'12px 0',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}>
@@ -3790,9 +3791,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             <rect x="-50000" y="-50000" width="100000" height="100000"
               fill={theme.darkMode ? '#0f172a' : '#f8fafc'} />
 
-            {/* Vine group borders — same strand style as friend links */}
-            {viewMode === 'canvas' && nodes.filter(n=>n.type==='hub').map(hub => {
-              const color = groupColors[hub.id] || '#10b981';
+            {/* Group vine borders */}
+            {viewMode === 'canvas' && showVineBorders && nodes.filter(n=>n.type==='hub').map((hub, hubIdx) => {
               const memberIds = new Set(
                 links.filter(l=>l.source===hub.id||l.target===hub.id)
                   .map(l=>l.source===hub.id?l.target:l.source)
@@ -3800,78 +3800,145 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               const members = nodes.filter(n=>memberIds.has(n.id)&&n.x!=null&&n.type!=='flower');
               if (members.length < 2) return null;
 
-              // Convex hull of members + hub
-              const allPts = [...members.map(n=>({x:n.x,y:n.y,id:n.id})), {x:hub.x,y:hub.y,id:hub.id}];
-              const cross = (O,A,B) => (A.x-O.x)*(B.y-O.y)-(A.y-O.y)*(B.x-O.x);
-              const sorted = [...allPts].sort((a,b)=>a.x-b.x||a.y-b.y);
-              const lower=[]; for(const p of sorted){while(lower.length>=2&&cross(lower[lower.length-2],lower[lower.length-1],p)<=0)lower.pop();lower.push(p);}
-              const upper=[]; for(const p of [...sorted].reverse()){while(upper.length>=2&&cross(upper[upper.length-2],upper[upper.length-1],p)<=0)upper.pop();upper.push(p);}
-              const hull=[...lower.slice(0,-1),...upper.slice(0,-1)];
-              if(hull.length<2) return null;
+              const avgScore = members.reduce((s,n)=>s+(n.interactionScore||0),0)/members.length;
+              const tier = avgScore<100?1:avgScore<300?2:avgScore<600?3:avgScore<1000?4:5;
+              const allBalls = [...members, hub].map(n=>({x:n.x, y:n.y, r:getNodeRadius(n)*0.85+14}));
 
-              // Expand hull outward by NODE_RADIUS
-              const NODE_R = 38;
-              const hcx=hull.reduce((s,p)=>s+p.x,0)/hull.length;
-              const hcy=hull.reduce((s,p)=>s+p.y,0)/hull.length;
-              const expanded = hull.map(p=>{
-                const dx=p.x-hcx,dy=p.y-hcy,dist=Math.sqrt(dx*dx+dy*dy)||1;
-                return {x:p.x+dx/dist*NODE_R, y:p.y+dy/dist*NODE_R};
-              });
-
-              // Render vine segments between adjacent hull points — same strand style as links
-              const STEPS = 30;
-              const strands = [
-                {width:3.2, wrapFreq:0,   wrapAmp:0,    color:color, opacity:0.7},
-                {width:1.2, wrapFreq:2.5, wrapAmp:1.0,  color:color, opacity:0.5},
-              ];
-
-              const segments = [];
-              for(let i=0;i<expanded.length;i++){
-                const A=expanded[i], B=expanded[(i+1)%expanded.length];
-                const dx=B.x-A.x, dy=B.y-A.y;
-                const len=Math.sqrt(dx*dx+dy*dy)||1;
-                const px=-dy/len, py=dx/len; // perpendicular
-
-                strands.forEach((strand,si)=>{
-                  const pts=[];
-                  for(let s=0;s<=STEPS;s++){
-                    const t=s/STEPS;
-                    const bx=A.x+dx*t, by=A.y+dy*t;
-                    const wave = strand.wrapAmp>0 ? Math.sin(t*Math.PI*2*strand.wrapFreq + si*1.3)*strand.wrapAmp : 0;
-                    pts.push({x:bx+px*wave, y:by+py*wave});
-                  }
-                  const d='M '+pts.map(p=>p.x.toFixed(1)+','+p.y.toFixed(1)).join(' L ');
-                  segments.push(
-                    <path key={`${hub.id}-seg${i}-s${si}`} d={d}
-                      fill="none" stroke={strand.color} strokeWidth={strand.width}
-                      strokeLinecap="round" strokeLinejoin="round"
-                      opacity={strand.opacity}/>
-                  );
-
-                  // Small leaf at midpoint of each segment
-                  if(si===0){
-                    const mx=A.x+dx*0.5, my=A.y+dy*0.5;
-                    const angle=Math.atan2(dy,dx)*180/Math.PI;
-                    segments.push(
-                      <g key={`${hub.id}-leaf${i}`} transform={`translate(${mx},${my}) rotate(${angle})`} opacity={0.65}>
-                        <path d="M 0,0 C 4,-5 10,-4 12,0 C 10,4 4,5 0,0 Z" fill={color}/>
-                        <line x1="0" y1="0" x2="12" y2="0" stroke={color} strokeWidth={0.7} opacity={0.5}/>
-                      </g>
-                    );
+              // Bridge blobs between close pairs
+              const bridges = [];
+              allBalls.forEach((a,ai)=>{
+                allBalls.slice(ai+1).forEach(b=>{
+                  const dx=b.x-a.x, dy=b.y-a.y, dist=Math.sqrt(dx*dx+dy*dy);
+                  const avg=(a.r+b.r)/2;
+                  if(dist < avg*3.0){
+                    const steps = Math.ceil(dist/avg*1.5);
+                    for(let s=1;s<steps;s++){
+                      const t=s/steps;
+                      bridges.push({x:a.x+dx*t, y:a.y+dy*t, r:avg*0.55*(1-Math.abs(t-0.5)*1.2)});
+                    }
                   }
                 });
-              }
+              });
+
+              const allBlobs = [...allBalls, ...bridges];
+              const filterId = 'mb-'+hub.id.replace(/[^a-z0-9]/gi,'');
+
+              // Bounding box
+              const xs=allBlobs.map(b=>b.x), ys=allBlobs.map(b=>b.y), rs=allBlobs.map(b=>b.r);
+              const x1=Math.min(...xs.map((x,i)=>x-rs[i]))-40;
+              const y1=Math.min(...ys.map((y,i)=>y-rs[i]))-40;
+              const x2=Math.max(...xs.map((x,i)=>x+rs[i]))+40;
+              const y2=Math.max(...ys.map((y,i)=>y+rs[i]))+40;
+              const fw=x2-x1, fh=y2-y1;
+
+              // Vine strand colors matching friendship links
+              const coreWidthScale=[0,1,1.4,1.9,2.5,3.2][tier];
+              const STRAND_DEFS=[
+                {width:3.2*coreWidthScale, colorDark:'#14532d', colorLight:'#15803d', role:'core',    blur:22, threshold:24, shift:-11},
+                {width:2.0,               colorDark:'#15803d', colorLight:'#22c55e', role:'wrapped',  blur:18, threshold:20, shift:-9},
+                {width:1.2,               colorDark:'#16a34a', colorLight:'#4ade80', role:'growing',  blur:14, threshold:18, shift:-8},
+              ];
+              const activeCount = tier < 2 ? 1 : tier < 4 ? 2 : 3;
+              const strands = STRAND_DEFS.slice(0, activeCount);
 
               return (
                 <g key={hub.id} style={{pointerEvents:'none'}}>
-                  {/* Subtle fill */}
-                  <path d={'M '+expanded.map(p=>`${p.x},${p.y}`).join(' L ')+' Z'}
-                    fill={color} opacity={0.05}/>
-                  {segments}
+                  <defs>
+                    {strands.map((s,si)=>(
+                      <filter key={filterId+si} id={filterId+'s'+si}
+                        x={x1} y={y1} width={fw} height={fh}
+                        filterUnits="userSpaceOnUse"
+                        colorInterpolationFilters="sRGB">
+                        <feGaussianBlur in="SourceGraphic" stdDeviation={s.blur} result="blur"/>
+                        <feColorMatrix in="blur" type="matrix"
+                          values={`1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 ${s.threshold} ${s.shift}`}/>
+                      </filter>
+                    ))}
+                  </defs>
+
+                  {strands.map((strand, si)=>{
+                    const col = theme.darkMode ? strand.colorDark : strand.colorLight;
+                    const scale = [1, 0.8, 0.6][si];
+                    return (
+                      <g key={si} filter={`url(#${filterId}s${si})`}>
+                        {allBalls.map((ball,bi)=>(
+                          <circle key={bi} cx={ball.x} cy={ball.y} r={ball.r*scale}
+                            fill={col} opacity={0.9}/>
+                        ))}
+                        {bridges.map((br,bi)=>(
+                          <circle key={'b'+bi} cx={br.x} cy={br.y} r={Math.max(4,br.r*scale)}
+                            fill={col} opacity={0.85}/>
+                        ))}
+                      </g>
+                    );
+                  })}
+
+                  {/* Leaves — rendered outside filter, along edges between close nodes */}
+                  {(()=>{
+                    const LEAF_CHARS = {
+                      core:    {sizeBase:27, sizeVar:4.5, colorDark:'#14532d', colorLight:'#15803d', aspectW:0.32, bud:false},
+                      wrapped: {sizeBase:12, sizeVar:2.4, colorDark:'#166534', colorLight:'#22c55e', aspectW:0.32, bud:false},
+                      growing: {sizeBase:3,  sizeVar:0.9, colorDark:'#16a34a', colorLight:'#4ade80', aspectW:0.32, bud:true},
+                    };
+                    const leafTierScale = 0.7 + tier*0.18;
+                    const leafSpacing = Math.max(24, 76 - tier*8);
+                    const allLeaves = [];
+
+                    // For each pair of close nodes, place leaves along the edge
+                    allBalls.forEach((a, ai)=>{
+                      allBalls.slice(ai+1).forEach((b, bi)=>{
+                        const dx=b.x-a.x, dy=b.y-a.y;
+                        const dist=Math.sqrt(dx*dx+dy*dy);
+                        const avg=(a.r+b.r)/2;
+                        if(dist > avg*3.2) return; // too far apart
+
+                        const leafCount = Math.max(2, Math.floor(dist/leafSpacing));
+                        const perpX=-dy/dist, perpY=dx/dist;
+
+                        ['core','wrapped','growing'].slice(0, activeCount).forEach((role, ri)=>{
+                          const lc = LEAF_CHARS[role];
+                        // Place leaves on BOTH sides — offset outward past blob radius
+                        const avgR = (a.r + b.r) / 2;
+                        [-1, 1].forEach(side => {
+                          for(let li=0;li<leafCount;li++){
+                            const t=(li+0.5+(ri*0.33))/leafCount;
+                            // Base position along edge
+                            const bx=a.x+dx*t, by=a.y+dy*t;
+                            // Perpendicular — push outward past the blob edge
+                            const outDist = avgR * 0.9 + ri * 6; // outside blob for outer leaves
+                            const ox = bx + perpX * side * outDist;
+                            const oy = by + perpY * side * outDist;
+                            const tangAngle=Math.atan2(dy,dx)*180/Math.PI;
+                            const sv=0.7+0.6*Math.abs(Math.sin(li*3.7+ri*1.9+ai*0.7));
+                            const baseLw=(lc.sizeBase+lc.sizeVar*sv)*leafTierScale;
+                            const lh=baseLw*lc.aspectW;
+                            const fill=theme.darkMode?lc.colorDark:lc.colorLight;
+                            const stroke=theme.darkMode?'#0f2d1a':'#14532d';
+                            // Leaf curls away from border on each side
+                            const curlAngle=tangAngle+side*42;
+                            allLeaves.push({x:ox,y:oy,angle:curlAngle,lw:baseLw,lh,fill,stroke,bud:lc.bud,opacity:lc.bud?0.7:0.88});
+                          }
+                        });
+                        });
+                      });
+                    });
+
+                    return allLeaves.map((lf,li)=>{
+                      const leafD = lf.bud
+                        ? `M 0,0 C ${lf.lw*0.15},${-lf.lh*0.4} ${lf.lw*0.7},${-lf.lh*0.35} ${lf.lw},0 C ${lf.lw*0.7},${lf.lh*0.35} ${lf.lw*0.15},${lf.lh*0.4} 0,0 Z`
+                        : `M 0,0 C ${lf.lw*0.25},${-lf.lh} ${lf.lw*0.75},${-lf.lh} ${lf.lw},0 C ${lf.lw*0.75},${lf.lh} ${lf.lw*0.25},${lf.lh} 0,0 Z`;
+                      return (
+                        <g key={'leaf'+li} transform={`translate(${lf.x},${lf.y}) rotate(${lf.angle})`}
+                          opacity={lf.opacity} style={{pointerEvents:'none'}}>
+                          <path d={leafD} fill={lf.fill} stroke={lf.stroke} strokeWidth={0.5}/>
+                          {!lf.bud && <path d={`M ${lf.lw*0.05},0 L ${lf.lw*0.82},0`} fill="none" stroke={lf.stroke} strokeWidth={0.35} opacity={0.5}/>}
+                        </g>
+                      );
+                    });
+                  })()}
                 </g>
               );
             })}
-
             {/* Hex grid — visible only while dragging, shows held hex + neighbours */}
             {viewMode === 'canvas' && liftedNodeId && hexSnapPos && (() => {
               const dm = theme.darkMode;
