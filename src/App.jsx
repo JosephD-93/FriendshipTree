@@ -585,6 +585,7 @@ function AppInner() {
   const [showGroupTable, setShowGroupTable] = useState(false);
   const [hubFlowerMenuOpen, setHubFlowerMenuOpen] = useState(false);
   const [showVineBorders, setShowVineBorders] = useState(true);
+  const [showVineColorPicker, setShowVineColorPicker] = useState(false);
   const [showVineTuner, setShowVineTuner] = useState(false);
   // Surrounding flowers settings
   const [surroundFlowerSettings, setSurroundFlowerSettings] = useState({
@@ -1032,13 +1033,8 @@ function AppInner() {
           lastTapRef.current.delete(ptr.nodeId + '_count');
         } else if (tapCount >= 2) {
           if (tappedNode?.type === 'hub') {
-            // Double-tap hub: open sidebar if not open, otherwise open group table
-            if (selectedNodeId === ptr.nodeId) {
-              setGroupModal({hubId: ptr.nodeId});
-              setShowGroupTable(true);
-            } else {
-              setSelectedNodeId(ptr.nodeId);
-            }
+            // Double-tap hub: just open/focus sidebar
+            setSelectedNodeId(ptr.nodeId);
           } else if (tappedNode?.type === 'flower') {
             const flowerNode = nodes.find(n => n.dimKey === tappedNode.dimKey);
             if (!flowerNode?.borderLocked) {
@@ -3001,17 +2997,21 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         }}>
         <div className={`border-b flex justify-between items-center ${theme.darkMode ? 'border-slate-700 bg-slate-800' : 'border-slate-100 bg-slate-50'}`}
           style={{padding:'8px 16px',minHeight:0}}>
-          <input
-            type="text"
-            value={!selectedNode ? '' : selectedNode.id==='me' ? 'Me' : selectedNode.type==='hub' ? selectedNode.label : (selectedNode.label && selectedNode.label!=='New Friend' ? selectedNode.label : '')}
-            placeholder={!selectedNode ? '' : selectedNode.type==='hub' ? 'Group name' : 'Name'}
-            onChange={e=>{
-              if(selectedNode && selectedNode.id!=='me'){
-                updateSelectedNode('label', e.target.value || 'New Friend');
-              }
-            }}
-            style={{fontSize:15,fontWeight:700,color:theme.darkMode?'#e2e8f0':'#1e293b',background:'none',border:'none',outline:'none',flex:1,minWidth:0}}
-          />
+          {/* Hide name input in header for hubs — shown in preview area instead */}
+          {(!selectedNode || selectedNode.type !== 'hub') && (
+            <input
+              type="text"
+              value={!selectedNode ? '' : selectedNode.id==='me' ? 'Me' : (selectedNode.label && selectedNode.label!=='New Friend' ? selectedNode.label : '')}
+              placeholder={!selectedNode ? '' : 'Name'}
+              onChange={e=>{
+                if(selectedNode && selectedNode.id!=='me'){
+                  updateSelectedNode('label', e.target.value || 'New Friend');
+                }
+              }}
+              style={{fontSize:15,fontWeight:700,color:theme.darkMode?'#e2e8f0':'#1e293b',background:'none',border:'none',outline:'none',flex:1,minWidth:0}}
+            />
+          )}
+          {selectedNode?.type === 'hub' && <div style={{flex:1}}/>}
           {selectedNode && <button onClick={() => { setSelectedNodeId(null); setAddFriendForms([]); setShowPhotoOptions(false); }} className={`p-1.5 rounded-full flex-shrink-0 ${theme.darkMode ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-200 hover:bg-slate-300'}`}><X className="w-3.5 h-3.5" /></button>}
         </div>
 
@@ -3540,86 +3540,226 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
                 return (
                   <>
-                  {/* Group name */}
-                  <div style={{textAlign:'center',padding:'8px 0 12px'}}>
-                    <div style={{width:52,height:52,borderRadius:'50%',background:groupColors[hubId]||'#10b981',margin:'0 auto 10px',display:'flex',alignItems:'center',justifyContent:'center'}}>
-                      <TreePine size={26} color="white"/>
-                    </div>
+                  {/* Group header — main photo left, members right, vine border around all */}
+                  <div style={{textAlign:'center',padding:'28px 0 8px',position:'relative'}}>
+                    {(()=>{
+                      const PREVIEW_W = 240, PREVIEW_H = 200;
+                      const blobColor = selectedNode.vineBlobColor || '#15803d';
+                      const blobOp = selectedNode.vineBlobOpacity ?? 0.9;
+                      const filterId = 'prev-' + hubId.replace(/[^a-z0-9]/gi,'');
+                      const groupColor = groupColors[hubId] || '#10b981';
+
+                      const mainR = 56;
+                      const mainX = mainR + 14, mainY = PREVIEW_H/2;
+                      const memberR = 22;
+                      const maxM = Math.min(members.length, 5);
+                      const memberSpacing = maxM>1 ? Math.min(memberR*2+6, (PREVIEW_H-16)/(maxM-1)) : 0;
+                      const memberX = mainX + mainR + memberR + 16;
+                      const memberPositions = Array.from({length:maxM},(_,i)=>{
+                        const totalH = memberSpacing*(maxM-1);
+                        const startY = PREVIEW_H/2 - totalH/2;
+                        return {x:memberX, y:maxM===1?PREVIEW_H/2:startY+i*memberSpacing};
+                      });
+
+                      const allNodes = [
+                        {x:mainX,y:mainY,r:mainR,photo:selectedNode.img,color:groupColor,isHub:true},
+                        ...memberPositions.map((pos,i)=>({x:pos.x,y:pos.y,r:memberR,photo:members[i]?.img,color:getLevel(members[i]?.interactionScore||0,members[i]).color,isHub:false}))
+                      ];
+                      const N=allNodes.length;
+                      const blobArcR=n=>n.r*(vineBorderParams.blobArcRadius||1.05);
+                      const vineArcR=n=>n.r*(vineBorderParams.vineArcRadius||1.05);
+                      const SAG=vineBorderParams.vineSagDepth||0.38;
+                      const hcx=allNodes.reduce((s,n)=>s+n.x,0)/N;
+                      const hcy=allNodes.reduce((s,n)=>s+n.y,0)/N;
+
+                      const crossFn=(O,A,B)=>(A.x-O.x)*(B.y-O.y)-(A.y-O.y)*(B.x-O.x);
+                      const sorted=[...allNodes].sort((a,b)=>a.x-b.x||a.y-b.y);
+                      const lo=[],up=[];
+                      for(const p of sorted){while(lo.length>=2&&crossFn(lo[lo.length-2],lo[lo.length-1],p)<=0)lo.pop();lo.push(p);}
+                      for(const p of [...sorted].reverse()){while(up.length>=2&&crossFn(up[up.length-2],up[up.length-1],p)<=0)up.pop();up.push(p);}
+                      const hull=[...lo.slice(0,-1),...up.slice(0,-1)];
+                      const hn=hull.length;
+
+                      const allPts=[];
+                      for(let i=0;i<hn;i++){
+                        const A=hull[i],B=hull[(i+1)%hn],P=hull[(i+hn-1)%hn];
+                        const ar=vineArcR(A),br2=vineArcR(B);
+                        const angAtoB=Math.atan2(B.y-A.y,B.x-A.x);
+                        const angPtoA=Math.atan2(A.y-P.y,A.x-P.x);
+                        let an1=angPtoA+Math.PI,an2=angAtoB;
+                        while(an2<an1)an2+=Math.PI*2;
+                        if(an2-an1<Math.PI){an2=an1-(Math.PI*2-(an2-an1));}
+                        for(let s=0;s<=16;s++){const t=s/16,ang=an1+(an2-an1)*t;allPts.push({x:A.x+Math.cos(ang)*ar,y:A.y+Math.sin(ang)*ar,t:(i+t*0.4)/hn});}
+                        const lx=A.x+Math.cos(angAtoB)*ar,ly=A.y+Math.sin(angAtoB)*ar;
+                        const rx=B.x+Math.cos(angAtoB+Math.PI)*br2,ry=B.y+Math.sin(angAtoB+Math.PI)*br2;
+                        const mx2=(lx+rx)/2,my2=(ly+ry)/2;
+                        const toCx=hcx-mx2,toCy=hcy-my2,toD=Math.sqrt(toCx*toCx+toCy*toCy)||1;
+                        const el=Math.sqrt((B.x-A.x)**2+(B.y-A.y)**2);
+                        const sx2=mx2+(toCx/toD)*el*SAG,sy2=my2+(toCy/toD)*el*SAG;
+                        for(let s=0;s<=18;s++){const t=s/18,it=1-t;allPts.push({x:it*it*lx+2*it*t*sx2+t*t*rx,y:it*it*ly+2*it*t*sy2+t*t*ry,t:(i+0.4+t*0.6)/hn});}
+                      }
+                      const totalPts=allPts.length;
+                      const perim=allPts.reduce((s,p,i)=>{const n=allPts[(i+1)%totalPts];return s+Math.sqrt((n.x-p.x)**2+(n.y-p.y)**2);},0);
+                      const coreR=1.5+3*0.8;
+                      const STRAND_DEFS=[
+                        {width:3.0,colorDark:'#14532d',colorLight:'#15803d',role:'core',   wrapFreq:0,  wrapAmp:0},
+                        {width:1.6,colorDark:'#15803d',colorLight:'#22c55e',role:'wrapped',wrapFreq:1.4,wrapAmp:0.7},
+                        {width:1.0,colorDark:'#16a34a',colorLight:'#4ade80',role:'growing',wrapFreq:2.5,wrapAmp:1.0},
+                      ];
+                      const LEAF_CHARS={
+                        core:{sizeBase:12,sizeVar:2,colorDark:'#14532d',colorLight:'#15803d',aspectW:0.35,bud:false},
+                        wrapped:{sizeBase:5,sizeVar:1,colorDark:'#166534',colorLight:'#22c55e',aspectW:0.32,bud:false},
+                        growing:{sizeBase:2,sizeVar:0.5,colorDark:'#16a34a',colorLight:'#4ade80',aspectW:0.32,bud:true},
+                      };
+                      const allLeaves=[];
+                      const strandPaths=STRAND_DEFS.map((def,ri)=>{
+                        const phaseBase=(ri/3)*Math.PI*2;
+                        const pts=allPts.map((bp,idx)=>{
+                          const prev=allPts[(idx+totalPts-1)%totalPts],next=allPts[(idx+1)%totalPts];
+                          const tdx=next.x-prev.x,tdy=next.y-prev.y,tlen=Math.sqrt(tdx*tdx+tdy*tdy)||1;
+                          const px=-tdy/tlen,py=tdx/tlen;
+                          const coil=def.role==='core'?0:Math.sin(bp.t*def.wrapFreq*Math.PI*2*hn+phaseBase)*coreR*def.wrapAmp;
+                          return {x:bp.x+px*coil,y:bp.y+py*coil,t:bp.t};
+                        });
+                        const lc=LEAF_CHARS[def.role];
+                        const lCount=Math.max(2,Math.floor(perim/28));
+                        for(let li=0;li<lCount;li++){
+                          const t=(li+0.5+ri*0.3)/lCount;
+                          const ptIdx=Math.floor(t*pts.length);
+                          const p=pts[ptIdx],p2=pts[(ptIdx+1)%pts.length];
+                          if(!p||!p2) continue;
+                          const tang=Math.atan2(p2.y-p.y,p2.x-p.x)*180/Math.PI;
+                          const sv=0.7+0.6*Math.abs(Math.sin(li*3.7+ri*1.9));
+                          const lw=lc.sizeBase+lc.sizeVar*sv,lh=lw*lc.aspectW;
+                          const fill=dm?lc.colorDark:lc.colorLight;
+                          allLeaves.push({x:p.x,y:p.y,angle:tang+42,lw,lh,fill,stroke:dm?'#0f2d1a':'#14532d',bud:lc.bud,op:0.88});
+                          if(li%2===0)allLeaves.push({x:p.x,y:p.y,angle:tang-42,lw:lw*0.75,lh:lh*0.75,fill,stroke:dm?'#0f2d1a':'#14532d',bud:lc.bud,op:0.65});
+                        }
+                        return {...def,d:'M '+pts.map(p=>p.x.toFixed(1)+','+p.y.toFixed(1)).join(' L ')+' Z'};
+                      });
+
+                      const pf=selectedNode.partnerFlower;
+                      const fr=mainR*0.3,fvR=vineArcR({r:mainR});
+                      const fx=mainX+Math.cos(-Math.PI*0.5)*fvR,fy=mainY+Math.sin(-Math.PI*0.5)*fvR;
+                      const fpr=fr*(1+(pf?.petalLength||0.55)),fpw=fpr*0.55;
+                      const fpPath=Array.from({length:pf?.petals||6},(_,pi)=>{
+                        const pa=(pi/(pf?.petals||6))*Math.PI*2,tx=Math.cos(pa)*fpr,ty=Math.sin(pa)*fpr,pp=pa+Math.PI*0.5;
+                        return `M 0,0 C ${Math.cos(pa)*fpr*0.35+Math.cos(pp)*fpw*0.6},${Math.sin(pa)*fpr*0.35+Math.sin(pp)*fpw*0.6} ${Math.cos(pa)*fpr*0.85+Math.cos(pp)*fpw*0.5},${Math.sin(pa)*fpr*0.85+Math.sin(pp)*fpw*0.5} ${tx},${ty} C ${Math.cos(pa)*fpr*0.85-Math.cos(pp)*fpw*0.5},${Math.sin(pa)*fpr*0.85-Math.sin(pp)*fpw*0.5} ${Math.cos(pa)*fpr*0.35-Math.cos(pp)*fpw*0.6},${Math.sin(pa)*fpr*0.35-Math.sin(pp)*fpw*0.6} 0,0`;
+                      }).join(' ');
+                      const isActive=pf&&selectedNode.groupFlowerActive!==false;
+
+                      return (
+                        <div style={{display:'inline-block',position:'relative'}}>
+                          <svg width={PREVIEW_W} height={PREVIEW_H} style={{display:'block',margin:'0 auto'}}>
+                            <defs>
+                              {showVineBorders&&(<filter id={filterId} x="-20%" y="-20%" width="140%" height="140%" filterUnits="userSpaceOnUse" colorInterpolationFilters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation={7} result="blur"/><feColorMatrix in="blur" type="matrix" result="shaped" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 32 -14"/><feFlood result="col" floodColor={blobColor} floodOpacity={blobOp}/><feComposite in="col" in2="shaped" operator="in"/></filter>)}
+                              {allNodes.map((_,i)=><clipPath key={i} id={filterId+'p'+i}><circle cx={allNodes[i].x} cy={allNodes[i].y} r={allNodes[i].r-1}/></clipPath>)}
+                            </defs>
+                            {showVineBorders&&(()=>{
+                              const blobs=allNodes.map(n=>({x:n.x,y:n.y,r:blobArcR(n)}));
+                              const bridges=[];
+                              blobs.forEach((a,ai)=>blobs.slice(ai+1).forEach(b=>{const dx=b.x-a.x,dy=b.y-a.y,dist=Math.sqrt(dx*dx+dy*dy),avg=(a.r+b.r)/2;if(dist<avg*4){const steps=Math.ceil(dist/12);for(let s=1;s<steps;s++){const t=s/steps;bridges.push({x:a.x+dx*t,y:a.y+dy*t,r:avg*0.28*Math.sin(t*Math.PI)+3});}}}));
+                              return <g filter={`url(#${filterId})`}>{blobs.map((b,bi)=><circle key={bi} cx={b.x} cy={b.y} r={b.r} fill="white"/>)}{bridges.map((br,bi)=><circle key={'b'+bi} cx={br.x} cy={br.y} r={Math.max(2,br.r)} fill="white"/>)}</g>;
+                            })()}
+                            {showVineBorders&&strandPaths.map((s,si)=><path key={si} d={s.d} fill="none" stroke={dm?s.colorDark:s.colorLight} strokeWidth={s.width} strokeLinecap="round" strokeLinejoin="round" opacity={s.role==='core'?1:s.role==='growing'?0.75:0.88}/>)}
+                            {showVineBorders&&allLeaves.map((lf,li)=>{
+                              const d=lf.bud?`M 0,0 C ${lf.lw*0.15},${-lf.lh*0.4} ${lf.lw*0.7},${-lf.lh*0.35} ${lf.lw},0 C ${lf.lw*0.7},${lf.lh*0.35} ${lf.lw*0.15},${lf.lh*0.4} 0,0 Z`:`M 0,0 C ${lf.lw*0.25},${-lf.lh} ${lf.lw*0.75},${-lf.lh} ${lf.lw},0 C ${lf.lw*0.75},${lf.lh} ${lf.lw*0.25},${lf.lh} 0,0 Z`;
+                              return <g key={li} transform={`translate(${lf.x},${lf.y}) rotate(${lf.angle})`} opacity={lf.op}><path d={d} fill={lf.fill} stroke={lf.stroke} strokeWidth={0.4}/>{!lf.bud&&<line x1={lf.lw*0.05} y1={0} x2={lf.lw*0.82} y2={0} stroke={lf.stroke} strokeWidth={0.3} opacity={0.5}/>}</g>;
+                            })}
+                            {allNodes.map((n,i)=>(
+                              <g key={i}>
+                                <circle cx={n.x} cy={n.y} r={n.r+3} fill="none" stroke={blobColor} strokeWidth={2.5}/>
+                                <circle cx={n.x} cy={n.y} r={n.r+0.5} fill="none" stroke={n.color} strokeWidth={2.5}/>
+                                <circle cx={n.x} cy={n.y} r={n.r-1} fill={n.isHub?groupColor:(dm?'#1e293b':'#e2e8f0')}/>
+                                {n.photo&&<image href={n.photo} x={n.x-n.r+1} y={n.y-n.r+1} width={(n.r-1)*2} height={(n.r-1)*2} clipPath={`url(#${filterId}p${i})`} preserveAspectRatio="xMidYMid slice"/>}
+                                {n.isHub&&!n.photo&&<text x={n.x} y={n.y+1} textAnchor="middle" dominantBaseline="middle" fontSize={n.r*0.75} style={{userSelect:'none'}}>🌳</text>}
+                              </g>
+                            ))}
+                            <g transform={`translate(${fx},${fy})`} onClick={()=>setHubFlowerMenuOpen(p=>!p)} style={{cursor:'pointer'}}>
+                              {hubFlowerMenuOpen&&<circle r={fr+4} fill="rgba(255,255,255,0.2)" stroke="white" strokeWidth={1.5} opacity={0.7}/>}
+                              {pf?(<><path d={fpPath} fill={isActive?pf.petalColor:'#94a3b8'} opacity={isActive?1:0.6}/><circle r={fr*0.28} fill={isActive?(pf.centerColor||'#fef08a'):'#e2e8f0'} stroke={isActive?pf.petalColor:'#94a3b8'} strokeWidth={1}/></>):(<><circle r={fr} fill="none" stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="4 3" opacity={0.7}/><text textAnchor="middle" dominantBaseline="middle" fontSize={fr*0.9} style={{userSelect:'none'}}>🌸</text></>)}
+                            </g>
+                          </svg>
+                          {hubFlowerMenuOpen&&(
+                            <div style={{position:'absolute',top:'50%',left:'50%',transform:'translate(-50%,-50%)',zIndex:50,borderRadius:12,overflow:'hidden',boxShadow:'0 4px 24px rgba(0,0,0,0.4)',border:`1px solid ${bd}`,background:dm?'#1e293b':'white',minWidth:160}}>
+                              <button onClick={()=>{setHubFlowerMenuOpen(false);setPfSelectedPart('main');setPfColorPickerFor(null);setPfTab('design');setPartnerFlowerEditor(hubId);}} style={{width:'100%',padding:'12px 16px',background:'none',border:'none',cursor:'pointer',textAlign:'left',fontSize:13,fontWeight:700,color:dm?'#e2e8f0':'#1e293b',display:'flex',alignItems:'center',gap:8}}>✏️ {pf?'Edit Flower':'Add Flower'}</button>
+                              {pf&&<button onClick={()=>{setHubFlowerMenuOpen(false);updateSelectedNode('groupFlowerActive',selectedNode.groupFlowerActive===false?true:false);showToast(selectedNode.groupFlowerActive===false?'🌸 Group flower on':'⭕ Group flower off');}} style={{width:'100%',padding:'12px 16px',background:'none',border:'none',borderTop:`1px solid ${bd}`,cursor:'pointer',textAlign:'left',fontSize:13,fontWeight:700,color:selectedNode.groupFlowerActive===false?'#94a3b8':'#10b981',display:'flex',alignItems:'center',gap:8}}>{selectedNode.groupFlowerActive===false?'⭕ Turn On':'✅ Turn Off'}</button>}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                    {/* Group name — top-left, overlaid near the preview */}
                     <input type="text"
                       value={selectedNode.label === 'New Group' ? '' : selectedNode.label || ''}
                       placeholder="Group Name"
                       autoCapitalize="words"
                       onChange={e=>updateSelectedNode('label',e.target.value.replace(/\b\w/g,c=>c.toUpperCase())||'New Group')}
-                      style={{width:'100%',textAlign:'center',fontWeight:800,fontSize:20,background:'transparent',border:'none',outline:'none',color:dm?'#e2e8f0':'#1e293b'}}/>
+                      style={{position:'absolute',top:8,left:8,width:'calc(100% - 16px)',
+                        fontWeight:800,fontSize:16,background:'transparent',border:'none',outline:'none',
+                        color:dm?'#e2e8f0':'#1e293b',textAlign:'left',
+                        textShadow:dm?'0 1px 4px rgba(0,0,0,0.8)':'0 1px 3px rgba(255,255,255,0.8)'}}/>
                   </div>
-
-                  {/* Action row: Flower + Key + Vine toggle */}
+                  {/* Action row: Vine toggle */}
                   <div style={{display:'flex',gap:6,marginBottom:8}}>
-                    {/* Flower button — with popup menu */}
-                    <div style={{flex:1,position:'relative'}}>
-                      <button onClick={()=>setHubFlowerMenuOpen(p=>!p)}
-                            style={{width:'100%',padding:'8px 6px',borderRadius:10,border:`1.5px solid ${selectedNode.partnerFlower&&selectedNode.groupFlowerActive!==false?'#10b981':bd}`,background:selectedNode.partnerFlower&&selectedNode.groupFlowerActive!==false?'#10b98118':bg2,cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',gap:3}}>
-                            <svg width={22} height={22} viewBox="-22 -22 44 44">
-                              {selectedNode.partnerFlower?(()=>{
-                                const pf=selectedNode.partnerFlower,pr=10*(1+(pf.petalLength||0.55)),pw=pr*0.65;
-                                const mp=Array.from({length:pf.petals||6},(_,pi)=>{const pa=(pi/(pf.petals||6))*Math.PI*2,tx=Math.cos(pa)*pr,ty=Math.sin(pa)*pr,pp=pa+Math.PI*0.5;return `M 0,0 C ${Math.cos(pa)*pr*0.35+Math.cos(pp)*pw*0.6},${Math.sin(pa)*pr*0.35+Math.sin(pp)*pw*0.6} ${Math.cos(pa)*pr*0.85+Math.cos(pp)*pw*0.5},${Math.sin(pa)*pr*0.85+Math.sin(pp)*pw*0.5} ${tx},${ty} C ${Math.cos(pa)*pr*0.85-Math.cos(pp)*pw*0.5},${Math.sin(pa)*pr*0.85-Math.sin(pp)*pw*0.5} ${Math.cos(pa)*pr*0.35-Math.cos(pp)*pw*0.6},${Math.sin(pa)*pr*0.35-Math.sin(pp)*pw*0.6} 0,0`;}).join(' ');
-                                return(<><path d={mp} fill={pf.petalColor||'#10b981'}/><circle r={5} fill={dm?'#1e293b':'white'} stroke={pf.borderColor||pf.petalColor} strokeWidth="1.5"/></>);
-                              })():<text textAnchor="middle" dominantBaseline="middle" fontSize="16">🌸</text>}
-                            </svg>
-                            <span style={{fontSize:9,fontWeight:700,color:sub}}>{selectedNode.partnerFlower?'Flower ▾':'Add Flower'}</span>
-                          </button>
-                          {hubFlowerMenuOpen && (
-                            <div style={{position:'absolute',top:'100%',left:0,right:0,zIndex:50,marginTop:4,borderRadius:10,overflow:'hidden',boxShadow:'0 4px 20px rgba(0,0,0,0.3)',border:`1px solid ${bd}`,background:dm?'#1e293b':'white'}}>
-                              <button onClick={()=>{setHubFlowerMenuOpen(false);setPfSelectedPart('main');setPfColorPickerFor(null);setPfTab('design');setPartnerFlowerEditor(hubId);}}
-                                style={{width:'100%',padding:'10px 14px',background:'none',border:'none',cursor:'pointer',textAlign:'left',fontSize:12,fontWeight:700,color:dm?'#e2e8f0':'#1e293b',display:'flex',alignItems:'center',gap:8}}>
-                                ✏️ {selectedNode.partnerFlower?'Edit Flower':'Add Flower'}
-                              </button>
-                              {selectedNode.partnerFlower && (
-                                <button onClick={()=>{setHubFlowerMenuOpen(false);updateSelectedNode('groupFlowerActive',selectedNode.groupFlowerActive===false?true:false);showToast(selectedNode.groupFlowerActive===false?'🌸 Group flower on':'⭕ Group flower off');}}
-                                  style={{width:'100%',padding:'10px 14px',background:'none',border:'none',borderTop:`1px solid ${bd}`,cursor:'pointer',textAlign:'left',fontSize:12,fontWeight:700,color:selectedNode.groupFlowerActive===false?'#94a3b8':'#10b981',display:'flex',alignItems:'center',gap:8}}>
-                                  {selectedNode.groupFlowerActive===false?'⭕ Turn Flower On':'✅ Turn Flower Off'}
-                                </button>
-                              )}
+                    {/* Vine border — toggle + colour dot */}
+                    <div style={{flex:1,borderRadius:10,border:`1.5px solid ${showVineBorders?'#10b981':bd}`,background:showVineBorders?'#10b98118':bg2,padding:'8px 6px',display:'flex',flexDirection:'column',alignItems:'center',gap:5}}>
+                      <span style={{fontSize:20}}>🌿</span>
+                      {/* On/Off toggle */}
+                      <div onClick={()=>setShowVineBorders(p=>!p)} style={{display:'flex',alignItems:'center',gap:4,cursor:'pointer'}}>
+                        <div style={{width:28,height:16,borderRadius:8,background:showVineBorders?'#10b981':'#334155',position:'relative',flexShrink:0,transition:'background 0.2s'}}>
+                          <div style={{position:'absolute',top:2,width:12,height:12,borderRadius:'50%',background:'white',left:showVineBorders?14:2,transition:'left 0.2s'}}/>
+                        </div>
+                        <span style={{fontSize:9,fontWeight:700,color:showVineBorders?'#10b981':sub}}>{showVineBorders?'On':'Off'}</span>
+                      </div>
+                      {/* Colour dot — opens colour wheel */}
+                      {showVineBorders && (
+                        <div style={{position:'relative'}}>
+                          <button onClick={()=>setShowVineColorPicker(p=>!p)}
+                            style={{width:22,height:22,borderRadius:'50%',
+                              background:selectedNode.vineBlobColor||'#15803d',
+                              border:`2.5px solid ${showVineColorPicker?'white':bd}`,
+                              boxShadow:showVineColorPicker?`0 0 0 2px ${selectedNode.vineBlobColor||'#15803d'}`:'none',
+                              cursor:'pointer',flexShrink:0}}/>
+                          {showVineColorPicker && (
+                            <div style={{position:'absolute',bottom:'130%',left:'50%',transform:'translateX(-50%)',zIndex:200,
+                              background:dm?'#1e293b':'white',borderRadius:14,padding:12,
+                              boxShadow:'0 4px 24px rgba(0,0,0,0.35)',border:`1px solid ${bd}`,width:180}}>
+                              <div style={{fontSize:11,fontWeight:700,color:sub,marginBottom:8}}>Blob Colour</div>
+                              {/* Colour wheel using hue slider */}
+                              <input type="color"
+                                value={selectedNode.vineBlobColor||'#15803d'}
+                                onChange={e=>{updateSelectedNode('vineBlobColor',e.target.value);}}
+                                style={{width:'100%',height:40,borderRadius:8,border:'none',cursor:'pointer',marginBottom:8}}/>
+                              {/* Preset swatches */}
+                              <div style={{display:'flex',gap:4,flexWrap:'wrap',marginBottom:8}}>
+                                {['#14532d','#15803d','#22c55e','#4ade80','#84cc16','#ca8a04','#b45309','#ef4444','#3b82f6','#8b5cf6','#ec4899','#f43f5e'].map(c=>(
+                                  <button key={c} onClick={()=>{updateSelectedNode('vineBlobColor',c);}}
+                                    style={{width:18,height:18,borderRadius:'50%',background:c,
+                                      border:`2px solid ${selectedNode.vineBlobColor===c?'white':'transparent'}`,
+                                      boxShadow:selectedNode.vineBlobColor===c?`0 0 0 1.5px ${c}`:'none',
+                                      cursor:'pointer',flexShrink:0}}/>
+                                ))}
+                                {/* Transparent */}
+                                <button onClick={()=>{updateSelectedNode('vineBlobColor',null);setShowVineColorPicker(false);}}
+                                  style={{width:18,height:18,borderRadius:'50%',background:'transparent',border:'1.5px dashed #94a3b8',cursor:'pointer',fontSize:8,color:'#94a3b8',display:'flex',alignItems:'center',justifyContent:'center'}}>✕</button>
+                              </div>
+                              {/* Opacity slider */}
+                              <div style={{display:'flex',alignItems:'center',gap:6}}>
+                                <span style={{fontSize:10,color:sub,flexShrink:0}}>Opacity</span>
+                                <input type="range" min={0} max={1} step={0.05}
+                                  value={selectedNode.vineBlobOpacity??0.9}
+                                  onChange={e=>updateSelectedNode('vineBlobOpacity',parseFloat(e.target.value))}
+                                  style={{flex:1,accentColor:'#10b981'}}/>
+                                <span style={{fontSize:10,color:sub,width:24,textAlign:'right'}}>{Math.round((selectedNode.vineBlobOpacity??0.9)*100)}%</span>
+                              </div>
                             </div>
                           )}
                         </div>
-
-                    {/* Key button */}
-                    <button onClick={()=>setShowMapKey(p=>!p)}
-                      style={{flex:1,padding:'8px 6px',borderRadius:10,border:`1.5px solid ${showMapKey?'#3b82f6':bd}`,background:showMapKey?'#3b82f618':bg2,cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',gap:3}}>
-                      <span style={{fontSize:20}}>🔑</span>
-                      <span style={{fontSize:9,fontWeight:700,color:showMapKey?'#3b82f6':sub}}>{showMapKey?'Key on':'Key'}</span>
-                    </button>
-
-                    {/* Vine border toggle */}
-                    <button onClick={()=>setShowVineBorders(p=>!p)}
-                      style={{flex:1,padding:'8px 6px',borderRadius:10,border:`1.5px solid ${showVineBorders?'#10b981':bd}`,background:showVineBorders?'#10b98118':bg2,cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',gap:3}}>
-                      <span style={{fontSize:20}}>🌿</span>
-                      <span style={{fontSize:9,fontWeight:700,color:showVineBorders?'#10b981':sub}}>{showVineBorders?'Vine on':'Vine off'}</span>
-                    </button>
+                      )}
+                    </div>
                   </div>
 
-                  {/* Blob colour (only when vine borders on) */}
-                  {showVineBorders && (
-                    <div style={{borderRadius:10,border:`1px solid ${bd}`,padding:'9px 12px',marginBottom:8}}>
-                      <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:6}}>
-                        <span style={{fontSize:11,fontWeight:700,color:sub,flex:1}}>🌿 Blob colour</span>
-                        <input type="range" min={0} max={1} step={0.05}
-                          value={selectedNode.vineBlobOpacity??0.9}
-                          onChange={e=>updateSelectedNode('vineBlobOpacity',parseFloat(e.target.value))}
-                          style={{width:80,accentColor:'#10b981'}}/>
-                        <span style={{fontSize:10,color:sub,width:28,textAlign:'right'}}>{Math.round((selectedNode.vineBlobOpacity??0.9)*100)}%</span>
-                      </div>
-                      <div style={{display:'flex',gap:4,flexWrap:'wrap',alignItems:'center'}}>
-                        {['#14532d','#15803d','#22c55e','#4ade80','#84cc16','#ca8a04','#b45309','#92400e','#ef4444','#3b82f6','#8b5cf6','#ec4899'].map(c=>(
-                          <button key={c} onClick={()=>updateSelectedNode('vineBlobColor',c)}
-                            style={{width:20,height:20,borderRadius:'50%',background:c,border:`2.5px solid ${selectedNode.vineBlobColor===c?'white':'transparent'}`,boxShadow:selectedNode.vineBlobColor===c?`0 0 0 2px ${c}`:'none',cursor:'pointer',flexShrink:0}}/>
-                        ))}
-                        <button onClick={()=>updateSelectedNode('vineBlobColor',null)}
-                          style={{width:20,height:20,borderRadius:'50%',background:'transparent',border:'1.5px dashed #94a3b8',cursor:'pointer',fontSize:8,color:'#94a3b8',display:'flex',alignItems:'center',justifyContent:'center'}}>✕</button>
-                      </div>
-                    </div>
-                  )}
 
                   {/* Members panel — collapsible */}
                   {(()=>{
@@ -8398,7 +8538,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       })()}
       {groupModal && showGroupTable && (() => {
         const hub = nodes.find(n => n.id === groupModal.hubId);
-        if (!hub) { setGroupModal(null);setShowGroupTable(false); return null; }
+        if (!hub) return null;
 
         // All non-hub, non-flower people INCLUDING Me
         const people = nodes.filter(n => n.type !== 'hub' && n.type !== 'flower');
@@ -8498,7 +8638,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         return (
           <div
             style={{ position:'fixed', top:0,left:0,right:0,bottom:0, zIndex:200, background:'rgba(0,0,0,0.55)', display:'flex', alignItems:'center', justifyContent:'center' }}
-            onClick={e => { if (e.target === e.currentTarget) setGroupModal(null);setShowGroupTable(false); }}
+            onClick={e => { if (e.target === e.currentTarget) { setGroupModal(null);setShowGroupTable(false); } }}
           >
             <div style={{ background:bg, border:`1px solid ${border}`, borderRadius:16, width:'min(96vw, 780px)', maxHeight:'85vh', display:'flex', flexDirection:'column', boxShadow:'0 25px 60px rgba(0,0,0,0.5)', overflow:'hidden' }}>
 
@@ -8511,7 +8651,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   style={{ flex:1, background:'transparent', border:'none', outline:'none', fontSize:17, fontWeight:700, color:text }}
                 />
                 <button
-                  onClick={() => setGroupModal(null);setShowGroupTable(false)}
+                  onClick={() => { setGroupModal(null);setShowGroupTable(false); }}
                   style={{ padding:'5px 12px', borderRadius:8, background:dm?'#334155':'#e2e8f0', border:'none', color:text, cursor:'pointer', fontSize:13, fontWeight:600, flexShrink:0 }}
                 >Done</button>
               </div>
