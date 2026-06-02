@@ -1016,8 +1016,9 @@ function AppInner() {
       const lastTime = lastTapRef.current.get(ptr.nodeId) || 0;
       const tapCount = (lastTapRef.current.get(ptr.nodeId + '_count') || 0) + 1;
       const now = Date.now();
+      const tappedNode = nodes.find(n => n.id === ptr.nodeId);
+
       if (now - lastTime < 400) {
-        const tappedNode = nodes.find(n => n.id === ptr.nodeId);
         if (tapCount >= 3 && tappedNode?.type === 'hub') {
           // Triple-tap hub: collapse/expand
           setCollapsedGroups(prev =>
@@ -1030,9 +1031,7 @@ function AppInner() {
           if (tappedNode?.type === 'hub') {
             // Double-tap hub: open/close group modal
             setGroupModal(prev => prev?.hubId === ptr.nodeId ? null : { hubId: ptr.nodeId });
-          }
-          else if (tappedNode?.type === 'flower') {
-            // Double-tap any flower: cycle border mode (unless locked)
+          } else if (tappedNode?.type === 'flower') {
             const flowerNode = nodes.find(n => n.dimKey === tappedNode.dimKey);
             if (!flowerNode?.borderLocked) {
               const modes = ['none','tier','group','momentum'];
@@ -1043,9 +1042,10 @@ function AppInner() {
             } else {
               showToast('🔒 Border locked — unlock in group settings');
             }
+          } else {
+            // Double-tap person: open their sidebar
+            setSelectedNodeId(ptr.nodeId);
           }
-          else if (tappedNode?.id === 'me') setSelectedNodeId('me');
-          else setSelectedNodeId(ptr.nodeId);
           lastTapRef.current.delete(ptr.nodeId);
           lastTapRef.current.delete(ptr.nodeId + '_count');
         } else {
@@ -1053,8 +1053,8 @@ function AppInner() {
           lastTapRef.current.set(ptr.nodeId + '_count', tapCount);
         }
       } else {
-        // Single tap — select the node to open sidebar
-        if (tappedNode?.type === 'hub') setSelectedNodeId(ptr.nodeId);
+        // First tap — select node to open sidebar
+        setSelectedNodeId(ptr.nodeId);
         lastTapRef.current.set(ptr.nodeId, now);
         lastTapRef.current.set(ptr.nodeId + '_count', 1);
       }
