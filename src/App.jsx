@@ -645,8 +645,9 @@ function AppInner() {
   const fabRef = useRef(null);
   const holdTimer = useRef(null);
   const groupLiftTimer = useRef(null);
-  const groupDragIds = useRef(null); // Set of nodeIds to move together, or null
+  const groupDragIds = useRef(null);
   const groupDragOrigins = useRef({});
+  const groupHoldStartPos = useRef(null); // tracks pointer position when group hold timer starts
   const [showTutorial, setShowTutorial] = useState(false);
   const [showLevelPanel, setShowLevelPanel] = useState(false);
   const [showLevelSetter, setShowLevelSetter] = useState(false);
@@ -793,9 +794,20 @@ function AppInner() {
         isPanningOverride.current = false;
         setLiftedNodeId(nodeId);
       }, 150);
-      // 2s hold — drag node with all directly connected friends
-      const dragNodeId = nodeId; // capture in closure
+
+      // Capture pointer start position for movement threshold check
+      groupHoldStartPos.current = { x: e.clientX, y: e.clientY };
+      const MOVE_CANCEL_PX = 12;
+
+      // 2s hold while staying still — drag node with all connected friends
+      const dragNodeId = nodeId;
       groupLiftTimer.current = setTimeout(() => {
+        // Cancel if pointer has moved too much (user is panning not holding)
+        const start = groupHoldStartPos.current;
+        if (!start) return;
+        const movedX = Math.abs(e.clientX - start.x);
+        const movedY = Math.abs(e.clientY - start.y);
+        if (movedX > MOVE_CANCEL_PX || movedY > MOVE_CANCEL_PX) return;
         // Use functional setState to get current nodes/links
         setNodes(currentNodes => {
           setLinks(currentLinks => {
@@ -841,7 +853,7 @@ function AppInner() {
           });
           return currentNodes;
         });
-      }, 800);
+      }, 2000);
     } else {
       // Background touch — start panning immediately
       setIsPanning(true);
@@ -861,6 +873,17 @@ function AppInner() {
       const sy = (e.clientY - rect.top - transform.y) / transform.scale;
       setCurrentStroke(prev => [...prev, { x: sx, y: sy }]);
       return;
+    }
+
+    // Update hold start pos tracking so group drag timer can check movement
+    if (groupHoldStartPos.current) {
+      const dx = Math.abs(e.clientX - groupHoldStartPos.current.x);
+      const dy = Math.abs(e.clientY - groupHoldStartPos.current.y);
+      if (dx > 12 || dy > 12) {
+        // Moved too much — cancel group drag timer
+        clearTimeout(groupLiftTimer.current);
+        groupHoldStartPos.current = null;
+      }
     }
 
     const ptr = activePointers.current.get(e.pointerId);
@@ -891,6 +914,7 @@ function AppInner() {
           clearTimeout(liftTimer.current);
           clearTimeout(groupLiftTimer.current);
           groupDragIds.current = null;
+          groupHoldStartPos.current = null;
           isPanningOverride.current = true;
           ptr.decidedPan = true;
           ptr.nodeId = null; // treat as background touch from now on
@@ -4465,6 +4489,55 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
             {viewMode === 'canvas' && (
               <g>
+                {/* ── Surrounding flowers — background layer, pointerEvents none ── */}
+                {surroundFlowerSettings.showSurround && activeRenderNodes.filter(n=>n.type==='friend'&&n.partnerFlower).map(node=>{
+                  const pf = node.partnerFlower;
+                  const score = node.interactionScore||0;
+                  const tier = score<100?1:score<300?2:score<600?3:score<1000?4:5;
+                  const tierBounds=[[0,100],[100,300],[300,600],[600,1000],[1000,1500]];
+                  const [tMin,tMax]=tierBounds[Math.min(4,tier-1)];
+                  const tierPos=Math.min(1,(score-tMin)/(tMax-tMin||1));
+                  const count=Math.max(1,surroundFlowerSettings.useCalc
+                    ?Math.round(1+tier*1.5+tierPos*2.5)
+                    :surroundFlowerSettings.count);
+                  const minS=surroundFlowerSettings.minSize;
+                  const maxS=surroundFlowerSettings.maxSize;
+                  const spread=surroundFlowerSettings.spread;
+                  const nodeR=node.radius||40;
+                  // Degradation
+                  const hist=node.scoreHistory||[];
+                  const now2=Date.now(),HOUR=3600000;
+                  const scoreThen=(hist.find(h=>(now2-h.ts)>=48*HOUR)||hist[0])?.score??score;
+                  const degraded=(score-scoreThen)<-50;
+                  const flowerColor=degraded?'#ca8a04':(pf.petalColor||'#f59e0b');
+                  const flowerOpacity=degraded?0.6:0.85;
+                  return (
+                    <g key={'sf-'+node.id} style={{pointerEvents:'none'}}>
+                      {Array.from({length:count},(_,fi)=>{
+                        const angle=(fi/count)*Math.PI*2+fi*0.7;
+                        const dist=nodeR+10+(fi/count)*spread;
+                        const fx=node.renderX+Math.cos(angle)*dist;
+                        const fy=node.renderY+Math.sin(angle)*dist;
+                        const sv=0.5+0.5*Math.abs(Math.sin(fi*2.3+node.id.length));
+                        const fr=minS+(maxS-minS)*sv;
+                        const PETALS=pf.petals||6;
+                        const fpr=fr*(1+(pf.petalLength??0.55));
+                        const fpw=fpr*0.5;
+                        const fpPath=Array.from({length:PETALS},(_,pi)=>{
+                          const pa=(pi/PETALS)*Math.PI*2+(fi*0.5);
+                          const tx=Math.cos(pa)*fpr,ty=Math.sin(pa)*fpr,pp=pa+Math.PI*0.5;
+                          return `M 0,0 C ${Math.cos(pa)*fpr*0.35+Math.cos(pp)*fpw*0.6},${Math.sin(pa)*fpr*0.35+Math.sin(pp)*fpw*0.6} ${Math.cos(pa)*fpr*0.85+Math.cos(pp)*fpw*0.5},${Math.sin(pa)*fpr*0.85+Math.sin(pp)*fpw*0.5} ${tx},${ty} C ${Math.cos(pa)*fpr*0.85-Math.cos(pp)*fpw*0.5},${Math.sin(pa)*fpr*0.85-Math.sin(pp)*fpw*0.5} ${Math.cos(pa)*fpr*0.35-Math.cos(pp)*fpw*0.6},${Math.sin(pa)*fpr*0.35-Math.sin(pp)*fpw*0.6} 0,0`;
+                        }).join(' ');
+                        return (
+                          <g key={fi} transform={`translate(${fx},${fy})`} opacity={flowerOpacity}>
+                            <path d={fpPath} fill={flowerColor}/>
+                            <circle r={fr*0.22} fill={pf.centerColor||'#fef08a'} stroke={flowerColor} strokeWidth={0.5}/>
+                          </g>
+                        );
+                      })}
+                    </g>
+                  );
+                })}
                 {/* ── Hub stakes — drawn BEFORE links so vines appear in front ── */}
                 {activeRenderNodes.filter(n=>n.type==='hub').map(node=>{
                   const scaleRatio = node.radius ? node.radius / 40 : 1;
@@ -5267,62 +5340,6 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                             })}
                           </g>
                         );
-                      })()}
-                      {/* Surrounding flowers — small flowers placed on vines near this node */}
-                      {surroundFlowerSettings.showSurround && node.type === 'friend' && node.partnerFlower && (()=>{
-                        const pf = node.partnerFlower;
-                        const tier = (node.interactionScore||0) < 100 ? 1 : (node.interactionScore||0) < 300 ? 2 : (node.interactionScore||0) < 600 ? 3 : (node.interactionScore||0) < 1000 ? 4 : 5;
-                        // Tier position 0-1 within tier
-                        const tierBounds = [[0,100],[100,300],[300,600],[600,1000],[1000,1500]];
-                        const [tMin,tMax] = tierBounds[Math.min(4,tier-1)];
-                        const tierPos = Math.min(1,(((node.interactionScore||0)-tMin)/(tMax-tMin)));
-
-                        // Calculated count based on tier + position
-                        const calcCount = surroundFlowerSettings.useCalc
-                          ? Math.round(1 + tier * 1.5 + tierPos * 2.5)
-                          : surroundFlowerSettings.count;
-                        const count = Math.max(1, calcCount);
-
-                        // Size range
-                        const minS = surroundFlowerSettings.minSize;
-                        const maxS = surroundFlowerSettings.maxSize;
-                        const spread = surroundFlowerSettings.spread;
-
-                        // Degradation: same as leaf lifecycle
-                        const scoreHistory = node.scoreHistory || [];
-                        const now2 = Date.now(), HOUR = 3600000;
-                        const scoreThen = scoreHistory.length > 0
-                          ? (scoreHistory.find(h=>(now2-h.ts)>=48*HOUR)||scoreHistory[0]).score
-                          : (node.interactionScore||0);
-                        const delta = (node.interactionScore||0) - scoreThen;
-                        const degraded = delta < -50;
-                        const flowerColor = degraded ? '#ca8a04' : (pf.petalColor || '#f59e0b');
-                        const flowerOpacity = degraded ? 0.6 : 0.85;
-
-                        return Array.from({length:count},(_,fi)=>{
-                          // Place flowers at varying angles and distances from node
-                          const angle = (fi/count)*Math.PI*2 + fi*0.7;
-                          const dist = r + 8 + (fi/count)*spread;
-                          const fx = Math.cos(angle)*dist;
-                          const fy = Math.sin(angle)*dist;
-                          // Size varies within range
-                          const sv = 0.5 + 0.5*Math.abs(Math.sin(fi*2.3+node.id.length));
-                          const fr = minS + (maxS-minS)*sv;
-                          const PETALS = pf.petals||6;
-                          const fpr = fr*(1+(pf.petalLength??0.55));
-                          const fpw = fpr*0.5;
-                          const fpPath = Array.from({length:PETALS},(_,pi)=>{
-                            const pa=(pi/PETALS)*Math.PI*2+(fi*0.5);
-                            const tx=Math.cos(pa)*fpr,ty=Math.sin(pa)*fpr,pp=pa+Math.PI*0.5;
-                            return `M 0,0 C ${Math.cos(pa)*fpr*0.35+Math.cos(pp)*fpw*0.6},${Math.sin(pa)*fpr*0.35+Math.sin(pp)*fpw*0.6} ${Math.cos(pa)*fpr*0.85+Math.cos(pp)*fpw*0.5},${Math.sin(pa)*fpr*0.85+Math.sin(pp)*fpw*0.5} ${tx},${ty} C ${Math.cos(pa)*fpr*0.85-Math.cos(pp)*fpw*0.5},${Math.sin(pa)*fpr*0.85-Math.sin(pp)*fpw*0.5} ${Math.cos(pa)*fpr*0.35-Math.cos(pp)*fpw*0.6},${Math.sin(pa)*fpr*0.35-Math.sin(pp)*fpw*0.6} 0,0`;
-                          }).join(' ');
-                          return (
-                            <g key={fi} transform={`translate(${fx},${fy})`} opacity={flowerOpacity} style={{pointerEvents:'none'}}>
-                              <path d={fpPath} fill={flowerColor}/>
-                              <circle r={fr*0.22} fill={pf.centerColor||'#fef08a'} stroke={flowerColor} strokeWidth={0.5}/>
-                            </g>
-                          );
-                        });
                       })()}
                       {/* Name label — grey arc band inside circle bottom */}
                       <g clipPath={`url(#clip-${node.id})`} style={{pointerEvents:'none'}}>
