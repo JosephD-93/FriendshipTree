@@ -7,7 +7,7 @@ import {
   BookUser
 } from 'lucide-react';
 
-const APP_VERSION = '3.48';
+const APP_VERSION = '3.0';
 const INTERACTION_DISTANCE = 70;
 const TIER_COLORS_GLOBAL = ['#bef264','#84cc16','#166534','#3b82f6','#9333ea'];
 const PRIMARY_GROUP_COLORS = ['#ef4444','#3b82f6','#f59e0b','#10b981','#8b5cf6','#ec4899','#06b6d4','#f97316'];
@@ -344,7 +344,6 @@ function AppInner() {
   const groupPhotoSvgRef = useRef(null);
   const [tagNameInput, setTagNameInput] = useState('');
   const [faceDetecting, setFaceDetecting] = useState(false);
-  const [selectedRingId, setSelectedRingId] = useState(null);
   const faceApiLoadedRef = useRef(false);
   const origFlowerRef = useRef(null);
   const [partnerFlowerEditor, setPartnerFlowerEditor] = useState(null);
@@ -583,15 +582,15 @@ function AppInner() {
   const [tierPickMode, setTierPickMode] = useState(false);
   const [photoBorderMode, setPhotoBorderMode] = useState('none');
   const [showVineBorders, setShowVineBorders] = useState(true);
+  const [showVineTuner, setShowVineTuner] = useState(false);
   const [vineBorderParams, setVineBorderParams] = useState({
     blobArcRadius: 1.05,
     blobSagDepth:  0.38,
     vineArcRadius: 1.05,
     vineSagDepth:  0.38,
-    leavesInner:   1.0,   // multiplier for inner leaf count (0=none, 2=double)
-    leavesOuter:   1.0,   // multiplier for outer leaf count
+    leavesInner:   1.0,
+    leavesOuter:   1.0,
   });
-  const [showVineTuner, setShowVineTuner] = useState(false);
   const [groupColors, setGroupColors] = useState({});
   const [confirmModal, setConfirmModal] = useState(null);
   const [pinModal, setPinModal] = useState(null);
@@ -2518,38 +2517,34 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       {/* Floating vine border tuner */}
       {showVineTuner && showVineBorders && (()=>{
         const dm=theme.darkMode;
-        const bg=dm?'#1e293b':'white';
-        const txt=dm?'#e2e8f0':'#1e293b';
-        const sub=dm?'#94a3b8':'#64748b';
         const setP=(k,v)=>setVineBorderParams(p=>({...p,[k]:v}));
         const sliders=[
-          {key:'blobArcRadius', label:'Blob arc radius', min:0.5, max:2.5, step:0.05, unit:'×', color:'#3b82f6'},
-          {key:'blobSagDepth',  label:'Blob sag depth',  min:0.0, max:0.9, step:0.02, unit:'',  color:'#3b82f6'},
-          {key:'vineArcRadius', label:'Vine arc radius',  min:0.5, max:2.5, step:0.05, unit:'×', color:'#10b981'},
-          {key:'vineSagDepth',  label:'Vine sag depth',   min:0.0, max:0.9, step:0.02, unit:'',  color:'#10b981'},
-          {key:'leavesInner',   label:'Inner leaves',     min:0.0, max:3.0, step:0.25, unit:'×', color:'#22c55e'},
-          {key:'leavesOuter',   label:'Outer leaves',     min:0.0, max:3.0, step:0.25, unit:'×', color:'#22c55e'},
+          {key:'blobArcRadius',label:'Blob arc radius',min:0.5,max:2.5,step:0.05,unit:'×',color:'#3b82f6'},
+          {key:'blobSagDepth', label:'Blob sag depth', min:0.0,max:0.9,step:0.02,unit:'', color:'#3b82f6'},
+          {key:'vineArcRadius',label:'Vine arc radius',min:0.5,max:2.5,step:0.05,unit:'×',color:'#10b981'},
+          {key:'vineSagDepth', label:'Vine sag depth', min:0.0,max:0.9,step:0.02,unit:'', color:'#10b981'},
+          {key:'leavesInner',  label:'Inner leaves',  min:0.0,max:3.0,step:0.25,unit:'×',color:'#22c55e'},
+          {key:'leavesOuter',  label:'Outer leaves',  min:0.0,max:3.0,step:0.25,unit:'×',color:'#22c55e'},
         ];
         return (
           <div style={{position:'absolute',top:12,left:12,zIndex:300,
-            background:bg,borderRadius:14,padding:'12px 14px',
-            boxShadow:'0 4px 24px rgba(0,0,0,0.35)',
-            width:220,pointerEvents:'all'}}>
+            background:dm?'#1e293b':'white',borderRadius:14,padding:'12px 14px',
+            boxShadow:'0 4px 24px rgba(0,0,0,0.35)',width:230,pointerEvents:'all'}}>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
-              <span style={{fontSize:13,fontWeight:800,color:txt}}>🌿 Vine Tuner</span>
+              <span style={{fontSize:13,fontWeight:800,color:dm?'#e2e8f0':'#1e293b'}}>🌿 Vine Tuner</span>
               <button onClick={()=>setShowVineTuner(false)}
-                style={{background:'none',border:'none',cursor:'pointer',fontSize:16,color:sub,padding:0}}>✕</button>
+                style={{background:'none',border:'none',cursor:'pointer',fontSize:16,color:dm?'#94a3b8':'#64748b',padding:0}}>✕</button>
             </div>
             {sliders.map(s=>(
               <div key={s.key} style={{marginBottom:8}}>
                 <div style={{display:'flex',justifyContent:'space-between',marginBottom:2}}>
-                  <span style={{fontSize:11,color:sub}}>{s.label}</span>
+                  <span style={{fontSize:11,color:dm?'#94a3b8':'#64748b'}}>{s.label}</span>
                   <span style={{fontSize:11,fontWeight:700,color:s.color}}>{vineBorderParams[s.key].toFixed(2)}{s.unit}</span>
                 </div>
                 <input type="range" min={s.min} max={s.max} step={s.step}
                   value={vineBorderParams[s.key]}
                   onChange={e=>setP(s.key,parseFloat(e.target.value))}
-                  style={{width:'100%',accentColor:s.color,height:3}}/>
+                  style={{width:'100%',accentColor:s.color}}/>
               </div>
             ))}
           </div>
@@ -2629,12 +2624,12 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       <div key={i} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 0',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}><span style={{fontSize:14,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>{row.label}</span>{row.ctrl}</div>
                     ))}
                     {showVineBorders && (
-                      <div style={{padding:'10px 0',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}>
+                      <div style={{padding:'8px 0',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}>
                         <button onClick={()=>{setShowVineTuner(p=>!p);setViewMode('canvas');}}
-                          style={{width:'100%',padding:'9px',borderRadius:10,border:'1.5px solid #10b981',
+                          style={{width:'100%',padding:'8px',borderRadius:10,border:'1.5px solid #10b981',
                             background:showVineTuner?'#10b981':'transparent',
                             color:showVineTuner?'white':'#10b981',
-                            fontSize:13,fontWeight:700,cursor:'pointer'}}>
+                            fontSize:12,fontWeight:700,cursor:'pointer'}}>
                           {showVineTuner?'✓ Tuner open on map':'🎛 Open Vine Border Tuner on map'}
                         </button>
                       </div>
@@ -3897,7 +3892,6 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               const BLOB_BLUR             = 14;
               const BLOB_THRESHOLD        = 32;
               const BLOB_THRESHOLD_SHIFT  = -14;
-
               const VINE_NODE_RADIUS_MULT = vineBorderParams.vineArcRadius;
               const VINE_NODE_RADIUS_ADD  = 0;
               const VINE_SAG_DEPTH        = vineBorderParams.vineSagDepth;
@@ -3947,16 +3941,16 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 const pts=[];
                 // Helper: CCW arc from angle a1 to a2 around node, choosing outer direction
                 const arcOuter=(A, a1, a2)=>{
-                  // Always take the LONG arc between a1 and a2 (>180°)
-                  // since the short arc cuts inside the node
+                  const outAng=Math.atan2(A.y-cen.y, A.x-cen.x);
+                  // CCW arc: ensure it passes through outAng
+                  // Bring both into [outAng-π, outAng+π] — but allow full range by
+                  // choosing the direction that contains outAng
+                  const containsCCW=(s,e,t)=>{ let ee=e; while(ee<s)ee+=Math.PI*2; let tt=t; while(tt<s)tt+=Math.PI*2; return tt<=ee; };
                   let an1=a1, an2=a2;
-                  // Normalise to [an1, an1+2π)
-                  while(an2 < an1) an2 += Math.PI*2;
-                  while(an2 > an1 + Math.PI*2) an2 -= Math.PI*2;
-                  const shortSpan = an2 - an1;
-                  if(shortSpan < Math.PI) {
-                    // Short arc — flip to long arc by going the other way
-                    an2 = an1 - (Math.PI*2 - shortSpan);
+                  if(containsCCW(an1,an2,outAng)){
+                    while(an2<an1) an2+=Math.PI*2;
+                  } else {
+                    while(an2>an1) an2-=Math.PI*2;
                   }
                   const res=[];
                   for(let s=0;s<=arcSteps;s++){
@@ -3970,12 +3964,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   const A=hull[i], B=hull[(i+1)%hn], P=hull[(i+hn-1)%hn];
                   const angAtoB=Math.atan2(B.y-A.y, B.x-A.x);
                   const angPtoA=Math.atan2(A.y-P.y, A.x-P.x);
-                  // arrivalAng: point on A's circle facing TOWARD P (where previous sag ends)
-                  // = angPtoA + π (opposite side from the P→A direction)
-                  const arrivalAng = angPtoA + Math.PI;
 
-                  // Arc around A from arrival to departure (long/outer arc)
-                  const arcPts=arcOuter(A, arrivalAng, angAtoB);
+                  // Arc around A from where previous sag arrived to where this sag leaves
+                  const arcPts=arcOuter(A, angPtoA, angAtoB);
                   pts.push(...arcPts);
 
                   // Sag: inward bezier from A surface to B surface
@@ -4045,24 +4036,24 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               const allLeaves=[];
               activeStrands.forEach(({pts,role,renderIdx})=>{
                 const lc=LEAF_CHARS[role]||LEAF_CHARS.core;
-                const leafCount=Math.max(0,Math.floor(perim/leafSpacing * vineBorderParams.leavesInner));
-                // Alternating both sides
+                // Inner leaves — controlled by leavesInner multiplier
+                // Hull goes CCW, so +42° = right of travel = inward toward group
+                const leafCount=Math.max(0,Math.floor(perim/leafSpacing*(vineBorderParams.leavesInner??1)));
                 for(let li=0;li<leafCount;li++){
                   const t=(li+0.5+renderIdx*0.3)/leafCount;
                   const ptIdx=Math.floor(t*(pts.length-1));
                   const p=pts[ptIdx],p2=pts[(ptIdx+1)%pts.length];
                   if(!p||!p2) continue;
                   const tangAngle=Math.atan2(p2.y-p.y,p2.x-p.x)*180/Math.PI;
-                  const side=((li+renderIdx)%2===0)?1:-1;
                   const sv=0.7+0.6*Math.abs(Math.sin(li*3.7+renderIdx*1.9+hubIdx));
                   const baseLw=(lc.sizeBase+lc.sizeVar*sv)*leafTierScale;
                   const lh=baseLw*lc.aspectW;
                   const fill=theme.darkMode?lc.colorDark:lc.colorLight;
                   const stroke=theme.darkMode?'#0f2d1a':'#14532d';
-                  allLeaves.push({x:p.x,y:p.y,angle:tangAngle+side*42,lw:baseLw,lh,fill,stroke,bud:lc.bud,opacity:lc.bud?0.7:0.88});
+                  allLeaves.push({x:p.x,y:p.y,angle:tangAngle+42,lw:baseLw,lh,fill,stroke,bud:lc.bud,opacity:lc.bud?0.7:0.88});
                 }
-                // Extra outward-only pass
-                const outerCount=Math.max(0,Math.floor(perim/(leafSpacing*0.55) * vineBorderParams.leavesOuter));
+                // Outer leaves — -42° = left of travel = outward away from group
+                const outerCount=Math.max(0,Math.floor(perim/(leafSpacing*0.55)*(vineBorderParams.leavesOuter??1)));
                 for(let li=0;li<outerCount;li++){
                   const t=(li+0.15+renderIdx*0.2)/outerCount;
                   const ptIdx=Math.floor(t*(pts.length-1));
@@ -4074,7 +4065,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   const lh=lw*lc.aspectW;
                   const fill=theme.darkMode?lc.colorDark:lc.colorLight;
                   const stroke=theme.darkMode?'#0f2d1a':'#14532d';
-                  allLeaves.push({x:p.x,y:p.y,angle:tangAngle+42,lw,lh,fill,stroke,bud:lc.bud,opacity:lc.bud?0.55:0.7});
+                  allLeaves.push({x:p.x,y:p.y,angle:tangAngle-42,lw,lh,fill,stroke,bud:lc.bud,opacity:lc.bud?0.55:0.7});
                 }
               });
 
@@ -4110,19 +4101,77 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       opacity={role==='core'?0.95:role==='growing'?0.75:0.85}/>;
                   })}
 
-                  {/* Leaves */}
-                  {allLeaves.map((lf,li)=>{
-                    const leafD=lf.bud
-                      ?`M 0,0 C ${lf.lw*0.15},${-lf.lh*0.4} ${lf.lw*0.7},${-lf.lh*0.35} ${lf.lw},0 C ${lf.lw*0.7},${lf.lh*0.35} ${lf.lw*0.15},${lf.lh*0.4} 0,0 Z`
-                      :`M 0,0 C ${lf.lw*0.25},${-lf.lh} ${lf.lw*0.75},${-lf.lh} ${lf.lw},0 C ${lf.lw*0.75},${lf.lh} ${lf.lw*0.25},${lf.lh} 0,0 Z`;
+                  {/* Leaves — rendered to offscreen canvas then inserted as single <image> element */}
+                  {(()=>{
+                    if(allLeaves.length===0) return null;
+                    // Reduce leaf count at low zoom for performance
+                    const zoom=transform.scale||1;
+                    const visibleLeaves=zoom<0.5
+                      ? allLeaves.filter((_,i)=>i%4===0)  // 25% at very low zoom
+                      : zoom<0.8
+                      ? allLeaves.filter((_,i)=>i%2===0)  // 50% at medium zoom
+                      : allLeaves;                          // 100% when zoomed in
+
+                    // Bounding box for canvas
+                    const pad=60;
+                    const lx1=Math.min(...visibleLeaves.map(l=>l.x))-pad;
+                    const ly1=Math.min(...visibleLeaves.map(l=>l.y))-pad;
+                    const lx2=Math.max(...visibleLeaves.map(l=>l.x+l.lw))+pad;
+                    const ly2=Math.max(...visibleLeaves.map(l=>l.y+l.lw))+pad;
+                    const cw=Math.ceil(lx2-lx1), ch=Math.ceil(ly2-ly1);
+                    if(cw<1||ch<1) return null;
+
+                    // Draw all leaves to offscreen canvas
+                    const cvs=document.createElement('canvas');
+                    cvs.width=cw; cvs.height=ch;
+                    const ctx=cvs.getContext('2d');
+
+                    visibleLeaves.forEach(lf=>{
+                      ctx.save();
+                      ctx.translate(lf.x-lx1, lf.y-ly1);
+                      ctx.rotate(lf.angle*Math.PI/180);
+                      ctx.globalAlpha=lf.opacity;
+
+                      // Draw leaf shape
+                      ctx.beginPath();
+                      if(lf.bud){
+                        ctx.moveTo(0,0);
+                        ctx.bezierCurveTo(lf.lw*0.15,-lf.lh*0.4, lf.lw*0.7,-lf.lh*0.35, lf.lw,0);
+                        ctx.bezierCurveTo(lf.lw*0.7,lf.lh*0.35, lf.lw*0.15,lf.lh*0.4, 0,0);
+                      } else {
+                        ctx.moveTo(0,0);
+                        ctx.bezierCurveTo(lf.lw*0.25,-lf.lh, lf.lw*0.75,-lf.lh, lf.lw,0);
+                        ctx.bezierCurveTo(lf.lw*0.75,lf.lh, lf.lw*0.25,lf.lh, 0,0);
+                      }
+                      ctx.closePath();
+                      ctx.fillStyle=lf.fill;
+                      ctx.fill();
+                      ctx.strokeStyle=lf.stroke;
+                      ctx.lineWidth=0.5;
+                      ctx.stroke();
+
+                      // Midrib
+                      if(!lf.bud){
+                        ctx.beginPath();
+                        ctx.moveTo(lf.lw*0.05,0);
+                        ctx.lineTo(lf.lw*0.82,0);
+                        ctx.strokeStyle=lf.stroke;
+                        ctx.lineWidth=0.35;
+                        ctx.globalAlpha=lf.opacity*0.5;
+                        ctx.stroke();
+                      }
+                      ctx.restore();
+                    });
+
                     return (
-                      <g key={'lf'+li} transform={`translate(${lf.x},${lf.y}) rotate(${lf.angle})`}
-                        opacity={lf.opacity} style={{pointerEvents:'none'}}>
-                        <path d={leafD} fill={lf.fill} stroke={lf.stroke} strokeWidth={0.5}/>
-                        {!lf.bud&&<path d={`M ${lf.lw*0.05},0 L ${lf.lw*0.82},0`} fill="none" stroke={lf.stroke} strokeWidth={0.35} opacity={0.5}/>}
-                      </g>
+                      <image
+                        href={cvs.toDataURL()}
+                        x={lx1} y={ly1}
+                        width={cw} height={ch}
+                        style={{pointerEvents:'none'}}
+                      />
                     );
-                  })}
+                  })()}
                 </g>
               );
             })}
@@ -6638,7 +6687,6 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       {groupPhotoSrc && (() => {
         const dm = theme.darkMode;
         const CANVAS_W = 320;
-        const selectedRing = faceRings.find(r => r.id === selectedRingId) || faceRings[0] || null;
         const friendNodes = nodes.filter(n => n.type === 'friend' || n.id === 'me');
 
         const startDrag = (e, ringId, mode) => {
@@ -6822,19 +6870,16 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           onUp();
         };
 
-        // Ring drag — auto-detect move vs resize based on where user touches
-        const startDragZoom = (e, ringId) => {
+        // Ring drag start needs to work in image-space, accounting for zoom
+        const startDragZoom = (e, ringId, mode) => {
           e.stopPropagation();
           const rect = e.currentTarget.closest('.tagger-wrap').getBoundingClientRect();
           const clientX = e.touches ? e.touches[0].clientX : e.clientX;
           const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-          const imgPt = toImg(clientX - rect.left, clientY - rect.top);
+          // Convert to image space
+          const img = toImg(clientX - rect.left, clientY - rect.top);
           const ring = faceRings.find(r => r.id === ringId);
-          const dist = Math.sqrt((imgPt.x-ring.x)**2+(imgPt.y-ring.y)**2);
-          // Touch within 65% of radius = move, outside = resize
-          const mode = dist > ring.r * 0.65 ? 'resize' : 'move';
-          setSelectedRingId(ringId);
-          dragRingRef.current = {id:ringId, mode, sx:imgPt.x, sy:imgPt.y, ox:ring.x, oy:ring.y, or:ring.r};
+          dragRingRef.current = {id:ringId, mode, sx:img.x, sy:img.y, ox:ring.x, oy:ring.y, or:ring.r};
         };
 
         const onMoveZoom = (e) => {
@@ -6842,12 +6887,12 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           const rect = e.currentTarget.getBoundingClientRect();
           const clientX = e.touches ? e.touches[0].clientX : e.clientX;
           const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-          const imgPt = toImg(clientX - rect.left, clientY - rect.top);
+          const img = toImg(clientX - rect.left, clientY - rect.top);
           const {id, mode, sx, sy, ox, oy} = dragRingRef.current;
           setFaceRings(prev => prev.map(r => {
             if (r.id !== id) return r;
-            if (mode === 'move') return {...r, x:ox+(imgPt.x-sx), y:oy+(imgPt.y-sy)};
-            return {...r, r:Math.max(12, Math.sqrt((imgPt.x-r.x)**2+(imgPt.y-r.y)**2))};
+            if (mode === 'move') return {...r, x:Math.max(r.r,Math.min(CANVAS_W-r.r,ox+(img.x-sx))), y:Math.max(r.r,Math.min(CANVAS_W-r.r,oy+(img.y-sy)))};
+            return {...r, r:Math.max(20,Math.min(CANVAS_W/2,Math.sqrt(Math.pow(img.x-r.x,2)+Math.pow(img.y-r.y,2))))};
           }));
         };
 
@@ -6855,56 +6900,67 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         const detectFaces = async () => {
           setFaceDetecting(true);
           try {
-            // Load face-api.js if not already loaded
-            if (!window.faceapi) {
+            // Load face-api.js from CDN if not already loaded
+            if (!faceApiLoadedRef.current) {
               await new Promise((resolve, reject) => {
+                if (window.faceapi) { resolve(); return; }
                 const script = document.createElement('script');
-                script.src = 'https://cdn.jsdelivr.net/npm/face-api.js/dist/face-api.min.js';
+                script.src = 'https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js';
                 script.onload = resolve;
                 script.onerror = reject;
                 document.head.appendChild(script);
               });
-            }
-
-            if (!faceApiLoadedRef.current) {
-              const MODEL_URL = 'https://cdn.jsdelivr.net/npm/face-api.js/weights';
-              await window.faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+              // Load tiny models from CDN
+              const MODEL_URL = 'https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/weights';
+              await Promise.all([
+                window.faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+                window.faceapi.nets.faceLandmark68TinyNet.loadFromUri(MODEL_URL),
+              ]);
               faceApiLoadedRef.current = true;
             }
 
+            // Draw image to canvas — face-api works better with canvas
             const img = new Image();
             img.crossOrigin = 'anonymous';
-            await new Promise((res, rej) => { img.onload=res; img.onerror=rej; img.src=groupPhotoSrc; });
+            await new Promise((resolve, reject) => {
+              img.onload = resolve;
+              img.onerror = reject;
+              img.src = groupPhotoSrc;
+            });
+            const canvas = document.createElement('canvas');
+            canvas.width = img.naturalWidth || 640;
+            canvas.height = img.naturalHeight || 480;
+            canvas.getContext('2d').drawImage(img, 0, 0);
 
-            // Try multiple thresholds for better detection
-            let detections = [];
-            for (const threshold of [0.2, 0.3, 0.4]) {
-              const opts = new window.faceapi.TinyFaceDetectorOptions({inputSize:608, scoreThreshold:threshold});
-              detections = await window.faceapi.detectAllFaces(img, opts);
-              if (detections.length > 0) break;
-            }
+            const options = new window.faceapi.TinyFaceDetectorOptions({
+              inputSize: 416,
+              scoreThreshold: 0.3,
+            });
+            const detections = await window.faceapi.detectAllFaces(canvas, options);
 
             if (detections.length === 0) {
-              showToast('No faces found — try adding rings manually');
+              showToast('No faces detected — try adjusting the photo or place rings manually');
               setFaceDetecting(false);
               return;
             }
 
-            const scaleX = CANVAS_W / (img.naturalWidth || CANVAS_W);
-            const scaleY = CANVAS_W / (img.naturalHeight || CANVAS_W);
+            // Scale detections from canvas coords to CANVAS_W
+            const scaleX = CANVAS_W / canvas.width;
+            const scaleY = CANVAS_W / canvas.height;
+
             const rings = detections.map((det, i) => {
               const box = det.box;
               const cx = (box.x + box.width/2) * scaleX;
               const cy = (box.y + box.height/2) * scaleY;
-              const r = Math.max(box.width, box.height) * 0.62 * Math.max(scaleX, scaleY);
-              return {id: Date.now()+i, x:cx, y:cy, r:Math.max(16,r), name:'', assignedNodeId:null};
+              const r = Math.max(box.width, box.height) * 0.6 * Math.max(scaleX, scaleY);
+              return {id: Date.now()+i, x:cx, y:cy, r:Math.max(20, r), name:'', assignedNodeId:null};
             });
+
             setFaceRings(rings);
-            setSelectedRingId(rings[0]?.id || null);
-            showToast(`Found ${rings.length} face${rings.length===1?'':'s'} — adjust rings then continue`);
+            showToast('Found ' + rings.length + ' face' + (rings.length===1?'':'s') + ' — adjust rings then continue');
           } catch(err) {
-            showToast('Auto-detect failed — add rings manually');
-            console.error('face-api error:', err);
+            showToast('Detection failed — place rings manually');
+            console.error(err);
           }
           setFaceDetecting(false);
         };
@@ -6955,54 +7011,26 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               <div ref={svgRef} style={{position:'absolute',top:0,left:0,transformOrigin:'0 0',willChange:'transform'}}>
                 <svg width={CANVAS_W} height={CANVAS_W} style={{display:'block',touchAction:'none',userSelect:'none'}}>
                   <image href={groupPhotoSrc} x="0" y="0" width={CANVAS_W} height={CANVAS_W} preserveAspectRatio="xMidYMid meet"/>
-                  {faceRings.map((ring, ri) => {
-                    const isSelected = ring.id === selectedRingId;
-                    return (
-                    <g key={ring.id} onClick={()=>setSelectedRingId(ring.id)}>
-                      {/* Main draggable circle — inner for move, edge for resize */}
-                      <circle cx={ring.x} cy={ring.y} r={ring.r}
-                        fill={isSelected?"rgba(59,130,246,0.15)":"rgba(59,130,246,0.08)"}
-                        stroke={isSelected?"#60a5fa":"#3b82f6"} strokeWidth={isSelected?3:2}
-                        strokeDasharray={isSelected?"none":"6 3"}
-                        style={{cursor:'move',touchAction:'none'}}
-                        onMouseDown={e=>startDragZoom(e,ring.id)}
-                        onTouchStart={e=>{e.stopPropagation();startDragZoom(e,ring.id);}}/>
-                      {/* Centre dot */}
-                      <circle cx={ring.x} cy={ring.y} r={5} fill="#60a5fa" style={{pointerEvents:'none'}}/>
-                      <circle cx={ring.x} cy={ring.y} r={2} fill="white" style={{pointerEvents:'none'}}/>
-                      {/* Delete button */}
-                      <g style={{cursor:'pointer'}}
-                        onMouseDown={e=>{e.stopPropagation();setFaceRings(prev=>prev.filter(r=>r.id!==ring.id));}}
-                        onTouchStart={e=>{e.stopPropagation();setFaceRings(prev=>prev.filter(r=>r.id!==ring.id));}}>
+                  {faceRings.map((ring, ri) => (
+                    <g key={ring.id}>
+                      <circle cx={ring.x} cy={ring.y} r={ring.r} fill="rgba(59,130,246,0.12)" stroke="#3b82f6" strokeWidth="2.5" strokeDasharray="6 3" style={{cursor:'move',touchAction:'none'}}
+                        onMouseDown={e=>startDragZoom(e,ring.id,'move')} onTouchStart={e=>{e.stopPropagation();startDragZoom(e,ring.id,'move');}}/>
+                      <circle cx={ring.x+ring.r*0.707} cy={ring.y+ring.r*0.707} r={8} fill="#3b82f6" style={{cursor:'nwse-resize',touchAction:'none'}}
+                        onMouseDown={e=>startDragZoom(e,ring.id,'resize')} onTouchStart={e=>{e.stopPropagation();startDragZoom(e,ring.id,'resize');}}/>
+                      <g style={{cursor:'pointer'}} onMouseDown={e=>{e.stopPropagation();setFaceRings(prev=>prev.filter(r=>r.id!==ring.id));}}>
                         <circle cx={ring.x-ring.r*0.707} cy={ring.y-ring.r*0.707} r={10} fill="#ef4444"/>
-                        <text x={ring.x-ring.r*0.707} y={ring.y-ring.r*0.707} textAnchor="middle" dominantBaseline="middle" fontSize="12" fill="white" style={{pointerEvents:'none'}}>✕</text>
+                        <text x={ring.x-ring.r*0.707} y={ring.y-ring.r*0.707} textAnchor="middle" dominantBaseline="middle" fontSize="12" fill="white" style={{pointerEvents:'none'}}>x</text>
                       </g>
                       <text x={ring.x} y={ring.y+ring.r+14} textAnchor="middle" fontSize="11" fontWeight="700" fill="white"
                         style={{filter:'drop-shadow(0 1px 2px rgba(0,0,0,0.8))',pointerEvents:'none'}}>{ring.name||('Face '+(ri+1))}</text>
                     </g>
-                    );
-                  })}
+                  ))}
                 </svg>
               </div>
             </div>
 
             {/* Bottom bar */}
-            <div style={{padding:'10px 16px 24px',flexShrink:0,display:'flex',flexDirection:'column',gap:8,background:dm?'#0f172a':'#1e293b'}}>
-              {/* Radius slider for selected ring */}
-              {selectedRing && (
-                <div style={{display:'flex',alignItems:'center',gap:8,padding:'6px 0'}}>
-                  <span style={{fontSize:11,color:'#94a3b8',flexShrink:0,width:28}}>⊙ r</span>
-                  <button onMouseDown={e=>e.stopPropagation()} onClick={()=>setFaceRings(prev=>prev.map(r=>r.id===selectedRing.id?{...r,r:Math.max(12,r.r-2)}:r))}
-                    style={{width:28,height:28,borderRadius:6,background:'rgba(255,255,255,0.1)',color:'white',border:'none',cursor:'pointer',fontSize:16,flexShrink:0}}>−</button>
-                  <input type="range" min={12} max={160} step={1}
-                    value={selectedRing.r}
-                    onChange={e=>setFaceRings(prev=>prev.map(r=>r.id===selectedRing.id?{...r,r:parseInt(e.target.value)}:r))}
-                    style={{flex:1,accentColor:'#60a5fa'}}/>
-                  <button onMouseDown={e=>e.stopPropagation()} onClick={()=>setFaceRings(prev=>prev.map(r=>r.id===selectedRing.id?{...r,r:Math.min(160,r.r+2)}:r))}
-                    style={{width:28,height:28,borderRadius:6,background:'rgba(255,255,255,0.1)',color:'white',border:'none',cursor:'pointer',fontSize:16,flexShrink:0}}>+</button>
-                  <span style={{fontSize:11,color:'#60a5fa',fontWeight:700,width:28,textAlign:'right',flexShrink:0}}>{Math.round(selectedRing.r)}</span>
-                </div>
-              )}
+            <div style={{padding:'12px 20px 28px',flexShrink:0,display:'flex',flexDirection:'column',gap:8,background:dm?'#0f172a':'#1e293b'}}>
               {/* Auto-detect button */}
               <button onClick={detectFaces} disabled={faceDetecting}
                 style={{width:'100%',padding:'10px',borderRadius:10,
