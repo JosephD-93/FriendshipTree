@@ -581,6 +581,9 @@ function AppInner() {
   useEffect(() => { if (settingsOpen) settingsOpenTime.current = Date.now(); }, [settingsOpen]);
   const [tierPickMode, setTierPickMode] = useState(false);
   const [photoBorderMode, setPhotoBorderMode] = useState('none');
+  const [showHubMembers, setShowHubMembers] = useState(true);
+  const [showGroupTable, setShowGroupTable] = useState(false);
+  const [hubFlowerMenuOpen, setHubFlowerMenuOpen] = useState(false);
   const [showVineBorders, setShowVineBorders] = useState(true);
   const [showVineTuner, setShowVineTuner] = useState(false);
   // Surrounding flowers settings
@@ -1029,8 +1032,13 @@ function AppInner() {
           lastTapRef.current.delete(ptr.nodeId + '_count');
         } else if (tapCount >= 2) {
           if (tappedNode?.type === 'hub') {
-            // Double-tap hub: open/close group modal
-            setGroupModal(prev => prev?.hubId === ptr.nodeId ? null : { hubId: ptr.nodeId });
+            // Double-tap hub: open sidebar if not open, otherwise open group table
+            if (selectedNodeId === ptr.nodeId) {
+              setGroupModal({hubId: ptr.nodeId});
+              setShowGroupTable(true);
+            } else {
+              setSelectedNodeId(ptr.nodeId);
+            }
           } else if (tappedNode?.type === 'flower') {
             const flowerNode = nodes.find(n => n.dimKey === tappedNode.dimKey);
             if (!flowerNode?.borderLocked) {
@@ -3548,11 +3556,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   {/* Action row: Flower + Key + Vine toggle */}
                   <div style={{display:'flex',gap:6,marginBottom:8}}>
                     {/* Flower button — with popup menu */}
-                    {(()=>{
-                      const [flowerMenuOpen, setFlowerMenuOpen] = React.useState(false);
-                      return (
-                        <div style={{flex:1,position:'relative'}}>
-                          <button onClick={()=>setFlowerMenuOpen(p=>!p)}
+                    <div style={{flex:1,position:'relative'}}>
+                      <button onClick={()=>setHubFlowerMenuOpen(p=>!p)}
                             style={{width:'100%',padding:'8px 6px',borderRadius:10,border:`1.5px solid ${selectedNode.partnerFlower&&selectedNode.groupFlowerActive!==false?'#10b981':bd}`,background:selectedNode.partnerFlower&&selectedNode.groupFlowerActive!==false?'#10b98118':bg2,cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',gap:3}}>
                             <svg width={22} height={22} viewBox="-22 -22 44 44">
                               {selectedNode.partnerFlower?(()=>{
@@ -3563,14 +3568,14 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                             </svg>
                             <span style={{fontSize:9,fontWeight:700,color:sub}}>{selectedNode.partnerFlower?'Flower ▾':'Add Flower'}</span>
                           </button>
-                          {flowerMenuOpen && (
+                          {hubFlowerMenuOpen && (
                             <div style={{position:'absolute',top:'100%',left:0,right:0,zIndex:50,marginTop:4,borderRadius:10,overflow:'hidden',boxShadow:'0 4px 20px rgba(0,0,0,0.3)',border:`1px solid ${bd}`,background:dm?'#1e293b':'white'}}>
-                              <button onClick={()=>{setFlowerMenuOpen(false);setPfSelectedPart('main');setPfColorPickerFor(null);setPfTab('design');setPartnerFlowerEditor(hubId);}}
+                              <button onClick={()=>{setHubFlowerMenuOpen(false);setPfSelectedPart('main');setPfColorPickerFor(null);setPfTab('design');setPartnerFlowerEditor(hubId);}}
                                 style={{width:'100%',padding:'10px 14px',background:'none',border:'none',cursor:'pointer',textAlign:'left',fontSize:12,fontWeight:700,color:dm?'#e2e8f0':'#1e293b',display:'flex',alignItems:'center',gap:8}}>
                                 ✏️ {selectedNode.partnerFlower?'Edit Flower':'Add Flower'}
                               </button>
                               {selectedNode.partnerFlower && (
-                                <button onClick={()=>{setFlowerMenuOpen(false);updateSelectedNode('groupFlowerActive',selectedNode.groupFlowerActive===false?true:false);showToast(selectedNode.groupFlowerActive===false?'🌸 Group flower on':'⭕ Group flower off');}}
+                                <button onClick={()=>{setHubFlowerMenuOpen(false);updateSelectedNode('groupFlowerActive',selectedNode.groupFlowerActive===false?true:false);showToast(selectedNode.groupFlowerActive===false?'🌸 Group flower on':'⭕ Group flower off');}}
                                   style={{width:'100%',padding:'10px 14px',background:'none',border:'none',borderTop:`1px solid ${bd}`,cursor:'pointer',textAlign:'left',fontSize:12,fontWeight:700,color:selectedNode.groupFlowerActive===false?'#94a3b8':'#10b981',display:'flex',alignItems:'center',gap:8}}>
                                   {selectedNode.groupFlowerActive===false?'⭕ Turn Flower On':'✅ Turn Flower Off'}
                                 </button>
@@ -3578,8 +3583,6 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                             </div>
                           )}
                         </div>
-                      );
-                    })()}
 
                     {/* Key button */}
                     <button onClick={()=>setShowMapKey(p=>!p)}
@@ -3620,16 +3623,15 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
                   {/* Members panel — collapsible */}
                   {(()=>{
-                    const [showMembers, setShowMembers] = React.useState(true);
                     return (
                       <div style={{borderRadius:10,border:`1px solid ${bd}`,overflow:'hidden',marginBottom:8}}>
-                        <button onClick={()=>setShowMembers(p=>!p)}
+                        <button onClick={()=>setShowHubMembers(p=>!p)}
                           style={{width:'100%',padding:'9px 12px',background:bg2,border:'none',cursor:'pointer',display:'flex',alignItems:'center',gap:8}}>
                           <span style={{fontSize:13}}>👥</span>
                           <span style={{flex:1,textAlign:'left',fontSize:12,fontWeight:700,color:dm?'#e2e8f0':'#1e293b'}}>Members ({members.length})</span>
-                          <span style={{fontSize:11,color:sub}}>{showMembers?'▲':'▼'}</span>
+                          <span style={{fontSize:11,color:sub}}>{showHubMembers?'▲':'▼'}</span>
                         </button>
-                        {showMembers && (
+                        {showHubMembers && (
                           <div style={{maxHeight:220,overflowY:'auto'}}>
                             {members.length===0?(
                               <div style={{padding:16,textAlign:'center',color:sub,fontSize:12,fontStyle:'italic'}}>No members yet — drag people onto this group</div>
@@ -3650,6 +3652,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                             })}
                           </div>
                         )}
+                        {/* Manage all groups button */}
+                        <button onClick={()=>{setShowGroupTable(p=>!p);setGroupModal({hubId:selectedNodeId});}}
+                          style={{width:'100%',padding:'8px 12px',background:'none',border:'none',borderTop:`1px solid ${bd}`,cursor:'pointer',fontSize:11,fontWeight:700,color:'#10b981',display:'flex',alignItems:'center',justifyContent:'center',gap:6}}>
+                          {showGroupTable?'▲ Close group table':'⊞ Manage all groups & members'}
+                        </button>
                       </div>
                     );
                   })()}
@@ -8389,9 +8396,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           </div>
         );
       })()}
-      {groupModal && (() => {
+      {groupModal && showGroupTable && (() => {
         const hub = nodes.find(n => n.id === groupModal.hubId);
-        if (!hub) { setGroupModal(null); return null; }
+        if (!hub) { setGroupModal(null);setShowGroupTable(false); return null; }
 
         // All non-hub, non-flower people INCLUDING Me
         const people = nodes.filter(n => n.type !== 'hub' && n.type !== 'flower');
@@ -8491,7 +8498,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         return (
           <div
             style={{ position:'fixed', top:0,left:0,right:0,bottom:0, zIndex:200, background:'rgba(0,0,0,0.55)', display:'flex', alignItems:'center', justifyContent:'center' }}
-            onClick={e => { if (e.target === e.currentTarget) setGroupModal(null); }}
+            onClick={e => { if (e.target === e.currentTarget) setGroupModal(null);setShowGroupTable(false); }}
           >
             <div style={{ background:bg, border:`1px solid ${border}`, borderRadius:16, width:'min(96vw, 780px)', maxHeight:'85vh', display:'flex', flexDirection:'column', boxShadow:'0 25px 60px rgba(0,0,0,0.5)', overflow:'hidden' }}>
 
@@ -8504,7 +8511,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   style={{ flex:1, background:'transparent', border:'none', outline:'none', fontSize:17, fontWeight:700, color:text }}
                 />
                 <button
-                  onClick={() => setGroupModal(null)}
+                  onClick={() => setGroupModal(null);setShowGroupTable(false)}
                   style={{ padding:'5px 12px', borderRadius:8, background:dm?'#334155':'#e2e8f0', border:'none', color:text, cursor:'pointer', fontSize:13, fontWeight:600, flexShrink:0 }}
                 >Done</button>
               </div>
@@ -8522,7 +8529,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               <div style={{ padding:'12px 24px', borderBottom:`1px solid ${border}`, display:'flex', gap:10 }}>
                 <button
                   onClick={() => {
-                    setGroupModal(null);
+                    setGroupModal(null);setShowGroupTable(false);
                     setSelectForGroupMode(groupModal.hubId);
                   }}
                   style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 16px', borderRadius:8, background:'#16a34a', color:'white', border:'none', cursor:'pointer', fontSize:13, fontWeight:600 }}
@@ -8531,7 +8538,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 </button>
                 <button
                   onClick={() => {
-                    setGroupModal(null);
+                    setGroupModal(null);setShowGroupTable(false);
                     setAddFriendForms(prev => [...prev, { id:'form_'+Date.now(), name:'', parentId: hub.id }]);
                   }}
                   style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 16px', borderRadius:8, background:'#0ea5e9', color:'white', border:'none', cursor:'pointer', fontSize:13, fontWeight:600 }}
@@ -8622,7 +8629,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 <button
                   onClick={()=>{
                     if(!hub.partnerFlower){
-                      setGroupModal(null);
+                      setGroupModal(null);setShowGroupTable(false);
                       setSelectedNodeId(hub.id);
                       setPfSelectedPart('main');setPfColorPickerFor(null);setPfTab('design');
                       setPartnerFlowerEditor(hub.id);
@@ -8680,7 +8687,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   snapshot();
                   setNodes(p=>p.filter(n=>n.id!==hub.id));
                   setLinks(p=>p.filter(l=>l.source!==hub.id&&l.target!==hub.id));
-                  setGroupModal(null);
+                  setGroupModal(null);setShowGroupTable(false);
                   showToast('🗑 Group deleted');
                 }} style={{padding:'6px 10px',borderRadius:8,background:'rgba(239,68,68,0.1)',color:'#ef4444',border:'1px solid rgba(239,68,68,0.3)',cursor:'pointer',fontSize:11,fontWeight:700,flexShrink:0}}>
                   🗑 Delete
