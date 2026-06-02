@@ -7,7 +7,7 @@ import {
   BookUser
 } from 'lucide-react';
 
-const APP_VERSION = '3.0';
+const APP_VERSION = '3.1';
 const INTERACTION_DISTANCE = 70;
 const TIER_COLORS_GLOBAL = ['#bef264','#84cc16','#166534','#3b82f6','#9333ea'];
 const PRIMARY_GROUP_COLORS = ['#ef4444','#3b82f6','#f59e0b','#10b981','#8b5cf6','#ec4899','#06b6d4','#f97316'];
@@ -583,6 +583,17 @@ function AppInner() {
   const [photoBorderMode, setPhotoBorderMode] = useState('none');
   const [showVineBorders, setShowVineBorders] = useState(true);
   const [showVineTuner, setShowVineTuner] = useState(false);
+  // Surrounding flowers settings
+  const [surroundFlowerSettings, setSurroundFlowerSettings] = useState({
+    enabled: true,
+    minSize: 8,      // px min flower radius
+    maxSize: 22,     // px max flower radius
+    count: 5,        // base count per person (manual mode)
+    spread: 80,      // how far along vine from node (px)
+    useCalc: true,   // use calculated mode based on tier
+    showMain: true,  // show main flower around photo
+    showSurround: true, // show surrounding flowers on vines
+  });
   const [vineBorderParams, setVineBorderParams] = useState({
     blobArcRadius: 1.05,
     blobSagDepth:  0.38,
@@ -984,7 +995,7 @@ function AppInner() {
       if (now - lastTime < 400) {
         const tappedNode = nodes.find(n => n.id === ptr.nodeId);
         if (tapCount >= 3 && tappedNode?.type === 'hub') {
-          // Triple-tap hub: toggle collapse
+          // Triple-tap hub: collapse/expand
           setCollapsedGroups(prev =>
             prev.includes(ptr.nodeId) ? prev.filter(id => id !== ptr.nodeId) : [...prev, ptr.nodeId]
           );
@@ -992,7 +1003,10 @@ function AppInner() {
           lastTapRef.current.delete(ptr.nodeId);
           lastTapRef.current.delete(ptr.nodeId + '_count');
         } else if (tapCount >= 2) {
-          if (tappedNode?.type === 'hub') setGroupModal({ hubId: ptr.nodeId });
+          if (tappedNode?.type === 'hub') {
+            // Double-tap hub: open/close group modal
+            setGroupModal(prev => prev?.hubId === ptr.nodeId ? null : { hubId: ptr.nodeId });
+          }
           else if (tappedNode?.type === 'flower') {
             // Double-tap any flower: cycle border mode (unless locked)
             const flowerNode = nodes.find(n => n.dimKey === tappedNode.dimKey);
@@ -1015,6 +1029,8 @@ function AppInner() {
           lastTapRef.current.set(ptr.nodeId + '_count', tapCount);
         }
       } else {
+        // Single tap — select the node to open sidebar
+        if (tappedNode?.type === 'hub') setSelectedNodeId(ptr.nodeId);
         lastTapRef.current.set(ptr.nodeId, now);
         lastTapRef.current.set(ptr.nodeId + '_count', 1);
       }
@@ -2634,6 +2650,46 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         </button>
                       </div>
                     )}
+                    {/* Surrounding flowers settings */}
+                    <div style={{padding:'10px 0',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}>
+                      <div style={{fontSize:13,fontWeight:700,color:theme.darkMode?'#94a3b8':'#64748b',marginBottom:8}}>🌸 Person Flowers</div>
+                      {[
+                        {label:'Main flower (around photo)', key:'showMain'},
+                        {label:'Surrounding flowers (on vines)', key:'showSurround'},
+                        {label:'Use tier-calculated count', key:'useCalc'},
+                      ].map(row=>(
+                        <div key={row.key} style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:6}}>
+                          <span style={{fontSize:12,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>{row.label}</span>
+                          <input type="checkbox" checked={surroundFlowerSettings[row.key]} onChange={e=>setSurroundFlowerSettings(p=>({...p,[row.key]:e.target.checked}))} style={{width:16,height:16,accentColor:'#f59e0b'}}/>
+                        </div>
+                      ))}
+                      {surroundFlowerSettings.showSurround && (()=>{
+                        const dm=theme.darkMode;
+                        const setS=(k,v)=>setSurroundFlowerSettings(p=>({...p,[k]:v}));
+                        const sliders=[
+                          {key:'minSize',label:'Min size',min:4,max:30,step:1,unit:'px'},
+                          {key:'maxSize',label:'Max size',min:8,max:60,step:1,unit:'px'},
+                          {key:'spread', label:'Spread from node',min:20,max:200,step:5,unit:'px'},
+                          ...(!surroundFlowerSettings.useCalc?[{key:'count',label:'Count per person',min:1,max:20,step:1,unit:''}]:[]),
+                        ];
+                        return (
+                          <div style={{marginTop:4}}>
+                            {sliders.map(s=>(
+                              <div key={s.key} style={{marginBottom:6}}>
+                                <div style={{display:'flex',justifyContent:'space-between',marginBottom:2}}>
+                                  <span style={{fontSize:11,color:dm?'#94a3b8':'#64748b'}}>{s.label}</span>
+                                  <span style={{fontSize:11,fontWeight:700,color:'#f59e0b'}}>{surroundFlowerSettings[s.key]}{s.unit}</span>
+                                </div>
+                                <input type="range" min={s.min} max={s.max} step={s.step}
+                                  value={surroundFlowerSettings[s.key]}
+                                  onChange={e=>setS(s.key,parseFloat(e.target.value))}
+                                  style={{width:'100%',accentColor:'#f59e0b'}}/>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })()}
+                    </div>
                     <div style={{padding:'12px 0',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}>
                       <div style={{fontSize:13,fontWeight:700,color:theme.darkMode?'#94a3b8':'#64748b',marginBottom:8}}>⬡ Grid Style</div>
                       <div style={{display:'flex',gap:6}}>{[{id:'hex',label:'Hex'},{id:'hexSmall',label:'Small Hex'},{id:'square',label:'Square'}].map(g=>(
@@ -3439,133 +3495,165 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 </div>
               )}
 
-              {selectedNode.type === 'hub' && (
-                <>
-                  <div className="text-center p-4 rounded-xl border" style={{ backgroundColor: theme.darkMode ? 'rgba(16,185,129,0.1)' : '#f0fdf4', borderColor: theme.darkMode ? 'rgba(16,185,129,0.3)' : '#bbf7d0' }}>
-                    <TreePine className="w-8 h-8 mx-auto text-emerald-600 mb-2" />
+              {selectedNode.type === 'hub' && (()=>{
+                const dm = theme.darkMode;
+                const sub = dm?'#94a3b8':'#64748b';
+                const bd = dm?'#334155':'#e2e8f0';
+                const bg2 = dm?'#1e293b':'#f8fafc';
+                const hubId = selectedNode.id;
+
+                // Members of this group
+                const memberIds = new Set(links.filter(l=>l.source===hubId||l.target===hubId).map(l=>l.source===hubId?l.target:l.source));
+                const members = nodes.filter(n=>memberIds.has(n.id)&&n.type!=='flower');
+
+                return (
+                  <>
+                  {/* Group name */}
+                  <div style={{textAlign:'center',padding:'8px 0 12px'}}>
+                    <div style={{width:52,height:52,borderRadius:'50%',background:groupColors[hubId]||'#10b981',margin:'0 auto 10px',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                      <TreePine size={26} color="white"/>
+                    </div>
                     <input type="text"
                       value={selectedNode.label === 'New Group' ? '' : selectedNode.label || ''}
-                      placeholder="New Group"
+                      placeholder="Group Name"
                       autoCapitalize="words"
-                      onChange={e => {
-                        const val = e.target.value.replace(/\b\w/g, c => c.toUpperCase());
-                        updateSelectedNode('label', val || 'New Group');
-                      }}
-                      onFocus={e => { if (selectedNode.label === 'New Group') e.target.select(); }}
-                      className={`w-full text-center font-bold text-lg bg-transparent border-b outline-none focus:border-emerald-500 ${theme.darkMode ? 'text-slate-100 placeholder-slate-500 border-slate-600' : 'text-slate-900 placeholder-slate-400 border-slate-300'}`}
-                    />
+                      onChange={e=>updateSelectedNode('label',e.target.value.replace(/\b\w/g,c=>c.toUpperCase())||'New Group')}
+                      style={{width:'100%',textAlign:'center',fontWeight:800,fontSize:20,background:'transparent',border:'none',outline:'none',color:dm?'#e2e8f0':'#1e293b'}}/>
                   </div>
 
-                  {/* Group flower */}
-                  <button
-                    onClick={()=>{setPfSelectedPart('main');setPfColorPickerFor(null);setPfTab('design');setPartnerFlowerEditor(selectedNodeId);}}
-                    style={{width:'100%',borderRadius:12,border:'2px solid '+(theme.darkMode?'#334155':'#e2e8f0'),background:theme.darkMode?'#1e293b':'#f8fafc',cursor:'pointer',padding:'8px 12px',display:'flex',alignItems:'center',gap:10}}>
-                    <svg width={36} height={36} viewBox="-22 -22 44 44" style={{flexShrink:0}}>
-                      {selectedNode.partnerFlower ? (()=>{
-                        const pf=selectedNode.partnerFlower;
-                        const pr=10*(1+(pf.petalLength||0.55)),pw=pr*0.65;
-                        const mainPath=Array.from({length:pf.petals||6},(_,pi)=>{
-                          const pa=(pi/(pf.petals||6))*Math.PI*2,tx=Math.cos(pa)*pr,ty=Math.sin(pa)*pr,perpA=pa+Math.PI*0.5;
-                          const c1x=Math.cos(pa)*pr*0.35+Math.cos(perpA)*pw*0.6,c1y=Math.sin(pa)*pr*0.35+Math.sin(perpA)*pw*0.6;
-                          const c2x=Math.cos(pa)*pr*0.85+Math.cos(perpA)*pw*0.5,c2y=Math.sin(pa)*pr*0.85+Math.sin(perpA)*pw*0.5;
-                          const c3x=Math.cos(pa)*pr*0.85-Math.cos(perpA)*pw*0.5,c3y=Math.sin(pa)*pr*0.85-Math.sin(perpA)*pw*0.5;
-                          const c4x=Math.cos(pa)*pr*0.35-Math.cos(perpA)*pw*0.6,c4y=Math.sin(pa)*pr*0.35-Math.sin(perpA)*pw*0.6;
-                          return 'M 0,0 C '+c1x+','+c1y+' '+c2x+','+c2y+' '+tx+','+ty+' C '+c3x+','+c3y+' '+c4x+','+c4y+' 0,0';
-                        }).join(' ');
-                        return (<><path d={mainPath} fill={pf.petalColor||'#10b981'}/><circle r={6} fill={theme.darkMode?'#1e293b':'white'} stroke={pf.borderColor||pf.petalColor} strokeWidth="1.5"/></>);
-                      })() : (
-                        <text textAnchor="middle" dominantBaseline="middle" fontSize="22">🌸</text>
-                      )}
-                    </svg>
-                    <div style={{textAlign:'left',flex:1,minWidth:0}}>
-                      <div style={{fontSize:12,fontWeight:700,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>
-                        {selectedNode.partnerFlower ? 'Group Flower' : 'Add Group Flower'}
-                      </div>
-                      <div style={{fontSize:10,color:theme.darkMode?'#64748b':'#94a3b8',marginTop:1}}>
-                        {selectedNode.partnerFlower
-                          ? (selectedNode.groupFlowerActive!==false
-                              ? '✅ On — showing on all members'
-                              : '⭕ Off — members show personal flowers')
-                          : 'Design a shared flower for this group'}
-                      </div>
-                    </div>
-                    {/* Toggle on/off */}
-                    {selectedNode.partnerFlower && (
-                      <button
-                        onPointerDown={e=>{e.stopPropagation();}}
-                        onClick={e=>{e.stopPropagation();updateSelectedNode('groupFlowerActive',selectedNode.groupFlowerActive===false?true:false);showToast(selectedNode.groupFlowerActive===false?'🌸 Group flower on':'⭕ Group flower off');}}
-                        style={{flexShrink:0,width:42,height:24,borderRadius:12,border:'none',cursor:'pointer',
-                          background:selectedNode.groupFlowerActive===false?'#334155':'#10b981',
-                          position:'relative',transition:'background 0.2s'}}>
-                        <div style={{position:'absolute',top:3,width:18,height:18,borderRadius:'50%',background:'white',transition:'left 0.2s',
-                          left:selectedNode.groupFlowerActive===false?3:21}}/>
-                      </button>
-                    )}
-                  </button>
+                  {/* Action row: Flower + Key + Vine toggle */}
+                  <div style={{display:'flex',gap:6,marginBottom:8}}>
+                    {/* Flower button — with popup menu */}
+                    {(()=>{
+                      const [flowerMenuOpen, setFlowerMenuOpen] = React.useState(false);
+                      return (
+                        <div style={{flex:1,position:'relative'}}>
+                          <button onClick={()=>setFlowerMenuOpen(p=>!p)}
+                            style={{width:'100%',padding:'8px 6px',borderRadius:10,border:`1.5px solid ${selectedNode.partnerFlower&&selectedNode.groupFlowerActive!==false?'#10b981':bd}`,background:selectedNode.partnerFlower&&selectedNode.groupFlowerActive!==false?'#10b98118':bg2,cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',gap:3}}>
+                            <svg width={22} height={22} viewBox="-22 -22 44 44">
+                              {selectedNode.partnerFlower?(()=>{
+                                const pf=selectedNode.partnerFlower,pr=10*(1+(pf.petalLength||0.55)),pw=pr*0.65;
+                                const mp=Array.from({length:pf.petals||6},(_,pi)=>{const pa=(pi/(pf.petals||6))*Math.PI*2,tx=Math.cos(pa)*pr,ty=Math.sin(pa)*pr,pp=pa+Math.PI*0.5;return `M 0,0 C ${Math.cos(pa)*pr*0.35+Math.cos(pp)*pw*0.6},${Math.sin(pa)*pr*0.35+Math.sin(pp)*pw*0.6} ${Math.cos(pa)*pr*0.85+Math.cos(pp)*pw*0.5},${Math.sin(pa)*pr*0.85+Math.sin(pp)*pw*0.5} ${tx},${ty} C ${Math.cos(pa)*pr*0.85-Math.cos(pp)*pw*0.5},${Math.sin(pa)*pr*0.85-Math.sin(pp)*pw*0.5} ${Math.cos(pa)*pr*0.35-Math.cos(pp)*pw*0.6},${Math.sin(pa)*pr*0.35-Math.sin(pp)*pw*0.6} 0,0`;}).join(' ');
+                                return(<><path d={mp} fill={pf.petalColor||'#10b981'}/><circle r={5} fill={dm?'#1e293b':'white'} stroke={pf.borderColor||pf.petalColor} strokeWidth="1.5"/></>);
+                              })():<text textAnchor="middle" dominantBaseline="middle" fontSize="16">🌸</text>}
+                            </svg>
+                            <span style={{fontSize:9,fontWeight:700,color:sub}}>{selectedNode.partnerFlower?'Flower ▾':'Add Flower'}</span>
+                          </button>
+                          {flowerMenuOpen && (
+                            <div style={{position:'absolute',top:'100%',left:0,right:0,zIndex:50,marginTop:4,borderRadius:10,overflow:'hidden',boxShadow:'0 4px 20px rgba(0,0,0,0.3)',border:`1px solid ${bd}`,background:dm?'#1e293b':'white'}}>
+                              <button onClick={()=>{setFlowerMenuOpen(false);setPfSelectedPart('main');setPfColorPickerFor(null);setPfTab('design');setPartnerFlowerEditor(hubId);}}
+                                style={{width:'100%',padding:'10px 14px',background:'none',border:'none',cursor:'pointer',textAlign:'left',fontSize:12,fontWeight:700,color:dm?'#e2e8f0':'#1e293b',display:'flex',alignItems:'center',gap:8}}>
+                                ✏️ {selectedNode.partnerFlower?'Edit Flower':'Add Flower'}
+                              </button>
+                              {selectedNode.partnerFlower && (
+                                <button onClick={()=>{setFlowerMenuOpen(false);updateSelectedNode('groupFlowerActive',selectedNode.groupFlowerActive===false?true:false);showToast(selectedNode.groupFlowerActive===false?'🌸 Group flower on':'⭕ Group flower off');}}
+                                  style={{width:'100%',padding:'10px 14px',background:'none',border:'none',borderTop:`1px solid ${bd}`,cursor:'pointer',textAlign:'left',fontSize:12,fontWeight:700,color:selectedNode.groupFlowerActive===false?'#94a3b8':'#10b981',display:'flex',alignItems:'center',gap:8}}>
+                                  {selectedNode.groupFlowerActive===false?'⭕ Turn Flower On':'✅ Turn Flower Off'}
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
 
-                  {/* Vine border blob colour + opacity */}
+                    {/* Key button */}
+                    <button onClick={()=>setShowMapKey(p=>!p)}
+                      style={{flex:1,padding:'8px 6px',borderRadius:10,border:`1.5px solid ${showMapKey?'#3b82f6':bd}`,background:showMapKey?'#3b82f618':bg2,cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',gap:3}}>
+                      <span style={{fontSize:20}}>🔑</span>
+                      <span style={{fontSize:9,fontWeight:700,color:showMapKey?'#3b82f6':sub}}>{showMapKey?'Key on':'Key'}</span>
+                    </button>
+
+                    {/* Vine border toggle */}
+                    <button onClick={()=>setShowVineBorders(p=>!p)}
+                      style={{flex:1,padding:'8px 6px',borderRadius:10,border:`1.5px solid ${showVineBorders?'#10b981':bd}`,background:showVineBorders?'#10b98118':bg2,cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',gap:3}}>
+                      <span style={{fontSize:20}}>🌿</span>
+                      <span style={{fontSize:9,fontWeight:700,color:showVineBorders?'#10b981':sub}}>{showVineBorders?'Vine on':'Vine off'}</span>
+                    </button>
+                  </div>
+
+                  {/* Blob colour (only when vine borders on) */}
                   {showVineBorders && (
-                    <div style={{borderRadius:10,border:'1px solid '+(theme.darkMode?'#334155':'#e2e8f0'),padding:'10px 12px',display:'flex',flexDirection:'column',gap:8}}>
-                      <span style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:1,color:theme.darkMode?'#64748b':'#94a3b8'}}>🌿 Vine Blob Colour</span>
-                      {/* Colour swatches + transparent option */}
-                      <div style={{display:'flex',gap:5,flexWrap:'wrap',alignItems:'center'}}>
-                        {['#14532d','#15803d','#22c55e','#4ade80','#84cc16','#ca8a04','#b45309','#92400e','#ef4444','#3b82f6','#8b5cf6','#ec4899'].map(c=>(
-                          <button key={c} onClick={()=>updateSelectedNode('vineBlobColor',c)}
-                            style={{width:20,height:20,borderRadius:'50%',background:c,border:'2.5px solid '+(selectedNode.vineBlobColor===c?'white':'transparent'),boxShadow:selectedNode.vineBlobColor===c?'0 0 0 2px '+c:'none',cursor:'pointer',flexShrink:0}}/>
-                        ))}
-                        {/* Transparent */}
-                        <button onClick={()=>updateSelectedNode('vineBlobColor',null)}
-                          style={{width:20,height:20,borderRadius:'50%',background:'transparent',border:'1.5px dashed #94a3b8',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',fontSize:9,color:'#94a3b8',flexShrink:0}}>✕</button>
-                      </div>
-                      {/* Opacity slider */}
-                      <div style={{display:'flex',alignItems:'center',gap:8}}>
-                        <span style={{fontSize:10,color:theme.darkMode?'#94a3b8':'#64748b',width:50,flexShrink:0}}>Opacity</span>
+                    <div style={{borderRadius:10,border:`1px solid ${bd}`,padding:'9px 12px',marginBottom:8}}>
+                      <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:6}}>
+                        <span style={{fontSize:11,fontWeight:700,color:sub,flex:1}}>🌿 Blob colour</span>
                         <input type="range" min={0} max={1} step={0.05}
                           value={selectedNode.vineBlobOpacity??0.9}
                           onChange={e=>updateSelectedNode('vineBlobOpacity',parseFloat(e.target.value))}
-                          style={{flex:1,accentColor:'#10b981'}}/>
-                        <span style={{fontSize:10,color:theme.darkMode?'#94a3b8':'#64748b',width:28,textAlign:'right',flexShrink:0}}>
-                          {Math.round((selectedNode.vineBlobOpacity??0.9)*100)}%
-                        </span>
+                          style={{width:80,accentColor:'#10b981'}}/>
+                        <span style={{fontSize:10,color:sub,width:28,textAlign:'right'}}>{Math.round((selectedNode.vineBlobOpacity??0.9)*100)}%</span>
+                      </div>
+                      <div style={{display:'flex',gap:4,flexWrap:'wrap',alignItems:'center'}}>
+                        {['#14532d','#15803d','#22c55e','#4ade80','#84cc16','#ca8a04','#b45309','#92400e','#ef4444','#3b82f6','#8b5cf6','#ec4899'].map(c=>(
+                          <button key={c} onClick={()=>updateSelectedNode('vineBlobColor',c)}
+                            style={{width:20,height:20,borderRadius:'50%',background:c,border:`2.5px solid ${selectedNode.vineBlobColor===c?'white':'transparent'}`,boxShadow:selectedNode.vineBlobColor===c?`0 0 0 2px ${c}`:'none',cursor:'pointer',flexShrink:0}}/>
+                        ))}
+                        <button onClick={()=>updateSelectedNode('vineBlobColor',null)}
+                          style={{width:20,height:20,borderRadius:'50%',background:'transparent',border:'1.5px dashed #94a3b8',cursor:'pointer',fontSize:8,color:'#94a3b8',display:'flex',alignItems:'center',justifyContent:'center'}}>✕</button>
                       </div>
                     </div>
                   )}
 
-                  {(() => {
-                    const severed = archivedLinks.filter(l => l.source === selectedNode.id || l.target === selectedNode.id);
-                    if (severed.length === 0) return null;
+                  {/* Members panel — collapsible */}
+                  {(()=>{
+                    const [showMembers, setShowMembers] = React.useState(true);
                     return (
-                      <div className={`pt-4 border-t ${theme.darkMode ? 'border-slate-700' : 'border-slate-200'}`}>
-                        <h3 className="text-xs font-semibold uppercase tracking-wider mb-3 flex items-center" style={{ color: '#f97316' }}>
-                          ✂ Severed Members
-                        </h3>
-                        <div className="space-y-2">
-                          {severed.map((l, i) => {
-                            const otherId = l.source === selectedNode.id ? l.target : l.source;
-                            const other = nodes.find(n => n.id === otherId);
-                            const cutDate = new Date(l.cutAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-                            return (
-                              <div key={i} className={`flex items-center justify-between px-3 py-2 rounded-lg border ${theme.darkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-                                <div className="flex items-center space-x-2 min-w-0">
-                                  {other?.img && <img src={other.img} className="w-6 h-6 rounded-full object-cover flex-shrink-0" alt="" />}
-                                  <div className="min-w-0">
-                                    <p className="text-xs font-semibold truncate">{other?.label ?? otherId}</p>
-                                    <p className="text-[10px] opacity-50">Cut {cutDate}</p>
+                      <div style={{borderRadius:10,border:`1px solid ${bd}`,overflow:'hidden',marginBottom:8}}>
+                        <button onClick={()=>setShowMembers(p=>!p)}
+                          style={{width:'100%',padding:'9px 12px',background:bg2,border:'none',cursor:'pointer',display:'flex',alignItems:'center',gap:8}}>
+                          <span style={{fontSize:13}}>👥</span>
+                          <span style={{flex:1,textAlign:'left',fontSize:12,fontWeight:700,color:dm?'#e2e8f0':'#1e293b'}}>Members ({members.length})</span>
+                          <span style={{fontSize:11,color:sub}}>{showMembers?'▲':'▼'}</span>
+                        </button>
+                        {showMembers && (
+                          <div style={{maxHeight:220,overflowY:'auto'}}>
+                            {members.length===0?(
+                              <div style={{padding:16,textAlign:'center',color:sub,fontSize:12,fontStyle:'italic'}}>No members yet — drag people onto this group</div>
+                            ):members.map(m=>{
+                              const ml=getLevel(m.interactionScore||0,m);
+                              return (
+                                <div key={m.id} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 12px',borderTop:`1px solid ${bd}`,cursor:'pointer'}}
+                                  onClick={()=>setSelectedNodeId(m.id)}>
+                                  <img src={m.img} style={{width:32,height:32,borderRadius:'50%',objectFit:'cover',border:`2px solid ${ml.color}`,flexShrink:0}}/>
+                                  <div style={{flex:1,minWidth:0}}>
+                                    <div style={{fontSize:12,fontWeight:700,color:dm?'#e2e8f0':'#1e293b',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{m.label}</div>
+                                    <div style={{fontSize:10,color:ml.color,fontWeight:600}}>{ml.emoji} {ml.label}</div>
                                   </div>
+                                  <button onClick={e=>{e.stopPropagation();snapshot();setLinks(p=>p.filter(l=>!(l.source===hubId&&l.target===m.id)&&!(l.target===hubId&&l.source===m.id)));}}
+                                    style={{width:22,height:22,borderRadius:'50%',background:'rgba(239,68,68,0.1)',color:'#ef4444',border:'none',cursor:'pointer',fontSize:13,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>×</button>
                                 </div>
-                                <button
-                                  onClick={() => restoreLink(l)}
-                                  className="ml-2 flex-shrink-0 px-2 py-1 rounded-md text-[10px] font-bold text-emerald-600 border border-emerald-500 hover:bg-emerald-500/10 transition-colors"
-                                >Restore</button>
-                              </div>
-                            );
-                          })}
-                        </div>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
                     );
                   })()}
-                </>
-              )}
+
+                  {/* Severed members */}
+                  {(()=>{
+                    const severed = archivedLinks.filter(l => l.source === hubId || l.target === hubId);
+                    if (severed.length === 0) return null;
+                    return (
+                      <div style={{borderRadius:10,border:`1px solid ${dm?'#7c3f00':'#fed7aa'}`,padding:'10px 12px',marginBottom:8}}>
+                        <div style={{fontSize:11,fontWeight:700,color:'#f97316',marginBottom:8}}>✂ Severed Members</div>
+                        {severed.map((l,i)=>{
+                          const otherId=l.source===hubId?l.target:l.source;
+                          const other=nodes.find(n=>n.id===otherId);
+                          return(
+                            <div key={i} style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
+                              {other?.img&&<img src={other.img} style={{width:24,height:24,borderRadius:'50%',objectFit:'cover'}}/>}
+                              <span style={{flex:1,fontSize:11,color:dm?'#e2e8f0':'#1e293b'}}>{other?.label||otherId}</span>
+                              <button onClick={()=>restoreLink(l)} style={{fontSize:10,fontWeight:700,color:'#10b981',background:'none',border:'1px solid #10b981',borderRadius:6,padding:'2px 8px',cursor:'pointer'}}>Restore</button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
+                  </>
+                );
+              })()}
 
               {/* Severed connections relevant to this node */}
               {(() => {
@@ -3939,18 +4027,16 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               // For each hull edge: arc CCW around node A (outer), then inward sag to node B
               const buildArchPath=(hull, hn, cen, sagDepth, arcSteps, sagSteps)=>{
                 const pts=[];
-                // Helper: CCW arc from angle a1 to a2 around node, choosing outer direction
+                // arcOuter: always take the LONG arc (>180°) — the short arc cuts inside the node
                 const arcOuter=(A, a1, a2)=>{
-                  const outAng=Math.atan2(A.y-cen.y, A.x-cen.x);
-                  // CCW arc: ensure it passes through outAng
-                  // Bring both into [outAng-π, outAng+π] — but allow full range by
-                  // choosing the direction that contains outAng
-                  const containsCCW=(s,e,t)=>{ let ee=e; while(ee<s)ee+=Math.PI*2; let tt=t; while(tt<s)tt+=Math.PI*2; return tt<=ee; };
                   let an1=a1, an2=a2;
-                  if(containsCCW(an1,an2,outAng)){
-                    while(an2<an1) an2+=Math.PI*2;
-                  } else {
-                    while(an2>an1) an2-=Math.PI*2;
+                  // Normalise to [an1, an1+2π)
+                  while(an2 < an1) an2 += Math.PI*2;
+                  while(an2 > an1 + Math.PI*2) an2 -= Math.PI*2;
+                  const shortSpan = an2 - an1;
+                  if(shortSpan < Math.PI) {
+                    // Short arc — flip to the long arc by going backwards
+                    an2 = an1 - (Math.PI*2 - shortSpan);
                   }
                   const res=[];
                   for(let s=0;s<=arcSteps;s++){
@@ -3964,9 +4050,12 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   const A=hull[i], B=hull[(i+1)%hn], P=hull[(i+hn-1)%hn];
                   const angAtoB=Math.atan2(B.y-A.y, B.x-A.x);
                   const angPtoA=Math.atan2(A.y-P.y, A.x-P.x);
+                  // arrivalAng: the point on A's circle FACING P (where previous sag ended)
+                  // = angPtoA + π (opposite to the P→A direction)
+                  const arrivalAng = angPtoA + Math.PI;
 
-                  // Arc around A from where previous sag arrived to where this sag leaves
-                  const arcPts=arcOuter(A, angPtoA, angAtoB);
+                  // Arc around A from arrival point to departure point (always outer/long arc)
+                  const arcPts=arcOuter(A, arrivalAng, angAtoB);
                   pts.push(...arcPts);
 
                   // Sag: inward bezier from A surface to B surface
@@ -4593,12 +4682,12 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   };
 
                   const LIFECYCLE_STYLES = {
-                    budding:     { scale: 0.2, wScale: 0.2,  lScale: 0.2,  color: '#bbf7d0', opacity: 0.9,  curl: 0.5 },
-                    growing:     { scale: 0.55,wScale: 0.55, lScale: 0.55, color: '#4ade80', opacity: 0.85, curl: 0.2 },
-                    full:        { scale: 1.0, wScale: 1.0,  lScale: 1.0,  color: null,       opacity: null, curl: 0 },
-                    shrivelling: { scale: 1.0, wScale: 0.60, lScale: 0.90, color: '#ca8a04', opacity: 0.8,  curl: 0.4 },
-                    brown:       { scale: 1.0, wScale: 0.55, lScale: 0.85, color: '#78350f', opacity: 0.65, curl: 0.7 },
-                    fallen:      { scale: 0,   wScale: 0,    lScale: 0,    color: null,       opacity: 0,    curl: 0 },
+                    budding:     { scale: 0.2,  wScale: 1.0,  lScale: 0.2,  color: '#bbf7d0', opacity: 0.9,  curl: 0.5 },
+                    growing:     { scale: 0.55, wScale: 1.0,  lScale: 0.55, color: '#4ade80', opacity: 0.85, curl: 0.2 },
+                    full:        { scale: 1.0,  wScale: 1.0,  lScale: 1.0,  color: null,       opacity: null, curl: 0 },
+                    shrivelling: { scale: 0.82, wScale: 1.0,  lScale: 0.82, color: '#ca8a04', opacity: 0.8,  curl: 0.3 },
+                    brown:       { scale: 0.68, wScale: 1.0,  lScale: 0.68, color: '#78350f', opacity: 0.65, curl: 0.5 },
+                    fallen:      { scale: 0,    wScale: 0,    lScale: 0,    color: null,       opacity: 0,    curl: 0 },
                   };
 
                   const LEAF_CHARS = {
@@ -4632,8 +4721,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       if (ls.scale === 0) continue; // fallen — skip
 
                       const baseLw = (lc.sizeBase + lc.sizeVar * sv) * leafTierScale;
-                      const lw = baseLw * ls.lScale;        // length
-                      const lh = lw * lc.aspectW * (ls.wScale / ls.lScale); // width independently scaled
+                      const lw = baseLw * ls.scale;           // length scaled uniformly
+                      const lh = lw * lc.aspectW;             // width maintains aspect ratio
                       const fill = ls.color || (theme.darkMode ? lc.colorDark : lc.colorLight);
                       const stroke = leafState === 'full' || leafState === 'growing' || leafState === 'budding'
                         ? (theme.darkMode ? '#0f2d1a' : '#14532d')
@@ -5178,6 +5267,62 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                             })}
                           </g>
                         );
+                      })()}
+                      {/* Surrounding flowers — small flowers placed on vines near this node */}
+                      {surroundFlowerSettings.showSurround && node.type === 'friend' && node.partnerFlower && (()=>{
+                        const pf = node.partnerFlower;
+                        const tier = (node.interactionScore||0) < 100 ? 1 : (node.interactionScore||0) < 300 ? 2 : (node.interactionScore||0) < 600 ? 3 : (node.interactionScore||0) < 1000 ? 4 : 5;
+                        // Tier position 0-1 within tier
+                        const tierBounds = [[0,100],[100,300],[300,600],[600,1000],[1000,1500]];
+                        const [tMin,tMax] = tierBounds[Math.min(4,tier-1)];
+                        const tierPos = Math.min(1,(((node.interactionScore||0)-tMin)/(tMax-tMin)));
+
+                        // Calculated count based on tier + position
+                        const calcCount = surroundFlowerSettings.useCalc
+                          ? Math.round(1 + tier * 1.5 + tierPos * 2.5)
+                          : surroundFlowerSettings.count;
+                        const count = Math.max(1, calcCount);
+
+                        // Size range
+                        const minS = surroundFlowerSettings.minSize;
+                        const maxS = surroundFlowerSettings.maxSize;
+                        const spread = surroundFlowerSettings.spread;
+
+                        // Degradation: same as leaf lifecycle
+                        const scoreHistory = node.scoreHistory || [];
+                        const now2 = Date.now(), HOUR = 3600000;
+                        const scoreThen = scoreHistory.length > 0
+                          ? (scoreHistory.find(h=>(now2-h.ts)>=48*HOUR)||scoreHistory[0]).score
+                          : (node.interactionScore||0);
+                        const delta = (node.interactionScore||0) - scoreThen;
+                        const degraded = delta < -50;
+                        const flowerColor = degraded ? '#ca8a04' : (pf.petalColor || '#f59e0b');
+                        const flowerOpacity = degraded ? 0.6 : 0.85;
+
+                        return Array.from({length:count},(_,fi)=>{
+                          // Place flowers at varying angles and distances from node
+                          const angle = (fi/count)*Math.PI*2 + fi*0.7;
+                          const dist = r + 8 + (fi/count)*spread;
+                          const fx = Math.cos(angle)*dist;
+                          const fy = Math.sin(angle)*dist;
+                          // Size varies within range
+                          const sv = 0.5 + 0.5*Math.abs(Math.sin(fi*2.3+node.id.length));
+                          const fr = minS + (maxS-minS)*sv;
+                          const PETALS = pf.petals||6;
+                          const fpr = fr*(1+(pf.petalLength??0.55));
+                          const fpw = fpr*0.5;
+                          const fpPath = Array.from({length:PETALS},(_,pi)=>{
+                            const pa=(pi/PETALS)*Math.PI*2+(fi*0.5);
+                            const tx=Math.cos(pa)*fpr,ty=Math.sin(pa)*fpr,pp=pa+Math.PI*0.5;
+                            return `M 0,0 C ${Math.cos(pa)*fpr*0.35+Math.cos(pp)*fpw*0.6},${Math.sin(pa)*fpr*0.35+Math.sin(pp)*fpw*0.6} ${Math.cos(pa)*fpr*0.85+Math.cos(pp)*fpw*0.5},${Math.sin(pa)*fpr*0.85+Math.sin(pp)*fpw*0.5} ${tx},${ty} C ${Math.cos(pa)*fpr*0.85-Math.cos(pp)*fpw*0.5},${Math.sin(pa)*fpr*0.85-Math.sin(pp)*fpw*0.5} ${Math.cos(pa)*fpr*0.35-Math.cos(pp)*fpw*0.6},${Math.sin(pa)*fpr*0.35-Math.sin(pp)*fpw*0.6} 0,0`;
+                          }).join(' ');
+                          return (
+                            <g key={fi} transform={`translate(${fx},${fy})`} opacity={flowerOpacity} style={{pointerEvents:'none'}}>
+                              <path d={fpPath} fill={flowerColor}/>
+                              <circle r={fr*0.22} fill={pf.centerColor||'#fef08a'} stroke={flowerColor} strokeWidth={0.5}/>
+                            </g>
+                          );
+                        });
                       })()}
                       {/* Name label — grey arc band inside circle bottom */}
                       <g clipPath={`url(#clip-${node.id})`} style={{pointerEvents:'none'}}>
