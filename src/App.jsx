@@ -7,7 +7,7 @@ import {
   BookUser
 } from 'lucide-react';
 
-const APP_VERSION = '3.0';
+const APP_VERSION = '3.48';
 const INTERACTION_DISTANCE = 70;
 const TIER_COLORS_GLOBAL = ['#bef264','#84cc16','#166534','#3b82f6','#9333ea'];
 const PRIMARY_GROUP_COLORS = ['#ef4444','#3b82f6','#f59e0b','#10b981','#8b5cf6','#ec4899','#06b6d4','#f97316'];
@@ -6638,6 +6638,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       {groupPhotoSrc && (() => {
         const dm = theme.darkMode;
         const CANVAS_W = 320;
+        const selectedRing = faceRings.find(r => r.id === selectedRingId) || faceRings[0] || null;
         const friendNodes = nodes.filter(n => n.type === 'friend' || n.id === 'me');
 
         const startDrag = (e, ringId, mode) => {
