@@ -1053,8 +1053,8 @@ function AppInner() {
           lastTapRef.current.set(ptr.nodeId + '_count', tapCount);
         }
       } else {
-        // First tap — select node to open sidebar
-        setSelectedNodeId(ptr.nodeId);
+        // First tap — select node to open sidebar (but not flower nodes)
+        if (tappedNode?.type !== 'flower') setSelectedNodeId(ptr.nodeId);
         lastTapRef.current.set(ptr.nodeId, now);
         lastTapRef.current.set(ptr.nodeId + '_count', 1);
       }
