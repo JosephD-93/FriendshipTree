@@ -344,6 +344,7 @@ function AppInner() {
   const groupPhotoSvgRef = useRef(null);
   const [tagNameInput, setTagNameInput] = useState('');
   const [faceDetecting, setFaceDetecting] = useState(false);
+  const [selectedRingId, setSelectedRingId] = useState(null);
   const faceApiLoadedRef = useRef(false);
   const origFlowerRef = useRef(null);
   const [partnerFlowerEditor, setPartnerFlowerEditor] = useState(null);
@@ -6820,16 +6821,19 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           onUp();
         };
 
-        // Ring drag start needs to work in image-space, accounting for zoom
-        const startDragZoom = (e, ringId, mode) => {
+        // Ring drag — auto-detect move vs resize based on where user touches
+        const startDragZoom = (e, ringId) => {
           e.stopPropagation();
           const rect = e.currentTarget.closest('.tagger-wrap').getBoundingClientRect();
           const clientX = e.touches ? e.touches[0].clientX : e.clientX;
           const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-          // Convert to image space
-          const img = toImg(clientX - rect.left, clientY - rect.top);
+          const imgPt = toImg(clientX - rect.left, clientY - rect.top);
           const ring = faceRings.find(r => r.id === ringId);
-          dragRingRef.current = {id:ringId, mode, sx:img.x, sy:img.y, ox:ring.x, oy:ring.y, or:ring.r};
+          const dist = Math.sqrt((imgPt.x-ring.x)**2+(imgPt.y-ring.y)**2);
+          // Touch within 65% of radius = move, outside = resize
+          const mode = dist > ring.r * 0.65 ? 'resize' : 'move';
+          setSelectedRingId(ringId);
+          dragRingRef.current = {id:ringId, mode, sx:imgPt.x, sy:imgPt.y, ox:ring.x, oy:ring.y, or:ring.r};
         };
 
         const onMoveZoom = (e) => {
@@ -6837,12 +6841,12 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           const rect = e.currentTarget.getBoundingClientRect();
           const clientX = e.touches ? e.touches[0].clientX : e.clientX;
           const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-          const img = toImg(clientX - rect.left, clientY - rect.top);
+          const imgPt = toImg(clientX - rect.left, clientY - rect.top);
           const {id, mode, sx, sy, ox, oy} = dragRingRef.current;
           setFaceRings(prev => prev.map(r => {
             if (r.id !== id) return r;
-            if (mode === 'move') return {...r, x:Math.max(r.r,Math.min(CANVAS_W-r.r,ox+(img.x-sx))), y:Math.max(r.r,Math.min(CANVAS_W-r.r,oy+(img.y-sy)))};
-            return {...r, r:Math.max(20,Math.min(CANVAS_W/2,Math.sqrt(Math.pow(img.x-r.x,2)+Math.pow(img.y-r.y,2))))};
+            if (mode === 'move') return {...r, x:ox+(imgPt.x-sx), y:oy+(imgPt.y-sy)};
+            return {...r, r:Math.max(12, Math.sqrt((imgPt.x-r.x)**2+(imgPt.y-r.y)**2))};
           }));
         };
 
@@ -6850,67 +6854,56 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         const detectFaces = async () => {
           setFaceDetecting(true);
           try {
-            // Load face-api.js from CDN if not already loaded
-            if (!faceApiLoadedRef.current) {
+            // Load face-api.js if not already loaded
+            if (!window.faceapi) {
               await new Promise((resolve, reject) => {
-                if (window.faceapi) { resolve(); return; }
                 const script = document.createElement('script');
-                script.src = 'https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js';
+                script.src = 'https://cdn.jsdelivr.net/npm/face-api.js/dist/face-api.min.js';
                 script.onload = resolve;
                 script.onerror = reject;
                 document.head.appendChild(script);
               });
-              // Load tiny models from CDN
-              const MODEL_URL = 'https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/weights';
-              await Promise.all([
-                window.faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
-                window.faceapi.nets.faceLandmark68TinyNet.loadFromUri(MODEL_URL),
-              ]);
+            }
+
+            if (!faceApiLoadedRef.current) {
+              const MODEL_URL = 'https://cdn.jsdelivr.net/npm/face-api.js/weights';
+              await window.faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
               faceApiLoadedRef.current = true;
             }
 
-            // Draw image to canvas — face-api works better with canvas
             const img = new Image();
             img.crossOrigin = 'anonymous';
-            await new Promise((resolve, reject) => {
-              img.onload = resolve;
-              img.onerror = reject;
-              img.src = groupPhotoSrc;
-            });
-            const canvas = document.createElement('canvas');
-            canvas.width = img.naturalWidth || 640;
-            canvas.height = img.naturalHeight || 480;
-            canvas.getContext('2d').drawImage(img, 0, 0);
+            await new Promise((res, rej) => { img.onload=res; img.onerror=rej; img.src=groupPhotoSrc; });
 
-            const options = new window.faceapi.TinyFaceDetectorOptions({
-              inputSize: 416,
-              scoreThreshold: 0.3,
-            });
-            const detections = await window.faceapi.detectAllFaces(canvas, options);
+            // Try multiple thresholds for better detection
+            let detections = [];
+            for (const threshold of [0.2, 0.3, 0.4]) {
+              const opts = new window.faceapi.TinyFaceDetectorOptions({inputSize:608, scoreThreshold:threshold});
+              detections = await window.faceapi.detectAllFaces(img, opts);
+              if (detections.length > 0) break;
+            }
 
             if (detections.length === 0) {
-              showToast('No faces detected — try adjusting the photo or place rings manually');
+              showToast('No faces found — try adding rings manually');
               setFaceDetecting(false);
               return;
             }
 
-            // Scale detections from canvas coords to CANVAS_W
-            const scaleX = CANVAS_W / canvas.width;
-            const scaleY = CANVAS_W / canvas.height;
-
+            const scaleX = CANVAS_W / (img.naturalWidth || CANVAS_W);
+            const scaleY = CANVAS_W / (img.naturalHeight || CANVAS_W);
             const rings = detections.map((det, i) => {
               const box = det.box;
               const cx = (box.x + box.width/2) * scaleX;
               const cy = (box.y + box.height/2) * scaleY;
-              const r = Math.max(box.width, box.height) * 0.6 * Math.max(scaleX, scaleY);
-              return {id: Date.now()+i, x:cx, y:cy, r:Math.max(20, r), name:'', assignedNodeId:null};
+              const r = Math.max(box.width, box.height) * 0.62 * Math.max(scaleX, scaleY);
+              return {id: Date.now()+i, x:cx, y:cy, r:Math.max(16,r), name:'', assignedNodeId:null};
             });
-
             setFaceRings(rings);
-            showToast('Found ' + rings.length + ' face' + (rings.length===1?'':'s') + ' — adjust rings then continue');
+            setSelectedRingId(rings[0]?.id || null);
+            showToast(`Found ${rings.length} face${rings.length===1?'':'s'} — adjust rings then continue`);
           } catch(err) {
-            showToast('Detection failed — place rings manually');
-            console.error(err);
+            showToast('Auto-detect failed — add rings manually');
+            console.error('face-api error:', err);
           }
           setFaceDetecting(false);
         };
@@ -6961,26 +6954,54 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               <div ref={svgRef} style={{position:'absolute',top:0,left:0,transformOrigin:'0 0',willChange:'transform'}}>
                 <svg width={CANVAS_W} height={CANVAS_W} style={{display:'block',touchAction:'none',userSelect:'none'}}>
                   <image href={groupPhotoSrc} x="0" y="0" width={CANVAS_W} height={CANVAS_W} preserveAspectRatio="xMidYMid meet"/>
-                  {faceRings.map((ring, ri) => (
-                    <g key={ring.id}>
-                      <circle cx={ring.x} cy={ring.y} r={ring.r} fill="rgba(59,130,246,0.12)" stroke="#3b82f6" strokeWidth="2.5" strokeDasharray="6 3" style={{cursor:'move',touchAction:'none'}}
-                        onMouseDown={e=>startDragZoom(e,ring.id,'move')} onTouchStart={e=>{e.stopPropagation();startDragZoom(e,ring.id,'move');}}/>
-                      <circle cx={ring.x+ring.r*0.707} cy={ring.y+ring.r*0.707} r={8} fill="#3b82f6" style={{cursor:'nwse-resize',touchAction:'none'}}
-                        onMouseDown={e=>startDragZoom(e,ring.id,'resize')} onTouchStart={e=>{e.stopPropagation();startDragZoom(e,ring.id,'resize');}}/>
-                      <g style={{cursor:'pointer'}} onMouseDown={e=>{e.stopPropagation();setFaceRings(prev=>prev.filter(r=>r.id!==ring.id));}}>
+                  {faceRings.map((ring, ri) => {
+                    const isSelected = ring.id === selectedRingId;
+                    return (
+                    <g key={ring.id} onClick={()=>setSelectedRingId(ring.id)}>
+                      {/* Main draggable circle — inner for move, edge for resize */}
+                      <circle cx={ring.x} cy={ring.y} r={ring.r}
+                        fill={isSelected?"rgba(59,130,246,0.15)":"rgba(59,130,246,0.08)"}
+                        stroke={isSelected?"#60a5fa":"#3b82f6"} strokeWidth={isSelected?3:2}
+                        strokeDasharray={isSelected?"none":"6 3"}
+                        style={{cursor:'move',touchAction:'none'}}
+                        onMouseDown={e=>startDragZoom(e,ring.id)}
+                        onTouchStart={e=>{e.stopPropagation();startDragZoom(e,ring.id);}}/>
+                      {/* Centre dot */}
+                      <circle cx={ring.x} cy={ring.y} r={5} fill="#60a5fa" style={{pointerEvents:'none'}}/>
+                      <circle cx={ring.x} cy={ring.y} r={2} fill="white" style={{pointerEvents:'none'}}/>
+                      {/* Delete button */}
+                      <g style={{cursor:'pointer'}}
+                        onMouseDown={e=>{e.stopPropagation();setFaceRings(prev=>prev.filter(r=>r.id!==ring.id));}}
+                        onTouchStart={e=>{e.stopPropagation();setFaceRings(prev=>prev.filter(r=>r.id!==ring.id));}}>
                         <circle cx={ring.x-ring.r*0.707} cy={ring.y-ring.r*0.707} r={10} fill="#ef4444"/>
-                        <text x={ring.x-ring.r*0.707} y={ring.y-ring.r*0.707} textAnchor="middle" dominantBaseline="middle" fontSize="12" fill="white" style={{pointerEvents:'none'}}>x</text>
+                        <text x={ring.x-ring.r*0.707} y={ring.y-ring.r*0.707} textAnchor="middle" dominantBaseline="middle" fontSize="12" fill="white" style={{pointerEvents:'none'}}>✕</text>
                       </g>
                       <text x={ring.x} y={ring.y+ring.r+14} textAnchor="middle" fontSize="11" fontWeight="700" fill="white"
                         style={{filter:'drop-shadow(0 1px 2px rgba(0,0,0,0.8))',pointerEvents:'none'}}>{ring.name||('Face '+(ri+1))}</text>
                     </g>
-                  ))}
+                    );
+                  })}
                 </svg>
               </div>
             </div>
 
             {/* Bottom bar */}
-            <div style={{padding:'12px 20px 28px',flexShrink:0,display:'flex',flexDirection:'column',gap:8,background:dm?'#0f172a':'#1e293b'}}>
+            <div style={{padding:'10px 16px 24px',flexShrink:0,display:'flex',flexDirection:'column',gap:8,background:dm?'#0f172a':'#1e293b'}}>
+              {/* Radius slider for selected ring */}
+              {selectedRing && (
+                <div style={{display:'flex',alignItems:'center',gap:8,padding:'6px 0'}}>
+                  <span style={{fontSize:11,color:'#94a3b8',flexShrink:0,width:28}}>⊙ r</span>
+                  <button onMouseDown={e=>e.stopPropagation()} onClick={()=>setFaceRings(prev=>prev.map(r=>r.id===selectedRing.id?{...r,r:Math.max(12,r.r-2)}:r))}
+                    style={{width:28,height:28,borderRadius:6,background:'rgba(255,255,255,0.1)',color:'white',border:'none',cursor:'pointer',fontSize:16,flexShrink:0}}>−</button>
+                  <input type="range" min={12} max={160} step={1}
+                    value={selectedRing.r}
+                    onChange={e=>setFaceRings(prev=>prev.map(r=>r.id===selectedRing.id?{...r,r:parseInt(e.target.value)}:r))}
+                    style={{flex:1,accentColor:'#60a5fa'}}/>
+                  <button onMouseDown={e=>e.stopPropagation()} onClick={()=>setFaceRings(prev=>prev.map(r=>r.id===selectedRing.id?{...r,r:Math.min(160,r.r+2)}:r))}
+                    style={{width:28,height:28,borderRadius:6,background:'rgba(255,255,255,0.1)',color:'white',border:'none',cursor:'pointer',fontSize:16,flexShrink:0}}>+</button>
+                  <span style={{fontSize:11,color:'#60a5fa',fontWeight:700,width:28,textAlign:'right',flexShrink:0}}>{Math.round(selectedRing.r)}</span>
+                </div>
+              )}
               {/* Auto-detect button */}
               <button onClick={detectFaces} disabled={faceDetecting}
                 style={{width:'100%',padding:'10px',borderRadius:10,
