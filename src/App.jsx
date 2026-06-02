@@ -582,6 +582,15 @@ function AppInner() {
   const [tierPickMode, setTierPickMode] = useState(false);
   const [photoBorderMode, setPhotoBorderMode] = useState('none');
   const [showVineBorders, setShowVineBorders] = useState(true);
+  const [vineBorderParams, setVineBorderParams] = useState({
+    blobArcRadius: 1.05,
+    blobSagDepth:  0.38,
+    vineArcRadius: 1.05,
+    vineSagDepth:  0.38,
+    leavesInner:   1.0,   // multiplier for inner leaf count (0=none, 2=double)
+    leavesOuter:   1.0,   // multiplier for outer leaf count
+  });
+  const [showVineTuner, setShowVineTuner] = useState(false);
   const [groupColors, setGroupColors] = useState({});
   const [confirmModal, setConfirmModal] = useState(null);
   const [pinModal, setPinModal] = useState(null);
@@ -2505,6 +2514,47 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         color: theme.darkMode ? '#f1f5f9' : '#1e293b',
       }}>
       
+      {/* Floating vine border tuner */}
+      {showVineTuner && showVineBorders && (()=>{
+        const dm=theme.darkMode;
+        const bg=dm?'#1e293b':'white';
+        const txt=dm?'#e2e8f0':'#1e293b';
+        const sub=dm?'#94a3b8':'#64748b';
+        const setP=(k,v)=>setVineBorderParams(p=>({...p,[k]:v}));
+        const sliders=[
+          {key:'blobArcRadius', label:'Blob arc radius', min:0.5, max:2.5, step:0.05, unit:'×', color:'#3b82f6'},
+          {key:'blobSagDepth',  label:'Blob sag depth',  min:0.0, max:0.9, step:0.02, unit:'',  color:'#3b82f6'},
+          {key:'vineArcRadius', label:'Vine arc radius',  min:0.5, max:2.5, step:0.05, unit:'×', color:'#10b981'},
+          {key:'vineSagDepth',  label:'Vine sag depth',   min:0.0, max:0.9, step:0.02, unit:'',  color:'#10b981'},
+          {key:'leavesInner',   label:'Inner leaves',     min:0.0, max:3.0, step:0.25, unit:'×', color:'#22c55e'},
+          {key:'leavesOuter',   label:'Outer leaves',     min:0.0, max:3.0, step:0.25, unit:'×', color:'#22c55e'},
+        ];
+        return (
+          <div style={{position:'absolute',top:12,left:12,zIndex:300,
+            background:bg,borderRadius:14,padding:'12px 14px',
+            boxShadow:'0 4px 24px rgba(0,0,0,0.35)',
+            width:220,pointerEvents:'all'}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+              <span style={{fontSize:13,fontWeight:800,color:txt}}>🌿 Vine Tuner</span>
+              <button onClick={()=>setShowVineTuner(false)}
+                style={{background:'none',border:'none',cursor:'pointer',fontSize:16,color:sub,padding:0}}>✕</button>
+            </div>
+            {sliders.map(s=>(
+              <div key={s.key} style={{marginBottom:8}}>
+                <div style={{display:'flex',justifyContent:'space-between',marginBottom:2}}>
+                  <span style={{fontSize:11,color:sub}}>{s.label}</span>
+                  <span style={{fontSize:11,fontWeight:700,color:s.color}}>{vineBorderParams[s.key].toFixed(2)}{s.unit}</span>
+                </div>
+                <input type="range" min={s.min} max={s.max} step={s.step}
+                  value={vineBorderParams[s.key]}
+                  onChange={e=>setP(s.key,parseFloat(e.target.value))}
+                  style={{width:'100%',accentColor:s.color,height:3}}/>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
+
       {/* ── Draggable Edge-Snapping FAB ─────────────────────────────────────── */}
       {/* ── FAB ── */}
       {viewMode === "canvas" && <FabMenu
@@ -2577,6 +2627,17 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     {[{label:'Weathered Hubs',ctrl:<input type="checkbox" checked={theme.showWeathering} onChange={e=>setTheme(p=>({...p,showWeathering:e.target.checked}))} style={{width:18,height:18,accentColor:'#10b981'}}/>},{label:'🌙 Dark Mode',ctrl:<input type="checkbox" checked={theme.darkMode} onChange={e=>setTheme(p=>({...p,darkMode:e.target.checked}))} style={{width:18,height:18,accentColor:'#10b981'}}/>},{label:'🌿 Group Vine Borders',ctrl:<input type="checkbox" checked={showVineBorders} onChange={e=>setShowVineBorders(e.target.checked)} style={{width:18,height:18,accentColor:'#10b981'}}/>}].map((row,i)=>(
                       <div key={i} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 0',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}><span style={{fontSize:14,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>{row.label}</span>{row.ctrl}</div>
                     ))}
+                    {showVineBorders && (
+                      <div style={{padding:'10px 0',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}>
+                        <button onClick={()=>{setShowVineTuner(p=>!p);setViewMode('canvas');}}
+                          style={{width:'100%',padding:'9px',borderRadius:10,border:'1.5px solid #10b981',
+                            background:showVineTuner?'#10b981':'transparent',
+                            color:showVineTuner?'white':'#10b981',
+                            fontSize:13,fontWeight:700,cursor:'pointer'}}>
+                          {showVineTuner?'✓ Tuner open on map':'🎛 Open Vine Border Tuner on map'}
+                        </button>
+                      </div>
+                    )}
                     <div style={{padding:'12px 0',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}>
                       <div style={{fontSize:13,fontWeight:700,color:theme.darkMode?'#94a3b8':'#64748b',marginBottom:8}}>⬡ Grid Style</div>
                       <div style={{display:'flex',gap:6}}>{[{id:'hex',label:'Hex'},{id:'hexSmall',label:'Small Hex'},{id:'square',label:'Square'}].map(g=>(
@@ -3445,6 +3506,35 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       </button>
                     )}
                   </button>
+
+                  {/* Vine border blob colour + opacity */}
+                  {showVineBorders && (
+                    <div style={{borderRadius:10,border:'1px solid '+(theme.darkMode?'#334155':'#e2e8f0'),padding:'10px 12px',display:'flex',flexDirection:'column',gap:8}}>
+                      <span style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:1,color:theme.darkMode?'#64748b':'#94a3b8'}}>🌿 Vine Blob Colour</span>
+                      {/* Colour swatches + transparent option */}
+                      <div style={{display:'flex',gap:5,flexWrap:'wrap',alignItems:'center'}}>
+                        {['#14532d','#15803d','#22c55e','#4ade80','#84cc16','#ca8a04','#b45309','#92400e','#ef4444','#3b82f6','#8b5cf6','#ec4899'].map(c=>(
+                          <button key={c} onClick={()=>updateSelectedNode('vineBlobColor',c)}
+                            style={{width:20,height:20,borderRadius:'50%',background:c,border:'2.5px solid '+(selectedNode.vineBlobColor===c?'white':'transparent'),boxShadow:selectedNode.vineBlobColor===c?'0 0 0 2px '+c:'none',cursor:'pointer',flexShrink:0}}/>
+                        ))}
+                        {/* Transparent */}
+                        <button onClick={()=>updateSelectedNode('vineBlobColor',null)}
+                          style={{width:20,height:20,borderRadius:'50%',background:'transparent',border:'1.5px dashed #94a3b8',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',fontSize:9,color:'#94a3b8',flexShrink:0}}>✕</button>
+                      </div>
+                      {/* Opacity slider */}
+                      <div style={{display:'flex',alignItems:'center',gap:8}}>
+                        <span style={{fontSize:10,color:theme.darkMode?'#94a3b8':'#64748b',width:50,flexShrink:0}}>Opacity</span>
+                        <input type="range" min={0} max={1} step={0.05}
+                          value={selectedNode.vineBlobOpacity??0.9}
+                          onChange={e=>updateSelectedNode('vineBlobOpacity',parseFloat(e.target.value))}
+                          style={{flex:1,accentColor:'#10b981'}}/>
+                        <span style={{fontSize:10,color:theme.darkMode?'#94a3b8':'#64748b',width:28,textAlign:'right',flexShrink:0}}>
+                          {Math.round((selectedNode.vineBlobOpacity??0.9)*100)}%
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
                   {(() => {
                     const severed = archivedLinks.filter(l => l.source === selectedNode.id || l.target === selectedNode.id);
                     if (severed.length === 0) return null;
@@ -3791,151 +3881,247 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             <rect x="-50000" y="-50000" width="100000" height="100000"
               fill={theme.darkMode ? '#0f172a' : '#f8fafc'} />
 
-            {/* Group vine borders */}
+            {/* Group vine borders — parametric arch system */}
             {viewMode === 'canvas' && showVineBorders && nodes.filter(n=>n.type==='hub').map((hub, hubIdx) => {
-              const memberIds = new Set(
-                links.filter(l=>l.source===hub.id||l.target===hub.id)
-                  .map(l=>l.source===hub.id?l.target:l.source)
-              );
-              const members = nodes.filter(n=>memberIds.has(n.id)&&n.x!=null&&n.type!=='flower');
+              const memberIds = new Set(links.filter(l=>l.source===hub.id||l.target===hub.id).map(l=>l.source===hub.id?l.target:l.source));
+              const members = nodes.filter(n=>memberIds.has(n.id)&&n.x!=null&&n.type!=='flower'&&n.id!=='me');
               if (members.length < 2) return null;
 
+              // ── Tuning constants — driven by Appearance settings ──────────────
+              const BLOB_NODE_RADIUS_MULT = vineBorderParams.blobArcRadius;
+              const BLOB_NODE_RADIUS_ADD  = 0;
+              const BLOB_SAG_DEPTH        = vineBorderParams.blobSagDepth;
+              const BLOB_SAG_STEPS        = 16;
+              const BLOB_ARC_STEPS        = 20;
+              const BLOB_BLUR             = 14;
+              const BLOB_THRESHOLD        = 32;
+              const BLOB_THRESHOLD_SHIFT  = -14;
+
+              const VINE_NODE_RADIUS_MULT = vineBorderParams.vineArcRadius;
+              const VINE_NODE_RADIUS_ADD  = 0;
+              const VINE_SAG_DEPTH        = vineBorderParams.vineSagDepth;
+              const VINE_SAG_STEPS        = 24;
+              const VINE_ARC_STEPS        = 20;
+              // ─────────────────────────────────────────────────────────────────
+
               const avgScore = members.reduce((s,n)=>s+(n.interactionScore||0),0)/members.length;
-              const tier = avgScore<100?1:avgScore<300?2:avgScore<600?3:avgScore<1000?4:5;
-              const allBalls = [...members, hub].map(n=>({x:n.x, y:n.y, r:getNodeRadius(n)*0.85+14}));
+              const maxScore = Math.max(...members.map(n=>n.interactionScore||0));
+              const effectiveScore = avgScore + (maxScore-avgScore)*0.7;
+              const tier = effectiveScore<100?1:effectiveScore<300?2:effectiveScore<600?3:effectiveScore<1000?4:5;
 
-              // Bridge blobs between close pairs
-              const bridges = [];
-              allBalls.forEach((a,ai)=>{
-                allBalls.slice(ai+1).forEach(b=>{
-                  const dx=b.x-a.x, dy=b.y-a.y, dist=Math.sqrt(dx*dx+dy*dy);
-                  const avg=(a.r+b.r)/2;
-                  if(dist < avg*3.0){
-                    const steps = Math.ceil(dist/avg*1.5);
-                    for(let s=1;s<steps;s++){
-                      const t=s/steps;
-                      bridges.push({x:a.x+dx*t, y:a.y+dy*t, r:avg*0.55*(1-Math.abs(t-0.5)*1.2)});
-                    }
+              // Node positions with tunable radii
+              const blobNodes = members.map(n=>({x:n.x, y:n.y, r:getNodeRadius(n)*BLOB_NODE_RADIUS_MULT+BLOB_NODE_RADIUS_ADD}));
+              const vineNodes = members.map(n=>({x:n.x, y:n.y, r:getNodeRadius(n)*VINE_NODE_RADIUS_MULT+VINE_NODE_RADIUS_ADD}));
+
+              // Only include hub if close to centroid
+              const cx0=members.reduce((s,n)=>s+(n.x||0),0)/members.length;
+              const cy0=members.reduce((s,n)=>s+(n.y||0),0)/members.length;
+              const avgMR=members.reduce((s,n)=>s+getNodeRadius(n),0)/members.length;
+              const hubDist=Math.sqrt((hub.x-cx0)**2+(hub.y-cy0)**2);
+              if(hubDist < avgMR*2){
+                blobNodes.push({x:hub.x, y:hub.y, r:getNodeRadius(hub)*BLOB_NODE_RADIUS_MULT+BLOB_NODE_RADIUS_ADD});
+                vineNodes.push({x:hub.x, y:hub.y, r:getNodeRadius(hub)*VINE_NODE_RADIUS_MULT+VINE_NODE_RADIUS_ADD});
+              }
+
+              // Convex hull
+              const crossFn=(O,A,B)=>(A.x-O.x)*(B.y-O.y)-(A.y-O.y)*(B.x-O.x);
+              const buildHull=(pts)=>{
+                const s=[...pts].sort((a,b)=>a.x-b.x||a.y-b.y);
+                const lo=[],up=[];
+                for(const p of s){while(lo.length>=2&&crossFn(lo[lo.length-2],lo[lo.length-1],p)<=0)lo.pop();lo.push(p);}
+                for(const p of [...s].reverse()){while(up.length>=2&&crossFn(up[up.length-2],up[up.length-1],p)<=0)up.pop();up.push(p);}
+                return [...lo.slice(0,-1),...up.slice(0,-1)];
+              };
+              const blobHull=buildHull(blobNodes);
+              const vineHull=buildHull(vineNodes);
+              const bhn=blobHull.length, vhn=vineHull.length;
+              if(bhn<2||vhn<2) return null;
+
+              const centroid=(hull)=>({x:hull.reduce((s,p)=>s+p.x,0)/hull.length, y:hull.reduce((s,p)=>s+p.y,0)/hull.length});
+              const bCen=centroid(blobHull), vCen=centroid(vineHull);
+
+              // ── Arch path builder ─────────────────────────────────────────────
+              // For each hull edge: arc CCW around node A (outer), then inward sag to node B
+              const buildArchPath=(hull, hn, cen, sagDepth, arcSteps, sagSteps)=>{
+                const pts=[];
+                // Helper: CCW arc from angle a1 to a2 around node, choosing outer direction
+                const arcOuter=(A, a1, a2)=>{
+                  // Always take the LONG arc between a1 and a2 (>180°)
+                  // since the short arc cuts inside the node
+                  let an1=a1, an2=a2;
+                  // Normalise to [an1, an1+2π)
+                  while(an2 < an1) an2 += Math.PI*2;
+                  while(an2 > an1 + Math.PI*2) an2 -= Math.PI*2;
+                  const shortSpan = an2 - an1;
+                  if(shortSpan < Math.PI) {
+                    // Short arc — flip to long arc by going the other way
+                    an2 = an1 - (Math.PI*2 - shortSpan);
                   }
-                });
-              });
+                  const res=[];
+                  for(let s=0;s<=arcSteps;s++){
+                    const t=s/arcSteps, ang=an1+(an2-an1)*t;
+                    res.push({x:A.x+Math.cos(ang)*A.r, y:A.y+Math.sin(ang)*A.r});
+                  }
+                  return res;
+                };
 
-              const allBlobs = [...allBalls, ...bridges];
-              const filterId = 'mb-'+hub.id.replace(/[^a-z0-9]/gi,'');
+                for(let i=0;i<hn;i++){
+                  const A=hull[i], B=hull[(i+1)%hn], P=hull[(i+hn-1)%hn];
+                  const angAtoB=Math.atan2(B.y-A.y, B.x-A.x);
+                  const angPtoA=Math.atan2(A.y-P.y, A.x-P.x);
+                  // arrivalAng: point on A's circle facing TOWARD P (where previous sag ends)
+                  // = angPtoA + π (opposite side from the P→A direction)
+                  const arrivalAng = angPtoA + Math.PI;
 
-              // Bounding box
-              const xs=allBlobs.map(b=>b.x), ys=allBlobs.map(b=>b.y), rs=allBlobs.map(b=>b.r);
-              const x1=Math.min(...xs.map((x,i)=>x-rs[i]))-40;
-              const y1=Math.min(...ys.map((y,i)=>y-rs[i]))-40;
-              const x2=Math.max(...xs.map((x,i)=>x+rs[i]))+40;
-              const y2=Math.max(...ys.map((y,i)=>y+rs[i]))+40;
-              const fw=x2-x1, fh=y2-y1;
+                  // Arc around A from arrival to departure (long/outer arc)
+                  const arcPts=arcOuter(A, arrivalAng, angAtoB);
+                  pts.push(...arcPts);
 
-              // Vine strand colors matching friendship links
+                  // Sag: inward bezier from A surface to B surface
+                  const leaveX=A.x+Math.cos(angAtoB)*A.r, leaveY=A.y+Math.sin(angAtoB)*A.r;
+                  const arriveX=B.x+Math.cos(angAtoB+Math.PI)*B.r, arriveY=B.y+Math.sin(angAtoB+Math.PI)*B.r;
+                  const mx=(leaveX+arriveX)/2, my=(leaveY+arriveY)/2;
+                  const toCx=cen.x-mx, toCy=cen.y-my, toD=Math.sqrt(toCx*toCx+toCy*toCy)||1;
+                  const edgeLen=Math.sqrt((B.x-A.x)**2+(B.y-A.y)**2)||1;
+                  const sagX=mx+(toCx/toD)*edgeLen*sagDepth, sagY=my+(toCy/toD)*edgeLen*sagDepth;
+                  for(let s=0;s<=sagSteps;s++){
+                    const t=s/sagSteps,it=1-t;
+                    pts.push({x:it*it*leaveX+2*it*t*sagX+t*t*arriveX, y:it*it*leaveY+2*it*t*sagY+t*t*arriveY});
+                  }
+                }
+                return pts;
+              };
+
+              const blobPts=buildArchPath(blobHull,bhn,bCen,BLOB_SAG_DEPTH,BLOB_ARC_STEPS,BLOB_SAG_STEPS);
+              const vinePts=buildArchPath(vineHull,vhn,vCen,VINE_SAG_DEPTH,VINE_ARC_STEPS,VINE_SAG_STEPS);
+
+              // ── Blob filter ───────────────────────────────────────────────────
+              const blobCol=hub.vineBlobColor||'#15803d';
+              const blobOp=hub.vineBlobOpacity??0.85;
+              const filterId='mbf'+hub.id.replace(/[^a-z0-9]/gi,'');
+
+              const xs=blobPts.map(p=>p.x), ys=blobPts.map(p=>p.y);
+              const x1=Math.min(...xs)-60, y1=Math.min(...ys)-60;
+              const x2=Math.max(...xs)+60, y2=Math.max(...ys)+60;
+
+              // ── Vine strands ──────────────────────────────────────────────────
+              const totalVinePts=vinePts.length;
+              let perim=0;
+              for(let i=0;i<totalVinePts;i++){const a=vinePts[i],b=vinePts[(i+1)%totalVinePts];perim+=Math.sqrt((b.x-a.x)**2+(b.y-a.y)**2);}
+
               const coreWidthScale=[0,1,1.4,1.9,2.5,3.2][tier];
               const STRAND_DEFS=[
-                {width:3.2*coreWidthScale, colorDark:'#14532d', colorLight:'#15803d', role:'core',    blur:22, threshold:24, shift:-11},
-                {width:2.0,               colorDark:'#15803d', colorLight:'#22c55e', role:'wrapped',  blur:18, threshold:20, shift:-9},
-                {width:1.2,               colorDark:'#16a34a', colorLight:'#4ade80', role:'growing',  blur:14, threshold:18, shift:-8},
+                {width:3.2*coreWidthScale,colorDark:'#14532d',colorLight:'#15803d',role:'core',   wrapFreq:0,  wrapAmp:0},
+                {width:2.0,              colorDark:'#15803d',colorLight:'#22c55e',role:'wrapped', wrapFreq:1.4,wrapAmp:0.7},
+                {width:1.2,              colorDark:'#16a34a',colorLight:'#4ade80',role:'growing', wrapFreq:2.5,wrapAmp:1.0},
               ];
-              const activeCount = tier < 2 ? 1 : tier < 4 ? 2 : 3;
-              const strands = STRAND_DEFS.slice(0, activeCount);
+              const TIER_STRAND_SETS=[[],[0,1],[0,2,1],[0,2,1],[0,2,1],[0,2,1]];
+              const strandDefs=TIER_STRAND_SETS[tier].map(si=>STRAND_DEFS[si]).filter(Boolean);
+              const coreRadius=1.5+tier*0.8;
+
+              const activeStrands=strandDefs.map((def,renderIdx)=>{
+                const phaseBase=(renderIdx/strandDefs.length)*Math.PI*2+hubIdx*1.3;
+                const pts=vinePts.map((bp,idx)=>{
+                  const prev=vinePts[(idx+totalVinePts-1)%totalVinePts];
+                  const next=vinePts[(idx+1)%totalVinePts];
+                  const tdx=next.x-prev.x,tdy=next.y-prev.y,tlen=Math.sqrt(tdx*tdx+tdy*tdy)||1;
+                  const px=-tdy/tlen,py=tdx/tlen;
+                  const t=idx/totalVinePts;
+                  const coil=def.role==='core'?0:Math.sin(t*def.wrapFreq*Math.PI*2*vhn+phaseBase)*coreRadius*def.wrapAmp;
+                  return {x:bp.x+px*coil,y:bp.y+py*coil,t};
+                });
+                return {...def,pts,renderIdx};
+              });
+
+              // ── Leaves ────────────────────────────────────────────────────────
+              const LEAF_CHARS={
+                core:   {sizeBase:27,sizeVar:4.5,colorDark:'#14532d',colorLight:'#15803d',aspectW:0.32,bud:false},
+                wrapped:{sizeBase:12,sizeVar:2.4,colorDark:'#166534',colorLight:'#22c55e',aspectW:0.32,bud:false},
+                growing:{sizeBase:3, sizeVar:0.9,colorDark:'#16a34a',colorLight:'#4ade80',aspectW:0.32,bud:true},
+              };
+              const leafTierScale=0.7+tier*0.18;
+              const leafSpacing=Math.max(24,76-tier*8);
+              const allLeaves=[];
+              activeStrands.forEach(({pts,role,renderIdx})=>{
+                const lc=LEAF_CHARS[role]||LEAF_CHARS.core;
+                const leafCount=Math.max(0,Math.floor(perim/leafSpacing * vineBorderParams.leavesInner));
+                // Alternating both sides
+                for(let li=0;li<leafCount;li++){
+                  const t=(li+0.5+renderIdx*0.3)/leafCount;
+                  const ptIdx=Math.floor(t*(pts.length-1));
+                  const p=pts[ptIdx],p2=pts[(ptIdx+1)%pts.length];
+                  if(!p||!p2) continue;
+                  const tangAngle=Math.atan2(p2.y-p.y,p2.x-p.x)*180/Math.PI;
+                  const side=((li+renderIdx)%2===0)?1:-1;
+                  const sv=0.7+0.6*Math.abs(Math.sin(li*3.7+renderIdx*1.9+hubIdx));
+                  const baseLw=(lc.sizeBase+lc.sizeVar*sv)*leafTierScale;
+                  const lh=baseLw*lc.aspectW;
+                  const fill=theme.darkMode?lc.colorDark:lc.colorLight;
+                  const stroke=theme.darkMode?'#0f2d1a':'#14532d';
+                  allLeaves.push({x:p.x,y:p.y,angle:tangAngle+side*42,lw:baseLw,lh,fill,stroke,bud:lc.bud,opacity:lc.bud?0.7:0.88});
+                }
+                // Extra outward-only pass
+                const outerCount=Math.max(0,Math.floor(perim/(leafSpacing*0.55) * vineBorderParams.leavesOuter));
+                for(let li=0;li<outerCount;li++){
+                  const t=(li+0.15+renderIdx*0.2)/outerCount;
+                  const ptIdx=Math.floor(t*(pts.length-1));
+                  const p=pts[ptIdx],p2=pts[(ptIdx+1)%pts.length];
+                  if(!p||!p2) continue;
+                  const tangAngle=Math.atan2(p2.y-p.y,p2.x-p.x)*180/Math.PI;
+                  const sv=0.4+0.6*Math.abs(Math.sin(li*2.3+renderIdx*1.4+hubIdx*1.1));
+                  const lw=(lc.sizeBase*0.72+lc.sizeVar*0.5*sv)*leafTierScale;
+                  const lh=lw*lc.aspectW;
+                  const fill=theme.darkMode?lc.colorDark:lc.colorLight;
+                  const stroke=theme.darkMode?'#0f2d1a':'#14532d';
+                  allLeaves.push({x:p.x,y:p.y,angle:tangAngle+42,lw,lh,fill,stroke,bud:lc.bud,opacity:lc.bud?0.55:0.7});
+                }
+              });
 
               return (
                 <g key={hub.id} style={{pointerEvents:'none'}}>
                   <defs>
-                    {strands.map((s,si)=>(
-                      <filter key={filterId+si} id={filterId+'s'+si}
-                        x={x1} y={y1} width={fw} height={fh}
-                        filterUnits="userSpaceOnUse"
-                        colorInterpolationFilters="sRGB">
-                        <feGaussianBlur in="SourceGraphic" stdDeviation={s.blur} result="blur"/>
-                        <feColorMatrix in="blur" type="matrix"
-                          values={`1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 ${s.threshold} ${s.shift}`}/>
-                      </filter>
-                    ))}
+                    <filter id={filterId} x={x1} y={y1} width={x2-x1} height={y2-y1}
+                      filterUnits="userSpaceOnUse" colorInterpolationFilters="sRGB">
+                      <feGaussianBlur in="SourceGraphic" stdDeviation={BLOB_BLUR} result="blur"/>
+                      <feColorMatrix in="blur" type="matrix" result="shaped"
+                        values={`1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 ${BLOB_THRESHOLD} ${BLOB_THRESHOLD_SHIFT}`}/>
+                      <feFlood result="col" floodColor={blobCol} floodOpacity={blobOp}/>
+                      <feComposite in="col" in2="shaped" operator="in"/>
+                    </filter>
                   </defs>
 
-                  {strands.map((strand, si)=>{
-                    const col = theme.darkMode ? strand.colorDark : strand.colorLight;
-                    const scale = [1, 0.8, 0.6][si];
+                  {/* Blob — circles at each arch point, sized to match blob radius at node, thinning at sag */}
+                  <g filter={`url(#${filterId})`}>
+                    {blobPts.filter((_,i)=>i%2===0).map((p,pi)=>(
+                      <circle key={pi} cx={p.x} cy={p.y} r={16} fill="white"/>
+                    ))}
+                    {blobHull.map((A,i)=>(
+                      <circle key={'n'+i} cx={A.x} cy={A.y} r={A.r*1.1} fill="white"/>
+                    ))}
+                  </g>
+
+                  {/* Vine strands */}
+                  {activeStrands.map(({pts,width,colorDark,colorLight,role},si)=>{
+                    const col=theme.darkMode?colorDark:colorLight;
+                    const d='M '+pts.map(p=>p.x.toFixed(1)+','+p.y.toFixed(1)).join(' L ')+' Z';
+                    return <path key={'st'+si} d={d} fill="none" stroke={col} strokeWidth={width}
+                      strokeLinecap="round" strokeLinejoin="round"
+                      opacity={role==='core'?0.95:role==='growing'?0.75:0.85}/>;
+                  })}
+
+                  {/* Leaves */}
+                  {allLeaves.map((lf,li)=>{
+                    const leafD=lf.bud
+                      ?`M 0,0 C ${lf.lw*0.15},${-lf.lh*0.4} ${lf.lw*0.7},${-lf.lh*0.35} ${lf.lw},0 C ${lf.lw*0.7},${lf.lh*0.35} ${lf.lw*0.15},${lf.lh*0.4} 0,0 Z`
+                      :`M 0,0 C ${lf.lw*0.25},${-lf.lh} ${lf.lw*0.75},${-lf.lh} ${lf.lw},0 C ${lf.lw*0.75},${lf.lh} ${lf.lw*0.25},${lf.lh} 0,0 Z`;
                     return (
-                      <g key={si} filter={`url(#${filterId}s${si})`}>
-                        {allBalls.map((ball,bi)=>(
-                          <circle key={bi} cx={ball.x} cy={ball.y} r={ball.r*scale}
-                            fill={col} opacity={0.9}/>
-                        ))}
-                        {bridges.map((br,bi)=>(
-                          <circle key={'b'+bi} cx={br.x} cy={br.y} r={Math.max(4,br.r*scale)}
-                            fill={col} opacity={0.85}/>
-                        ))}
+                      <g key={'lf'+li} transform={`translate(${lf.x},${lf.y}) rotate(${lf.angle})`}
+                        opacity={lf.opacity} style={{pointerEvents:'none'}}>
+                        <path d={leafD} fill={lf.fill} stroke={lf.stroke} strokeWidth={0.5}/>
+                        {!lf.bud&&<path d={`M ${lf.lw*0.05},0 L ${lf.lw*0.82},0`} fill="none" stroke={lf.stroke} strokeWidth={0.35} opacity={0.5}/>}
                       </g>
                     );
                   })}
-
-                  {/* Leaves — rendered outside filter, along edges between close nodes */}
-                  {(()=>{
-                    const LEAF_CHARS = {
-                      core:    {sizeBase:27, sizeVar:4.5, colorDark:'#14532d', colorLight:'#15803d', aspectW:0.32, bud:false},
-                      wrapped: {sizeBase:12, sizeVar:2.4, colorDark:'#166534', colorLight:'#22c55e', aspectW:0.32, bud:false},
-                      growing: {sizeBase:3,  sizeVar:0.9, colorDark:'#16a34a', colorLight:'#4ade80', aspectW:0.32, bud:true},
-                    };
-                    const leafTierScale = 0.7 + tier*0.18;
-                    const leafSpacing = Math.max(24, 76 - tier*8);
-                    const allLeaves = [];
-
-                    // For each pair of close nodes, place leaves along the edge
-                    allBalls.forEach((a, ai)=>{
-                      allBalls.slice(ai+1).forEach((b, bi)=>{
-                        const dx=b.x-a.x, dy=b.y-a.y;
-                        const dist=Math.sqrt(dx*dx+dy*dy);
-                        const avg=(a.r+b.r)/2;
-                        if(dist > avg*3.2) return; // too far apart
-
-                        const leafCount = Math.max(2, Math.floor(dist/leafSpacing));
-                        const perpX=-dy/dist, perpY=dx/dist;
-
-                        ['core','wrapped','growing'].slice(0, activeCount).forEach((role, ri)=>{
-                          const lc = LEAF_CHARS[role];
-                        // Place leaves on BOTH sides — offset outward past blob radius
-                        const avgR = (a.r + b.r) / 2;
-                        [-1, 1].forEach(side => {
-                          for(let li=0;li<leafCount;li++){
-                            const t=(li+0.5+(ri*0.33))/leafCount;
-                            // Base position along edge
-                            const bx=a.x+dx*t, by=a.y+dy*t;
-                            // Perpendicular — push outward past the blob edge
-                            const outDist = avgR * 0.9 + ri * 6; // outside blob for outer leaves
-                            const ox = bx + perpX * side * outDist;
-                            const oy = by + perpY * side * outDist;
-                            const tangAngle=Math.atan2(dy,dx)*180/Math.PI;
-                            const sv=0.7+0.6*Math.abs(Math.sin(li*3.7+ri*1.9+ai*0.7));
-                            const baseLw=(lc.sizeBase+lc.sizeVar*sv)*leafTierScale;
-                            const lh=baseLw*lc.aspectW;
-                            const fill=theme.darkMode?lc.colorDark:lc.colorLight;
-                            const stroke=theme.darkMode?'#0f2d1a':'#14532d';
-                            // Leaf curls away from border on each side
-                            const curlAngle=tangAngle+side*42;
-                            allLeaves.push({x:ox,y:oy,angle:curlAngle,lw:baseLw,lh,fill,stroke,bud:lc.bud,opacity:lc.bud?0.7:0.88});
-                          }
-                        });
-                        });
-                      });
-                    });
-
-                    return allLeaves.map((lf,li)=>{
-                      const leafD = lf.bud
-                        ? `M 0,0 C ${lf.lw*0.15},${-lf.lh*0.4} ${lf.lw*0.7},${-lf.lh*0.35} ${lf.lw},0 C ${lf.lw*0.7},${lf.lh*0.35} ${lf.lw*0.15},${lf.lh*0.4} 0,0 Z`
-                        : `M 0,0 C ${lf.lw*0.25},${-lf.lh} ${lf.lw*0.75},${-lf.lh} ${lf.lw},0 C ${lf.lw*0.75},${lf.lh} ${lf.lw*0.25},${lf.lh} 0,0 Z`;
-                      return (
-                        <g key={'leaf'+li} transform={`translate(${lf.x},${lf.y}) rotate(${lf.angle})`}
-                          opacity={lf.opacity} style={{pointerEvents:'none'}}>
-                          <path d={leafD} fill={lf.fill} stroke={lf.stroke} strokeWidth={0.5}/>
-                          {!lf.bud && <path d={`M ${lf.lw*0.05},0 L ${lf.lw*0.82},0`} fill="none" stroke={lf.stroke} strokeWidth={0.35} opacity={0.5}/>}
-                        </g>
-                      );
-                    });
-                  })()}
                 </g>
               );
             })}
@@ -8199,6 +8385,26 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               </div>
 
               {/* Bottom row: Group Flower + Key + Delete — all in one line */}
+              {/* Vine blob colour row */}
+              {showVineBorders && (
+                <div style={{padding:'8px 12px',borderTop:`1px solid ${border}`,display:'flex',alignItems:'center',gap:8}}>
+                  <span style={{fontSize:11,fontWeight:600,color:subtext,flexShrink:0}}>🌿 Blob</span>
+                  <div style={{display:'flex',gap:4,flexWrap:'wrap',flex:1}}>
+                    {['#14532d','#15803d','#22c55e','#4ade80','#84cc16','#ca8a04','#b45309','#ef4444','#3b82f6','#8b5cf6','#ec4899'].map(c=>(
+                      <button key={c} onClick={()=>setNodes(prev=>prev.map(n=>n.id===hub.id?{...n,vineBlobColor:c}:n))}
+                        style={{width:18,height:18,borderRadius:'50%',background:c,border:'2px solid '+(hub.vineBlobColor===c?'white':'transparent'),boxShadow:hub.vineBlobColor===c?'0 0 0 2px '+c:'none',cursor:'pointer',flexShrink:0}}/>
+                    ))}
+                    <button onClick={()=>setNodes(prev=>prev.map(n=>n.id===hub.id?{...n,vineBlobColor:null}:n))}
+                      style={{width:18,height:18,borderRadius:'50%',background:'transparent',border:'1.5px dashed #94a3b8',cursor:'pointer',fontSize:8,color:'#94a3b8',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>✕</button>
+                  </div>
+                  <input type="range" min={0} max={1} step={0.05}
+                    value={hub.vineBlobOpacity??0.9}
+                    onChange={e=>setNodes(prev=>prev.map(n=>n.id===hub.id?{...n,vineBlobOpacity:parseFloat(e.target.value)}:n))}
+                    style={{width:70,accentColor:'#10b981',flexShrink:0}}/>
+                  <span style={{fontSize:10,color:subtext,flexShrink:0,width:28}}>{Math.round((hub.vineBlobOpacity??0.9)*100)}%</span>
+                </div>
+              )}
+
               <div style={{padding:'8px 12px',borderTop:`1px solid ${border}`,display:'flex',alignItems:'center',gap:6}}>
                 {/* Group Flower */}
                 <button
