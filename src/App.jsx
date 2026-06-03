@@ -159,7 +159,8 @@ function FabMenu(props) {
     fabDragStart, fabRef, holdTimer,
     historyLen, futureLen, vineDrawMode, macheteMode, pendingPaths,
     undo, redo, setSearchOpen, setSettingsOpen,
-    commitAllPaths, setVineDrawMode, setMacheteMode, setPendingPaths, setCurrentStroke
+    commitAllPaths, setVineDrawMode, setMacheteMode, setPendingPaths, setCurrentStroke,
+    rakeActive, setRakeActive,
   } = props;
 
   const dm = theme.darkMode;
@@ -184,6 +185,7 @@ function FabMenu(props) {
     {id:'undo',  icon:'↩', label:'Undo',    fn:()=>undo(), holdFn:()=>redo(), holdIcon:'↪',holdLabel:'Redo', dim:historyLen===0&&futureLen===0},
     {id:'vine',  icon:'🌿',label:vineDrawMode?'Commit':'Vine', fn:()=>{vineDrawMode?(commitAllPaths(),setVineDrawMode(false)):(setVineDrawMode(true),setMacheteMode(false),setPendingPaths([]),setCurrentStroke([]));setFabOpen(false);}, active:vineDrawMode},
     {id:'cut',   icon:'🪓',label:macheteMode?'Stop':'Cut', fn:()=>{setMacheteMode(!macheteMode);setVineDrawMode(false);setFabOpen(false);}, active:macheteMode},
+    {id:'rake',  icon:'🧹',label:rakeActive?'Hide Rake':'Rake', fn:()=>{setRakeActive(v=>!v);setFabOpen(false);}, active:rakeActive},
     {id:'cfg',   icon:'⚙️',label:'Settings',fn:()=>{setSettingsOpen(v=>!v);setFabOpen(false);}},
   ];
   const n=tools.length;
@@ -207,8 +209,8 @@ function FabMenu(props) {
     };
   };
 
-  const fabIconCol=fabOpen?'white':(vineDrawMode||macheteMode?'white':'#10b981');
-  const fabBg=fabOpen?'#dc2626':(vineDrawMode||macheteMode?'#10b981':bg);
+  const fabIconCol=fabOpen?'white':(vineDrawMode||macheteMode||rakeActive?'white':'#10b981');
+  const fabBg=fabOpen?'#dc2626':(vineDrawMode||macheteMode||rakeActive?'#10b981':bg);
 
   return (
     <>
@@ -291,6 +293,25 @@ function FabMenu(props) {
           </button>
         </div>
       )}
+      {/* Floating button below FAB when rake active */}
+      {rakeActive && (
+        <div style={{position:'fixed',left:px,top:py+FAB+8,zIndex:152,display:'flex',flexDirection:'column',alignItems:'center'}}>
+          <button
+            onPointerDown={()=>{ rakeHoldTimer.current=setTimeout(()=>setClearLeavesConfirm(true),600); }}
+            onPointerUp={()=>{ clearTimeout(rakeHoldTimer.current); }}
+            onPointerLeave={()=>{ clearTimeout(rakeHoldTimer.current); }}
+            onClick={()=>setRakeActive(false)}
+            style={{
+              width:FAB,height:FAB,borderRadius:'50%',border:'3px solid white',cursor:'pointer',
+              background:'#92400e',
+              boxShadow:'0 4px 16px rgba(0,0,0,0.35)',color:'white',
+              display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:1,
+            }}>
+            <span style={{fontSize:16,lineHeight:1}}>🧹</span>
+            <span style={{fontSize:7,fontWeight:900,letterSpacing:'0.5px'}}>STOP</span>
+          </button>
+        </div>
+      )}
     </>
   );
 }
@@ -298,23 +319,25 @@ function FabMenu(props) {
 
 
 
+const KEYFRAMES_CSS = ['@keyframes spin{to{transform:rotate(360deg)}}', '@keyframes fadein{from{opacity:0}to{opacity:1}}'].join(' ');
+
 function AppInner() {
   const svgRef = useRef(null);
   const [nodes, setNodes] = useState(() => {
-    try { const s = localStorage.getItem('ft_nodes'); return s ? JSON.parse(s) : INITIAL_NODES; } catch { return INITIAL_NODES; }
+    try { const s = localStorage.getItem('ft_nodes'); return s ? JSON.parse(s) : INITIAL_NODES; } catch(e) { return INITIAL_NODES; }
   });
   const [links, setLinks] = useState(() => {
-    try { const s = localStorage.getItem('ft_links'); return s ? JSON.parse(s) : INITIAL_LINKS; } catch { return INITIAL_LINKS; }
+    try { const s = localStorage.getItem('ft_links'); return s ? JSON.parse(s) : INITIAL_LINKS; } catch(e) { return INITIAL_LINKS; }
   });
   const [lastDecayCheck, setLastDecayCheck] = useState(Date.now());
   const [viewMode, setViewMode] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('ft_viewMode')) || 'canvas'; } catch { return 'canvas'; }
+    try { return JSON.parse(localStorage.getItem('ft_viewMode')) || 'canvas'; } catch(e) { return 'canvas'; }
   });
   const [calendarLayout, setCalendarLayout] = useState('circle');
   const [dimensions, setDimensions] = useState(() => {
-    try { const s = localStorage.getItem('ft_dimensions'); return s ? { ...DEFAULT_DIMENSIONS, ...JSON.parse(s) } : DEFAULT_DIMENSIONS; } catch { return DEFAULT_DIMENSIONS; }
+    try { const s = localStorage.getItem('ft_dimensions'); return s ? { ...DEFAULT_DIMENSIONS, ...JSON.parse(s) } : DEFAULT_DIMENSIONS; } catch(e) { return DEFAULT_DIMENSIONS; }
   });
-  const [collapsedGroups, setCollapsedGroups] = useState([]);
+  const [collapsedGroups, setCollapsedGroups] = useState((() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); return s.collapsedGroups !== undefined ? s.collapsedGroups : []; } catch(e) { return []; } })());
   const [mergePrompt, setMergePrompt] = useState(null); // {type:'group'|'friend', a, b} or null
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -325,7 +348,7 @@ function AppInner() {
   const [activeTab, setActiveTab] = useState('social');
   const [socialView, setSocialView] = useState('gridScore'); // 'gridScore'|'gridMomentum'|'barScore'|'barMomentum'
   const [barStyle, setBarStyle] = useState('segments');
-  const [activeTags, setActiveTags] = useState([]); // tags currently filtered on
+  const [activeTags, setActiveTags] = useState((() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); return s.activeTags !== undefined ? s.activeTags : []; } catch(e) { return []; } })()); // tags currently filtered on
   const [tagInput, setTagInput] = useState('');     // new tag being typed in panel
   const [addFriendForms, setAddFriendForms] = useState([]);
   const [photoSlideshow, setPhotoSlideshow] = useState(null); // nodeId
@@ -361,10 +384,10 @@ function AppInner() {
   const [pfTab, setPfTab] = useState('design');
   const [pfEditingPresetIdx, setPfEditingPresetIdx] = useState(null);
   const [customPresets, setCustomPresets] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('ft_flower_presets') || '[]'); } catch { return []; }
+    try { return JSON.parse(localStorage.getItem('ft_flower_presets') || '[]'); } catch(e) { return []; }
   });
   const [settingsSections, setSettingsSections] = useState({appearance:true,filters:false,data:false,reset:false,security:false,future:false});
-  const [fontSize, setFontSize] = useState(() => { try { return parseFloat(localStorage.getItem('ft_fontSize')||'1'); } catch { return 1; } });
+  const [fontSize, setFontSize] = useState(() => { try { return parseFloat(localStorage.getItem('ft_fontSize')||'1'); } catch(e) { return 1; } });
   useEffect(() => {
     document.documentElement.style.fontSize = `${fontSize * 16}px`;
     return () => { document.documentElement.style.fontSize = ''; };
@@ -501,7 +524,7 @@ function AppInner() {
       return reset;
     });
     setArchivedLinks([]);
-    try { localStorage.removeItem('ft_links'); } catch {}
+    try { localStorage.removeItem('ft_links'); } catch(e) {}
     showToast('🗑️ History cleared — people & photos kept');
   };
 
@@ -575,45 +598,34 @@ function AppInner() {
   const [futureOpen, setFutureOpen] = useState(false);
   const [newIdea, setNewIdea] = useState('');
   const [userIdeas, setUserIdeas] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('ft_ideas') || '[]'); } catch { return []; }
+    try { return JSON.parse(localStorage.getItem('ft_ideas') || '[]'); } catch(e) { return []; }
   });
   const settingsOpenTime = useRef(0);
   useEffect(() => { if (settingsOpen) settingsOpenTime.current = Date.now(); }, [settingsOpen]);
   const [tierPickMode, setTierPickMode] = useState(false);
-  const [photoBorderMode, setPhotoBorderMode] = useState('none');
+  const [photoBorderMode, setPhotoBorderMode] = useState((() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); return s.photoBorderMode !== undefined ? s.photoBorderMode : 'none'; } catch(e) { return 'none'; } })());
   const [showHubMembers, setShowHubMembers] = useState(true);
   const [showGroupTable, setShowGroupTable] = useState(false);
   const [hubFlowerMenuOpen, setHubFlowerMenuOpen] = useState(false);
-  const [showVineBorders, setShowVineBorders] = useState(true);
+  const [showVineBorders, setShowVineBorders] = useState((() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); return s.showVineBorders !== undefined ? s.showVineBorders : true; } catch(e) { return true; } })());
   const [showVineColorPicker, setShowVineColorPicker] = useState(false);
   const [showVineTuner, setShowVineTuner] = useState(false);
+  const [tunerSections, setTunerSections] = useState({borders:true,flowers:false,strands:false});
+  const [sliderDragging, setSliderDragging] = useState(false);
+  const [fallenLeaves, setFallenLeaves] = useState(() => { try { return JSON.parse(localStorage.getItem('ft_fallenLeaves')||'[]'); } catch(e) { return []; } });
   // Surrounding flowers settings
-  const [surroundFlowerSettings, setSurroundFlowerSettings] = useState({
-    enabled: true,
-    minSize: 8,      // px min flower radius
-    maxSize: 22,     // px max flower radius
-    count: 5,        // base count per person (manual mode)
-    spread: 80,      // how far along vine from node (px)
-    useCalc: true,   // use calculated mode based on tier
-    showMain: true,  // show main flower around photo
-    showSurround: true, // show surrounding flowers on vines
-  });
-  const [vineBorderParams, setVineBorderParams] = useState({
-    blobArcRadius: 1.05,
-    blobSagDepth:  0.38,
-    vineArcRadius: 1.05,
-    vineSagDepth:  0.38,
-    leavesInner:   1.0,
-    leavesOuter:   1.0,
-  });
-  const [groupColors, setGroupColors] = useState({});
+  const [surroundFlowerSettings, setSurroundFlowerSettings] = useState(() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); return s.surroundFlowerSettings ? {...{enabled:true,minSize:8,maxSize:22,count:5,spread:80,useCalc:true,showMain:true,showSurround:true},...s.surroundFlowerSettings} : {enabled:true,minSize:8,maxSize:22,count:5,spread:80,useCalc:true,showMain:true,showSurround:true}; } catch(e) { return {enabled:true,minSize:8,maxSize:22,count:5,spread:80,useCalc:true,showMain:true,showSurround:true}; } });
+  const [vineBorderParams, setVineBorderParams] = useState(() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); return s.vineBorderParams ? {...{blobArcRadius:1.05,blobSagDepth:0.38,vineArcRadius:1.05,vineSagDepth:0.38,leavesInner:1.0,leavesOuter:1.0},...s.vineBorderParams} : {blobArcRadius:1.05,blobSagDepth:0.38,vineArcRadius:1.05,vineSagDepth:0.38,leavesInner:1.0,leavesOuter:1.0}; } catch(e) { return {blobArcRadius:1.05,blobSagDepth:0.38,vineArcRadius:1.05,vineSagDepth:0.38,leavesInner:1.0,leavesOuter:1.0}; } });
+  const STRAND_PARAMS_DEFAULT = {coreWidth:10.2,wrap1Width:2.0,wrap2Width:1.6,wrap3Width:1.3,growWidth:1.2,coreColorD:'#14532d',coreColorL:'#15803d',wrap1ColorD:'#15803d',wrap1ColorL:'#22c55e',wrap2ColorD:'#16a34a',wrap2ColorL:'#4ade80',wrap3ColorD:'#22c55e',wrap3ColorL:'#86efac',growColorD:'#16a34a',growColorL:'#4ade80',leafCoreSize:43,leafWrapSize:19,leafGrowSize:5,leafCoreDark:'#14532d',leafCoreLight:'#15803d',leafWrapDark:'#166534',leafWrapLight:'#22c55e',leafGrowDark:'#16a34a',leafGrowLight:'#4ade80',leafSpacing:36};
+  const [strandParams, setStrandParams] = useState(() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); return s.strandParams ? {...STRAND_PARAMS_DEFAULT,...s.strandParams} : STRAND_PARAMS_DEFAULT; } catch(e) { return STRAND_PARAMS_DEFAULT; } });
+  const [groupColors, setGroupColors] = useState((() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); return s.groupColors !== undefined ? s.groupColors : {}; } catch(e) { return {}; } })());
   const [confirmModal, setConfirmModal] = useState(null);
   const [pinModal, setPinModal] = useState(null);
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
   const [appLocked, setAppLocked] = useState(false);
-  const [lockPin, setLockPin] = useState(() => { try { return localStorage.getItem('ft_pin') || ''; } catch { return ''; } });
-  const [lockTimer, setLockTimerVal] = useState(() => { try { return localStorage.getItem('ft_lockTimer') || 'close'; } catch { return 'close'; } });
+  const [lockPin, setLockPin] = useState(() => { try { return localStorage.getItem('ft_pin') || ''; } catch(e) { return ''; } });
+  const [lockTimer, setLockTimerVal] = useState(() => { try { return localStorage.getItem('ft_lockTimer') || 'close'; } catch(e) { return 'close'; } });
   const lastActiveRef = useRef(Date.now());
 
   // Check if app should lock based on timer
@@ -640,7 +652,7 @@ function AppInner() {
     document.addEventListener('visibilitychange', onVis);
     return () => { clearInterval(iv); window.removeEventListener('pointerdown', resetTimer); document.removeEventListener('visibilitychange', onVis); };
   }, []);
-  const [theme, setTheme] = useState({ darkMode: true, showWeathering: true, fontSize: 14 });
+  const [theme, setTheme] = useState(() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); return s.theme ? {...{darkMode:true,showWeathering:true,fontSize:14},...s.theme} : {darkMode:true,showWeathering:true,fontSize:14}; } catch(e) { return {darkMode:true,showWeathering:true,fontSize:14}; } });
   const [fabOpen, setFabOpen] = useState(false);
   const [fabPos, setFabPos] = useState({ edge: 'left', offset: 0.3 });
   const [draggingFab, setDraggingFab] = useState(false);
@@ -656,7 +668,7 @@ function AppInner() {
   const [showLevelPanel, setShowLevelPanel] = useState(false);
   const [showLevelSetter, setShowLevelSetter] = useState(false);
   const [showPersonalColorPicker, setShowPersonalColorPicker] = useState(false);
-  const [showMapKey, setShowMapKey] = useState(false);
+  const [showMapKey, setShowMapKey] = useState((() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); return s.showMapKey !== undefined ? s.showMapKey : false; } catch(e) { return false; } })());
   const [showContactDetails, setShowContactDetails] = useState(false);
   const [groupModal, setGroupModal] = useState(null);
   const [selectForGroupMode, setSelectForGroupMode] = useState(null);
@@ -666,9 +678,16 @@ function AppInner() {
   // Keep ref in sync with state
   useEffect(() => { selectedForGroupRef.current = selectedForGroup; }, [selectedForGroup]); // null | { hubId }
   const [slashTrail, setSlashTrail] = useState([]);
-  const [archivedLinks, setArchivedLinks] = useState([]);
+  const [archivedLinks, setArchivedLinks] = useState((() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); return s.archivedLinks !== undefined ? s.archivedLinks : []; } catch(e) { return []; } })());
   const [macheteMode, setMacheteMode] = useState(false);
   const [vineDrawMode, setVineDrawMode] = useState(false);
+  const [rakeActive, setRakeActive] = useState(false);
+  const [rakePos, setRakePos] = useState({ x: 120, y: 120 });
+  const [rakeDragging, setRakeDragging] = useState(false);
+  const [collectedLeaves, setCollectedLeaves] = useState([]);
+  const [clearLeavesConfirm, setClearLeavesConfirm] = useState(false);
+  const rakeHoldTimer = useRef(null);
+  const rakeDragStart = useRef(null);
   const [vineConnectPrompt, setVineConnectPrompt] = useState(null);
   const [pendingPaths, setPendingPaths] = useState([]);
   const [currentStroke, setCurrentStroke] = useState([]);
@@ -1613,7 +1632,7 @@ function AppInner() {
           showToast("Contact imported!");
         }
       } else throw new Error("API not supported");
-    } catch {
+    } catch(e) {
       // Mock fallback — sort mock contacts by similarity to current label
       const mockPool = [
         { label: 'Alex Johnson', phone: '07700 900123', img: AVATARS.james_f },
@@ -1719,7 +1738,7 @@ function AppInner() {
           spawnNodes(mapped);
         }
       } else throw new Error("API not supported");
-    } catch {
+    } catch(e) {
       const allAvatarKeys = Object.keys(AVATARS);
       const usedKeys = new Set();
       const pickAvatar = () => {
@@ -2138,8 +2157,24 @@ function AppInner() {
       }
     }, 500);
   }, [nodes]);
-  useEffect(() => { try { localStorage.setItem('ft_links', JSON.stringify(links)); } catch {} }, [links]);
-  useEffect(() => { try { localStorage.setItem('ft_dimensions', JSON.stringify(dimensions)); } catch {} }, [dimensions]);
+  useEffect(() => { try { localStorage.setItem('ft_links', JSON.stringify(links)); } catch(e) {} }, [links]);
+  useEffect(() => { try { localStorage.setItem('ft_dimensions', JSON.stringify(dimensions)); } catch(e) {} }, [dimensions]);
+
+  // ── Persist all settings to ft_settings ──────────────────────────────────
+  useEffect(() => {
+    try {
+      localStorage.setItem('ft_settings', JSON.stringify({
+        theme, groupColors, archivedLinks, collapsedGroups,
+        photoBorderMode, showMapKey, showVineBorders,
+        vineBorderParams, surroundFlowerSettings, activeTags, strandParams,
+      }));
+    } catch(e) { console.warn('ft_settings save failed:', e.message); }
+  }, [theme, groupColors, archivedLinks, collapsedGroups, photoBorderMode,
+      showMapKey, showVineBorders, vineBorderParams, surroundFlowerSettings, activeTags, strandParams]);
+
+  useEffect(() => {
+    try { localStorage.setItem('ft_fallenLeaves', JSON.stringify(fallenLeaves)); } catch(e) {}
+  }, [fallenLeaves]);
 
   const exportData = async () => {
     showToast('📦 Preparing export…');
@@ -2218,7 +2253,7 @@ function AppInner() {
         } else {
           showToast('✅ Tree imported!');
         }
-      } catch { showToast('❌ Invalid file — could not import'); }
+      } catch(e) { showToast('❌ Invalid file — could not import'); }
     };
     reader.readAsText(file);
   };
@@ -2550,7 +2585,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
   return (
     <>
-    <style>{`@keyframes spin{to{transform:rotate(360deg)}} @keyframes fadein{from{opacity:0}to{opacity:1}}`}</style>
+    <style>{KEYFRAMES_CSS}</style>
     <div className={`fixed inset-0 font-sans overflow-hidden transition-colors duration-300 ${bgClass}`}
       style={{
         display:'flex', flexDirection:'column',
@@ -2558,39 +2593,127 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         color: theme.darkMode ? '#f1f5f9' : '#1e293b',
       }}>
       
-      {/* Floating vine border tuner */}
-      {showVineTuner && showVineBorders && (()=>{
+      {/* Floating merged tuner: vine borders + flowers + strand */}
+      {showVineTuner && (()=>{
         const dm=theme.darkMode;
         const setP=(k,v)=>setVineBorderParams(p=>({...p,[k]:v}));
-        const sliders=[
-          {key:'blobArcRadius',label:'Blob arc radius',min:0.5,max:2.5,step:0.05,unit:'×',color:'#3b82f6'},
-          {key:'blobSagDepth', label:'Blob sag depth', min:0.0,max:0.9,step:0.02,unit:'', color:'#3b82f6'},
-          {key:'vineArcRadius',label:'Vine arc radius',min:0.5,max:2.5,step:0.05,unit:'×',color:'#10b981'},
-          {key:'vineSagDepth', label:'Vine sag depth', min:0.0,max:0.9,step:0.02,unit:'', color:'#10b981'},
-          {key:'leavesInner',  label:'Inner leaves',  min:0.0,max:3.0,step:0.25,unit:'×',color:'#22c55e'},
-          {key:'leavesOuter',  label:'Outer leaves',  min:0.0,max:3.0,step:0.25,unit:'×',color:'#22c55e'},
-        ];
+        const setS=(k,v)=>setSurroundFlowerSettings(p=>({...p,[k]:v}));
+        const setST=(k,v)=>setStrandParams(p=>({...p,[k]:v}));
+        const secStyle={borderTop:'1px solid '+(dm?'#334155':'#e2e8f0'),marginTop:10,paddingTop:8};
+        const secHead=(label,open,toggle)=>(
+          <button onClick={toggle} style={{display:'flex',justifyContent:'space-between',alignItems:'center',width:'100%',background:'none',border:'none',cursor:'pointer',padding:'0 0 6px',color:dm?'#e2e8f0':'#1e293b'}}>
+            <span style={{fontSize:12,fontWeight:800}}>{label}</span>
+            <span style={{fontSize:10,color:dm?'#475569':'#94a3b8'}}>{open?'▲':'▼'}</span>
+          </button>
+        );
+        const Slider=({label,value,min,max,step,unit,color,onChange})=>(
+          <div style={{marginBottom:7}}>
+            <div style={{display:'flex',justifyContent:'space-between',marginBottom:2}}>
+              <span style={{fontSize:11,color:dm?'#94a3b8':'#64748b'}}>{label}</span>
+              <span style={{fontSize:11,fontWeight:700,color:color||'#10b981'}}>{typeof value==='number'&&!Number.isInteger(value)?value.toFixed(2):value}{unit||''}</span>
+            </div>
+            <input type="range" min={min} max={max} step={step} value={value}
+              onChange={e=>onChange(parseFloat(e.target.value))}
+              onPointerDown={()=>setSliderDragging(true)}
+              onPointerUp={()=>setSliderDragging(false)}
+              style={{width:'100%',accentColor:color||'#10b981'}}/>
+          </div>
+        );
+        const ColorRow=({label,value,onChange})=>(
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
+            <span style={{fontSize:11,color:dm?'#94a3b8':'#64748b'}}>{label}</span>
+            <input type="color" value={value} onChange={e=>onChange(e.target.value)}
+              style={{width:28,height:20,border:'none',borderRadius:4,cursor:'pointer',background:'none'}}/>
+          </div>
+        );
+        const exportConfig=()=>{
+          try {
+            const code=btoa(JSON.stringify({vineBorderParams,surroundFlowerSettings,strandParams}));
+            const el=document.createElement('textarea');
+            el.value=code; document.body.appendChild(el); el.select();
+            document.execCommand('copy'); document.body.removeChild(el);
+            alert('Config code copied to clipboard!');
+          } catch(e) {}
+        };
+        // Section open state stored in a ref so it doesn't re-render the whole map
+        const tog=(k)=>setTunerSections(p=>({...p,[k]:!p[k]}));
+        const op=tunerSections;
         return (
           <div style={{position:'absolute',top:12,left:12,zIndex:300,
             background:dm?'#1e293b':'white',borderRadius:14,padding:'12px 14px',
-            boxShadow:'0 4px 24px rgba(0,0,0,0.35)',width:230,pointerEvents:'all'}}>
+            boxShadow:'0 4px 24px rgba(0,0,0,0.35)',width:240,pointerEvents:'all',
+            maxHeight:'88vh',overflowY:'auto'}}>
+            {/* Header */}
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
-              <span style={{fontSize:13,fontWeight:800,color:dm?'#e2e8f0':'#1e293b'}}>🌿 Vine Tuner</span>
+              <span style={{fontSize:13,fontWeight:800,color:dm?'#e2e8f0':'#1e293b'}}>🎛 Design Tuner</span>
               <button onClick={()=>setShowVineTuner(false)}
                 style={{background:'none',border:'none',cursor:'pointer',fontSize:16,color:dm?'#94a3b8':'#64748b',padding:0}}>✕</button>
             </div>
-            {sliders.map(s=>(
-              <div key={s.key} style={{marginBottom:8}}>
-                <div style={{display:'flex',justifyContent:'space-between',marginBottom:2}}>
-                  <span style={{fontSize:11,color:dm?'#94a3b8':'#64748b'}}>{s.label}</span>
-                  <span style={{fontSize:11,fontWeight:700,color:s.color}}>{vineBorderParams[s.key].toFixed(2)}{s.unit}</span>
-                </div>
-                <input type="range" min={s.min} max={s.max} step={s.step}
-                  value={vineBorderParams[s.key]}
-                  onChange={e=>setP(s.key,parseFloat(e.target.value))}
-                  style={{width:'100%',accentColor:s.color}}/>
-              </div>
-            ))}
+
+            {/* Section 1: Vine Borders */}
+            {secHead('🌿 Vine Borders', op.borders, ()=>tog('borders'))}
+            {op.borders && <>
+              <Slider label="Blob arc radius" value={vineBorderParams.blobArcRadius} min={0.5} max={2.5} step={0.05} unit="×" color="#3b82f6" onChange={v=>setP('blobArcRadius',v)}/>
+              <Slider label="Blob sag depth"  value={vineBorderParams.blobSagDepth}  min={0.0} max={0.9} step={0.02} color="#3b82f6" onChange={v=>setP('blobSagDepth',v)}/>
+              <Slider label="Vine arc radius" value={vineBorderParams.vineArcRadius} min={0.5} max={2.5} step={0.05} unit="×" color="#10b981" onChange={v=>setP('vineArcRadius',v)}/>
+              <Slider label="Vine sag depth"  value={vineBorderParams.vineSagDepth}  min={0.0} max={0.9} step={0.02} color="#10b981" onChange={v=>setP('vineSagDepth',v)}/>
+              <Slider label="Inner leaves"    value={vineBorderParams.leavesInner}   min={0.0} max={3.0} step={0.25} unit="×" color="#22c55e" onChange={v=>setP('leavesInner',v)}/>
+              <Slider label="Outer leaves"    value={vineBorderParams.leavesOuter}   min={0.0} max={3.0} step={0.25} unit="×" color="#22c55e" onChange={v=>setP('leavesOuter',v)}/>
+            </>}
+
+            {/* Section 2: Flowers */}
+            <div style={secStyle}>
+              {secHead('🌸 Surrounding Flowers', op.flowers, ()=>tog('flowers'))}
+              {op.flowers && <>
+                <Slider label="Min size" value={surroundFlowerSettings.minSize} min={4}  max={30}  step={1} unit="px" color="#f59e0b" onChange={v=>setS('minSize',v)}/>
+                <Slider label="Max size" value={surroundFlowerSettings.maxSize} min={8}  max={60}  step={1} unit="px" color="#f59e0b" onChange={v=>setS('maxSize',v)}/>
+                <Slider label="Spread"   value={surroundFlowerSettings.spread}  min={20} max={200} step={5} unit="px" color="#f59e0b" onChange={v=>setS('spread',v)}/>
+                {!surroundFlowerSettings.useCalc && <Slider label="Count" value={surroundFlowerSettings.count} min={1} max={20} step={1} color="#f59e0b" onChange={v=>setS('count',v)}/>}
+              </>}
+            </div>
+
+            {/* Section 3: Vine Strands */}
+            <div style={secStyle}>
+              {secHead('🎋 Vine Strands', op.strands, ()=>tog('strands'))}
+              {op.strands && <>
+                <div style={{fontSize:10,color:dm?'#475569':'#94a3b8',marginBottom:6,fontWeight:700,textTransform:'uppercase',letterSpacing:1}}>Widths</div>
+                <Slider label="Core"    value={strandParams.coreWidth}  min={0.5} max={8} step={0.1} color="#14532d" onChange={v=>setST('coreWidth',v)}/>
+                <Slider label="Wrap 1"  value={strandParams.wrap1Width} min={0.5} max={6} step={0.1} color="#15803d" onChange={v=>setST('wrap1Width',v)}/>
+                <Slider label="Wrap 2"  value={strandParams.wrap2Width} min={0.5} max={6} step={0.1} color="#16a34a" onChange={v=>setST('wrap2Width',v)}/>
+                <Slider label="Wrap 3"  value={strandParams.wrap3Width} min={0.5} max={6} step={0.1} color="#22c55e" onChange={v=>setST('wrap3Width',v)}/>
+                <Slider label="Growing" value={strandParams.growWidth}  min={0.5} max={4} step={0.1} color="#4ade80" onChange={v=>setST('growWidth',v)}/>
+                <div style={{fontSize:10,color:dm?'#475569':'#94a3b8',margin:'8px 0 6px',fontWeight:700,textTransform:'uppercase',letterSpacing:1}}>Strand Colours</div>
+                <ColorRow label="Core (dark)"    value={strandParams.coreColorD}  onChange={v=>setST('coreColorD',v)}/>
+                <ColorRow label="Core (light)"   value={strandParams.coreColorL}  onChange={v=>setST('coreColorL',v)}/>
+                <ColorRow label="Wrap 1 (dark)"  value={strandParams.wrap1ColorD} onChange={v=>setST('wrap1ColorD',v)}/>
+                <ColorRow label="Wrap 1 (light)" value={strandParams.wrap1ColorL} onChange={v=>setST('wrap1ColorL',v)}/>
+                <ColorRow label="Wrap 2 (dark)"  value={strandParams.wrap2ColorD} onChange={v=>setST('wrap2ColorD',v)}/>
+                <ColorRow label="Wrap 2 (light)" value={strandParams.wrap2ColorL} onChange={v=>setST('wrap2ColorL',v)}/>
+                <ColorRow label="Wrap 3 (dark)"  value={strandParams.wrap3ColorD} onChange={v=>setST('wrap3ColorD',v)}/>
+                <ColorRow label="Wrap 3 (light)" value={strandParams.wrap3ColorL} onChange={v=>setST('wrap3ColorL',v)}/>
+                <ColorRow label="Growing (dark)" value={strandParams.growColorD}  onChange={v=>setST('growColorD',v)}/>
+                <ColorRow label="Growing (light)"value={strandParams.growColorL}  onChange={v=>setST('growColorL',v)}/>
+                <div style={{fontSize:10,color:dm?'#475569':'#94a3b8',margin:'8px 0 6px',fontWeight:700,textTransform:'uppercase',letterSpacing:1}}>Leaf Sizes</div>
+                <Slider label="Core leaves"    value={strandParams.leafCoreSize} min={4}  max={60} step={1} unit="px" color="#14532d" onChange={v=>setST('leafCoreSize',v)}/>
+                <Slider label="Wrapped leaves" value={strandParams.leafWrapSize} min={2}  max={40} step={1} unit="px" color="#16a34a" onChange={v=>setST('leafWrapSize',v)}/>
+                <Slider label="Growing leaves" value={strandParams.leafGrowSize} min={1}  max={20} step={1} unit="px" color="#4ade80" onChange={v=>setST('leafGrowSize',v)}/>
+                <Slider label="Leaf spacing"   value={strandParams.leafSpacing}  min={10} max={120} step={2} unit="px" color="#22c55e" onChange={v=>setST('leafSpacing',v)}/>
+                <div style={{fontSize:10,color:dm?'#475569':'#94a3b8',margin:'8px 0 6px',fontWeight:700,textTransform:'uppercase',letterSpacing:1}}>Leaf Colours</div>
+                <ColorRow label="Core (dark)"    value={strandParams.leafCoreDark}  onChange={v=>setST('leafCoreDark',v)}/>
+                <ColorRow label="Core (light)"   value={strandParams.leafCoreLight} onChange={v=>setST('leafCoreLight',v)}/>
+                <ColorRow label="Wrapped (dark)" value={strandParams.leafWrapDark}  onChange={v=>setST('leafWrapDark',v)}/>
+                <ColorRow label="Wrapped (light)"value={strandParams.leafWrapLight} onChange={v=>setST('leafWrapLight',v)}/>
+                <ColorRow label="Growing (dark)" value={strandParams.leafGrowDark}  onChange={v=>setST('leafGrowDark',v)}/>
+                <ColorRow label="Growing (light)"value={strandParams.leafGrowLight} onChange={v=>setST('leafGrowLight',v)}/>
+              </>}
+            </div>
+
+            <button onClick={exportConfig}
+              style={{width:'100%',marginTop:12,padding:'8px 0',borderRadius:8,
+                background:'#6366f1',color:'white',border:'none',cursor:'pointer',
+                fontSize:12,fontWeight:700}}>
+              📋 Export Config Code
+            </button>
           </div>
         );
       })()}
@@ -2609,7 +2732,147 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         undo={undo} redo={redo} setSearchOpen={setSearchOpen} setSettingsOpen={setSettingsOpen}
         commitAllPaths={commitAllPaths} setVineDrawMode={setVineDrawMode}
         setMacheteMode={setMacheteMode} setPendingPaths={setPendingPaths} setCurrentStroke={setCurrentStroke}
+        rakeActive={rakeActive} setRakeActive={setRakeActive}
       />}
+
+      {/* Clear all leaves confirm popup */}
+      {clearLeavesConfirm && (
+        <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:500,background:'rgba(0,0,0,0.6)',display:'flex',alignItems:'center',justifyContent:'center'}}
+          onPointerDown={()=>setClearLeavesConfirm(false)}>
+          <div onPointerDown={e=>e.stopPropagation()} style={{background:'white',borderRadius:16,padding:'24px 28px',width:280,boxShadow:'0 8px 32px rgba(0,0,0,0.4)',textAlign:'center'}}>
+            <div style={{fontSize:36,marginBottom:10}}>🍂</div>
+            <div style={{fontSize:15,fontWeight:800,color:'#1e293b',marginBottom:6}}>Remove all fallen leaves?</div>
+            <div style={{fontSize:12,color:'#64748b',marginBottom:20}}>This will clear every fallen leaf from the map at once.</div>
+            <div style={{display:'flex',gap:10}}>
+              <button onClick={()=>setClearLeavesConfirm(false)}
+                style={{flex:1,padding:'10px 0',borderRadius:10,border:'1.5px solid #e2e8f0',background:'white',color:'#64748b',fontWeight:700,fontSize:13,cursor:'pointer'}}>
+                Cancel
+              </button>
+              <button onClick={()=>{ setFallenLeaves([]); setCollectedLeaves([]); setClearLeavesConfirm(false); }}
+                style={{flex:1,padding:'10px 0',borderRadius:10,border:'none',background:'#92400e',color:'white',fontWeight:700,fontSize:13,cursor:'pointer'}}>
+                Remove All
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Rake tool overlay ── */}
+      {rakeActive && viewMode === 'canvas' && (()=>{
+        const RAKE_R = 36;
+        const BIN_SIZE = 56;
+        const BIN_X = window.innerWidth - BIN_SIZE - 16;
+        const BIN_Y = window.innerHeight - BIN_SIZE - 72;
+        const INFLUENCE_R = 120; // ~2 person node radii in map coords
+        const BIN_SNAP_R = 60;
+
+        const onRakePointerDown = (e) => {
+          e.stopPropagation();
+          e.currentTarget.setPointerCapture(e.pointerId);
+          // Hold timer for "remove all" popup
+          rakeHoldTimer.current = setTimeout(() => {
+            if (window.confirm('Remove all fallen leaves at once?')) {
+              setFallenLeaves([]);
+              setCollectedLeaves([]);
+            }
+          }, 700);
+          rakeDragStart.current = { startX: e.clientX, startY: e.clientY };
+          setRakeDragging(true);
+        };
+
+        const onRakePointerMove = (e) => {
+          if (!rakeDragging) return;
+          clearTimeout(rakeHoldTimer.current);
+          const nx = e.clientX - RAKE_R;
+          const ny = e.clientY - RAKE_R;
+          setRakePos({ x: nx, y: ny });
+
+          // Pick up nearby fallen leaves (in screen coords — need to account for transform)
+          const t = transform;
+          const mapX = (e.clientX - t.x) / t.scale;
+          const mapY = (e.clientY - t.y) / t.scale;
+          const influenceMap = INFLUENCE_R; // already in map coords, no scale division needed
+
+          setFallenLeaves(prev => {
+            const picked = [];
+            const remaining = prev.filter(fl => {
+              const dx = fl.x - mapX, dy = fl.y - mapY;
+              if (Math.sqrt(dx*dx + dy*dy) < influenceMap) { picked.push(fl); return false; }
+              return true;
+            });
+            if (picked.length > 0) setCollectedLeaves(c => [...c, ...picked]);
+            return remaining;
+          });
+
+          // Check if near bin — drop collected leaves
+          const binCX = BIN_X + BIN_SIZE/2, binCY = BIN_Y + BIN_SIZE/2;
+          const dbx = e.clientX - binCX, dby = e.clientY - binCY;
+          if (Math.sqrt(dbx*dbx + dby*dby) < BIN_SNAP_R) {
+            setCollectedLeaves([]);
+          }
+        };
+
+        const onRakePointerUp = () => {
+          clearTimeout(rakeHoldTimer.current);
+          setRakeDragging(false);
+          rakeDragStart.current = null;
+        };
+
+        return (
+          <>
+            {/* Bin — bottom right */}
+            <div style={{position:'fixed', left:BIN_X, top:BIN_Y, width:BIN_SIZE, height:BIN_SIZE,
+              zIndex:350, pointerEvents:'none',
+              display:'flex', alignItems:'center', justifyContent:'center',
+              fontSize:36,
+              filter: collectedLeaves.length > 0 ? 'drop-shadow(0 0 8px #f59e0b)' : 'none',
+              transition:'filter 0.2s',
+            }}>🗑️</div>
+
+            {/* Collected leaf count badge */}
+            {collectedLeaves.length > 0 && (
+              <div style={{position:'fixed', left:BIN_X+BIN_SIZE-10, top:BIN_Y-10, zIndex:351,
+                background:'#f59e0b', color:'white', borderRadius:'50%',
+                width:22, height:22, display:'flex', alignItems:'center', justifyContent:'center',
+                fontSize:11, fontWeight:800, pointerEvents:'none',
+              }}>{collectedLeaves.length}</div>
+            )}
+
+            {/* Rake icon — draggable */}
+            <div
+              style={{position:'fixed', left:rakePos.x, top:rakePos.y,
+                width:RAKE_R*2, height:RAKE_R*2, zIndex:350,
+                cursor: rakeDragging ? 'grabbing' : 'grab',
+                touchAction:'none', userSelect:'none',
+                fontSize:52, display:'flex', alignItems:'center', justifyContent:'center',
+                filter: rakeDragging ? 'drop-shadow(0 4px 12px rgba(0,0,0,0.5))' : 'drop-shadow(0 2px 6px rgba(0,0,0,0.3))',
+                transform: rakeDragging ? 'rotate(-20deg) scale(1.1)' : 'rotate(-20deg)',
+                transition: rakeDragging ? 'none' : 'filter 0.2s',
+              }}
+              onPointerDown={onRakePointerDown}
+              onPointerMove={onRakePointerMove}
+              onPointerUp={onRakePointerUp}
+            >🧹</div>
+
+            {/* Trailing collected leaves follow rake loosely */}
+            {collectedLeaves.filter((_,idx)=>idx%10===0).map((fl, idx) => {
+              const offsetX = (Math.sin(idx * 2.3) * 20);
+              const offsetY = (idx * 8) + 10;
+              return (
+                <div key={fl.id} style={{
+                  position:'fixed',
+                  left: rakePos.x + RAKE_R + offsetX,
+                  top: rakePos.y + RAKE_R + offsetY,
+                  fontSize:10, pointerEvents:'none', zIndex:349,
+                  opacity:0.8, transform:`rotate(${fl.angle}deg)`,
+                  color:'#78350f',
+                }}>🍂</div>
+              );
+            })}
+          </>
+        );
+      })()}
+
       {/* Settings panel — full height slide-in from right */}
       {settingsOpen && (
         <div
@@ -2731,7 +2994,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       </div>
                       <div style={{display:'flex',gap:6}}>
                         {[{v:0.85,l:'S'},{v:1,l:'M'},{v:1.15,l:'L'},{v:1.3,l:'XL'}].map(({v,l})=>(
-                          <button key={v} onClick={()=>{setFontSize(v);try{localStorage.setItem('ft_fontSize',String(v));}catch{}}}
+                          <button key={v} onClick={()=>{setFontSize(v);try{localStorage.setItem('ft_fontSize',String(v));}catch(e) {}}}
                             style={{flex:1,padding:'6px 0',borderRadius:8,fontWeight:700,cursor:'pointer',border:'1.5px solid '+(fontSize===v?'#10b981':(theme.darkMode?'#334155':'#e2e8f0')),background:fontSize===v?'#10b981':'transparent',color:fontSize===v?'white':(theme.darkMode?'#94a3b8':'#64748b'),fontSize:l==='S'?11:l==='M'?13:l==='L'?15:17}}>
                             {l}
                           </button>
@@ -2761,7 +3024,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
                   <SH k="data" label="💾 Data"/>
                   {settingsSections.data&&<div style={{padding:'8px 0'}}>
-                    {[{label:'🌱 Start Blank',btnLabel:'Reset',btnBg:'#64748b',onClick:()=>{setSettingsOpen(false);const doReset=()=>{clearTimeout(saveTimer.current);setNodes(INITIAL_NODES);setLinks(INITIAL_LINKS);setDimensions(DEFAULT_DIMENSIONS);try{localStorage.removeItem('ft_nodes');localStorage.removeItem('ft_links');localStorage.removeItem('ft_dimensions');}catch{}clearPhotoDB();showToast('🌱 Fresh start!');};const run=()=>localStorage.getItem('ft_pin')?openPinModal('clear','Confirm Reset',doReset):doReset();setConfirmModal({title:'Start Blank?',message:'Removes all people, groups, photos and history.',danger:true,onConfirm:run});}},
+                    {[{label:'🌱 Start Blank',btnLabel:'Reset',btnBg:'#64748b',onClick:()=>{setSettingsOpen(false);const doReset=()=>{clearTimeout(saveTimer.current);setNodes(INITIAL_NODES);setLinks(INITIAL_LINKS);setDimensions(DEFAULT_DIMENSIONS);try{localStorage.removeItem('ft_nodes');localStorage.removeItem('ft_links');localStorage.removeItem('ft_dimensions');}catch(e) {}clearPhotoDB();showToast('🌱 Fresh start!');};const run=()=>localStorage.getItem('ft_pin')?openPinModal('clear','Confirm Reset',doReset):doReset();setConfirmModal({title:'Start Blank?',message:'Removes all people, groups, photos and history.',danger:true,onConfirm:run});}},
                       {label:'✨ Demo Data',btnLabel:'Load',btnBg:'#10b981',onClick:()=>{setSettingsOpen(false);setConfirmModal({title:'Load Demo Data?',message:'Replaces your current tree with example data.',danger:false,onConfirm:()=>loadDemoData()});}},
                     ].map((row,i)=>(
                       <div key={i} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 0',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}>
@@ -2785,7 +3048,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       }},
                       {label:'📓 Diary entries',desc:'Clears all diary entries',title:'Clear Diaries?',msg:'Removes diary entries from all people.',onConfirm:()=>{setNodes(prev=>prev.map(n=>({...n,diaryEntries:[]})));showToast('📓 Diaries cleared');}},
                       {label:'⭐ Friendship scores',desc:"Reset scores — pick each person's tier on map",title:'Reset Scores?',msg:'Resets all scores. Each person shows tier picker on return.',onConfirm:()=>{setNodes(prev=>prev.map(n=>n.type==='friend'||n.id==='me'?{...n,interactionScore:0,prevScore:0}:n));setTierPickMode(true);showToast('⭐ Tap each person to set their level');}},
-                      {label:'🔗 Connections',desc:'Removes all vines & groups, keeps people',title:'Remove Connections?',msg:'Removes all vines and groups. People and photos stay.',onConfirm:()=>{setNodes(prev=>prev.filter(n=>n.type!=='hub'));setLinks(INITIAL_LINKS);setArchivedLinks([]);try{localStorage.removeItem('ft_links');}catch{}showToast('🔗 Done');}},
+                      {label:'🔗 Connections',desc:'Removes all vines & groups, keeps people',title:'Remove Connections?',msg:'Removes all vines and groups. People and photos stay.',onConfirm:()=>{setNodes(prev=>prev.filter(n=>n.type!=='hub'));setLinks(INITIAL_LINKS);setArchivedLinks([]);try{localStorage.removeItem('ft_links');}catch(e) {}showToast('🔗 Done');}},
                       {label:'👥 People',desc:'Removes all people, keeps Me',title:'Remove People?',msg:'Deletes all person nodes except Me.',onConfirm:()=>{setNodes(prev=>prev.filter(n=>n.type==='hub'||n.type==='flower'||n.id==='me'));setLinks(prev=>prev.filter(l=>{const sn=nodes.find(n=>n.id===l.source);const tn=nodes.find(n=>n.id===l.target);return(sn?.type==='hub'||sn?.type==='flower'||sn?.id==='me')&&(tn?.type==='hub'||tn?.type==='flower'||tn?.id==='me');}));clearPhotoDB();showToast('👥 Done');}},
                       {label:'📸 Photos',desc:'Replaces photos with blank avatars',title:'Remove Photos?',msg:'Replaces uploaded photos with default avatars.',onConfirm:()=>{clearPhotoDB();const ak=Object.keys(AVATARS);setNodes(prev=>prev.map(n=>n.type==='friend'||n.id==='me'?{...n,img:AVATARS[ak[Math.floor(Math.random()*ak.length)]]}:n));showToast('📸 Done');}},
                       {label:'🌳 Groups',desc:'Removes group hubs, keeps people',title:'Remove Groups?',msg:'Deletes all group hubs. People remain.',onConfirm:()=>{setNodes(prev=>prev.filter(n=>n.type!=='hub'));setLinks(prev=>prev.filter(l=>{const sn=nodes.find(n=>n.id===l.source);const tn=nodes.find(n=>n.id===l.target);return sn?.type!=='hub'&&tn?.type!=='hub';}));showToast('🌳 Done');}},
@@ -4011,7 +4274,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         return;
                       }
                     }
-                  } catch {}
+                  } catch(e) {}
                   createFriendFromForm(form.id, null);
                 }} className={`flex items-center gap-1 px-2 py-1.5 rounded-lg border text-xs font-semibold ${theme.darkMode ? 'bg-slate-800 border-slate-600 text-slate-300 hover:bg-slate-700' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
                   <BookUser className="w-3 h-3" /> Sync
@@ -4212,7 +4475,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   const res=[];
                   for(let s=0;s<=arcSteps;s++){
                     const t=s/arcSteps, ang=an1+(an2-an1)*t;
-                    res.push({x:A.x+Math.cos(ang)*A.r, y:A.y+Math.sin(ang)*A.r});
+                    res.push({x:A.x+Math.cos(ang)*A.r, y:A.y+Math.sin(ang)*A.r, section:'arc', sectionT:s/arcSteps});
                   }
                   return res;
                 };
@@ -4238,7 +4501,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   const sagX=mx+(toCx/toD)*edgeLen*sagDepth, sagY=my+(toCy/toD)*edgeLen*sagDepth;
                   for(let s=0;s<=sagSteps;s++){
                     const t=s/sagSteps,it=1-t;
-                    pts.push({x:it*it*leaveX+2*it*t*sagX+t*t*arriveX, y:it*it*leaveY+2*it*t*sagY+t*t*arriveY});
+                    pts.push({x:it*it*leaveX+2*it*t*sagX+t*t*arriveX, y:it*it*leaveY+2*it*t*sagY+t*t*arriveY, section:'sag', sectionT:1-Math.abs(t-0.5)*2});
                   }
                 }
                 return pts;
@@ -4280,7 +4543,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   const px=-tdy/tlen,py=tdx/tlen;
                   const t=idx/totalVinePts;
                   const coil=def.role==='core'?0:Math.sin(t*def.wrapFreq*Math.PI*2*vhn+phaseBase)*coreRadius*def.wrapAmp;
-                  return {x:bp.x+px*coil,y:bp.y+py*coil,t};
+                  return {x:bp.x+px*coil,y:bp.y+py*coil,t,section:bp.section,sectionT:bp.sectionT};
                 });
                 return {...def,pts,renderIdx};
               });
@@ -4291,8 +4554,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 wrapped:{sizeBase:12,sizeVar:2.4,colorDark:'#166534',colorLight:'#22c55e',aspectW:0.32,bud:false},
                 growing:{sizeBase:3, sizeVar:0.9,colorDark:'#16a34a',colorLight:'#4ade80',aspectW:0.32,bud:true},
               };
-              const leafTierScale=0.7+tier*0.18;
-              const leafSpacing=Math.max(24,76-tier*8);
+              const leafTierScale=0.7+5*0.18; // fixed T5
+              const leafSpacing=Math.max(24,76-5*8); // fixed T5
               const allLeaves=[];
               activeStrands.forEach(({pts,role,renderIdx})=>{
                 const lc=LEAF_CHARS[role]||LEAF_CHARS.core;
@@ -4313,20 +4576,28 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   allLeaves.push({x:p.x,y:p.y,angle:tangAngle+42,lw:baseLw,lh,fill,stroke,bud:lc.bud,opacity:lc.bud?0.7:0.88});
                 }
                 // Outer leaves — -42° = left of travel = outward away from group
-                const outerCount=Math.max(0,Math.floor(perim/(leafSpacing*0.55)*(vineBorderParams.leavesOuter??1)));
-                for(let li=0;li<outerCount;li++){
-                  const t=(li+0.15+renderIdx*0.2)/outerCount;
-                  const ptIdx=Math.floor(t*(pts.length-1));
-                  const p=pts[ptIdx],p2=pts[(ptIdx+1)%pts.length];
-                  if(!p||!p2) continue;
-                  const tangAngle=Math.atan2(p2.y-p.y,p2.x-p.x)*180/Math.PI;
-                  const sv=0.4+0.6*Math.abs(Math.sin(li*2.3+renderIdx*1.4+hubIdx*1.1));
-                  const lw=(lc.sizeBase*0.72+lc.sizeVar*0.5*sv)*leafTierScale;
-                  const lh=lw*lc.aspectW;
-                  const fill=theme.darkMode?lc.colorDark:lc.colorLight;
-                  const stroke=theme.darkMode?'#0f2d1a':'#14532d';
-                  allLeaves.push({x:p.x,y:p.y,angle:tangAngle-42,lw,lh,fill,stroke,bud:lc.bud,opacity:lc.bud?0.55:0.7});
-                }
+                // Outer leaves — arc sections 1.7× denser than sag
+                const baseOuter = vineBorderParams.leavesOuter ?? 1;
+                const arcPtsOnly = pts.filter(p => p.section === 'arc');
+                const sagPtsOnly = pts.filter(p => p.section === 'sag');
+                const arcLeafCount = Math.max(0, Math.floor((arcPtsOnly.length / pts.length) * perim / leafSpacing * baseOuter * 1.7));
+                const sagLeafCount = Math.max(0, Math.floor((sagPtsOnly.length / pts.length) * perim / leafSpacing * baseOuter * 1.0));
+                [[arcPtsOnly, arcLeafCount], [sagPtsOnly, sagLeafCount]].forEach(([sectionPts, count]) => {
+                  for(let li=0;li<count;li++){
+                    const t=(li+0.15+renderIdx*0.2)/count;
+                    const ptIdx=Math.floor(t*(sectionPts.length-1));
+                    const p=sectionPts[ptIdx];
+                    const p2=sectionPts[Math.min(sectionPts.length-1,ptIdx+1)];
+                    if(!p||!p2) continue;
+                    const tangAngle=Math.atan2(p2.y-p.y,p2.x-p.x)*180/Math.PI;
+                    const sv=0.4+0.6*Math.abs(Math.sin(li*2.3+renderIdx*1.4+hubIdx*1.1));
+                    const lw=(lc.sizeBase+lc.sizeVar*sv)*leafTierScale;
+                    const lh=lw*lc.aspectW;
+                    const fill=theme.darkMode?lc.colorDark:lc.colorLight;
+                    const stroke=theme.darkMode?'#0f2d1a':'#14532d';
+                    allLeaves.push({x:p.x,y:p.y,angle:tangAngle-42,lw,lh,fill,stroke,bud:lc.bud,opacity:lc.bud?0.55:0.7});
+                  }
+                });
               });
 
               return (
@@ -4706,7 +4977,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
             {viewMode === 'canvas' && (
               <g>
-                {links.map((link, i) => {
+                {!sliderDragging && links.map((link, i) => {
                   const src = activeRenderNodes.find(n => n.id === link.source);
                   const tgt = activeRenderNodes.find(n => n.id === link.target);
                   if (!src || !tgt) return null;
@@ -4719,7 +4990,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   } else {
                     score = (src.type !== 'hub' ? src.interactionScore : tgt.interactionScore) || 0;
                   }
-                  const tier = score < 100 ? 1 : score < 300 ? 2 : score < 600 ? 3 : score < 1000 ? 4 : 5;
+                  const tier = 5; // forced — all vines use T5 appearance
 
                   // Growing animation state for drawn vines
                   const growingVine = link.drawnLinkId
@@ -4754,47 +5025,26 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     return w * dist * 0.045;
                   };
 
-                  // --- STRAND DEFINITIONS per tier ---
-                  // Each tier accumulates strands. The last strand is always the "growing" one.
-                  // Role:  0=core, 1=wrapped, 2=wrapped, 3=wrapped, 4=growing
-                  //
-                  // Properties per strand:
-                  //   width       — stroke width
-                  //   wrapFreq    — how many coils along the vine (higher = tighter wrap)
-                  //   wrapAmp     — max perpendicular excursion as fraction of coreRadius
-                  //   coreRadius  — radius of the core vine (perpendicular offset of center)
-                  //   color dark/light
-                  //   role: 'core' | 'wrapped' | 'growing'
+                  // --- STRAND DEFINITIONS — tier forced to 5 for all vines ---
+                  const coreRadius = 1.5 + tier * 0.8;
 
-                  const coreRadius = 1.5 + tier * 0.8; // how thick the bundle is
-
-                  // Strand table — index 0 is always the core, grows darker/thicker each tier
-                  // subsequent indices are increasingly lighter, wrapping tighter
                   const STRAND_DEFS = [
-                    // T1 strands:
-                    { width: 3.2,  wrapFreq: 0,   wrapAmp: 0,    colorDark: '#14532d', colorLight: '#15803d', role: 'core'    },  // 0: core
-                    { width: 1.2,  wrapFreq: 2.5, wrapAmp: 1.0,  colorDark: '#16a34a', colorLight: '#4ade80', role: 'growing' },  // 1: T1 growing
-                    // T2 adds:
-                    { width: 2.0,  wrapFreq: 1.4, wrapAmp: 0.7,  colorDark: '#15803d', colorLight: '#22c55e', role: 'wrapped' },  // 2: T2 wrapped (replaces T1 growing, T1 growing moves up)
-                    // T3 adds:
-                    { width: 1.6,  wrapFreq: 1.9, wrapAmp: 0.85, colorDark: '#16a34a', colorLight: '#4ade80', role: 'wrapped' },  // 3: T3 wrapped
-                    // T4 adds:
-                    { width: 1.3,  wrapFreq: 2.2, wrapAmp: 0.95, colorDark: '#22c55e', colorLight: '#86efac', role: 'wrapped' },  // 4: T4 wrapped
-                    // T5 growing strand always at end — thinnest, tightest wrap
+                    { width: 3.2,  wrapFreq: 0,   wrapAmp: 0,    colorDark: '#14532d', colorLight: '#15803d', role: 'core'    },
+                    { width: 1.2,  wrapFreq: 2.5, wrapAmp: 1.0,  colorDark: '#16a34a', colorLight: '#4ade80', role: 'growing' },
+                    { width: 2.0,  wrapFreq: 1.4, wrapAmp: 0.7,  colorDark: '#15803d', colorLight: '#22c55e', role: 'wrapped' },
+                    { width: 1.6,  wrapFreq: 1.9, wrapAmp: 0.85, colorDark: '#16a34a', colorLight: '#4ade80', role: 'wrapped' },
+                    { width: 1.3,  wrapFreq: 2.2, wrapAmp: 0.95, colorDark: '#22c55e', colorLight: '#86efac', role: 'wrapped' },
                   ];
 
-                  // Per tier: which strand indices are active, in render order (core first)
-                  // The growing strand is always the last in the list
                   const TIER_STRAND_SETS = [
                     null,
-                    [0, 1],          // T1: core + growing
-                    [0, 2, 1],       // T2: thicker core + wrapped + growing (growing is thinner new one)
-                    [0, 2, 3, 1],    // T3: core + 2 wrapped + growing
-                    [0, 2, 3, 4, 1], // T4: core + 3 wrapped + growing
-                    [0, 2, 3, 4, 1], // T5: same as T4 but core is thickest — differentiated by width scale
+                    [0, 1],
+                    [0, 2, 1],
+                    [0, 2, 3, 1],
+                    [0, 2, 3, 4, 1],
+                    [0, 2, 3, 4, 1],
                   ];
 
-                  // Scale core width with tier
                   const coreWidthScale = [0, 1, 1.4, 1.9, 2.5, 3.2][tier];
 
                   const activeStrands = TIER_STRAND_SETS[tier].map((si, renderIdx) => {
@@ -4872,27 +5122,27 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   const delta48 = score - scoreThen48;
                   const delta24 = score - scoreThen24;
 
-                  // Get leaf visual state from its position along vine (t: 0=root, 1=tip)
-                  // and recent score delta
-                  const getLeafState = (t) => {
-                    // Tip leaves are newest. If score is rising, tip leaves bud first.
-                    // If score is falling, tip leaves shrivel first, root leaves fall last.
-                    const ageHrs = (1 - t) * 48; // root=48h old, tip=just born
+                  // Get leaf visual state — core leaves always full,
+                  // wrapped/growing degrade only on actual score decline (not stagnant)
+                  const getLeafState = (t, role) => {
+                    if (role === 'core') return 'full';
+                    const ageHrs = (1 - t) * 48;
+                    const isGrowing = role === 'growing';
 
-                    if (delta48 < -60 && ageHrs < 12) {
-                      // Losing significantly — tip leaves fallen
-                      return 'fallen';
+                    // Only degrade on actual decline — not stagnant
+                    if (delta48 < -60) {
+                      if (isGrowing) return ageHrs < 18 ? 'fallen' : ageHrs < 32 ? 'brown' : 'shrivelling';
+                      return ageHrs < 10 ? 'fallen' : ageHrs < 24 ? 'brown' : 'shrivelling';
                     }
-                    if (delta48 < -30 && ageHrs < 24) {
-                      // Losing — newer leaves shrivelling
-                      return ageHrs < 12 ? 'fallen' : 'brown';
+                    if (delta48 < -30) {
+                      if (isGrowing) return ageHrs < 12 ? 'brown' : ageHrs < 28 ? 'shrivelling' : 'full';
+                      return ageHrs < 8 ? 'brown' : ageHrs < 20 ? 'shrivelling' : 'full';
                     }
                     if (delta24 < -20) {
-                      // Declining recently — tip shrivelling
-                      return ageHrs < 6 ? 'shrivelling' : ageHrs < 18 ? 'brown' : 'full';
+                      if (isGrowing) return ageHrs < 8 ? 'shrivelling' : 'full';
+                      return ageHrs < 5 ? 'shrivelling' : 'full';
                     }
                     if (delta48 > 60) {
-                      // Gaining significantly — tip leaves budding/growing
                       return ageHrs < 6 ? 'budding' : ageHrs < 24 ? 'growing' : 'full';
                     }
                     if (delta24 > 20) {
@@ -4911,16 +5161,15 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   };
 
                   const LEAF_CHARS = {
-                    // 1:4:9 length and width progression (bud=1, wrapped=4, core=9)
                     core:    { sizeBase: 27, sizeVar: 4.5, colorDark: '#14532d', colorLight: '#15803d', aspectW: 0.32, bud: false },
                     wrapped: { sizeBase: 12, sizeVar: 2.4, colorDark: '#166534', colorLight: '#22c55e', aspectW: 0.32, bud: false },
                     growing: { sizeBase: 3,  sizeVar: 0.9, colorDark: '#16a34a', colorLight: '#4ade80', aspectW: 0.32, bud: true  },
                   };
                   const leafTierScale = 0.7 + tier * 0.18;
-                  // Double spacing = half as many leaves
                   const leafSpacing = Math.max(24, 76 - tier * 8);
 
                   const allLeaves = [];
+                  const newFallen = [];
                   activeStrands.forEach(({ pts, role, renderIdx }) => {
                     const lc = LEAF_CHARS[role];
                     const leafCount = Math.max(2, Math.floor(dist / leafSpacing));
@@ -4935,10 +5184,30 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       const side = ((li + renderIdx) % 2 === 0) ? 1 : -1;
                       const sv = 0.7 + 0.6 * Math.abs(Math.sin(li * 3.7 + renderIdx * 1.9 + i));
 
-                      // Lifecycle state
-                      const leafState = getLeafState(t);
+                      // Lifecycle state — pass role so core leaves are always full
+                      const leafState = getLeafState(t, role);
                       const ls = LIFECYCLE_STYLES[leafState];
-                      if (ls.scale === 0) continue; // fallen — skip
+                      if (ls.scale === 0) {
+                        // Fallen — displace slightly outside vine, random rotation -20 to +20
+                        const fallenId = link.source + '_' + link.target + '_' + role + '_' + li;
+                        const alreadyFallen = fallenLeaves.some(fl => fl.id === fallenId);
+                        if (!alreadyFallen) {
+                          const randRot = (Math.random() * 40 - 20);
+                          const perpOffset = 8 + Math.random() * 6;
+                          const baseLwF = (lc.sizeBase + lc.sizeVar * sv) * leafTierScale * 0.68;
+                          newFallen.push({
+                            id: fallenId,
+                            x: p.x + (side * perpOffset),
+                            y: p.y + (side * perpOffset),
+                            angle: tangAngle + randRot,
+                            lw: baseLwF,
+                            lh: baseLwF * lc.aspectW,
+                            fill: '#78350f',
+                            stroke: '#5a2d0c',
+                          });
+                        }
+                        continue;
+                      }
 
                       const baseLw = (lc.sizeBase + lc.sizeVar * sv) * leafTierScale;
                       const lw = baseLw * ls.scale;           // length scaled uniformly
@@ -4953,6 +5222,15 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       allLeaves.push({ x: p.x, y: p.y, angle: curlAngle, lw, lh, fill, stroke, bud: lc.bud || leafState === 'budding', opacity, shrivelled: ls.curl > 0.3 });
                     }
                   });
+
+                  // Flush any newly fallen leaves into persistent state (once, not every render)
+                  if (newFallen.length > 0) {
+                    setFallenLeaves(prev => {
+                      const existingIds = new Set(prev.map(fl => fl.id));
+                      const truly_new = newFallen.filter(fl => !existingIds.has(fl.id));
+                      return truly_new.length > 0 ? [...prev, ...truly_new] : prev;
+                    });
+                  }
 
                   return (
                     <g key={`link-${i}`}>
@@ -4975,7 +5253,17 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       })}
                       {/* Leaves — drawn after strands */}
                       {allLeaves.map((lf, li) => {
-                        const leafD = (lf.bud || lf.shrivelled)
+                        if (lf.shrivelled) return null;
+                        if (lf.bud) {
+                          // Buds = small light green circle, no pointy shape
+                          return (
+                            <circle key={`lf-${li}`}
+                              cx={lf.x} cy={lf.y} r={Math.max(1.5, lf.lw * 0.3)}
+                              fill='#bbf7d0' stroke='#4ade80' strokeWidth={0.4}
+                              opacity={lf.opacity} style={{pointerEvents:'none'}}/>
+                          );
+                        }
+                        const leafD = lf.shrivelled
                           ? `M 0,0 C ${lf.lw*0.15},${-lf.lh*0.4} ${lf.lw*0.7},${-lf.lh*0.35} ${lf.lw},0 C ${lf.lw*0.7},${lf.lh*0.35} ${lf.lw*0.15},${lf.lh*0.4} 0,0 Z`
                           : `M 0,0 C ${lf.lw*0.25},${-lf.lh} ${lf.lw*0.75},${-lf.lh} ${lf.lw},0 C ${lf.lw*0.75},${lf.lh} ${lf.lw*0.25},${lf.lh} 0,0 Z`;
                         const midrib = `M ${lf.lw*0.05},0 L ${lf.lw*0.82},0`;
@@ -4986,7 +5274,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                             style={{ pointerEvents: 'none' }}
                           >
                             <path d={leafD} fill={lf.fill} stroke={lf.stroke} strokeWidth={0.5} />
-                            {!lf.bud && <path d={midrib} fill="none" stroke={lf.stroke} strokeWidth={0.35} opacity={0.5} />}
+                            <path d={midrib} fill="none" stroke={lf.stroke} strokeWidth={0.35} opacity={0.5} />
                           </g>
                         );
                       })}
@@ -4996,6 +5284,20 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               </g>
             )}
 
+
+            {/* Fallen leaves — persist until raked */}
+            {fallenLeaves.length > 0 && (
+              <g className="fallen-leaves-layer" style={{pointerEvents:'none'}}>
+                {fallenLeaves.map(fl => {
+                  const leafD = `M 0,0 C ${fl.lw*0.25},${-fl.lh} ${fl.lw*0.75},${-fl.lh} ${fl.lw},0 C ${fl.lw*0.75},${fl.lh} ${fl.lw*0.25},${fl.lh} 0,0 Z`;
+                  return (
+                    <g key={fl.id} transform={`translate(${fl.x},${fl.y}) rotate(${fl.angle})`} opacity={0.75}>
+                      <path d={leafD} fill={fl.fill} stroke={fl.stroke} strokeWidth={0.4}/>
+                    </g>
+                  );
+                })}
+              </g>
+            )}
 
             <g className="nodes-layer">
               {activeRenderNodes.flatMap(node => {
