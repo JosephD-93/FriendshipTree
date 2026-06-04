@@ -161,6 +161,7 @@ function FabMenu(props) {
     undo, redo, setSearchOpen, setSettingsOpen,
     commitAllPaths, setVineDrawMode, setMacheteMode, setPendingPaths, setCurrentStroke,
     rakeActive, setRakeActive,
+    lassoMode, setLassoMode, setLassoPath, setLassoSelected, setLassoMenuOpen,
   } = props;
 
   const dm = theme.darkMode;
@@ -186,6 +187,7 @@ function FabMenu(props) {
     {id:'vine',  icon:'🌿',label:vineDrawMode?'Commit':'Vine', fn:()=>{vineDrawMode?(commitAllPaths(),setVineDrawMode(false)):(setVineDrawMode(true),setMacheteMode(false),setPendingPaths([]),setCurrentStroke([]));setFabOpen(false);}, active:vineDrawMode},
     {id:'cut',   icon:'🪓',label:macheteMode?'Stop':'Cut', fn:()=>{setMacheteMode(!macheteMode);setVineDrawMode(false);setFabOpen(false);}, active:macheteMode},
     {id:'rake',  icon:'🧹',label:rakeActive?'Hide Rake':'Rake', fn:()=>{setRakeActive(v=>!v);setFabOpen(false);}, active:rakeActive},
+    {id:'lasso', icon:'⭕',label:lassoMode?'Stop':'Select', fn:()=>{setLassoMode(v=>!v);setLassoPath([]);setLassoSelected([]);setLassoMenuOpen(false);setFabOpen(false);}, active:lassoMode},
     {id:'cfg',   icon:'⚙️',label:'Settings',fn:()=>{setSettingsOpen(v=>!v);setFabOpen(false);}},
   ];
   const n=tools.length;
@@ -209,8 +211,8 @@ function FabMenu(props) {
     };
   };
 
-  const fabIconCol=fabOpen?'white':(vineDrawMode||macheteMode||rakeActive?'white':'#10b981');
-  const fabBg=fabOpen?'#dc2626':(vineDrawMode||macheteMode||rakeActive?'#10b981':bg);
+  const fabIconCol=fabOpen?'white':(vineDrawMode||macheteMode||rakeActive||lassoMode?'white':'#10b981');
+  const fabBg=fabOpen?'#dc2626':(vineDrawMode||macheteMode||rakeActive||lassoMode?'#10b981':bg);
 
   return (
     <>
@@ -312,6 +314,21 @@ function FabMenu(props) {
           </button>
         </div>
       )}
+      {/* Floating button below FAB when lasso active */}
+      {lassoMode && (
+        <div style={{position:'fixed',left:px,top:py+FAB+8,zIndex:152,display:'flex',flexDirection:'column',alignItems:'center'}}>
+          <button onClick={()=>{setLassoMode(false);setLassoPath([]);setLassoSelected([]);setLassoMenuOpen(false);}}
+            style={{
+              width:FAB,height:FAB,borderRadius:'50%',border:'3px solid white',cursor:'pointer',
+              background:'#7c3aed',
+              boxShadow:'0 4px 16px rgba(0,0,0,0.35)',color:'white',
+              display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:1,
+            }}>
+            <span style={{fontSize:16,lineHeight:1}}>⭕</span>
+            <span style={{fontSize:7,fontWeight:900,letterSpacing:'0.5px'}}>STOP</span>
+          </button>
+        </div>
+      )}
     </>
   );
 }
@@ -375,11 +392,17 @@ function AppInner() {
     if (!partnerFlowerEditor) { origFlowerRef.current = null; return; }
     const n = nodes.find(n=>n.id===partnerFlowerEditor);
     if (n && origFlowerRef.current === null) {
-      origFlowerRef.current = n.partnerFlower ? JSON.parse(JSON.stringify(n.partnerFlower)) : null;
+      origFlowerRef.current = {
+        partnerFlower: n.partnerFlower ? JSON.parse(JSON.stringify(n.partnerFlower)) : null,
+        miniFlower: n.miniFlower ? JSON.parse(JSON.stringify(n.miniFlower)) : null,
+        groupMiniFlower: n.groupMiniFlower ? JSON.parse(JSON.stringify(n.groupMiniFlower)) : null,
+        groupFlowerActive: n.groupFlowerActive,
+      };
     }
   }, [partnerFlowerEditor]);
   const [pfAppearanceOpen, setPfAppearanceOpen] = useState(true);
   const [pfSelectedPart, setPfSelectedPart] = useState('main');
+  const [pfFlowerType, setPfFlowerType] = useState('main'); // 'main' | 'mini'
   const [pfColorPickerFor, setPfColorPickerFor] = useState(null);
   const [pfTab, setPfTab] = useState('design');
   const [pfEditingPresetIdx, setPfEditingPresetIdx] = useState(null);
@@ -398,6 +421,7 @@ function AppInner() {
   const cropImgRef = useRef(null);
   const cropDragRef = useRef(null);
   const idbRef = useRef(null);
+  const borderFlowerPositionsRef = useRef({});
 
   // ── IndexedDB for photo storage ───────────────────────────────────────────
   const [lastCreatedLink, setLastCreatedLink] = useState(null);
@@ -610,12 +634,14 @@ function AppInner() {
   const [showVineBorders, setShowVineBorders] = useState((() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); return s.showVineBorders !== undefined ? s.showVineBorders : true; } catch(e) { return true; } })());
   const [showVineColorPicker, setShowVineColorPicker] = useState(false);
   const [showVineTuner, setShowVineTuner] = useState(false);
-  const [tunerSections, setTunerSections] = useState({borders:true,flowers:false,strands:false});
+  const [tunerSections, setTunerSections] = useState({borders:true,flowers:false,strands:false,groupBorder:false});
   const [sliderDragging, setSliderDragging] = useState(false);
   const [fallenLeaves, setFallenLeaves] = useState(() => { try { return JSON.parse(localStorage.getItem('ft_fallenLeaves')||'[]'); } catch(e) { return []; } });
   // Surrounding flowers settings
-  const [surroundFlowerSettings, setSurroundFlowerSettings] = useState(() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); return s.surroundFlowerSettings ? {...{enabled:true,minSize:8,maxSize:22,count:5,spread:80,useCalc:true,showMain:true,showSurround:true},...s.surroundFlowerSettings} : {enabled:true,minSize:8,maxSize:22,count:5,spread:80,useCalc:true,showMain:true,showSurround:true}; } catch(e) { return {enabled:true,minSize:8,maxSize:22,count:5,spread:80,useCalc:true,showMain:true,showSurround:true}; } });
+  const [surroundFlowerSettings, setSurroundFlowerSettings] = useState(() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); return s.surroundFlowerSettings ? {...{enabled:true,minSize:8,maxSize:22,count:5,spread:80,useCalc:true,showMain:true,showSurround:true,flowerScale:1.0},...s.surroundFlowerSettings} : {enabled:true,minSize:8,maxSize:22,count:5,spread:80,useCalc:true,showMain:true,showSurround:true,flowerScale:1.0}; } catch(e) { return {enabled:true,minSize:8,maxSize:22,count:5,spread:80,useCalc:true,showMain:true,showSurround:true,flowerScale:1.0}; } });
   const [vineBorderParams, setVineBorderParams] = useState(() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); return s.vineBorderParams ? {...{blobArcRadius:1.05,blobSagDepth:0.38,vineArcRadius:1.05,vineSagDepth:0.38,leavesInner:1.0,leavesOuter:1.0},...s.vineBorderParams} : {blobArcRadius:1.05,blobSagDepth:0.38,vineArcRadius:1.05,vineSagDepth:0.38,leavesInner:1.0,leavesOuter:1.0}; } catch(e) { return {blobArcRadius:1.05,blobSagDepth:0.38,vineArcRadius:1.05,vineSagDepth:0.38,leavesInner:1.0,leavesOuter:1.0}; } });
+  const GROUP_BORDER_PARAMS_DEFAULT = {arcRadius:1.05,sagDepth:0.38,coreWidth:3.2,wrap1Width:2.0,wrap2Width:1.6,wrap3Width:1.3,growWidth:1.2,leafCoreSize:12,leafWrapSize:5,leafGrowSize:2,leafSpacing:28,leavesInner:1.0,leavesOuter:1.0};
+  const [groupBorderParams, setGroupBorderParams] = useState(() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); return s.groupBorderParams ? {...GROUP_BORDER_PARAMS_DEFAULT,...s.groupBorderParams} : GROUP_BORDER_PARAMS_DEFAULT; } catch(e) { return GROUP_BORDER_PARAMS_DEFAULT; } });
   const STRAND_PARAMS_DEFAULT = {coreWidth:10.2,wrap1Width:2.0,wrap2Width:1.6,wrap3Width:1.3,growWidth:1.2,coreColorD:'#14532d',coreColorL:'#15803d',wrap1ColorD:'#15803d',wrap1ColorL:'#22c55e',wrap2ColorD:'#16a34a',wrap2ColorL:'#4ade80',wrap3ColorD:'#22c55e',wrap3ColorL:'#86efac',growColorD:'#16a34a',growColorL:'#4ade80',leafCoreSize:43,leafWrapSize:19,leafGrowSize:5,leafCoreDark:'#14532d',leafCoreLight:'#15803d',leafWrapDark:'#166534',leafWrapLight:'#22c55e',leafGrowDark:'#16a34a',leafGrowLight:'#4ade80',leafSpacing:36};
   const [strandParams, setStrandParams] = useState(() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); return s.strandParams ? {...STRAND_PARAMS_DEFAULT,...s.strandParams} : STRAND_PARAMS_DEFAULT; } catch(e) { return STRAND_PARAMS_DEFAULT; } });
   const [groupColors, setGroupColors] = useState((() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); return s.groupColors !== undefined ? s.groupColors : {}; } catch(e) { return {}; } })());
@@ -682,6 +708,11 @@ function AppInner() {
   const [macheteMode, setMacheteMode] = useState(false);
   const [vineDrawMode, setVineDrawMode] = useState(false);
   const [rakeActive, setRakeActive] = useState(false);
+  const [lassoMode, setLassoMode] = useState(false);
+  const [lassoPath, setLassoPath] = useState([]);
+  const [lassoDrawing, setLassoDrawing] = useState(false);
+  const [lassoSelected, setLassoSelected] = useState([]);
+  const [lassoMenuOpen, setLassoMenuOpen] = useState(false);
   const [rakePos, setRakePos] = useState({ x: 120, y: 120 });
   const [rakeDragging, setRakeDragging] = useState(false);
   const [collectedLeaves, setCollectedLeaves] = useState([]);
@@ -2166,11 +2197,11 @@ function AppInner() {
       localStorage.setItem('ft_settings', JSON.stringify({
         theme, groupColors, archivedLinks, collapsedGroups,
         photoBorderMode, showMapKey, showVineBorders,
-        vineBorderParams, surroundFlowerSettings, activeTags, strandParams,
+        vineBorderParams, surroundFlowerSettings, activeTags, strandParams, groupBorderParams,
       }));
     } catch(e) { console.warn('ft_settings save failed:', e.message); }
   }, [theme, groupColors, archivedLinks, collapsedGroups, photoBorderMode,
-      showMapKey, showVineBorders, vineBorderParams, surroundFlowerSettings, activeTags, strandParams]);
+      showMapKey, showVineBorders, vineBorderParams, surroundFlowerSettings, activeTags, strandParams, groupBorderParams]);
 
   useEffect(() => {
     try { localStorage.setItem('ft_fallenLeaves', JSON.stringify(fallenLeaves)); } catch(e) {}
@@ -2597,6 +2628,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       {showVineTuner && (()=>{
         const dm=theme.darkMode;
         const setP=(k,v)=>setVineBorderParams(p=>({...p,[k]:v}));
+        const setG=(k,v)=>setGroupBorderParams(p=>({...p,[k]:v}));
         const setS=(k,v)=>setSurroundFlowerSettings(p=>({...p,[k]:v}));
         const setST=(k,v)=>setStrandParams(p=>({...p,[k]:v}));
         const secStyle={borderTop:'1px solid '+(dm?'#334155':'#e2e8f0'),marginTop:10,paddingTop:8};
@@ -2628,7 +2660,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         );
         const exportConfig=()=>{
           try {
-            const code=btoa(JSON.stringify({vineBorderParams,surroundFlowerSettings,strandParams}));
+            const code=btoa(JSON.stringify({vineBorderParams,surroundFlowerSettings,strandParams,groupBorderParams}));
             const el=document.createElement('textarea');
             el.value=code; document.body.appendChild(el); el.select();
             document.execCommand('copy'); document.body.removeChild(el);
@@ -2665,8 +2697,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             <div style={secStyle}>
               {secHead('🌸 Surrounding Flowers', op.flowers, ()=>tog('flowers'))}
               {op.flowers && <>
-                <Slider label="Min size" value={surroundFlowerSettings.minSize} min={4}  max={30}  step={1} unit="px" color="#f59e0b" onChange={v=>setS('minSize',v)}/>
-                <Slider label="Max size" value={surroundFlowerSettings.maxSize} min={8}  max={60}  step={1} unit="px" color="#f59e0b" onChange={v=>setS('maxSize',v)}/>
+                <Slider label="Overall scale" value={surroundFlowerSettings.flowerScale??1.0} min={0.05} max={3.0} step={0.05} color="#f59e0b" onChange={v=>setS('flowerScale',v)}/>
+                <Slider label="Min size" value={surroundFlowerSettings.minSize} min={1}  max={30}  step={0.5} unit="px" color="#f59e0b" onChange={v=>setS('minSize',v)}/>
+                <Slider label="Max size" value={surroundFlowerSettings.maxSize} min={2}  max={60}  step={0.5} unit="px" color="#f59e0b" onChange={v=>setS('maxSize',v)}/>
                 <Slider label="Spread"   value={surroundFlowerSettings.spread}  min={20} max={200} step={5} unit="px" color="#f59e0b" onChange={v=>setS('spread',v)}/>
                 {!surroundFlowerSettings.useCalc && <Slider label="Count" value={surroundFlowerSettings.count} min={1} max={20} step={1} color="#f59e0b" onChange={v=>setS('count',v)}/>}
               </>}
@@ -2708,6 +2741,26 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               </>}
             </div>
 
+            {/* Section 4: Group Border */}
+            <div style={secStyle}>
+              {secHead('🏠 Group Border', op.groupBorder, ()=>tog('groupBorder'))}
+              {op.groupBorder && <>
+                <Slider label="Arc radius"   value={groupBorderParams.arcRadius}   min={0.5} max={2.5} step={0.05} unit="×" color="#8b5cf6" onChange={v=>setG('arcRadius',v)}/>
+                <Slider label="Sag depth"    value={groupBorderParams.sagDepth}    min={0.0} max={0.9} step={0.02} color="#8b5cf6" onChange={v=>setG('sagDepth',v)}/>
+                <Slider label="Core width"   value={groupBorderParams.coreWidth}   min={0.5} max={8}   step={0.1}  color="#14532d" onChange={v=>setG('coreWidth',v)}/>
+                <Slider label="Wrap 1"       value={groupBorderParams.wrap1Width}  min={0.5} max={6}   step={0.1}  color="#15803d" onChange={v=>setG('wrap1Width',v)}/>
+                <Slider label="Wrap 2"       value={groupBorderParams.wrap2Width}  min={0.5} max={6}   step={0.1}  color="#16a34a" onChange={v=>setG('wrap2Width',v)}/>
+                <Slider label="Wrap 3"       value={groupBorderParams.wrap3Width}  min={0.5} max={6}   step={0.1}  color="#22c55e" onChange={v=>setG('wrap3Width',v)}/>
+                <Slider label="Growing"      value={groupBorderParams.growWidth}   min={0.5} max={4}   step={0.1}  color="#4ade80" onChange={v=>setG('growWidth',v)}/>
+                <Slider label="Core leaf"    value={groupBorderParams.leafCoreSize} min={2} max={40}   step={1}    unit="px" color="#14532d" onChange={v=>setG('leafCoreSize',v)}/>
+                <Slider label="Wrap leaf"    value={groupBorderParams.leafWrapSize} min={1} max={30}   step={1}    unit="px" color="#16a34a" onChange={v=>setG('leafWrapSize',v)}/>
+                <Slider label="Grow leaf"    value={groupBorderParams.leafGrowSize} min={1} max={15}   step={1}    unit="px" color="#4ade80" onChange={v=>setG('leafGrowSize',v)}/>
+                <Slider label="Leaf spacing" value={groupBorderParams.leafSpacing} min={8}  max={80}   step={2}    unit="px" color="#22c55e" onChange={v=>setG('leafSpacing',v)}/>
+                <Slider label="Inner leaves" value={groupBorderParams.leavesInner} min={0}  max={3}    step={0.25} unit="×" color="#22c55e" onChange={v=>setG('leavesInner',v)}/>
+                <Slider label="Outer leaves" value={groupBorderParams.leavesOuter} min={0}  max={3}    step={0.25} unit="×" color="#22c55e" onChange={v=>setG('leavesOuter',v)}/>
+              </>}
+            </div>
+
             <button onClick={exportConfig}
               style={{width:'100%',marginTop:12,padding:'8px 0',borderRadius:8,
                 background:'#6366f1',color:'white',border:'none',cursor:'pointer',
@@ -2733,6 +2786,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         commitAllPaths={commitAllPaths} setVineDrawMode={setVineDrawMode}
         setMacheteMode={setMacheteMode} setPendingPaths={setPendingPaths} setCurrentStroke={setCurrentStroke}
         rakeActive={rakeActive} setRakeActive={setRakeActive}
+        lassoMode={lassoMode} setLassoMode={setLassoMode}
+        setLassoPath={setLassoPath} setLassoSelected={setLassoSelected} setLassoMenuOpen={setLassoMenuOpen}
       />}
 
       {/* Clear all leaves confirm popup */}
@@ -2958,8 +3013,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         const dm=theme.darkMode;
                         const setS=(k,v)=>setSurroundFlowerSettings(p=>({...p,[k]:v}));
                         const sliders=[
-                          {key:'minSize',label:'Min size',min:4,max:30,step:1,unit:'px'},
-                          {key:'maxSize',label:'Max size',min:8,max:60,step:1,unit:'px'},
+                          {key:'minSize',label:'Min size',min:1,max:30,step:0.5,unit:'px'},
+                          {key:'maxSize',label:'Max size',min:2,max:60,step:0.5,unit:'px'},
                           {key:'spread', label:'Spread from node',min:20,max:200,step:5,unit:'px'},
                           ...(!surroundFlowerSettings.useCalc?[{key:'count',label:'Count per person',min:1,max:20,step:1,unit:''}]:[]),
                         ];
@@ -3655,33 +3710,53 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
               {/* Edit/Add Flower — below manual logs */}
               {selectedNode.type !== 'hub' && (
-                <button
-                  onClick={()=>{setPfSelectedPart('main');setPfColorPickerFor(null);setPfTab('design');setPartnerFlowerEditor(selectedNodeId);}}
-                  style={{width:'100%',borderRadius:12,border:'2px solid '+(theme.darkMode?'#334155':'#e2e8f0'),background:theme.darkMode?'#1e293b':'#f8fafc',cursor:'pointer',padding:'8px',display:'flex',alignItems:'center',gap:10,marginTop:12}}>
-                  <svg width={36} height={36} viewBox="-22 -22 44 44" style={{flexShrink:0}}>
-                    {selectedNode.partnerFlower ? (()=>{
-                      const pf = selectedNode.partnerFlower;
-                      const pr = 10*(1+(pf.petalLength||0.55)), pw = pr*0.65;
-                      const mainPath = Array.from({length:pf.petals||6},(_,pi)=>{
-                        const pa=(pi/(pf.petals||6))*Math.PI*2,tx=Math.cos(pa)*pr,ty=Math.sin(pa)*pr,perpA=pa+Math.PI*0.5;
-                        const c1x=Math.cos(pa)*pr*0.35+Math.cos(perpA)*pw*0.6,c1y=Math.sin(pa)*pr*0.35+Math.sin(perpA)*pw*0.6;
-                        const c2x=Math.cos(pa)*pr*0.85+Math.cos(perpA)*pw*0.5,c2y=Math.sin(pa)*pr*0.85+Math.sin(perpA)*pw*0.5;
-                        const c3x=Math.cos(pa)*pr*0.85-Math.cos(perpA)*pw*0.5,c3y=Math.sin(pa)*pr*0.85-Math.sin(perpA)*pw*0.5;
-                        const c4x=Math.cos(pa)*pr*0.35-Math.cos(perpA)*pw*0.6,c4y=Math.sin(pa)*pr*0.35-Math.sin(perpA)*pw*0.6;
-                        return 'M 0,0 C '+c1x+','+c1y+' '+c2x+','+c2y+' '+tx+','+ty+' C '+c3x+','+c3y+' '+c4x+','+c4y+' 0,0';
-                      }).join(' ');
-                      return (<>
-                        <path d={mainPath} fill={pf.petalColor||'#f43f5e'}/>
-                        <circle r={6} fill={theme.darkMode?'#1e293b':'white'} stroke={pf.borderColor||pf.petalColor} strokeWidth="1.5"/>
-                      </>);
-                    })() : (
-                      <text textAnchor="middle" dominantBaseline="middle" fontSize="24">🌸</text>
-                    )}
-                  </svg>
-                  <span style={{fontSize:12,fontWeight:700,color:theme.darkMode?'#94a3b8':'#64748b'}}>
-                    {selectedNode.partnerFlower ? 'Edit Flower' : 'Add Flower'}
-                  </span>
-                </button>
+                <>
+                  <button
+                    onClick={()=>{setPfSelectedPart('main');setPfColorPickerFor(null);setPfTab('design');setPfFlowerType('main');setPartnerFlowerEditor(selectedNodeId);}}
+                    style={{width:'100%',borderRadius:12,border:'2px solid '+(theme.darkMode?'#334155':'#e2e8f0'),background:theme.darkMode?'#1e293b':'#f8fafc',cursor:'pointer',padding:'8px',display:'flex',alignItems:'center',gap:10,marginTop:12}}>
+                    <svg width={36} height={36} viewBox="-22 -22 44 44" style={{flexShrink:0}}>
+                      {selectedNode.partnerFlower ? (()=>{
+                        const pf = selectedNode.partnerFlower;
+                        const pr = 10*(1+(pf.petalLength||0.55)), pw = pr*0.65;
+                        const mainPath = Array.from({length:pf.petals||6},(_,pi)=>{
+                          const pa=(pi/(pf.petals||6))*Math.PI*2,tx=Math.cos(pa)*pr,ty=Math.sin(pa)*pr,perpA=pa+Math.PI*0.5;
+                          const c1x=Math.cos(pa)*pr*0.35+Math.cos(perpA)*pw*0.6,c1y=Math.sin(pa)*pr*0.35+Math.sin(perpA)*pw*0.6;
+                          const c2x=Math.cos(pa)*pr*0.85+Math.cos(perpA)*pw*0.5,c2y=Math.sin(pa)*pr*0.85+Math.sin(perpA)*pw*0.5;
+                          const c3x=Math.cos(pa)*pr*0.85-Math.cos(perpA)*pw*0.5,c3y=Math.sin(pa)*pr*0.85-Math.sin(perpA)*pw*0.5;
+                          const c4x=Math.cos(pa)*pr*0.35-Math.cos(perpA)*pw*0.6,c4y=Math.sin(pa)*pr*0.35-Math.sin(perpA)*pw*0.6;
+                          return 'M 0,0 C '+c1x+','+c1y+' '+c2x+','+c2y+' '+tx+','+ty+' C '+c3x+','+c3y+' '+c4x+','+c4y+' 0,0';
+                        }).join(' ');
+                        return (<>
+                          <path d={mainPath} fill={pf.petalColor||'#f43f5e'}/>
+                          <circle r={6} fill={theme.darkMode?'#1e293b':'white'} stroke={pf.borderColor||pf.petalColor} strokeWidth="1.5"/>
+                        </>);
+                      })() : (
+                        <text textAnchor="middle" dominantBaseline="middle" fontSize="24">🌸</text>
+                      )}
+                    </svg>
+                    <span style={{fontSize:12,fontWeight:700,color:theme.darkMode?'#94a3b8':'#64748b'}}>
+                      {selectedNode.partnerFlower ? 'Edit Flower' : 'Add Flower'}
+                    </span>
+                  </button>
+                  {selectedNode.partnerFlower && (
+                    <div style={{marginTop:8,borderRadius:10,background:theme.darkMode?'#0f172a':'#f1f5f9',overflow:'hidden'}}>
+                      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'8px 12px',borderBottom:`1px solid ${theme.darkMode?'#1e293b':'#e2e8f0'}`}}>
+                        <span style={{fontSize:12,color:theme.darkMode?'#94a3b8':'#64748b',fontWeight:600}}>🌸 Show main flower</span>
+                        <input type="checkbox"
+                          checked={selectedNode.showMainFlower !== false}
+                          onChange={e=>updateSelectedNode('showMainFlower', e.target.checked)}
+                          style={{width:16,height:16,accentColor:'#f43f5e',cursor:'pointer'}}/>
+                      </div>
+                      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'8px 12px'}}>
+                        <span style={{fontSize:12,color:theme.darkMode?'#94a3b8':'#64748b',fontWeight:600}}>🌼 Show mini flowers on border</span>
+                        <input type="checkbox"
+                          checked={selectedNode.showBorderFlowers !== false}
+                          onChange={e=>updateSelectedNode('showBorderFlowers', e.target.checked)}
+                          style={{width:16,height:16,accentColor:'#f59e0b',cursor:'pointer'}}/>
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
 
               {/* Contact details — collapsible */}
@@ -3806,23 +3881,40 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   {/* Group header — main photo left, members right, vine border around all */}
                   <div style={{textAlign:'center',padding:'28px 0 8px',position:'relative'}}>
                     {(()=>{
-                      const PREVIEW_W = 240, PREVIEW_H = 200;
+                      const PREVIEW_W = 280, PREVIEW_H = 200;
                       const blobColor = selectedNode.vineBlobColor || '#15803d';
                       const blobOp = selectedNode.vineBlobOpacity ?? 0.9;
                       const filterId = 'prev-' + hubId.replace(/[^a-z0-9]/gi,'');
                       const groupColor = groupColors[hubId] || '#10b981';
 
                       const mainR = 56;
-                      const mainX = mainR + 14, mainY = PREVIEW_H/2;
                       const memberR = 22;
-                      const maxM = Math.min(members.length, 5);
-                      const memberSpacing = maxM>1 ? Math.min(memberR*2+6, (PREVIEW_H-16)/(maxM-1)) : 0;
-                      const memberX = mainX + mainR + memberR + 16;
-                      const memberPositions = Array.from({length:maxM},(_,i)=>{
-                        const totalH = memberSpacing*(maxM-1);
-                        const startY = PREVIEW_H/2 - totalH/2;
-                        return {x:memberX, y:maxM===1?PREVIEW_H/2:startY+i*memberSpacing};
-                      });
+                      const gap = 6;
+                      const hex = memberR * 2 + gap; // honeycomb cell size
+
+                      // Hub sits centre-left
+                      const mainX = mainR + 18, mainY = PREVIEW_H / 2;
+
+                      // Honeycomb offsets relative to hub: right side first (members 0-2), left side after (3+)
+                      // Honeycomb positions: right column, then left column
+                      const hexOffsets = [
+                        // Right of hub — 3 slots
+                        { dx:  mainR + memberR + gap,       dy: -hex * 0.5 },
+                        { dx:  mainR + memberR + gap,       dy:  hex * 0.5 },
+                        { dx:  mainR + memberR + gap + hex, dy:  0          },
+                        // Left of hub — slots 4+
+                        { dx: -(memberR + gap),             dy: -hex * 0.5 },
+                        { dx: -(memberR + gap),             dy:  hex * 0.5 },
+                        { dx: -(memberR + gap + hex),       dy:  0          },
+                        { dx: -(memberR + gap),             dy: -hex * 1.5  },
+                        { dx: -(memberR + gap),             dy:  hex * 1.5  },
+                      ];
+
+                      const maxM = Math.min(members.length, hexOffsets.length);
+                      const memberPositions = Array.from({length:maxM},(_,i)=>({
+                        x: mainX + hexOffsets[i].dx,
+                        y: mainY + hexOffsets[i].dy,
+                      }));
 
                       const allNodes = [
                         {x:mainX,y:mainY,r:mainR,photo:selectedNode.img,color:groupColor,isHub:true},
@@ -3830,8 +3922,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       ];
                       const N=allNodes.length;
                       const blobArcR=n=>n.r*(vineBorderParams.blobArcRadius||1.05);
-                      const vineArcR=n=>n.r*(vineBorderParams.vineArcRadius||1.05);
-                      const SAG=vineBorderParams.vineSagDepth||0.38;
+                      const vineArcR=n=>n.r*(groupBorderParams.arcRadius||1.05);
+                      const SAG=groupBorderParams.sagDepth||0.38;
                       const hcx=allNodes.reduce((s,n)=>s+n.x,0)/N;
                       const hcy=allNodes.reduce((s,n)=>s+n.y,0)/N;
 
@@ -3863,20 +3955,27 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       }
                       const totalPts=allPts.length;
                       const perim=allPts.reduce((s,p,i)=>{const n=allPts[(i+1)%totalPts];return s+Math.sqrt((n.x-p.x)**2+(n.y-p.y)**2);},0);
-                      const coreR=1.5+3*0.8;
+
+                      // Use groupBorderParams for the group window preview
+                      const gbp = groupBorderParams;
+                      const coreR = 5.0;
+
                       const STRAND_DEFS=[
-                        {width:3.0,colorDark:'#14532d',colorLight:'#15803d',role:'core',   wrapFreq:0,  wrapAmp:0},
-                        {width:1.6,colorDark:'#15803d',colorLight:'#22c55e',role:'wrapped',wrapFreq:1.4,wrapAmp:0.7},
-                        {width:1.0,colorDark:'#16a34a',colorLight:'#4ade80',role:'growing',wrapFreq:2.5,wrapAmp:1.0},
+                        {width:gbp.coreWidth,  colorDark:'#14532d', colorLight:'#15803d', role:'core',   wrapFreq:0,  wrapAmp:0},
+                        {width:gbp.wrap1Width, colorDark:'#15803d', colorLight:'#22c55e', role:'wrapped',wrapFreq:1.4,wrapAmp:0.7},
+                        {width:gbp.wrap2Width, colorDark:'#16a34a', colorLight:'#4ade80', role:'wrapped',wrapFreq:1.9,wrapAmp:0.85},
+                        {width:gbp.wrap3Width, colorDark:'#22c55e', colorLight:'#86efac', role:'wrapped',wrapFreq:2.2,wrapAmp:0.95},
+                        {width:gbp.growWidth,  colorDark:'#16a34a', colorLight:'#4ade80', role:'growing',wrapFreq:2.5,wrapAmp:1.0},
                       ];
                       const LEAF_CHARS={
-                        core:{sizeBase:12,sizeVar:2,colorDark:'#14532d',colorLight:'#15803d',aspectW:0.35,bud:false},
-                        wrapped:{sizeBase:5,sizeVar:1,colorDark:'#166534',colorLight:'#22c55e',aspectW:0.32,bud:false},
-                        growing:{sizeBase:2,sizeVar:0.5,colorDark:'#16a34a',colorLight:'#4ade80',aspectW:0.32,bud:true},
+                        core:   {sizeBase:gbp.leafCoreSize, sizeVar:gbp.leafCoreSize*0.17, colorDark:'#14532d', colorLight:'#15803d', aspectW:0.32, bud:false},
+                        wrapped:{sizeBase:gbp.leafWrapSize, sizeVar:gbp.leafWrapSize*0.20, colorDark:'#166534', colorLight:'#22c55e', aspectW:0.32, bud:false},
+                        growing:{sizeBase:gbp.leafGrowSize, sizeVar:gbp.leafGrowSize*0.30, colorDark:'#16a34a', colorLight:'#4ade80', aspectW:0.32, bud:true},
                       };
+                      const leafSpacingPrev = gbp.leafSpacing;
                       const allLeaves=[];
                       const strandPaths=STRAND_DEFS.map((def,ri)=>{
-                        const phaseBase=(ri/3)*Math.PI*2;
+                        const phaseBase=(ri/STRAND_DEFS.length)*Math.PI*2;
                         const pts=allPts.map((bp,idx)=>{
                           const prev=allPts[(idx+totalPts-1)%totalPts],next=allPts[(idx+1)%totalPts];
                           const tdx=next.x-prev.x,tdy=next.y-prev.y,tlen=Math.sqrt(tdx*tdx+tdy*tdy)||1;
@@ -3884,8 +3983,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           const coil=def.role==='core'?0:Math.sin(bp.t*def.wrapFreq*Math.PI*2*hn+phaseBase)*coreR*def.wrapAmp;
                           return {x:bp.x+px*coil,y:bp.y+py*coil,t:bp.t};
                         });
-                        const lc=LEAF_CHARS[def.role];
-                        const lCount=Math.max(2,Math.floor(perim/28));
+                        const lc=LEAF_CHARS[def.role]||LEAF_CHARS.wrapped;
+                        const lCount=Math.max(2,Math.floor(perim/leafSpacingPrev));
                         for(let li=0;li<lCount;li++){
                           const t=(li+0.5+ri*0.3)/lCount;
                           const ptIdx=Math.floor(t*pts.length);
@@ -3895,8 +3994,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           const sv=0.7+0.6*Math.abs(Math.sin(li*3.7+ri*1.9));
                           const lw=lc.sizeBase+lc.sizeVar*sv,lh=lw*lc.aspectW;
                           const fill=dm?lc.colorDark:lc.colorLight;
-                          allLeaves.push({x:p.x,y:p.y,angle:tang+42,lw,lh,fill,stroke:dm?'#0f2d1a':'#14532d',bud:lc.bud,op:0.88});
-                          if(li%2===0)allLeaves.push({x:p.x,y:p.y,angle:tang-42,lw:lw*0.75,lh:lh*0.75,fill,stroke:dm?'#0f2d1a':'#14532d',bud:lc.bud,op:0.65});
+                          if(!lc.bud) allLeaves.push({x:p.x,y:p.y,angle:tang+42,lw,lh,fill,stroke:dm?'#0f2d1a':'#14532d',bud:false,op:0.88});
+                          allLeaves.push({x:p.x,y:p.y,angle:tang-42,lw,lh,fill,stroke:dm?'#0f2d1a':'#14532d',bud:lc.bud,op:lc.bud?0.55:0.65});
                         }
                         return {...def,d:'M '+pts.map(p=>p.x.toFixed(1)+','+p.y.toFixed(1)).join(' L ')+' Z'};
                       });
@@ -3913,6 +4012,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
                       return (
                         <div style={{display:'inline-block',position:'relative'}}>
+                          {/* Open tuner button — temporary for design phase */}
+                          <button onClick={()=>setShowVineTuner(v=>!v)}
+                            style={{width:'100%',marginBottom:6,padding:'6px 12px',borderRadius:8,border:'none',cursor:'pointer',fontSize:11,fontWeight:700,
+                              background:showVineTuner?'#8b5cf6':'#ede9fe',color:showVineTuner?'white':'#8b5cf6',
+                              display:'flex',alignItems:'center',justifyContent:'center',gap:6}}>
+                            🎛 {showVineTuner?'Tuner open ✓':'Open Group Border Tuner'}
+                          </button>
                           <svg width={PREVIEW_W} height={PREVIEW_H} style={{display:'block',margin:'0 auto'}}>
                             <defs>
                               {showVineBorders&&(<filter id={filterId} x="-20%" y="-20%" width="140%" height="140%" filterUnits="userSpaceOnUse" colorInterpolationFilters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation={7} result="blur"/><feColorMatrix in="blur" type="matrix" result="shaped" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 32 -14"/><feFlood result="col" floodColor={blobColor} floodOpacity={blobOp}/><feComposite in="col" in2="shaped" operator="in"/></filter>)}
@@ -3938,15 +4044,81 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                 {n.isHub&&!n.photo&&<text x={n.x} y={n.y+1} textAnchor="middle" dominantBaseline="middle" fontSize={n.r*0.75} style={{userSelect:'none'}}>🌳</text>}
                               </g>
                             ))}
+                            {/* Mini flowers for each member along the vine border */}
+                            {members.filter(m=>m.showBorderFlowers!==false&&(m.miniFlower||m.partnerFlower)).map((m,mi)=>{
+                              const mpf = m.miniFlower||m.partnerFlower;
+                              const mpos = memberPositions[mi];
+                              if(!mpos) return null;
+                              const mCount = 5;
+                              return (
+                                <React.Fragment key={'mf-'+m.id}>
+                                  {Array.from({length:mCount},(_,fi)=>{
+                                    const angle=(fi/mCount)*Math.PI*2+fi*0.9+m.id.length;
+                                    const dv=Math.sin(fi*1.7+m.id.length*0.3)*memberR*0.4;
+                                    const dist=memberR+dv;
+                                    const fx2=mpos.x+Math.cos(angle)*dist;
+                                    const fy2=mpos.y+Math.sin(angle)*dist;
+                                    const sv=0.5+0.5*Math.abs(Math.sin(fi*2.3+m.id.length));
+                                    const fr3=(3+4*sv)*(surroundFlowerSettings.flowerScale??1);
+                                    const PETALS3=mpf.petals||6;
+                                    const fpr3=fr3*(1+(mpf.petalLength??0.45));
+                                    const fpw3=fpr3*0.5;
+                                    const fpPath3=Array.from({length:PETALS3},(_,pi)=>{
+                                      const pa=(pi/PETALS3)*Math.PI*2+(fi*0.5);
+                                      const tx=Math.cos(pa)*fpr3,ty=Math.sin(pa)*fpr3,pp=pa+Math.PI*0.5;
+                                      return `M 0,0 C ${Math.cos(pa)*fpr3*0.35+Math.cos(pp)*fpw3*0.6},${Math.sin(pa)*fpr3*0.35+Math.sin(pp)*fpw3*0.6} ${Math.cos(pa)*fpr3*0.85+Math.cos(pp)*fpw3*0.5},${Math.sin(pa)*fpr3*0.85+Math.sin(pp)*fpw3*0.5} ${tx},${ty} C ${Math.cos(pa)*fpr3*0.85-Math.cos(pp)*fpw3*0.5},${Math.sin(pa)*fpr3*0.85-Math.sin(pp)*fpw3*0.5} ${Math.cos(pa)*fpr3*0.35-Math.cos(pp)*fpw3*0.6},${Math.sin(pa)*fpr3*0.35-Math.sin(pp)*fpw3*0.6} 0,0`;
+                                    }).join(' ');
+                                    return (
+                                      <g key={fi} transform={`translate(${fx2},${fy2})`} opacity={0.85} style={{pointerEvents:'none'}}>
+                                        <path d={fpPath3} fill={mpf.petalColor||'#f59e0b'}/>
+                                        <circle r={fr3*0.22} fill={mpf.centerColor||'#fef08a'} stroke={mpf.petalColor||'#f59e0b'} strokeWidth={0.4}/>
+                                      </g>
+                                    );
+                                  })}
+                                </React.Fragment>
+                              );
+                            })}
+
+                            {/* Vine colour button — sits on the top-right of the vine border */}
+                            {showVineBorders && (
+                              <g transform={`translate(${PREVIEW_W-22},${22})`}
+                                onClick={()=>setShowVineColorPicker(p=>!p)}
+                                style={{cursor:'pointer'}}>
+                                <circle r={10} fill={selectedNode.vineBlobColor||"#15803d"} stroke="white" strokeWidth={2}
+                                  style={{filter:"drop-shadow(0 1px 3px rgba(0,0,0,0.4))"}}/>
+                                <text textAnchor="middle" dominantBaseline="middle" fontSize={9} fill="white" style={{userSelect:"none"}}>🌿</text>
+                              </g>
+                            )}
+
+                            {/* Hub flower button */}
                             <g transform={`translate(${fx},${fy})`} onClick={()=>setHubFlowerMenuOpen(p=>!p)} style={{cursor:'pointer'}}>
-                              {hubFlowerMenuOpen&&<circle r={fr+4} fill="rgba(255,255,255,0.2)" stroke="white" strokeWidth={1.5} opacity={0.7}/>}
+                              {hubFlowerMenuOpen&&<circle r={fr+4} fill="rgba(255,255,255,0.2)" stroke="white" strokeWidth={1.5} opacity={0.7}/>}}
                               {pf?(<><path d={fpPath} fill={isActive?pf.petalColor:'#94a3b8'} opacity={isActive?1:0.6}/><circle r={fr*0.28} fill={isActive?(pf.centerColor||'#fef08a'):'#e2e8f0'} stroke={isActive?pf.petalColor:'#94a3b8'} strokeWidth={1}/></>):(<><circle r={fr} fill="none" stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="4 3" opacity={0.7}/><text textAnchor="middle" dominantBaseline="middle" fontSize={fr*0.9} style={{userSelect:'none'}}>🌸</text></>)}
                             </g>
                           </svg>
                           {hubFlowerMenuOpen&&(
-                            <div style={{position:'absolute',top:'50%',left:'50%',transform:'translate(-50%,-50%)',zIndex:50,borderRadius:12,overflow:'hidden',boxShadow:'0 4px 24px rgba(0,0,0,0.4)',border:`1px solid ${bd}`,background:dm?'#1e293b':'white',minWidth:160}}>
-                              <button onClick={()=>{setHubFlowerMenuOpen(false);setPfSelectedPart('main');setPfColorPickerFor(null);setPfTab('design');setPartnerFlowerEditor(hubId);}} style={{width:'100%',padding:'12px 16px',background:'none',border:'none',cursor:'pointer',textAlign:'left',fontSize:13,fontWeight:700,color:dm?'#e2e8f0':'#1e293b',display:'flex',alignItems:'center',gap:8}}>✏️ {pf?'Edit Flower':'Add Flower'}</button>
-                              {pf&&<button onClick={()=>{setHubFlowerMenuOpen(false);updateSelectedNode('groupFlowerActive',selectedNode.groupFlowerActive===false?true:false);showToast(selectedNode.groupFlowerActive===false?'🌸 Group flower on':'⭕ Group flower off');}} style={{width:'100%',padding:'12px 16px',background:'none',border:'none',borderTop:`1px solid ${bd}`,cursor:'pointer',textAlign:'left',fontSize:13,fontWeight:700,color:selectedNode.groupFlowerActive===false?'#94a3b8':'#10b981',display:'flex',alignItems:'center',gap:8}}>{selectedNode.groupFlowerActive===false?'⭕ Turn On':'✅ Turn Off'}</button>}
+                            <div style={{position:'absolute',top:'50%',left:'50%',transform:'translate(-50%,-50%)',zIndex:50,borderRadius:12,overflow:'hidden',boxShadow:'0 4px 24px rgba(0,0,0,0.4)',border:`1px solid ${bd}`,background:dm?'#1e293b':'white',minWidth:190}}>
+                              <button onClick={()=>{setHubFlowerMenuOpen(false);setPfSelectedPart('main');setPfColorPickerFor(null);setPfTab('design');setPfFlowerType('mini');setPartnerFlowerEditor(hubId);}} style={{width:'100%',padding:'11px 16px',background:'none',border:'none',cursor:'pointer',textAlign:'left',fontSize:13,fontWeight:700,color:dm?'#e2e8f0':'#1e293b',display:'flex',alignItems:'center',gap:8}}>
+                                ✏️ Design
+                              </button>
+                              <div style={{padding:'8px 16px 4px',borderTop:`1px solid ${bd}`}}>
+                                <span style={{fontSize:10,fontWeight:800,color:dm?'#475569':'#94a3b8',textTransform:'uppercase',letterSpacing:1}}>Mini flower mode</span>
+                              </div>
+                              {[
+                                {mode:'shared',   icon:'❤️', label:'Group only'},
+                                {mode:'blend',    icon:'🩷', label:'Blend'},
+                                {mode:'personal', icon:'🤍', label:'Personal only'},
+                              ].map(opt=>{
+                                const current = selectedNode.groupMiniFlowerMode||'blend';
+                                const active = current===opt.mode;
+                                return (
+                                  <button key={opt.mode} onClick={()=>{updateSelectedNode('groupMiniFlowerMode',opt.mode);setHubFlowerMenuOpen(false);showToast(`${opt.icon} ${opt.label}`);}}
+                                    style={{width:'100%',padding:'9px 16px',background:active?(dm?'#0f172a':'#f0fdf4'):(dm?'#1e293b':'#fafafa'),border:'none',cursor:'pointer',textAlign:'left',fontSize:12,fontWeight:active?800:500,color:active?'#10b981':(dm?'#94a3b8':'#64748b'),display:'flex',alignItems:'center',gap:8}}>
+                                    {opt.icon} {opt.label}
+                                    {active&&<span style={{marginLeft:'auto',fontSize:14}}>✓</span>}
+                                  </button>
+                                );
+                              })}
                             </div>
                           )}
                         </div>
@@ -3963,65 +4135,40 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         color:dm?'#e2e8f0':'#1e293b',textAlign:'left',
                         textShadow:dm?'0 1px 4px rgba(0,0,0,0.8)':'0 1px 3px rgba(255,255,255,0.8)'}}/>
                   </div>
-                  {/* Action row: Vine toggle */}
-                  <div style={{display:'flex',gap:6,marginBottom:8}}>
-                    {/* Vine border — toggle + colour dot */}
-                    <div style={{flex:1,borderRadius:10,border:`1.5px solid ${showVineBorders?'#10b981':bd}`,background:showVineBorders?'#10b98118':bg2,padding:'8px 6px',display:'flex',flexDirection:'column',alignItems:'center',gap:5}}>
-                      <span style={{fontSize:20}}>🌿</span>
-                      {/* On/Off toggle */}
-                      <div onClick={()=>setShowVineBorders(p=>!p)} style={{display:'flex',alignItems:'center',gap:4,cursor:'pointer'}}>
-                        <div style={{width:28,height:16,borderRadius:8,background:showVineBorders?'#10b981':'#334155',position:'relative',flexShrink:0,transition:'background 0.2s'}}>
-                          <div style={{position:'absolute',top:2,width:12,height:12,borderRadius:'50%',background:'white',left:showVineBorders?14:2,transition:'left 0.2s'}}/>
+                  {/* Vine colour picker popup — triggered from SVG button on preview */}
+                  {showVineColorPicker && (
+                    <div style={{position:'relative',marginBottom:8}}>
+                      <div style={{position:'absolute',top:0,left:'50%',transform:'translateX(-50%)',zIndex:200,
+                        background:dm?'#1e293b':'white',borderRadius:14,padding:12,
+                        boxShadow:'0 4px 24px rgba(0,0,0,0.35)',border:`1px solid ${bd}`,width:180}}>
+                        <div style={{fontSize:11,fontWeight:700,color:sub,marginBottom:8}}>Vine Border Colour</div>
+                        <input type="color"
+                          value={selectedNode.vineBlobColor||'#15803d'}
+                          onChange={e=>{updateSelectedNode('vineBlobColor',e.target.value);}}
+                          style={{width:'100%',height:40,borderRadius:8,border:'none',cursor:'pointer',marginBottom:8}}/>
+                        <div style={{display:'flex',gap:4,flexWrap:'wrap',marginBottom:8}}>
+                          {['#14532d','#15803d','#22c55e','#4ade80','#84cc16','#ca8a04','#b45309','#ef4444','#3b82f6','#8b5cf6','#ec4899','#f43f5e'].map(c=>(
+                            <button key={c} onClick={()=>{updateSelectedNode('vineBlobColor',c);}}
+                              style={{width:18,height:18,borderRadius:'50%',background:c,
+                                border:`2px solid ${selectedNode.vineBlobColor===c?'white':'transparent'}`,
+                                cursor:'pointer',flexShrink:0}}/>
+                          ))}
+                          <button onClick={()=>{updateSelectedNode('vineBlobColor',null);setShowVineColorPicker(false);}}
+                            style={{width:18,height:18,borderRadius:'50%',background:'transparent',border:'1.5px dashed #94a3b8',cursor:'pointer',fontSize:8,color:'#94a3b8',display:'flex',alignItems:'center',justifyContent:'center'}}>✕</button>
                         </div>
-                        <span style={{fontSize:9,fontWeight:700,color:showVineBorders?'#10b981':sub}}>{showVineBorders?'On':'Off'}</span>
+                        <div style={{display:'flex',alignItems:'center',gap:6}}>
+                          <span style={{fontSize:10,color:sub,flexShrink:0}}>Opacity</span>
+                          <input type="range" min={0} max={1} step={0.05}
+                            value={selectedNode.vineBlobOpacity??0.9}
+                            onChange={e=>updateSelectedNode('vineBlobOpacity',parseFloat(e.target.value))}
+                            style={{flex:1,accentColor:'#10b981'}}/>
+                          <span style={{fontSize:10,color:sub,width:24,textAlign:'right'}}>{Math.round((selectedNode.vineBlobOpacity??0.9)*100)}%</span>
+                        </div>
+                        <button onClick={()=>setShowVineColorPicker(false)} style={{marginTop:8,width:'100%',padding:'6px',borderRadius:8,border:'none',background:'#10b981',color:'white',fontSize:12,fontWeight:700,cursor:'pointer'}}>Done</button>
                       </div>
-                      {/* Colour dot — opens colour wheel */}
-                      {showVineBorders && (
-                        <div style={{position:'relative'}}>
-                          <button onClick={()=>setShowVineColorPicker(p=>!p)}
-                            style={{width:22,height:22,borderRadius:'50%',
-                              background:selectedNode.vineBlobColor||'#15803d',
-                              border:`2.5px solid ${showVineColorPicker?'white':bd}`,
-                              boxShadow:showVineColorPicker?`0 0 0 2px ${selectedNode.vineBlobColor||'#15803d'}`:'none',
-                              cursor:'pointer',flexShrink:0}}/>
-                          {showVineColorPicker && (
-                            <div style={{position:'absolute',bottom:'130%',left:'50%',transform:'translateX(-50%)',zIndex:200,
-                              background:dm?'#1e293b':'white',borderRadius:14,padding:12,
-                              boxShadow:'0 4px 24px rgba(0,0,0,0.35)',border:`1px solid ${bd}`,width:180}}>
-                              <div style={{fontSize:11,fontWeight:700,color:sub,marginBottom:8}}>Blob Colour</div>
-                              {/* Colour wheel using hue slider */}
-                              <input type="color"
-                                value={selectedNode.vineBlobColor||'#15803d'}
-                                onChange={e=>{updateSelectedNode('vineBlobColor',e.target.value);}}
-                                style={{width:'100%',height:40,borderRadius:8,border:'none',cursor:'pointer',marginBottom:8}}/>
-                              {/* Preset swatches */}
-                              <div style={{display:'flex',gap:4,flexWrap:'wrap',marginBottom:8}}>
-                                {['#14532d','#15803d','#22c55e','#4ade80','#84cc16','#ca8a04','#b45309','#ef4444','#3b82f6','#8b5cf6','#ec4899','#f43f5e'].map(c=>(
-                                  <button key={c} onClick={()=>{updateSelectedNode('vineBlobColor',c);}}
-                                    style={{width:18,height:18,borderRadius:'50%',background:c,
-                                      border:`2px solid ${selectedNode.vineBlobColor===c?'white':'transparent'}`,
-                                      boxShadow:selectedNode.vineBlobColor===c?`0 0 0 1.5px ${c}`:'none',
-                                      cursor:'pointer',flexShrink:0}}/>
-                                ))}
-                                {/* Transparent */}
-                                <button onClick={()=>{updateSelectedNode('vineBlobColor',null);setShowVineColorPicker(false);}}
-                                  style={{width:18,height:18,borderRadius:'50%',background:'transparent',border:'1.5px dashed #94a3b8',cursor:'pointer',fontSize:8,color:'#94a3b8',display:'flex',alignItems:'center',justifyContent:'center'}}>✕</button>
-                              </div>
-                              {/* Opacity slider */}
-                              <div style={{display:'flex',alignItems:'center',gap:6}}>
-                                <span style={{fontSize:10,color:sub,flexShrink:0}}>Opacity</span>
-                                <input type="range" min={0} max={1} step={0.05}
-                                  value={selectedNode.vineBlobOpacity??0.9}
-                                  onChange={e=>updateSelectedNode('vineBlobOpacity',parseFloat(e.target.value))}
-                                  style={{flex:1,accentColor:'#10b981'}}/>
-                                <span style={{fontSize:10,color:sub,width:24,textAlign:'right'}}>{Math.round((selectedNode.vineBlobOpacity??0.9)*100)}%</span>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
                     </div>
-                  </div>
+                  )}
+
 
 
                   {/* Members panel — collapsible */}
@@ -4307,6 +4454,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           overflow: 'hidden',
         }}
         onPointerDown={e => {
+          if (lassoMode) return;
           // Capture ALL pointer events at the canvas level
           e.currentTarget.setPointerCapture(e.pointerId);
           if (vineDrawMode) {
@@ -4334,6 +4482,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           }
         }}
         onPointerMove={e => {
+          if (lassoMode) return;
           if (vineDrawMode && isDrawing.current) {
             const rect = svgRef.current.getBoundingClientRect();
             const sx = (e.clientX - rect.left - transform.x) / transform.scale;
@@ -4355,6 +4504,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           handlePointerMove(e);
         }}
         onPointerUp={e => {
+          if (lassoMode) return;
           if (vineDrawMode && isDrawing.current) {
             isDrawing.current = false;
             // Save this stroke to pendingPaths — don't render yet
@@ -4386,7 +4536,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         onWheel={handleWheel}
         onContextMenu={e => e.preventDefault()}
       >
-        <svg ref={svgRef} className="w-full h-full absolute inset-0 touch-none" onContextMenu={e => e.preventDefault()}>
+        <svg ref={svgRef} className="w-full h-full absolute inset-0 touch-none" onContextMenu={e => e.preventDefault()}
+        >
           <defs>
             <pattern id="bg-grid" width="40" height="40" patternUnits="userSpaceOnUse">
               <path d="M 40 0 L 0 0 0 40" fill="none" stroke={theme.darkMode ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.04)"} strokeWidth="1" />
@@ -4400,6 +4551,57 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               fill={theme.darkMode ? '#0f172a' : '#f8fafc'} />
 
             {/* Group vine borders — parametric arch system */}
+            {/* Always compute border flower positions, even when vine borders hidden */}
+            {viewMode === 'canvas' && nodes.filter(n=>n.type==='hub').map((hub)=>{
+              const memberIds=new Set(links.filter(l=>l.source===hub.id||l.target===hub.id).map(l=>l.source===hub.id?l.target:l.source));
+              const hubMembers=nodes.filter(n=>memberIds.has(n.id)&&n.type!=='flower');
+              if(hubMembers.length===0) return null;
+              const VINE_NODE_RADIUS_MULT=1.35,VINE_NODE_RADIUS_ADD=18;
+              const vineNodes=hubMembers.map(n=>({x:n.x,y:n.y,r:getNodeRadius(n)*VINE_NODE_RADIUS_MULT+VINE_NODE_RADIUS_ADD}));
+              if(hub.includeHub) vineNodes.push({x:hub.x,y:hub.y,r:getNodeRadius(hub)*VINE_NODE_RADIUS_MULT+VINE_NODE_RADIUS_ADD});
+              if(vineNodes.length<2) return null;
+              const crossFn=(O,A,B)=>(A.x-O.x)*(B.y-O.y)-(A.y-O.y)*(B.x-O.x);
+              const sorted=[...vineNodes].sort((a,b)=>a.x-b.x||a.y-b.y);
+              const lo=[],up=[];
+              for(const p of sorted){while(lo.length>=2&&crossFn(lo[lo.length-2],lo[lo.length-1],p)<=0)lo.pop();lo.push(p);}
+              for(const p of [...sorted].reverse()){while(up.length>=2&&crossFn(up[up.length-2],up[up.length-1],p)<=0)up.pop();up.push(p);}
+              const hull=[...lo.slice(0,-1),...up.slice(0,-1)];
+              const hn=hull.length;
+              if(hn<2) return null;
+              const vCen={x:hull.reduce((s,n)=>s+n.x,0)/hn,y:hull.reduce((s,n)=>s+n.y,0)/hn};
+              const VINE_ARC_STEPS2=20,VINE_SAG_STEPS2=24,VINE_SAG_DEPTH2=vineBorderParams.vineSagDepth||0.38;
+              const pts2=[];
+              for(let i=0;i<hn;i++){
+                const A=hull[i],B=hull[(i+1)%hn],P=hull[(i+hn-1)%hn];
+                const ar=A.r*(vineBorderParams.vineArcRadius||1.05);
+                const br2=B.r*(vineBorderParams.vineArcRadius||1.05);
+                const angAtoB=Math.atan2(B.y-A.y,B.x-A.x);
+                const angPtoA=Math.atan2(A.y-P.y,A.x-P.x);
+                let an1=angPtoA+Math.PI,an2=angAtoB;
+                while(an2<an1)an2+=Math.PI*2;
+                if(an2-an1<Math.PI){an2=an1-(Math.PI*2-(an2-an1));}
+                for(let s=0;s<=VINE_ARC_STEPS2;s++){const t2=s/VINE_ARC_STEPS2,ang=an1+(an2-an1)*t2;pts2.push({x:A.x+Math.cos(ang)*ar,y:A.y+Math.sin(ang)*ar,section:'arc'});}
+                const lx=A.x+Math.cos(angAtoB)*ar,ly=A.y+Math.sin(angAtoB)*ar;
+                const rx=B.x+Math.cos(angAtoB+Math.PI)*br2,ry=B.y+Math.sin(angAtoB+Math.PI)*br2;
+                const mx2=(lx+rx)/2,my2=(ly+ry)/2;
+                const toCx=vCen.x-mx2,toCy=vCen.y-my2,toD=Math.sqrt(toCx*toCx+toCy*toCy)||1;
+                const el=Math.sqrt((B.x-A.x)**2+(B.y-A.y)**2);
+                const sx2=mx2+(toCx/toD)*el*VINE_SAG_DEPTH2,sy2=my2+(toCy/toD)*el*VINE_SAG_DEPTH2;
+                for(let s=0;s<=VINE_SAG_STEPS2;s++){const t2=s/VINE_SAG_STEPS2,it=1-t2;pts2.push({x:it*it*lx+2*it*t2*sx2+t2*t2*rx,y:it*it*ly+2*it*t2*sy2+t2*t2*ry,section:'sag'});}
+              }
+              const vCenX=vCen.x,vCenY=vCen.y;
+              borderFlowerPositionsRef.current[hub.id]=pts2.map((p,idx)=>{
+                const next=pts2[(idx+1)%pts2.length];
+                const tangAngle=Math.atan2(next.y-p.y,next.x-p.x);
+                const toCX=vCenX-p.x,toCY=vCenY-p.y;
+                const normX=-Math.sin(tangAngle),normY=Math.cos(tangAngle);
+                const dot=normX*toCX+normY*toCY;
+                const inX=dot>0?normX:-normX,inY=dot>0?normY:-normY;
+                return {x:p.x,y:p.y,inX,inY,section:p.section};
+              });
+              return null;
+            })}
+
             {viewMode === 'canvas' && showVineBorders && nodes.filter(n=>n.type==='hub').map((hub, hubIdx) => {
               const memberIds = new Set(links.filter(l=>l.source===hub.id||l.target===hub.id).map(l=>l.source===hub.id?l.target:l.source));
               const members = nodes.filter(n=>memberIds.has(n.id)&&n.x!=null&&n.type!=='flower'&&n.id!=='me');
@@ -4510,6 +4712,18 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               const blobPts=buildArchPath(blobHull,bhn,bCen,BLOB_SAG_DEPTH,BLOB_ARC_STEPS,BLOB_SAG_STEPS);
               const vinePts=buildArchPath(vineHull,vhn,vCen,VINE_SAG_DEPTH,VINE_ARC_STEPS,VINE_SAG_STEPS);
 
+              // Store inner-side border points for this hub — used to place member flowers
+              const vCenX=vCen.x, vCenY=vCen.y;
+              borderFlowerPositionsRef.current[hub.id] = vinePts.map((p,idx)=>{
+                const next=vinePts[(idx+1)%vinePts.length];
+                const tangAngle=Math.atan2(next.y-p.y,next.x-p.x);
+                const toCX=vCenX-p.x, toCY=vCenY-p.y;
+                const normX=-Math.sin(tangAngle), normY=Math.cos(tangAngle);
+                const dot=normX*toCX+normY*toCY;
+                const inX=dot>0?normX:-normX, inY=dot>0?normY:-normY;
+                return {x:p.x, y:p.y, inX, inY, section:p.section, sectionT:p.sectionT};
+              });
+
               // ── Blob filter ───────────────────────────────────────────────────
               const blobCol=hub.vineBlobColor||'#15803d';
               const blobOp=hub.vineBlobOpacity??0.85;
@@ -4556,14 +4770,20 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               };
               const leafTierScale=0.7+5*0.18; // fixed T5
               const leafSpacing=Math.max(24,76-5*8); // fixed T5
+
+              // Seeded PRNG — deterministic per hub, different for each group
+              const hubSeed=hub.id.split('').reduce((a,c)=>((a<<5)-a+c.charCodeAt(0))|0,0);
+              let rngState=Math.abs(hubSeed)||1;
+              const seededRng=()=>{ rngState=(rngState*1664525+1013904223)&0xffffffff; return (rngState>>>0)/0xffffffff; };
+
               const allLeaves=[];
               activeStrands.forEach(({pts,role,renderIdx})=>{
                 const lc=LEAF_CHARS[role]||LEAF_CHARS.core;
-                // Inner leaves — controlled by leavesInner multiplier
-                // Hull goes CCW, so +42° = right of travel = inward toward group
+                // Inner leaves
                 const leafCount=Math.max(0,Math.floor(perim/leafSpacing*(vineBorderParams.leavesInner??1)));
                 for(let li=0;li<leafCount;li++){
-                  const t=(li+0.5+renderIdx*0.3)/leafCount;
+                  const jitter=(seededRng()-0.5)*0.7;
+                  const t=((li+0.5+renderIdx*0.3)/leafCount+jitter/leafCount+1)%1;
                   const ptIdx=Math.floor(t*(pts.length-1));
                   const p=pts[ptIdx],p2=pts[(ptIdx+1)%pts.length];
                   if(!p||!p2) continue;
@@ -4573,7 +4793,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   const lh=baseLw*lc.aspectW;
                   const fill=theme.darkMode?lc.colorDark:lc.colorLight;
                   const stroke=theme.darkMode?'#0f2d1a':'#14532d';
-                  allLeaves.push({x:p.x,y:p.y,angle:tangAngle+42,lw:baseLw,lh,fill,stroke,bud:lc.bud,opacity:lc.bud?0.7:0.88});
+                  const angleJitter=(seededRng()-0.5)*18;
+                  allLeaves.push({x:p.x,y:p.y,angle:tangAngle+42+angleJitter,lw:baseLw,lh,fill,stroke,bud:lc.bud,opacity:lc.bud?0.7:0.88});
                 }
                 // Outer leaves — -42° = left of travel = outward away from group
                 // Outer leaves — arc sections 1.7× denser than sag
@@ -4584,18 +4805,20 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 const sagLeafCount = Math.max(0, Math.floor((sagPtsOnly.length / pts.length) * perim / leafSpacing * baseOuter * 1.0));
                 [[arcPtsOnly, arcLeafCount], [sagPtsOnly, sagLeafCount]].forEach(([sectionPts, count]) => {
                   for(let li=0;li<count;li++){
-                    const t=(li+0.15+renderIdx*0.2)/count;
+                    const jitter=(seededRng()-0.5)*0.8;
+                    const t=((li+0.15+renderIdx*0.2)/count+jitter/count+1)%1;
                     const ptIdx=Math.floor(t*(sectionPts.length-1));
                     const p=sectionPts[ptIdx];
                     const p2=sectionPts[Math.min(sectionPts.length-1,ptIdx+1)];
                     if(!p||!p2) continue;
                     const tangAngle=Math.atan2(p2.y-p.y,p2.x-p.x)*180/Math.PI;
+                    const angleJitter=(seededRng()-0.5)*18;
                     const sv=0.4+0.6*Math.abs(Math.sin(li*2.3+renderIdx*1.4+hubIdx*1.1));
                     const lw=(lc.sizeBase+lc.sizeVar*sv)*leafTierScale;
                     const lh=lw*lc.aspectW;
                     const fill=theme.darkMode?lc.colorDark:lc.colorLight;
                     const stroke=theme.darkMode?'#0f2d1a':'#14532d';
-                    allLeaves.push({x:p.x,y:p.y,angle:tangAngle-42,lw,lh,fill,stroke,bud:lc.bud,opacity:lc.bud?0.55:0.7});
+                    allLeaves.push({x:p.x,y:p.y,angle:tangAngle-42+angleJitter,lw,lh,fill,stroke,bud:lc.bud,opacity:lc.bud?0.55:0.7});
                   }
                 });
               });
@@ -4908,36 +5131,51 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             {viewMode === 'canvas' && (
               <g>
                 {/* ── Surrounding flowers — background layer, pointerEvents none ── */}
-                {surroundFlowerSettings.showSurround && activeRenderNodes.filter(n=>n.type==='friend'&&n.partnerFlower).map(node=>{
-                  const pf = node.partnerFlower;
+                {surroundFlowerSettings.showSurround && activeRenderNodes.filter(n=>n.type==='friend').map(node=>{
+                  // Find this node's hub
+                  const nodeHubId = links.find(l=>l.source===node.id||l.target===node.id)
+                    ? (() => { const linked=links.filter(l=>l.source===node.id||l.target===node.id); const hl=linked.find(l=>{ const oid=l.source===node.id?l.target:l.source; return nodes.find(n=>n.id===oid&&n.type==='hub'); }); return hl?(hl.source===node.id?hl.target:hl.source):null; })()
+                    : null;
+                  const hubNode = nodeHubId ? nodes.find(n=>n.id===nodeHubId) : null;
+                  const mode = hubNode?.groupMiniFlowerMode || 'blend';
+                  const groupMiniFlower = hubNode?.groupMiniFlower;
+
+                  // Determine which flower to use based on mode
+                  let pf = null;
+                  if (mode === 'shared') pf = groupMiniFlower || null;
+                  else if (mode === 'blend') pf = node.miniFlower || node.partnerFlower || groupMiniFlower || null;
+                  else if (mode === 'personal') pf = node.miniFlower || node.partnerFlower || null;
+
+                  if (!pf) return null;
+                  if (node.showBorderFlowers === false) return null;
                   const score = node.interactionScore||0;
                   const tier = score<100?1:score<300?2:score<600?3:score<1000?4:5;
                   const tierBounds=[[0,100],[100,300],[300,600],[600,1000],[1000,1500]];
                   const [tMin,tMax]=tierBounds[Math.min(4,tier-1)];
                   const tierPos=Math.min(1,(score-tMin)/(tMax-tMin||1));
                   const count=Math.max(1,surroundFlowerSettings.useCalc
-                    ?Math.round(1+tier*1.5+tierPos*2.5)
+                    ?Math.round((1+tier*1.5+tierPos*2.5))
                     :surroundFlowerSettings.count);
                   const minS=surroundFlowerSettings.minSize;
                   const maxS=surroundFlowerSettings.maxSize;
-                  const spread=surroundFlowerSettings.spread;
-                  const nodeR=node.radius||40;
-                  // Degradation
                   const hist=node.scoreHistory||[];
                   const now2=Date.now(),HOUR=3600000;
                   const scoreThen=(hist.find(h=>(now2-h.ts)>=48*HOUR)||hist[0])?.score??score;
                   const degraded=(score-scoreThen)<-50;
                   const flowerColor=degraded?'#ca8a04':(pf.petalColor||'#f59e0b');
                   const flowerOpacity=degraded?0.6:0.85;
+
+                  // Find which hub this person belongs to
+                  const hubId = nodeHubId;
+                  const borderPts = hubId ? borderFlowerPositionsRef.current[hubId] : null;
+
                   return (
                     <g key={'sf-'+node.id} style={{pointerEvents:'none'}}>
                       {Array.from({length:count},(_,fi)=>{
-                        const angle=(fi/count)*Math.PI*2+fi*0.7;
-                        const dist=nodeR+10+(fi/count)*spread;
-                        const fx=node.renderX+Math.cos(angle)*dist;
-                        const fy=node.renderY+Math.sin(angle)*dist;
+                        const nodeR = node.radius || 40;
                         const sv=0.5+0.5*Math.abs(Math.sin(fi*2.3+node.id.length));
-                        const fr=minS+(maxS-minS)*sv;
+                        const scale = surroundFlowerSettings.flowerScale ?? 1.0;
+                        const fr=(minS+(maxS-minS)*sv)*scale;
                         const PETALS=pf.petals||6;
                         const fpr=fr*(1+(pf.petalLength??0.55));
                         const fpw=fpr*0.5;
@@ -4946,12 +5184,66 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           const tx=Math.cos(pa)*fpr,ty=Math.sin(pa)*fpr,pp=pa+Math.PI*0.5;
                           return `M 0,0 C ${Math.cos(pa)*fpr*0.35+Math.cos(pp)*fpw*0.6},${Math.sin(pa)*fpr*0.35+Math.sin(pp)*fpw*0.6} ${Math.cos(pa)*fpr*0.85+Math.cos(pp)*fpw*0.5},${Math.sin(pa)*fpr*0.85+Math.sin(pp)*fpw*0.5} ${tx},${ty} C ${Math.cos(pa)*fpr*0.85-Math.cos(pp)*fpw*0.5},${Math.sin(pa)*fpr*0.85-Math.sin(pp)*fpw*0.5} ${Math.cos(pa)*fpr*0.35-Math.cos(pp)*fpw*0.6},${Math.sin(pa)*fpr*0.35-Math.sin(pp)*fpw*0.6} 0,0`;
                         }).join(' ');
-                        return (
-                          <g key={fi} transform={`translate(${fx},${fy})`} opacity={flowerOpacity}>
+
+                        // Seeded random for border placement — consistent per node+flower
+                        let rngB = Math.abs(node.id.split('').reduce((a,c)=>((a<<5)-a+c.charCodeAt(0))|0, fi*31+7)) || 1;
+                        const seededRngBorder = () => { rngB=(rngB*1664525+1013904223)&0xffffffff; return (rngB>>>0)/0xffffffff; };
+
+                        // Only border flowers render in the background layer
+                        // Orbit flowers are rendered inside the node group (after photo) for overlap
+                        const positions = [];
+
+                        // 1. Orbit around photo node edge
+                        const angle = (fi / count) * Math.PI * 2 + fi * 0.9 + node.id.length;
+                        const distVariance = Math.sin(fi * 1.7 + node.id.length * 0.3) * nodeR * 0.5;
+                        const dist = nodeR + distVariance;
+                        if (Math.abs(dist) >= nodeR - fr) {
+                          positions.push({
+                            x: node.renderX + Math.cos(angle) * dist,
+                            y: node.renderY + Math.sin(angle) * dist,
+                          });
+                        }
+
+                        // Follow the vine border closely — mostly inside, ~10% just outside
+                        if (borderPts && borderPts.length > 0) {
+                          const ptIdx = Math.floor(((fi / count) + (node.id.length * 0.07 % 1)) * borderPts.length) % borderPts.length;
+                          const bp = borderPts[ptIdx];
+
+                          // Skip border-hugging flower if closer to a neighbour
+                          const distToOwner = (bp.x - node.renderX)**2 + (bp.y - node.renderY)**2;
+                          const tooClose = hubId && activeRenderNodes.some(n =>
+                            n.id !== node.id && n.type === 'friend' &&
+                            links.some(l => (l.source===n.id||l.target===n.id) && (l.source===hubId||l.target===hubId)) &&
+                            (bp.x - n.renderX)**2 + (bp.y - n.renderY)**2 < distToOwner * 0.7
+                          );
+                          if (!tooClose) {
+                            // Positive = inward, negative = just outside border
+                            const isOutside = seededRngBorder() < 0.1;
+                            const insetDist = isOutside
+                              ? -(2 + seededRngBorder() * 4)
+                              : (4 + seededRngBorder() * 12);
+                            positions.push({
+                              x: bp.x + bp.inX * insetDist,
+                              y: bp.y + bp.inY * insetDist,
+                            });
+                          }
+
+                          // Always add inward spread flower toward other members
+                          const blend = 0.45 + sv * 0.1;
+                          const bx = bp.x + bp.inX * 4;
+                          const by = bp.y + bp.inY * 4;
+                          positions.push({
+                            x: node.renderX + (bx - node.renderX) * blend,
+                            y: node.renderY + (by - node.renderY) * blend,
+                          });
+                        }
+
+                        return positions.map((pos, pi) => (
+                          <g key={fi+'-'+pi} transform={`translate(${pos.x},${pos.y})`} opacity={flowerOpacity}>
                             <path d={fpPath} fill={flowerColor}/>
                             <circle r={fr*0.22} fill={pf.centerColor||'#fef08a'} stroke={flowerColor} strokeWidth={0.5}/>
                           </g>
-                        );
+                        ));
                       })}
                     </g>
                   );
@@ -5668,7 +5960,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
                       {/* Partner flower — drawn BEFORE image so it's behind the photo */}
                       {/* Flower — personal or group override */}
-                      {(()=>{
+                      {node.showMainFlower !== false && (()=>{
                         const connHubs = links.filter(l=>l.source===node.id||l.target===node.id).map(l=>l.source===node.id?l.target:l.source).map(id=>nodes.find(n=>n.id===id)).filter(n=>n&&n.type==='hub'&&n.partnerFlower&&n.groupFlowerActive!==false);
                         const pf = connHubs.length>0 ? connHubs[0].partnerFlower : node.partnerFlower;
                         if (!pf) return null;
@@ -5716,6 +6008,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       <circle r={r} fill={theme.darkMode ? "#1e293b" : "white"} />
                       <clipPath id={`clip-${node.id}`}><circle r={r - 4} /></clipPath>
                       <image href={node.img} x={-r} y={-r} width={r * 2} height={r * 2} clipPath={`url(#clip-${node.id})`} preserveAspectRatio="xMidYMid slice" />
+
+                      {/* Mini orbit flowers now handled in background layer */}
 
                       {/* Centre border ring — drawn after image, on top */}
                       {node.isPartner && (
@@ -6000,6 +6294,140 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             )}
           </g>
         </svg>
+
+        {/* ── Lasso selection popup ──────────────────────────────────────────────── */}
+        {lassoMenuOpen && lassoSelected.length > 0 && (()=>{
+          const dm = theme.darkMode;
+          const hubs = nodes.filter(n=>n.type==='hub');
+          const TIERS = [1,2,3,4,5];
+          const TIER_LABELS = ['Budding','Growing','Established','Deep','Family'];
+          const TIER_SCORES = [0, 100, 300, 600, 1000];
+
+          const applyTier = (tier) => {
+            const score = TIER_SCORES[tier-1];
+            setNodes(prev=>prev.map(n=>
+              lassoSelected.find(s=>s.id===n.id) ? {...n, interactionScore: score} : n
+            ));
+            showToast(`✅ Set ${lassoSelected.length} people to tier ${tier}`);
+          };
+
+          const applyGroup = (hubId) => {
+            setNodes(prev=>prev.map(n=>lassoSelected.find(s=>s.id===n.id)?{...n,groupId:hubId}:n));
+            const newLinks = lassoSelected.flatMap(n=>{
+              const existing = links.find(l=>(l.source===n.id&&l.target===hubId)||(l.target===n.id&&l.source===hubId));
+              return existing ? [] : [{source:n.id, target:hubId, id:`${n.id}-${hubId}-${Date.now()}`}];
+            });
+            if (newLinks.length > 0) setLinks(prev=>[...prev, ...newLinks]);
+            showToast(`✅ Added ${lassoSelected.length} people to group`);
+          };
+
+          return (
+            <div style={{position:'fixed',bottom:80,left:'50%',transform:'translateX(-50%)',
+              zIndex:500,background:dm?'#1e293b':'white',borderRadius:16,
+              boxShadow:'0 8px 32px rgba(0,0,0,0.35)',border:`1px solid ${dm?'#334155':'#e2e8f0'}`,
+              width:300,overflow:'hidden'}}>
+              <div style={{padding:'14px 16px 10px',borderBottom:`1px solid ${dm?'#334155':'#f1f5f9'}`}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                  <span style={{fontSize:14,fontWeight:800,color:dm?'#e2e8f0':'#1e293b'}}>
+                    ⭕ {lassoSelected.length} selected
+                  </span>
+                  <button onClick={()=>{setLassoMenuOpen(false);setLassoSelected([]);}}
+                    style={{background:'none',border:'none',cursor:'pointer',fontSize:18,color:dm?'#94a3b8':'#64748b'}}>✕</button>
+                </div>
+                <div style={{fontSize:11,color:dm?'#64748b':'#94a3b8',marginTop:2}}>
+                  {lassoSelected.map(n=>n.label||n.id).join(', ')}
+                </div>
+              </div>
+              <div style={{padding:'12px 16px',borderBottom:`1px solid ${dm?'#334155':'#f1f5f9'}`}}>
+                <div style={{fontSize:11,fontWeight:700,color:dm?'#94a3b8':'#64748b',marginBottom:8,textTransform:'uppercase',letterSpacing:1}}>Set Tier</div>
+                <div style={{display:'flex',gap:6}}>
+                  {TIERS.map(t=>(
+                    <button key={t} onClick={()=>applyTier(t)}
+                      style={{flex:1,padding:'8px 0',borderRadius:8,border:'none',cursor:'pointer',
+                        background:`hsl(${120+t*20},60%,${dm?30:85}%)`,
+                        color:dm?'white':'#1e293b',fontSize:11,fontWeight:700}}>
+                      T{t}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div style={{padding:'12px 16px'}}>
+                <div style={{fontSize:11,fontWeight:700,color:dm?'#94a3b8':'#64748b',marginBottom:8,textTransform:'uppercase',letterSpacing:1}}>Add to Group</div>
+                <div style={{display:'flex',flexDirection:'column',gap:4,maxHeight:140,overflowY:'auto'}}>
+                  {hubs.map(hub=>(
+                    <button key={hub.id} onClick={()=>applyGroup(hub.id)}
+                      style={{padding:'8px 12px',borderRadius:8,border:`1px solid ${dm?'#334155':'#e2e8f0'}`,
+                        background:'none',cursor:'pointer',textAlign:'left',
+                        fontSize:12,fontWeight:600,color:dm?'#e2e8f0':'#1e293b',
+                        display:'flex',alignItems:'center',gap:8}}>
+                      <span style={{width:10,height:10,borderRadius:'50%',background:groupColors[hub.id]||'#10b981',flexShrink:0,display:'inline-block'}}/>
+                      {hub.label||hub.id}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* ── Lasso capture overlay — sits above everything when active ── */}
+        {lassoMode && (
+          <svg style={{position:'absolute',inset:0,width:'100%',height:'100%',zIndex:200,touchAction:'none',cursor:'crosshair'}}
+            onPointerDown={e => {
+              e.currentTarget.setPointerCapture(e.pointerId);
+              const rect = e.currentTarget.getBoundingClientRect();
+              setLassoPath([{x: e.clientX - rect.left, y: e.clientY - rect.top}]);
+              setLassoDrawing(true);
+              setLassoSelected([]);
+              setLassoMenuOpen(false);
+            }}
+            onPointerMove={e => {
+              if (!lassoDrawing) return;
+              const rect = e.currentTarget.getBoundingClientRect();
+              setLassoPath(p => [...p, {x: e.clientX - rect.left, y: e.clientY - rect.top}]);
+            }}
+            onPointerUp={e => {
+              if (!lassoDrawing) return;
+              setLassoDrawing(false);
+              const rect = e.currentTarget.getBoundingClientRect();
+              const poly = lassoPath;
+              const pointInPoly = (px, py) => {
+                let inside = false;
+                for (let i=0, j=poly.length-1; i<poly.length; j=i++) {
+                  const xi=poly[i].x, yi=poly[i].y, xj=poly[j].x, yj=poly[j].y;
+                  if (((yi>py)!==(yj>py)) && (px < (xj-xi)*(py-yi)/(yj-yi)+xi)) inside = !inside;
+                }
+                return inside;
+              };
+              const t = transform;
+              const selected = nodes.filter(n => {
+                if (n.type !== 'friend' && n.type !== 'hub') return false;
+                const sx = n.x * t.scale + t.x;
+                const sy = n.y * t.scale + t.y;
+                return pointInPoly(sx, sy);
+              });
+              setLassoSelected(selected);
+              setLassoPath([]);
+              if (selected.length > 0) setLassoMenuOpen(true);
+            }}
+          >
+            {/* Lasso path */}
+            {lassoPath.length > 1 && (
+              <polyline
+                points={lassoPath.map(p=>`${p.x},${p.y}`).join(' ')}
+                fill="rgba(124,58,237,0.12)" stroke="#7c3aed" strokeWidth={2}
+                strokeDasharray="6 3" style={{pointerEvents:'none'}}/>
+            )}
+            {/* Selected highlights */}
+            {lassoSelected.map(n => {
+              const t = transform;
+              const sx = n.x * t.scale + t.x;
+              const sy = n.y * t.scale + t.y;
+              const sr = (n.radius||40) * t.scale + 6;
+              return <circle key={n.id} cx={sx} cy={sy} r={sr} fill="rgba(124,58,237,0.1)" stroke="#7c3aed" strokeWidth={3} strokeDasharray="6 3" style={{pointerEvents:'none'}}/>;
+            })}
+          </svg>
+        )}
 
         {/* ── Restore banner after reset ────────────────────────────────────────── */}
       {dataSnapshot && (
@@ -6505,14 +6933,39 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         const pn = nodes.find(n=>n.id===partnerFlowerEditor);
         if (!pn) return null;
         const DEFAULT_PF = {petals:6,subPetals:6,petalColor:'#f43f5e',subPetalColor:'#fda4af',petalBorderColor:'#9f1239',subPetalBorderColor:'#fecdd3',borderColor:'#9f1239',pattern:'solid',petalLength:0.55,subPetalLength:0.47};
-        const pf = {...DEFAULT_PF,...(pn.partnerFlower||{})};
+        const DEFAULT_MF = {petals:6,subPetals:0,petalColor:'#f43f5e',subPetalColor:'#fda4af',petalBorderColor:'#9f1239',subPetalBorderColor:'#fecdd3',borderColor:'#9f1239',pattern:'solid',petalLength:0.45,subPetalLength:0.35};
+
+        // Which flower are we editing
+        const isMini = pfFlowerType === 'mini';
+        const isHub = pn.type === 'hub';
+        const pf = isMini
+          ? isHub
+            ? {...DEFAULT_MF,...(pn.groupMiniFlower||{})}
+            : {...DEFAULT_MF,...(pn.miniFlower||{})}
+          : {...DEFAULT_PF,...(pn.partnerFlower||{})};
+
         const dm = theme.darkMode;
         const bg = dm?'#0f172a':'#fafafa';
         const brd = dm?'#334155':'#e2e8f0';
         const sub = dm?'#94a3b8':'#64748b';
         const txt = dm?'#e2e8f0':'#1e293b';
 
-        const update = (key,val) => setNodes(prev=>prev.map(n=>n.id===partnerFlowerEditor?{...n,partnerFlower:{...DEFAULT_PF,...(n.partnerFlower||{}),[key]:val}}:n));
+        const update = (key,val) => setNodes(prev=>prev.map(n=>{
+          if(n.id!==partnerFlowerEditor) return n;
+          if(isMini && isHub) return {...n, groupMiniFlower:{...DEFAULT_MF,...(n.groupMiniFlower||{}),[key]:val}};
+          if(isMini) return {...n, miniFlower:{...DEFAULT_MF,...(n.miniFlower||{}),[key]:val}};
+          return {...n, partnerFlower:{...DEFAULT_PF,...(n.partnerFlower||{}),[key]:val}};
+        }));
+
+        const copyParentToMini = () => {
+          const mainFlower = {...DEFAULT_PF,...(pn.partnerFlower||{})};
+          const mini = {...mainFlower, petalLength: mainFlower.petalLength*0.7, subPetalLength:(mainFlower.subPetalLength||0.47)*0.7};
+          setNodes(prev=>prev.map(n=>{
+            if(n.id!==partnerFlowerEditor) return n;
+            if(isHub) return {...n, groupMiniFlower: mini};
+            return {...n, miniFlower: mini};
+          }));
+        };
 
         const COLORS = ['#f43f5e','#ec4899','#a855f7','#8b5cf6','#3b82f6','#06b6d4','#10b981','#84cc16','#f59e0b','#ef4444','#ffffff','#000000'];
         const PATTERNS = [{id:'solid',label:'Solid'},{id:'dots',label:'Dots'},{id:'radial',label:'Radial'}];
@@ -6630,12 +7083,23 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           );
         };
 
-        const hasChanges = JSON.stringify(pf) !== JSON.stringify(origFlowerRef.current);
+        const orig = origFlowerRef.current || {};
+        const hasChanges = JSON.stringify(pn.partnerFlower) !== JSON.stringify(orig.partnerFlower) ||
+          JSON.stringify(pn.miniFlower) !== JSON.stringify(orig.miniFlower) ||
+          JSON.stringify(pn.groupMiniFlower) !== JSON.stringify(orig.groupMiniFlower) ||
+          pn.groupFlowerActive !== orig.groupFlowerActive;
 
         const handleClose = (save) => {
           if (!save && hasChanges) {
             if (!window.confirm('Discard unsaved flower changes?')) return;
-            setNodes(prev => prev.map(n => n.id === partnerFlowerEditor ? {...n, partnerFlower: origFlowerRef.current} : n));
+            const orig = origFlowerRef.current || {};
+            setNodes(prev => prev.map(n => n.id === partnerFlowerEditor ? {
+              ...n,
+              partnerFlower: orig.partnerFlower ?? n.partnerFlower,
+              miniFlower: orig.miniFlower ?? n.miniFlower,
+              groupMiniFlower: orig.groupMiniFlower ?? n.groupMiniFlower,
+              groupFlowerActive: orig.groupFlowerActive ?? n.groupFlowerActive,
+            } : n));
           }
           origFlowerRef.current = null;
           setPartnerFlowerEditor(null); setColorPickerFor(null);
@@ -6667,7 +7131,36 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 </div>
               </div>
 
-              {/* Tabs */}
+              {/* Main / Mini switcher */}
+              <div style={{display:'flex',gap:6,padding:'0 20px 4px',flexShrink:0}}>
+                {[{id:'main',label:'🌸 Main'},{id:'mini',label:'🌼 Mini'}].map(t=>(
+                  <button key={t.id} onClick={()=>{setPfFlowerType(t.id);setPfSelectedPart('main');setPfColorPickerFor(null);}}
+                    style={{flex:1,padding:'8px 0',borderRadius:10,fontSize:13,fontWeight:800,cursor:'pointer',border:'none',
+                      background:pfFlowerType===t.id?(pf.petalColor||'#f43f5e'):(dm?'#1e293b':'#f1f5f9'),
+                      color:pfFlowerType===t.id?'white':sub}}>
+                    {t.label}
+                  </button>
+                ))}
+                {pfFlowerType==='mini' && (
+                  <button onClick={copyParentToMini}
+                    style={{padding:'8px 12px',borderRadius:10,fontSize:12,fontWeight:700,cursor:'pointer',border:'1px dashed '+(dm?'#475569':'#cbd5e1'),background:'none',color:sub,whiteSpace:'nowrap'}}>
+                    Copy Main ↓
+                  </button>
+                )}
+              </div>
+
+              {/* Show main flower toggle — only for hub nodes on Mini tab */}
+              {pfFlowerType==='mini' && isHub && (
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'8px 20px',borderBottom:`1px solid ${dm?'#334155':'#f1f5f9'}`}}>
+                  <span style={{fontSize:12,color:sub,fontWeight:600}}>Show main flower</span>
+                  <div onClick={()=>setNodes(prev=>prev.map(n=>n.id===partnerFlowerEditor?{...n,groupFlowerActive:n.groupFlowerActive===false?true:false}:n))}
+                    style={{width:36,height:20,borderRadius:10,background:pn.groupFlowerActive===false?'#334155':'#10b981',position:'relative',cursor:'pointer',transition:'background 0.2s',flexShrink:0}}>
+                    <div style={{position:'absolute',top:2,width:16,height:16,borderRadius:'50%',background:'white',left:pn.groupFlowerActive===false?2:18,transition:'left 0.2s'}}/>
+                  </div>
+                </div>
+              )}
+
+              {/* Design / Presets tabs */}
               <div style={{display:'flex',gap:4,padding:'0 20px 8px',flexShrink:0}}>
                 {[{id:'design',label:'✏️ Design'},{id:'presets',label:'🌺 Presets'}].map(t=>(
                   <button key={t.id} onClick={()=>setTab(t.id)}
