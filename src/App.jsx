@@ -4615,14 +4615,54 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             {/* Group vine borders — parametric arch system */}
             {/* Always compute border flower positions, even when vine borders hidden */}
             {viewMode === 'canvas' && nodes.filter(n=>n.type==='hub').map((hub)=>{
-              const memberIds=new Set(links.filter(l=>l.source===hub.id||l.target===hub.id).map(l=>l.source===hub.id?l.target:l.source));
-              const hubMembers=nodes.filter(n=>memberIds.has(n.id)&&n.type!=='flower');
-              if(hubMembers.length===0) return null;
+              let hubMembers;
+              if (hub.hidden) {
+                const directIds = links.filter(l=>l.source===hub.id||l.target===hub.id).map(l=>l.source===hub.id?l.target:l.source);
+                const visited = new Set(['me','flower_social']);
+                nodes.filter(n=>n.type==='hub').forEach(h=>visited.add(h.id));
+                const collected = new Set();
+                const queue = [...directIds];
+                while (queue.length > 0) {
+                  const id = queue.shift();
+                  if (visited.has(id) || collected.has(id)) continue;
+                  const n = nodes.find(x=>x.id===id);
+                  if (!n || n.type==='flower' || n.type==='hub') continue;
+                  collected.add(id);
+                  links.filter(l=>l.source===id||l.target===id).forEach(l=>{
+                    const oid = l.source===id?l.target:l.source;
+                    if (!visited.has(oid) && !collected.has(oid)) queue.push(oid);
+                  });
+                }
+                hubMembers = nodes.filter(n=>collected.has(n.id)&&n.type!=='flower');
+              } else {
+                const memberIds=new Set(links.filter(l=>l.source===hub.id||l.target===hub.id).map(l=>l.source===hub.id?l.target:l.source));
+                hubMembers=nodes.filter(n=>memberIds.has(n.id)&&n.type!=='flower');
+              }
               const VINE_NODE_RADIUS_MULT=1.35,VINE_NODE_RADIUS_ADD=18;
               const vineNodes=hubMembers.map(n=>({x:n.x,y:n.y,r:getNodeRadius(n)*VINE_NODE_RADIUS_MULT+VINE_NODE_RADIUS_ADD}));
               if(hub.includeHub) vineNodes.push({x:hub.x,y:hub.y,r:getNodeRadius(hub)*VINE_NODE_RADIUS_MULT+VINE_NODE_RADIUS_ADD});
               if(vineNodes.length<=0) return null;
-              if(vineNodes.length===1){const s=vineNodes[0],sr=(s.r||40)*1.2;vineNodes.push({...s,x:s.x+sr,y:s.y},{...s,x:s.x-sr,y:s.y},{...s,x:s.x,y:s.y+sr},{...s,x:s.x,y:s.y-sr});}
+              // Single member — distribute flower positions evenly around a circle
+              if(vineNodes.length===1){
+                const s=vineNodes[0];
+                const R=s.r*(vineBorderParams.vineArcRadius||1.05);
+                const N=48;
+                const pts2=[];
+                for(let i=0;i<=N;i++){
+                  const ang=(i/N)*Math.PI*2;
+                  pts2.push({x:s.x+Math.cos(ang)*R, y:s.y+Math.sin(ang)*R, section:'arc'});
+                }
+                borderFlowerPositionsRef.current[hub.id]=pts2.map((p,idx)=>{
+                  const next=pts2[(idx+1)%pts2.length];
+                  const tangAngle=Math.atan2(next.y-p.y,next.x-p.x);
+                  const toCX=s.x-p.x,toCY=s.y-p.y;
+                  const normX=-Math.sin(tangAngle),normY=Math.cos(tangAngle);
+                  const dot=normX*toCX+normY*toCY;
+                  const inX=dot>0?normX:-normX,inY=dot>0?normY:-normY;
+                  return {x:p.x,y:p.y,inX,inY,section:'arc'};
+                });
+                return null;
+              }
               const crossFn=(O,A,B)=>(A.x-O.x)*(B.y-O.y)-(A.y-O.y)*(B.x-O.x);
               const sorted=[...vineNodes].sort((a,b)=>a.x-b.x||a.y-b.y);
               const lo=[],up=[];
@@ -4666,22 +4706,39 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             })}
 
             {viewMode === 'canvas' && nodes.filter(n=>n.type==='hub').map((hub, hubIdx) => {
-              const memberIds = new Set(links.filter(l=>l.source===hub.id||l.target===hub.id).map(l=>l.source===hub.id?l.target:l.source));
-              const members = nodes.filter(n=>memberIds.has(n.id)&&n.x!=null&&n.type!=='flower'&&n.id!=='me');
+              // Gather members. For hidden hubs, include the whole tree branching
+              // off the linked person (e.g. James + Ken who branches off James).
+              let members;
+              if (hub.hidden) {
+                const directIds = links.filter(l=>l.source===hub.id||l.target===hub.id).map(l=>l.source===hub.id?l.target:l.source);
+                const visited = new Set(['me','flower_social']);
+                nodes.filter(n=>n.type==='hub').forEach(h=>visited.add(h.id));
+                const collected = new Set();
+                const queue = [...directIds];
+                while (queue.length > 0) {
+                  const id = queue.shift();
+                  if (visited.has(id) || collected.has(id)) continue;
+                  const n = nodes.find(x=>x.id===id);
+                  if (!n || n.type==='flower' || n.type==='hub') continue;
+                  collected.add(id);
+                  links.filter(l=>l.source===id||l.target===id).forEach(l=>{
+                    const oid = l.source===id?l.target:l.source;
+                    if (!visited.has(oid) && !collected.has(oid)) queue.push(oid);
+                  });
+                }
+                members = nodes.filter(n=>collected.has(n.id)&&n.x!=null&&n.type!=='flower'&&n.id!=='me');
+              } else {
+                const memberIds = new Set(links.filter(l=>l.source===hub.id||l.target===hub.id).map(l=>l.source===hub.id?l.target:l.source));
+                members = nodes.filter(n=>memberIds.has(n.id)&&n.x!=null&&n.type!=='flower'&&n.id!=='me');
+              }
               // Hidden hubs always show vine border (it's their only visual indicator)
               // Normal hubs only show vine border if showVineBorders is on
               if (!hub.hidden && !showVineBorders) return null;
               if (members.length <= 0) return null;
               if (members.length <= 1 && !hub.hidden) return null;
 
-              // Single member (hidden hub) — treat as 2-node hull using the node twice offset slightly
-              // so the full vine+leaf system runs normally
-              if (members.length === 1) {
-                const solo = members[0];
-                // Add a virtual duplicate slightly offset so hull has 2 points
-                // The vine border will then wrap around the single node as a circle
-                members.push({ ...solo, x: solo.x + 0.1, y: solo.y + 0.1 });
-              }
+              // Single member handled separately below (direct circle render)
+              const isSingleMember = members.length === 1;
 
               // -- Tuning constants — driven by Appearance settings --------------
               const BLOB_NODE_RADIUS_MULT = vineBorderParams.blobArcRadius;
@@ -4727,10 +4784,10 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 for(const p of [...s].reverse()){while(up.length>=2&&crossFn(up[up.length-2],up[up.length-1],p)<=0)up.pop();up.push(p);}
                 return [...lo.slice(0,-1),...up.slice(0,-1)];
               };
-              const blobHull=buildHull(blobNodes);
-              const vineHull=buildHull(vineNodes);
+              const blobHull=isSingleMember?[blobNodes[0]]:buildHull(blobNodes);
+              const vineHull=isSingleMember?[vineNodes[0]]:buildHull(vineNodes);
               const bhn=blobHull.length, vhn=vineHull.length;
-              if(bhn<2||vhn<2) return null;
+              if(!isSingleMember && (bhn<2||vhn<2)) return null;
 
               const centroid=(hull)=>({x:hull.reduce((s,p)=>s+p.x,0)/hull.length, y:hull.reduce((s,p)=>s+p.y,0)/hull.length});
               const bCen=centroid(blobHull), vCen=centroid(vineHull);
@@ -4739,6 +4796,16 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               // For each hull edge: arc CCW around node A (outer), then inward sag to node B
               const buildArchPath=(hull, hn, cen, sagDepth, arcSteps, sagSteps)=>{
                 const pts=[];
+                // Single node — draw a full circle around it
+                if (hn === 1) {
+                  const A = hull[0];
+                  const steps = arcSteps * 6;
+                  for (let s = 0; s <= steps; s++) {
+                    const ang = (s / steps) * Math.PI * 2;
+                    pts.push({ x: A.x + Math.cos(ang) * A.r, y: A.y + Math.sin(ang) * A.r, section: 'arc', sectionT: (s % arcSteps) / arcSteps });
+                  }
+                  return pts;
+                }
                 // arcOuter: always take the LONG arc (>180°) — the short arc cuts inside the node
                 const arcOuter=(A, a1, a2)=>{
                   let an1=a1, an2=a2;
@@ -4856,7 +4923,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               activeStrands.forEach(({pts,role,renderIdx})=>{
                 const lc=LEAF_CHARS[role]||LEAF_CHARS.core;
                 // Inner leaves
-                const leafCount=Math.max(0,Math.floor(perim/leafSpacing*(vineBorderParams.leavesInner??1)));
+                const leafDensityMult = isSingleMember ? 0.4 : 1;
+                const leafCount=Math.max(0,Math.floor(perim/leafSpacing*(vineBorderParams.leavesInner??1)*leafDensityMult));
                 for(let li=0;li<leafCount;li++){
                   const jitter=(seededRng()-0.5)*0.7;
                   const t=((li+0.5+renderIdx*0.3)/leafCount+jitter/leafCount+1)%1;
@@ -4877,8 +4945,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 const baseOuter = vineBorderParams.leavesOuter ?? 1;
                 const arcPtsOnly = pts.filter(p => p.section === 'arc');
                 const sagPtsOnly = pts.filter(p => p.section === 'sag');
-                const arcLeafCount = Math.max(0, Math.floor((arcPtsOnly.length / pts.length) * perim / leafSpacing * baseOuter * 1.7));
-                const sagLeafCount = Math.max(0, Math.floor((sagPtsOnly.length / pts.length) * perim / leafSpacing * baseOuter * 1.0));
+                const arcLeafCount = Math.max(0, Math.floor((arcPtsOnly.length / pts.length) * perim / leafSpacing * baseOuter * 1.7 * leafDensityMult));
+                const sagLeafCount = Math.max(0, Math.floor((sagPtsOnly.length / pts.length) * perim / leafSpacing * baseOuter * 1.0 * leafDensityMult));
                 [[arcPtsOnly, arcLeafCount], [sagPtsOnly, sagLeafCount]].forEach(([sectionPts, count]) => {
                   for(let li=0;li<count;li++){
                     const jitter=(seededRng()-0.5)*0.8;
@@ -5208,10 +5276,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               <g>
                 {/* -- Surrounding flowers — background layer, pointerEvents none -- */}
                 {surroundFlowerSettings.showSurround && activeRenderNodes.filter(n=>n.type==='friend'||(!n.type&&n.id!=='me')).map(node=>{
-                  // Find this node's hub
-                  const nodeHubId = links.find(l=>l.source===node.id||l.target===node.id)
+                  // Find this node's hub — prefer its own hidden hub if it has one
+                  const ownHiddenHub = nodes.find(n => n.id === 'hidden_hub_' + node.id && n.hidden);
+                  const nodeHubId = ownHiddenHub ? ownHiddenHub.id : (links.find(l=>l.source===node.id||l.target===node.id)
                     ? (() => { const linked=links.filter(l=>l.source===node.id||l.target===node.id); const hl=linked.find(l=>{ const oid=l.source===node.id?l.target:l.source; return nodes.find(n=>n.id===oid&&n.type==='hub'); }); return hl?(hl.source===node.id?hl.target:hl.source):null; })()
-                    : null;
+                    : null);
                   const hubNode = nodeHubId ? nodes.find(n=>n.id===nodeHubId) : null;
                   const mode = hubNode?.groupMiniFlowerMode || 'blend';
                   const groupMiniFlower = hubNode?.groupMiniFlower;
@@ -5270,9 +5339,30 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         // Orbit flowers are rendered inside the node group (after photo) for overlap
                         const positions = [];
 
-                        // 1. Orbit around photo node edge
-                        const angle = (fi / count) * Math.PI * 2 + fi * 0.9 + node.id.length;
-                        const distVariance = Math.sin(fi * 1.7 + node.id.length * 0.3) * nodeR * 0.5;
+                        // 1. Orbit around photo node edge — biased toward the OUTER
+                        // side (away from the group centre) so the main person keeps
+                        // flowers on their outer edge as members are added
+                        let outwardAng = null;
+                        if (borderPts && borderPts.length > 0) {
+                          // group centre = centroid of the border points
+                          const gcx = borderPts.reduce((s,p)=>s+p.x,0)/borderPts.length;
+                          const gcy = borderPts.reduce((s,p)=>s+p.y,0)/borderPts.length;
+                          const dgx = node.renderX - gcx, dgy = node.renderY - gcy;
+                          // only bias if the node is meaningfully off-centre from the group
+                          if (Math.sqrt(dgx*dgx + dgy*dgy) > nodeR * 0.4) {
+                            outwardAng = Math.atan2(dgy, dgx);
+                          }
+                        }
+                        // Spread flowers in a ~200° fan centred on the outward direction
+                        let angle;
+                        if (outwardAng !== null) {
+                          const fan = Math.PI * 1.15; // ~200°
+                          const frac = count > 1 ? (fi / (count - 1)) - 0.5 : 0;
+                          angle = outwardAng + frac * fan + Math.sin(fi * 1.7 + node.id.length) * 0.15;
+                        } else {
+                          angle = (fi / count) * Math.PI * 2 + fi * 0.9 + node.id.length;
+                        }
+                        const distVariance = Math.sin(fi * 1.7 + node.id.length * 0.3) * nodeR * 0.35;
                         const dist = nodeR + distVariance;
                         if (Math.abs(dist) >= nodeR - fr) {
                           positions.push({
@@ -5303,16 +5393,16 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                               x: bp.x + bp.inX * insetDist,
                               y: bp.y + bp.inY * insetDist,
                             });
-                          }
 
-                          // Always add inward spread flower toward other members
-                          const blend = 0.45 + sv * 0.1;
-                          const bx = bp.x + bp.inX * 4;
-                          const by = bp.y + bp.inY * 4;
-                          positions.push({
-                            x: node.renderX + (bx - node.renderX) * blend,
-                            y: node.renderY + (by - node.renderY) * blend,
-                          });
+                            // Always add inward spread flower toward other members
+                            const blend = 0.45 + sv * 0.1;
+                            const bx = bp.x + bp.inX * 4;
+                            const by = bp.y + bp.inY * 4;
+                            positions.push({
+                              x: node.renderX + (bx - node.renderX) * blend,
+                              y: node.renderY + (by - node.renderY) * blend,
+                            });
+                          }
                         }
 
                         return positions.map((pos, pi) => (
