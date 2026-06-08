@@ -865,6 +865,8 @@ function AppInner() {
     }
 
     if (nodeId && viewMode === 'canvas') {
+      const touchedNode = nodes.find(n => n.id === nodeId);
+      if (touchedNode?.hidden) { handlePointerDown(e, null); return; }
       // In select-for-group mode, don't lift nodes — just register touch for tap detection
       if (selectForGroupMode) {
         activePointers.current.set(e.pointerId, {
@@ -1071,6 +1073,7 @@ function AppInner() {
       nodes.forEach(n => {
         if (n.id === dragNode.id) return;
         if (n.type === 'flower' && n.id !== 'flower_social') return;
+        if (n.hidden) return;
         const d = Math.sqrt((n.x-svgX)**2 + (n.y-svgY)**2);
         if (d < minDist) { minDist = d; closest = n.id; }
       });
@@ -4332,6 +4335,19 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       <span>Add Friend via {selectedNode.label}</span>
                     </button>
                   )}
+                  {/* Open hidden group window */}
+                  {selectedNode.type !== 'hub' && selectedNode.id !== 'me' && (()=>{
+                    const hiddenHub = nodes.find(n => n.id === 'hidden_hub_' + selectedNodeId && n.hidden);
+                    if (!hiddenHub) return null;
+                    return (
+                      <button onClick={()=>setSelectedNodeId(hiddenHub.id)}
+                        className={`w-full flex items-center justify-center space-x-2 px-4 py-2 rounded-lg transition-all active:scale-95 font-medium border ${theme.darkMode?'bg-slate-700 hover:bg-slate-600 text-slate-200 border-slate-600':'bg-white hover:bg-slate-50 text-slate-700 border-slate-200'}`}>
+                        <span>👥</span>
+                        <span>Open {hiddenHub.label}</span>
+                      </button>
+                    );
+                  })()}
+
                   {/* Add to Group */}
                   {selectedNode.type !== 'hub' && selectedNode.id !== 'me' && (
                     <div>
@@ -4342,7 +4358,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       </button>
                       {showAddToGroup&&(
                         <div className={`mt-2 rounded-xl border overflow-hidden ${theme.darkMode?'border-slate-700':'border-slate-200'}`}>
-                          {nodes.filter(n=>n.type==='hub').map(hub=>{
+                          {nodes.filter(n=>n.type==='hub'&&!n.hidden).map(hub=>{
                             const linked=links.some(l=>(l.source===hub.id&&l.target===selectedNodeId)||(l.source===selectedNodeId&&l.target===hub.id));
                             return (
                               <button key={hub.id} onClick={()=>{
@@ -4354,7 +4370,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                               </button>
                             );
                           })}
-                          {nodes.filter(n=>n.type==='hub').length===0&&(
+                          {nodes.filter(n=>n.type==='hub'&&!n.hidden).length===0&&(
                             <div className={`px-4 py-3 text-sm ${theme.darkMode?'text-slate-400':'text-slate-500'}`}>No groups yet</div>
                           )}
                         </div>
@@ -4605,7 +4621,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               const VINE_NODE_RADIUS_MULT=1.35,VINE_NODE_RADIUS_ADD=18;
               const vineNodes=hubMembers.map(n=>({x:n.x,y:n.y,r:getNodeRadius(n)*VINE_NODE_RADIUS_MULT+VINE_NODE_RADIUS_ADD}));
               if(hub.includeHub) vineNodes.push({x:hub.x,y:hub.y,r:getNodeRadius(hub)*VINE_NODE_RADIUS_MULT+VINE_NODE_RADIUS_ADD});
-              if(vineNodes.length<2) return null;
+              if(vineNodes.length<=0) return null;
+              if(vineNodes.length===1){const s=vineNodes[0],sr=(s.r||40)*1.2;vineNodes.push({...s,x:s.x+sr,y:s.y},{...s,x:s.x-sr,y:s.y},{...s,x:s.x,y:s.y+sr},{...s,x:s.x,y:s.y-sr});}
               const crossFn=(O,A,B)=>(A.x-O.x)*(B.y-O.y)-(A.y-O.y)*(B.x-O.x);
               const sorted=[...vineNodes].sort((a,b)=>a.x-b.x||a.y-b.y);
               const lo=[],up=[];
@@ -4648,10 +4665,23 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               return null;
             })}
 
-            {viewMode === 'canvas' && showVineBorders && nodes.filter(n=>n.type==='hub').map((hub, hubIdx) => {
+            {viewMode === 'canvas' && nodes.filter(n=>n.type==='hub').map((hub, hubIdx) => {
               const memberIds = new Set(links.filter(l=>l.source===hub.id||l.target===hub.id).map(l=>l.source===hub.id?l.target:l.source));
               const members = nodes.filter(n=>memberIds.has(n.id)&&n.x!=null&&n.type!=='flower'&&n.id!=='me');
-              if (members.length < 2) return null;
+              // Hidden hubs always show vine border (it's their only visual indicator)
+              // Normal hubs only show vine border if showVineBorders is on
+              if (!hub.hidden && !showVineBorders) return null;
+              if (members.length <= 0) return null;
+              if (members.length <= 1 && !hub.hidden) return null;
+
+              // Single member (hidden hub) — treat as 2-node hull using the node twice offset slightly
+              // so the full vine+leaf system runs normally
+              if (members.length === 1) {
+                const solo = members[0];
+                // Add a virtual duplicate slightly offset so hull has 2 points
+                // The vine border will then wrap around the single node as a circle
+                members.push({ ...solo, x: solo.x + 0.1, y: solo.y + 0.1 });
+              }
 
               // -- Tuning constants — driven by Appearance settings --------------
               const BLOB_NODE_RADIUS_MULT = vineBorderParams.blobArcRadius;
@@ -4707,53 +4737,6 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
               // -- Arch path builder ---------------------------------------------
               // For each hull edge: arc CCW around node A (outer), then inward sag to node B
-              const buildArchPath=(hull, hn, cen, sagDepth, arcSteps, sagSteps)=>{
-                const pts=[];
-                // arcOuter: always take the LONG arc (>180°) — the short arc cuts inside the node
-                const arcOuter=(A, a1, a2)=>{
-                  let an1=a1, an2=a2;
-                  // Normalise to [an1, an1+2π)
-                  while(an2 < an1) an2 += Math.PI*2;
-                  while(an2 > an1 + Math.PI*2) an2 -= Math.PI*2;
-                  const shortSpan = an2 - an1;
-                  if(shortSpan < Math.PI) {
-                    // Short arc — flip to the long arc by going backwards
-                    an2 = an1 - (Math.PI*2 - shortSpan);
-                  }
-                  const res=[];
-                  for(let s=0;s<=arcSteps;s++){
-                    const t=s/arcSteps, ang=an1+(an2-an1)*t;
-                    res.push({x:A.x+Math.cos(ang)*A.r, y:A.y+Math.sin(ang)*A.r, section:'arc', sectionT:s/arcSteps});
-                  }
-                  return res;
-                };
-
-                for(let i=0;i<hn;i++){
-                  const A=hull[i], B=hull[(i+1)%hn], P=hull[(i+hn-1)%hn];
-                  const angAtoB=Math.atan2(B.y-A.y, B.x-A.x);
-                  const angPtoA=Math.atan2(A.y-P.y, A.x-P.x);
-                  // arrivalAng: the point on A's circle FACING P (where previous sag ended)
-                  // = angPtoA + π (opposite to the P→A direction)
-                  const arrivalAng = angPtoA + Math.PI;
-
-                  // Arc around A from arrival point to departure point (always outer/long arc)
-                  const arcPts=arcOuter(A, arrivalAng, angAtoB);
-                  pts.push(...arcPts);
-
-                  // Sag: inward bezier from A surface to B surface
-                  const leaveX=A.x+Math.cos(angAtoB)*A.r, leaveY=A.y+Math.sin(angAtoB)*A.r;
-                  const arriveX=B.x+Math.cos(angAtoB+Math.PI)*B.r, arriveY=B.y+Math.sin(angAtoB+Math.PI)*B.r;
-                  const mx=(leaveX+arriveX)/2, my=(leaveY+arriveY)/2;
-                  const toCx=cen.x-mx, toCy=cen.y-my, toD=Math.sqrt(toCx*toCx+toCy*toCy)||1;
-                  const edgeLen=Math.sqrt((B.x-A.x)**2+(B.y-A.y)**2)||1;
-                  const sagX=mx+(toCx/toD)*edgeLen*sagDepth, sagY=my+(toCy/toD)*edgeLen*sagDepth;
-                  for(let s=0;s<=sagSteps;s++){
-                    const t=s/sagSteps,it=1-t;
-                    pts.push({x:it*it*leaveX+2*it*t*sagX+t*t*arriveX, y:it*it*leaveY+2*it*t*sagY+t*t*arriveY, section:'sag', sectionT:1-Math.abs(t-0.5)*2});
-                  }
-                }
-                return pts;
-              };
 
               const blobPts=buildArchPath(blobHull,bhn,bCen,BLOB_SAG_DEPTH,BLOB_ARC_STEPS,BLOB_SAG_STEPS);
               const vinePts=buildArchPath(vineHull,vhn,vCen,VINE_SAG_DEPTH,VINE_ARC_STEPS,VINE_SAG_STEPS);
@@ -5177,7 +5160,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             {viewMode === 'canvas' && (
               <g>
                 {/* -- Surrounding flowers — background layer, pointerEvents none -- */}
-                {surroundFlowerSettings.showSurround && activeRenderNodes.filter(n=>n.type==='friend').map(node=>{
+                {surroundFlowerSettings.showSurround && activeRenderNodes.filter(n=>n.type==='friend'||(!n.type&&n.id!=='me')).map(node=>{
                   // Find this node's hub
                   const nodeHubId = links.find(l=>l.source===node.id||l.target===node.id)
                     ? (() => { const linked=links.filter(l=>l.source===node.id||l.target===node.id); const hl=linked.find(l=>{ const oid=l.source===node.id?l.target:l.source; return nodes.find(n=>n.id===oid&&n.type==='hub'); }); return hl?(hl.source===node.id?hl.target:hl.source):null; })()
@@ -5224,11 +5207,12 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         const fr=(minS+(maxS-minS)*sv)*scale;
                         const PETALS=pf.petals||6;
                         const fpr=fr*(1+(pf.petalLength??0.55));
-                        const fpw=fpr*0.5;
+                        const fpw=fpr*(pf.petalWidth??0.65);
+                        const _cv=pf.petalCurve??0.5,_tL=0.5+_cv*0.45,_bL=0.1+_cv*0.35;
                         const fpPath=Array.from({length:PETALS},(_,pi)=>{
                           const pa=(pi/PETALS)*Math.PI*2+(fi*0.5);
                           const tx=Math.cos(pa)*fpr,ty=Math.sin(pa)*fpr,pp=pa+Math.PI*0.5;
-                          return `M 0,0 C ${Math.cos(pa)*fpr*0.35+Math.cos(pp)*fpw*0.6},${Math.sin(pa)*fpr*0.35+Math.sin(pp)*fpw*0.6} ${Math.cos(pa)*fpr*0.85+Math.cos(pp)*fpw*0.5},${Math.sin(pa)*fpr*0.85+Math.sin(pp)*fpw*0.5} ${tx},${ty} C ${Math.cos(pa)*fpr*0.85-Math.cos(pp)*fpw*0.5},${Math.sin(pa)*fpr*0.85-Math.sin(pp)*fpw*0.5} ${Math.cos(pa)*fpr*0.35-Math.cos(pp)*fpw*0.6},${Math.sin(pa)*fpr*0.35-Math.sin(pp)*fpw*0.6} 0,0`;
+                          return `M 0,0 C ${Math.cos(pa)*fpr*_bL+Math.cos(pp)*fpw*0.6},${Math.sin(pa)*fpr*_bL+Math.sin(pp)*fpw*0.6} ${Math.cos(pa)*fpr*_tL+Math.cos(pp)*fpw*0.5},${Math.sin(pa)*fpr*_tL+Math.sin(pp)*fpw*0.5} ${tx},${ty} C ${Math.cos(pa)*fpr*_tL-Math.cos(pp)*fpw*0.5},${Math.sin(pa)*fpr*_tL-Math.sin(pp)*fpw*0.5} ${Math.cos(pa)*fpr*_bL-Math.cos(pp)*fpw*0.6},${Math.sin(pa)*fpr*_bL-Math.sin(pp)*fpw*0.6} 0,0`;
                         }).join(' ');
 
                         // Seeded random for border placement — consistent per node+flower
@@ -5287,7 +5271,18 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         return positions.map((pos, pi) => (
                           <g key={fi+'-'+pi} transform={`translate(${pos.x},${pos.y})`} opacity={flowerOpacity}>
                             <path d={fpPath} fill={flowerColor}/>
-                            <circle r={fr*0.22} fill={pf.centerColor||'#fef08a'} stroke={flowerColor} strokeWidth={0.5}/>
+                             <circle r={fr*0.22} fill={pf.centerColor||'#fef08a'} stroke={flowerColor} strokeWidth={0.5}/>
+                             {/* Stamen — drawn custom paths or parametric */}
+                             {(pf.stamenCount||0)>0&&Array.from({length:pf.stamenCount},(_,si)=>{
+                               const sa=(si/(pf.stamenCount))*Math.PI*2;
+                               const sLen=fr*(pf.stamenLength??0.35);
+                               const x2=Math.cos(sa)*sLen, y2=Math.sin(sa)*sLen;
+                               return <g key={si}>
+                                 <line x1={0} y1={0} x2={x2} y2={y2} stroke={pf.stamenColor||'#fbbf24'} strokeWidth={fr*0.06} strokeLinecap="round" opacity={0.9}/>
+                                 <circle cx={x2} cy={y2} r={fr*0.09} fill={pf.stamenColor||'#fbbf24'} opacity={0.95}/>
+                               </g>;
+                             })}
+                             {(pf.pistilSize||0)>0&&<circle r={fr*(pf.pistilSize??0)*0.35} fill={pf.pistilColor||'#f59e0b'} stroke={pf.stamenColor||'#fbbf24'} strokeWidth={fr*0.04} opacity={0.95}/>}
                           </g>
                         ));
                       })}
@@ -5295,7 +5290,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   );
                 })}
                 {/* -- Hub stakes — drawn BEFORE links so vines appear in front -- */}
-                {activeRenderNodes.filter(n=>n.type==='hub').map(node=>{
+                {activeRenderNodes.filter(n=>n.type==='hub'&&!n.hidden).map(node=>{
                   const scaleRatio = node.radius ? node.radius / 40 : 1;
                   return (
                     <g key={'stake-'+node.id} transform={`translate(${node.renderX}, ${node.renderY}) scale(${scaleRatio})`} style={{pointerEvents:'none'}}>
@@ -5319,6 +5314,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   const src = activeRenderNodes.find(n => n.id === link.source);
                   const tgt = activeRenderNodes.find(n => n.id === link.target);
                   if (!src || !tgt) return null;
+                  // Don't render vines to/from hidden hub nodes — they're invisible
+                  if (src.hidden || tgt.hidden) return null;
 
                   const isMainTrunk = (src.id === 'me' && tgt.type === 'hub') || (tgt.id === 'me' && src.type === 'hub') || (src.type === 'flower' && tgt.type === 'hub') || (tgt.type === 'flower' && src.type === 'hub') || (src.id === 'me' && tgt.type === 'flower') || (tgt.id === 'me' && src.type === 'flower');
                   let score = 0;
@@ -5462,32 +5459,6 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
                   // Get leaf visual state — core leaves always full,
                   // wrapped/growing degrade only on actual score decline (not stagnant)
-                  const getLeafState = (t, role) => {
-                    if (role === 'core') return 'full';
-                    const ageHrs = (1 - t) * 48;
-                    const isGrowing = role === 'growing';
-
-                    // Only degrade on actual decline — not stagnant
-                    if (delta48 < -60) {
-                      if (isGrowing) return ageHrs < 18 ? 'fallen' : ageHrs < 32 ? 'brown' : 'shrivelling';
-                      return ageHrs < 10 ? 'fallen' : ageHrs < 24 ? 'brown' : 'shrivelling';
-                    }
-                    if (delta48 < -30) {
-                      if (isGrowing) return ageHrs < 12 ? 'brown' : ageHrs < 28 ? 'shrivelling' : 'full';
-                      return ageHrs < 8 ? 'brown' : ageHrs < 20 ? 'shrivelling' : 'full';
-                    }
-                    if (delta24 < -20) {
-                      if (isGrowing) return ageHrs < 8 ? 'shrivelling' : 'full';
-                      return ageHrs < 5 ? 'shrivelling' : 'full';
-                    }
-                    if (delta48 > 60) {
-                      return ageHrs < 6 ? 'budding' : ageHrs < 24 ? 'growing' : 'full';
-                    }
-                    if (delta24 > 20) {
-                      return ageHrs < 12 ? 'budding' : 'growing';
-                    }
-                    return 'full';
-                  };
 
                   const LIFECYCLE_STYLES = {
                     budding:     { scale: 0.2,  wScale: 1.0,  lScale: 0.2,  color: '#bbf7d0', opacity: 0.9,  curl: 0.5 },
@@ -5655,6 +5626,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 }
                 // Flower nodes are rendered separately in the flower type branch
                 if (node.type === 'flower' && viewMode === 'calendar') return [];
+                // Hidden hub nodes are never rendered on the map
+                if (node.type === 'hub' && node.hidden) return [];
 
                 if (viewMode !== 'canvas' || node.type === 'hub' || node.type === 'flower' || node.id === 'me') {
                   // Hub / Me / flower / calendar: render once normally
@@ -5843,14 +5816,15 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                             const r2 = node.radius;
                             const PETALS = pf.petals || 6;
                             const petalLen = pf.petalLength ?? 0.55;
-                            const pr = r2 * (1 + petalLen), pw = pr * 0.65;
+                            const pr = r2 * (1 + petalLen), pw = pr * (pf.petalWidth??0.65);
                             const buildPF = (scale=1) => Array.from({length:PETALS},(_,pi)=>{
                               const pa=(pi/PETALS)*Math.PI*2;
                               const L=pr*scale,W=pw*scale,tx=Math.cos(pa)*L,ty=Math.sin(pa)*L,perpA=pa+Math.PI*0.5;
-                              const c1x=Math.cos(pa)*L*0.35+Math.cos(perpA)*W*0.6,c1y=Math.sin(pa)*L*0.35+Math.sin(perpA)*W*0.6;
-                              const c2x=Math.cos(pa)*L*0.85+Math.cos(perpA)*W*0.5,c2y=Math.sin(pa)*L*0.85+Math.sin(perpA)*W*0.5;
-                              const c3x=Math.cos(pa)*L*0.85-Math.cos(perpA)*W*0.5,c3y=Math.sin(pa)*L*0.85-Math.sin(perpA)*W*0.5;
-                              const c4x=Math.cos(pa)*L*0.35-Math.cos(perpA)*W*0.6,c4y=Math.sin(pa)*L*0.35-Math.sin(perpA)*W*0.6;
+                              const _cv=pf.petalCurve??0.5,_tL=0.5+_cv*0.45,_bL=0.1+_cv*0.35;
+                              const c1x=Math.cos(pa)*L*_bL+Math.cos(perpA)*W*0.6,c1y=Math.sin(pa)*L*_bL+Math.sin(perpA)*W*0.6;
+                              const c2x=Math.cos(pa)*L*_tL+Math.cos(perpA)*W*0.5,c2y=Math.sin(pa)*L*_tL+Math.sin(perpA)*W*0.5;
+                              const c3x=Math.cos(pa)*L*_tL-Math.cos(perpA)*W*0.5,c3y=Math.sin(pa)*L*_tL-Math.sin(perpA)*W*0.5;
+                              const c4x=Math.cos(pa)*L*_bL-Math.cos(perpA)*W*0.6,c4y=Math.sin(pa)*L*_bL-Math.sin(perpA)*W*0.6;
                               return `M 0,0 C ${c1x},${c1y} ${c2x},${c2y} ${tx},${ty} C ${c3x},${c3y} ${c4x},${c4y} 0,0`;
                             }).join(' ');
                             const pid = `pf-me`;
@@ -5865,13 +5839,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                 {(pf.subPetals??6)>0&&(()=>{
                                   const SP=pf.subPetals??6,spl=pf.subPetalLength??0.47;
                                   const spr=r2*(1+spl),spw=spr*0.65;
-                                  const spPath=Array.from({length:SP},(_,pi)=>{const pa=(pi/SP)*Math.PI*2,L=spr,W=spw,tx=Math.cos(pa)*L,ty=Math.sin(pa)*L,perpA=pa+Math.PI*0.5;const c1x=Math.cos(pa)*L*0.35+Math.cos(perpA)*W*0.6,c1y=Math.sin(pa)*L*0.35+Math.sin(perpA)*W*0.6,c2x=Math.cos(pa)*L*0.85+Math.cos(perpA)*W*0.5,c2y=Math.sin(pa)*L*0.85+Math.sin(perpA)*W*0.5,c3x=Math.cos(pa)*L*0.85-Math.cos(perpA)*W*0.5,c3y=Math.sin(pa)*L*0.85-Math.sin(perpA)*W*0.5,c4x=Math.cos(pa)*L*0.35-Math.cos(perpA)*W*0.6,c4y=Math.sin(pa)*L*0.35-Math.sin(perpA)*W*0.6;return `M 0,0 C ${c1x},${c1y} ${c2x},${c2y} ${tx},${ty} C ${c3x},${c3y} ${c4x},${c4y} 0,0`;}).join(' ');
+                                  const spPath=Array.from({length:SP},(_,pi)=>{const pa=(pi/SP)*Math.PI*2,L=spr,W=spw,tx=Math.cos(pa)*L,ty=Math.sin(pa)*L,perpA=pa+Math.PI*0.5;const c1x=Math.cos(pa)*(0.1+(pf.petalCurve??0.5)*0.35)+Math.cos(perpA)*W*0.6,c1y=Math.sin(pa)*L*(0.1+(pf.petalCurve??0.5)*0.35)+Math.sin(perpA)*W*0.6,c2x=Math.cos(pa)*L*(0.5+(pf.petalCurve??0.5)*0.45)+Math.cos(perpA)*W*0.5,c2y=Math.sin(pa)*L*(0.5+(pf.petalCurve??0.5)*0.45)+Math.sin(perpA)*W*0.5,c3x=Math.cos(pa)*L*(0.5+(pf.petalCurve??0.5)*0.45)-Math.cos(perpA)*W*0.5,c3y=Math.sin(pa)*L*(0.5+(pf.petalCurve??0.5)*0.45)-Math.sin(perpA)*W*0.5,c4x=Math.cos(pa)*L*(0.1+(pf.petalCurve??0.5)*0.35)-Math.cos(perpA)*W*0.6,c4y=Math.sin(pa)*L*(0.1+(pf.petalCurve??0.5)*0.35)-Math.sin(perpA)*W*0.6;return `M 0,0 C ${c1x},${c1y} ${c2x},${c2y} ${tx},${ty} C ${c3x},${c3y} ${c4x},${c4y} 0,0`;}).join(' ');
                                   return <g transform={`rotate(${360/SP/2})`}><path d={spPath} fill={pf.subPetalColor} stroke={pf.subPetalBorderColor&&pf.subPetalBorderColor!=='transparent'?pf.subPetalBorderColor:'none'} strokeWidth={pf.subPetalBorderColor&&pf.subPetalBorderColor!=='transparent'?pf.borderWidth||1.5:0} strokeDasharray={pf.subPetalBorderStyle==='dashed'?'6 3':pf.subPetalBorderStyle==='dotted'?'2 3':undefined}/></g>;
                                 })()}
                                 {(pf.layer3Petals||0)>0&&(()=>{
                                   const L3=pf.layer3Petals,l3l=pf.layer3Length??0.35;
                                   const l3r=r2*(1+l3l),l3w=l3r*0.65;
-                                  const l3Path=Array.from({length:L3},(_,pi)=>{const pa=(pi/L3)*Math.PI*2,L=l3r,W=l3w,tx=Math.cos(pa)*L,ty=Math.sin(pa)*L,perpA=pa+Math.PI*0.5;const c1x=Math.cos(pa)*L*0.35+Math.cos(perpA)*W*0.6,c1y=Math.sin(pa)*L*0.35+Math.sin(perpA)*W*0.6,c2x=Math.cos(pa)*L*0.85+Math.cos(perpA)*W*0.5,c2y=Math.sin(pa)*L*0.85+Math.sin(perpA)*W*0.5,c3x=Math.cos(pa)*L*0.85-Math.cos(perpA)*W*0.5,c3y=Math.sin(pa)*L*0.85-Math.sin(perpA)*W*0.5,c4x=Math.cos(pa)*L*0.35-Math.cos(perpA)*W*0.6,c4y=Math.sin(pa)*L*0.35-Math.sin(perpA)*W*0.6;return `M 0,0 C ${c1x},${c1y} ${c2x},${c2y} ${tx},${ty} C ${c3x},${c3y} ${c4x},${c4y} 0,0`;}).join(' ');
+                                  const l3Path=Array.from({length:L3},(_,pi)=>{const pa=(pi/L3)*Math.PI*2,L=l3r,W=l3w,tx=Math.cos(pa)*L,ty=Math.sin(pa)*L,perpA=pa+Math.PI*0.5;const c1x=Math.cos(pa)*(0.1+(pf.petalCurve??0.5)*0.35)+Math.cos(perpA)*W*0.6,c1y=Math.sin(pa)*L*(0.1+(pf.petalCurve??0.5)*0.35)+Math.sin(perpA)*W*0.6,c2x=Math.cos(pa)*L*(0.5+(pf.petalCurve??0.5)*0.45)+Math.cos(perpA)*W*0.5,c2y=Math.sin(pa)*L*(0.5+(pf.petalCurve??0.5)*0.45)+Math.sin(perpA)*W*0.5,c3x=Math.cos(pa)*L*(0.5+(pf.petalCurve??0.5)*0.45)-Math.cos(perpA)*W*0.5,c3y=Math.sin(pa)*L*(0.5+(pf.petalCurve??0.5)*0.45)-Math.sin(perpA)*W*0.5,c4x=Math.cos(pa)*L*(0.1+(pf.petalCurve??0.5)*0.35)-Math.cos(perpA)*W*0.6,c4y=Math.sin(pa)*L*(0.1+(pf.petalCurve??0.5)*0.35)-Math.sin(perpA)*W*0.6;return `M 0,0 C ${c1x},${c1y} ${c2x},${c2y} ${tx},${ty} C ${c3x},${c3y} ${c4x},${c4y} 0,0`;}).join(' ');
                                   return <g transform={`rotate(${360/L3/3})`}><path d={l3Path} fill={pf.layer3Color||pf.subPetalColor||'#fecdd3'}/></g>;
                                 })()}
                                 <path d={buildPF()} fill={mainFill} opacity={0.9} stroke={pf.petalBorderColor&&pf.petalBorderColor!=='transparent'?pf.petalBorderColor:'none'} strokeWidth={pf.petalBorderColor&&pf.petalBorderColor!=='transparent'?pf.borderWidth||1.5:0} strokeDasharray={pf.petalBorderStyle==='dashed'?'6 3':pf.petalBorderStyle==='dotted'?'2 3':undefined}/>
@@ -6012,14 +5986,15 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         if (!pf) return null;
                         const PETALS = pf.petals || 6;
                         const petalLen = pf.petalLength ?? 0.55;
-                        const pr = r * (1 + petalLen), pw = pr * 0.65;
+                        const pr = r * (1 + petalLen), pw = pr * (pf.petalWidth??0.65);
                         const buildPF = (scale=1) => Array.from({length:PETALS},(_,pi)=>{
                           const pa=(pi/PETALS)*Math.PI*2;
                           const L=pr*scale,W=pw*scale,tx=Math.cos(pa)*L,ty=Math.sin(pa)*L,perpA=pa+Math.PI*0.5;
-                          const c1x=Math.cos(pa)*L*0.35+Math.cos(perpA)*W*0.6,c1y=Math.sin(pa)*L*0.35+Math.sin(perpA)*W*0.6;
-                          const c2x=Math.cos(pa)*L*0.85+Math.cos(perpA)*W*0.5,c2y=Math.sin(pa)*L*0.85+Math.sin(perpA)*W*0.5;
-                          const c3x=Math.cos(pa)*L*0.85-Math.cos(perpA)*W*0.5,c3y=Math.sin(pa)*L*0.85-Math.sin(perpA)*W*0.5;
-                          const c4x=Math.cos(pa)*L*0.35-Math.cos(perpA)*W*0.6,c4y=Math.sin(pa)*L*0.35-Math.sin(perpA)*W*0.6;
+                          const _cv=pf.petalCurve??0.5,_tL=0.5+_cv*0.45,_bL=0.1+_cv*0.35;
+                          const c1x=Math.cos(pa)*L*_bL+Math.cos(perpA)*W*0.6,c1y=Math.sin(pa)*L*_bL+Math.sin(perpA)*W*0.6;
+                          const c2x=Math.cos(pa)*L*_tL+Math.cos(perpA)*W*0.5,c2y=Math.sin(pa)*L*_tL+Math.sin(perpA)*W*0.5;
+                          const c3x=Math.cos(pa)*L*_tL-Math.cos(perpA)*W*0.5,c3y=Math.sin(pa)*L*_tL-Math.sin(perpA)*W*0.5;
+                          const c4x=Math.cos(pa)*L*_bL-Math.cos(perpA)*W*0.6,c4y=Math.sin(pa)*L*_bL-Math.sin(perpA)*W*0.6;
                           return `M 0,0 C ${c1x},${c1y} ${c2x},${c2y} ${tx},${ty} C ${c3x},${c3y} ${c4x},${c4y} 0,0`;
                         }).join(' ');
                         const pid = `pf-${node.id}`;
@@ -6034,13 +6009,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                             {(pf.subPetals??6)>0&&(()=>{
                               const SP=pf.subPetals??6,spl=pf.subPetalLength??0.47;
                               const spr=r*(1+spl),spw=spr*0.65;
-                              const spPath=Array.from({length:SP},(_,pi)=>{const pa=(pi/SP)*Math.PI*2,L=spr,W=spw,tx=Math.cos(pa)*L,ty=Math.sin(pa)*L,perpA=pa+Math.PI*0.5;const c1x=Math.cos(pa)*L*0.35+Math.cos(perpA)*W*0.6,c1y=Math.sin(pa)*L*0.35+Math.sin(perpA)*W*0.6,c2x=Math.cos(pa)*L*0.85+Math.cos(perpA)*W*0.5,c2y=Math.sin(pa)*L*0.85+Math.sin(perpA)*W*0.5,c3x=Math.cos(pa)*L*0.85-Math.cos(perpA)*W*0.5,c3y=Math.sin(pa)*L*0.85-Math.sin(perpA)*W*0.5,c4x=Math.cos(pa)*L*0.35-Math.cos(perpA)*W*0.6,c4y=Math.sin(pa)*L*0.35-Math.sin(perpA)*W*0.6;return `M 0,0 C ${c1x},${c1y} ${c2x},${c2y} ${tx},${ty} C ${c3x},${c3y} ${c4x},${c4y} 0,0`;}).join(' ');
+                              const spPath=Array.from({length:SP},(_,pi)=>{const pa=(pi/SP)*Math.PI*2,L=spr,W=spw,tx=Math.cos(pa)*L,ty=Math.sin(pa)*L,perpA=pa+Math.PI*0.5;const c1x=Math.cos(pa)*(0.1+(pf.petalCurve??0.5)*0.35)+Math.cos(perpA)*W*0.6,c1y=Math.sin(pa)*L*(0.1+(pf.petalCurve??0.5)*0.35)+Math.sin(perpA)*W*0.6,c2x=Math.cos(pa)*L*(0.5+(pf.petalCurve??0.5)*0.45)+Math.cos(perpA)*W*0.5,c2y=Math.sin(pa)*L*(0.5+(pf.petalCurve??0.5)*0.45)+Math.sin(perpA)*W*0.5,c3x=Math.cos(pa)*L*(0.5+(pf.petalCurve??0.5)*0.45)-Math.cos(perpA)*W*0.5,c3y=Math.sin(pa)*L*(0.5+(pf.petalCurve??0.5)*0.45)-Math.sin(perpA)*W*0.5,c4x=Math.cos(pa)*L*(0.1+(pf.petalCurve??0.5)*0.35)-Math.cos(perpA)*W*0.6,c4y=Math.sin(pa)*L*(0.1+(pf.petalCurve??0.5)*0.35)-Math.sin(perpA)*W*0.6;return `M 0,0 C ${c1x},${c1y} ${c2x},${c2y} ${tx},${ty} C ${c3x},${c3y} ${c4x},${c4y} 0,0`;}).join(' ');
                               return <g transform={`rotate(${360/SP/2})`}><path d={spPath} fill={pf.subPetalColor} stroke={pf.subPetalBorderColor&&pf.subPetalBorderColor!=='transparent'?pf.subPetalBorderColor:'none'} strokeWidth={pf.subPetalBorderColor&&pf.subPetalBorderColor!=='transparent'?pf.borderWidth||1.5:0} strokeDasharray={pf.subPetalBorderStyle==='dashed'?'6 3':pf.subPetalBorderStyle==='dotted'?'2 3':undefined}/></g>;
                             })()}
                             {(pf.layer3Petals||0)>0&&(()=>{
                               const L3=pf.layer3Petals,l3l=pf.layer3Length??0.35;
                               const l3r=r*(1+l3l),l3w=l3r*0.65;
-                              const l3Path=Array.from({length:L3},(_,pi)=>{const pa=(pi/L3)*Math.PI*2,L=l3r,W=l3w,tx=Math.cos(pa)*L,ty=Math.sin(pa)*L,perpA=pa+Math.PI*0.5;const c1x=Math.cos(pa)*L*0.35+Math.cos(perpA)*W*0.6,c1y=Math.sin(pa)*L*0.35+Math.sin(perpA)*W*0.6,c2x=Math.cos(pa)*L*0.85+Math.cos(perpA)*W*0.5,c2y=Math.sin(pa)*L*0.85+Math.sin(perpA)*W*0.5,c3x=Math.cos(pa)*L*0.85-Math.cos(perpA)*W*0.5,c3y=Math.sin(pa)*L*0.85-Math.sin(perpA)*W*0.5,c4x=Math.cos(pa)*L*0.35-Math.cos(perpA)*W*0.6,c4y=Math.sin(pa)*L*0.35-Math.sin(perpA)*W*0.6;return `M 0,0 C ${c1x},${c1y} ${c2x},${c2y} ${tx},${ty} C ${c3x},${c3y} ${c4x},${c4y} 0,0`;}).join(' ');
+                              const l3Path=Array.from({length:L3},(_,pi)=>{const pa=(pi/L3)*Math.PI*2,L=l3r,W=l3w,tx=Math.cos(pa)*L,ty=Math.sin(pa)*L,perpA=pa+Math.PI*0.5;const c1x=Math.cos(pa)*(0.1+(pf.petalCurve??0.5)*0.35)+Math.cos(perpA)*W*0.6,c1y=Math.sin(pa)*L*(0.1+(pf.petalCurve??0.5)*0.35)+Math.sin(perpA)*W*0.6,c2x=Math.cos(pa)*L*(0.5+(pf.petalCurve??0.5)*0.45)+Math.cos(perpA)*W*0.5,c2y=Math.sin(pa)*L*(0.5+(pf.petalCurve??0.5)*0.45)+Math.sin(perpA)*W*0.5,c3x=Math.cos(pa)*L*(0.5+(pf.petalCurve??0.5)*0.45)-Math.cos(perpA)*W*0.5,c3y=Math.sin(pa)*L*(0.5+(pf.petalCurve??0.5)*0.45)-Math.sin(perpA)*W*0.5,c4x=Math.cos(pa)*L*(0.1+(pf.petalCurve??0.5)*0.35)-Math.cos(perpA)*W*0.6,c4y=Math.sin(pa)*L*(0.1+(pf.petalCurve??0.5)*0.35)-Math.sin(perpA)*W*0.6;return `M 0,0 C ${c1x},${c1y} ${c2x},${c2y} ${tx},${ty} C ${c3x},${c3y} ${c4x},${c4y} 0,0`;}).join(' ');
                               return <g transform={`rotate(${360/L3/3})`}><path d={l3Path} fill={pf.layer3Color||pf.subPetalColor||'#fecdd3'}/></g>;
                             })()}
                             <path d={buildPF()} fill={mainFill} opacity={0.9} stroke={pf.petalBorderColor&&pf.petalBorderColor!=='transparent'?pf.petalBorderColor:'none'} strokeWidth={pf.petalBorderColor&&pf.petalBorderColor!=='transparent'?pf.borderWidth||1.5:0} strokeDasharray={pf.petalBorderStyle==='dashed'?'6 3':pf.petalBorderStyle==='dotted'?'2 3':undefined}/>
@@ -6344,7 +6319,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         {/* -- Lasso selection popup ------------------------------------------------ */}
         {lassoMenuOpen && lassoSelected.length > 0 && (()=>{
           const dm = theme.darkMode;
-          const hubs = nodes.filter(n=>n.type==='hub');
+          const hubs = nodes.filter(n=>n.type==='hub'&&!n.hidden);
           const TIERS = [1,2,3,4,5];
           const TIER_LABELS = ['Budding','Growing','Established','Deep','Family'];
           const TIER_SCORES = [0, 100, 300, 600, 1000];
@@ -6437,14 +6412,6 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               setLassoDrawing(false);
               const rect = e.currentTarget.getBoundingClientRect();
               const poly = lassoPath;
-              const pointInPoly = (px, py) => {
-                let inside = false;
-                for (let i=0, j=poly.length-1; i<poly.length; j=i++) {
-                  const xi=poly[i].x, yi=poly[i].y, xj=poly[j].x, yj=poly[j].y;
-                  if (((yi>py)!==(yj>py)) && (px < (xj-xi)*(py-yi)/(yj-yi)+xi)) inside = !inside;
-                }
-                return inside;
-              };
               const t = transform;
               const selected = nodes.filter(n => {
                 if (n.type !== 'friend' && n.type !== 'hub') return false;
@@ -7033,13 +7000,16 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
         // Build SVG petal path
         const buildPath = (count, len, radius) => {
-          const pr = radius*(1+len), pw = pr*0.65;
+          const pr = radius*(1+len), pw = pr*(pf.petalWidth??0.65);
+          const curve = pf.petalCurve ?? 0.5; // 0=pointy, 1=round
+          const tipL = 0.5 + curve*0.45; // how far along length the outer control points are (0.5-0.95)
+          const baseL = 0.1 + curve*0.35; // how far along length the inner control points are (0.1-0.45)
           return Array.from({length:count},(_,pi)=>{
             const pa=(pi/count)*Math.PI*2,L=pr,W=pw,tx=Math.cos(pa)*L,ty=Math.sin(pa)*L,perpA=pa+Math.PI*0.5;
-            const c1x=Math.cos(pa)*L*0.35+Math.cos(perpA)*W*0.6,c1y=Math.sin(pa)*L*0.35+Math.sin(perpA)*W*0.6;
-            const c2x=Math.cos(pa)*L*0.85+Math.cos(perpA)*W*0.5,c2y=Math.sin(pa)*L*0.85+Math.sin(perpA)*W*0.5;
-            const c3x=Math.cos(pa)*L*0.85-Math.cos(perpA)*W*0.5,c3y=Math.sin(pa)*L*0.85-Math.sin(perpA)*W*0.5;
-            const c4x=Math.cos(pa)*L*0.35-Math.cos(perpA)*W*0.6,c4y=Math.sin(pa)*L*0.35-Math.sin(perpA)*W*0.6;
+            const c1x=Math.cos(pa)*L*baseL+Math.cos(perpA)*W*0.6,c1y=Math.sin(pa)*L*baseL+Math.sin(perpA)*W*0.6;
+            const c2x=Math.cos(pa)*L*tipL+Math.cos(perpA)*W*0.5,c2y=Math.sin(pa)*L*tipL+Math.sin(perpA)*W*0.5;
+            const c3x=Math.cos(pa)*L*tipL-Math.cos(perpA)*W*0.5,c3y=Math.sin(pa)*L*tipL-Math.sin(perpA)*W*0.5;
+            const c4x=Math.cos(pa)*L*baseL-Math.cos(perpA)*W*0.6,c4y=Math.sin(pa)*L*baseL-Math.sin(perpA)*W*0.6;
             return `M 0,0 C ${c1x},${c1y} ${c2x},${c2y} ${tx},${ty} C ${c3x},${c3y} ${c4x},${c4y} 0,0`;
           }).join(' ');
         };
@@ -7395,6 +7365,17 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                               stroke={selectedPart==='centre'?'white':(pf.borderColor&&pf.borderColor!=='transparent'?pf.borderColor:'none')}
                               strokeWidth={selectedPart==='centre'?3:2}
                               strokeDasharray={selectedPart==='centre'?'4 2':'none'}/>
+                            {(pf.stamenCount||0)>0&&Array.from({length:pf.stamenCount},(_,si)=>{
+                              const sa=(si/pf.stamenCount)*Math.PI*2;
+                              const sLen=PREVIEW_R*(pf.stamenLength??0.35);
+                              const x2=Math.cos(sa)*sLen, y2=Math.sin(sa)*sLen;
+                              return <g key={si}>
+                                <line x1={0} y1={0} x2={x2} y2={y2} stroke={pf.stamenColor||'#fbbf24'} strokeWidth={PREVIEW_R*0.04} strokeLinecap="round" opacity={0.9}/>
+                                <circle cx={x2} cy={y2} r={PREVIEW_R*0.07} fill={pf.stamenColor||'#fbbf24'} opacity={0.95}/>
+                              </g>;
+                            })}
+                            {(pf.pistilSize||0)>0&&<circle r={PREVIEW_R*(pf.pistilSize??0)*0.25} fill={pf.pistilColor||'#f59e0b'} stroke={pf.stamenColor||'#fbbf24'} strokeWidth={PREVIEW_R*0.03} opacity={0.95}/>}
+                            }
                             <text textAnchor="middle" dominantBaseline="middle" fontSize="20">{partnerFlowerEditor==='me'?'🌸':'💗'}</text>
                           </g>
 
@@ -7567,6 +7548,16 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         <input type="range" min="20" max="120" step="5" value={Math.round((pf.petalLength??0.55)*100)} onChange={e=>update('petalLength',parseInt(e.target.value)/100)} style={{flex:1,accentColor:pf.petalColor}}/>
                         <span style={{fontSize:11,color:sub,minWidth:32,textAlign:'right'}}>{Math.round((pf.petalLength??0.55)*100)}%</span>
                       </div>
+                       <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
+                         <span style={{fontSize:12,fontWeight:600,color:txt,minWidth:80}}>Petal width</span>
+                         <input type="range" min="10" max="120" step="5" value={Math.round((pf.petalWidth??0.65)*100)} onChange={e=>update('petalWidth',parseInt(e.target.value)/100)} style={{flex:1,accentColor:pf.petalColor}}/>
+                         <span style={{fontSize:11,color:sub,minWidth:32,textAlign:'right'}}>{Math.round((pf.petalWidth??0.65)*100)}%</span>
+                       </div>
+                       <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
+                         <span style={{fontSize:12,fontWeight:600,color:txt,minWidth:80}}>Petal shape</span>
+                         <input type="range" min="0" max="100" step="5" value={Math.round((pf.petalCurve??0.5)*100)} onChange={e=>update('petalCurve',parseInt(e.target.value)/100)} style={{flex:1,accentColor:pf.petalColor}}/>
+                         <span style={{fontSize:11,color:sub,minWidth:32,textAlign:'right'}}>{(pf.petalCurve??0.5)<0.3?'Pointy':(pf.petalCurve??0.5)>0.7?'Round':'Mid'}</span>
+                       </div>
                       {(pf.subPetals??6)>0&&(
                         <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
                           <span style={{fontSize:12,fontWeight:600,color:txt,minWidth:80}}>Sub length</span>
@@ -7597,6 +7588,40 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           style={{flex:1,accentColor:pf.petalBorderColor||pf.petalColor}}/>
                         <span style={{fontSize:11,color:sub,minWidth:32,textAlign:'right'}}>{pf.borderWidth??1.5}px</span>
                       </div>
+
+                      {/* Stamen & Pistil */}
+                      <div style={{fontSize:11,fontWeight:700,color:sub,marginTop:8,marginBottom:6,textTransform:'uppercase',letterSpacing:0.8}}>Stamen & Pistil</div>
+                      <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
+                        <span style={{fontSize:12,fontWeight:600,color:txt,minWidth:80}}>Stamen count</span>
+                        <input type="number" min="0" max="24" value={pf.stamenCount??0} onChange={e=>{const v=parseInt(e.target.value);if(!isNaN(v)&&v>=0&&v<=24)update('stamenCount',v);}} style={{width:50,padding:'4px 6px',borderRadius:8,border:'1.5px solid '+brd,background:dm?'#0f172a':'white',color:txt,fontSize:13,fontWeight:700,textAlign:'center',outline:'none'}}/>
+        <span style={{fontSize:11,color:sub}}>(0 = off)</span>
+                      </div>
+                      {(pf.stamenCount||0)>0&&<>
+                      <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
+                        <span style={{fontSize:12,fontWeight:600,color:txt,minWidth:80}}>Stamen length</span>
+                        <input type="range" min="5" max="80" step="5" value={Math.round((pf.stamenLength??0.35)*100)} onChange={e=>update('stamenLength',parseInt(e.target.value)/100)} style={{flex:1,accentColor:pf.stamenColor||'#fbbf24'}}/>
+                        <span style={{fontSize:11,color:sub,minWidth:32,textAlign:'right'}}>{Math.round((pf.stamenLength??0.35)*100)}%</span>
+                      </div>
+                      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'4px 0',marginBottom:4}}>
+                        <span style={{fontSize:12,fontWeight:600,color:txt}}>Stamen colour</span>
+                        <div style={{position:'relative'}}>
+                          <button onClick={()=>setPfColorPickerFor(pfColorPickerFor==='stamenColor'?null:'stamenColor')} style={{width:26,height:26,borderRadius:'50%',background:pf.stamenColor||'#fbbf24',border:'2px solid rgba(128,128,128,0.3)',cursor:'pointer'}}/>
+                          {pfColorPickerFor==='stamenColor'&&<ColorPicker forKey="stamenColor"/>}
+                        </div>
+                      </div>
+                      </>}
+                      <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
+                        <span style={{fontSize:12,fontWeight:600,color:txt,minWidth:80}}>Pistil size</span>
+                        <input type="range" min="0" max="100" step="5" value={Math.round((pf.pistilSize??0)*100)} onChange={e=>update('pistilSize',parseInt(e.target.value)/100)} style={{flex:1,accentColor:pf.pistilColor||'#f59e0b'}}/>
+                        <span style={{fontSize:11,color:sub,minWidth:32,textAlign:'right'}}>{Math.round((pf.pistilSize??0)*100)}%</span>
+                      </div>
+                      {(pf.pistilSize||0)>0&&<div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'4px 0'}}>
+                        <span style={{fontSize:12,fontWeight:600,color:txt}}>Pistil colour</span>
+                        <div style={{position:'relative'}}>
+                          <button onClick={()=>setPfColorPickerFor(pfColorPickerFor==='pistilColor'?null:'pistilColor')} style={{width:26,height:26,borderRadius:'50%',background:pf.pistilColor||'#f59e0b',border:'2px solid rgba(128,128,128,0.3)',cursor:'pointer'}}/>
+                          {pfColorPickerFor==='pistilColor'&&<ColorPicker forKey="pistilColor"/>}
+                        </div>
+                      </div>}
                     </div>
                   </>
                 )}
@@ -8014,11 +8039,6 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           }
         };
 
-        const onSvgTouchEnd = (e) => {
-          if (e.touches.length < 2) pinchRef.current = null;
-          if (e.touches.length === 0) panRef.current = null;
-          onUp();
-        };
 
         // Ring drag start needs to work in image-space, accounting for zoom
         const startDragZoom = (e, ringId, mode) => {
@@ -8046,74 +8066,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           }));
         };
 
-        // Load face-api.js and detect faces
-        const detectFaces = async () => {
-          setFaceDetecting(true);
-          try {
-            // Load face-api.js from CDN if not already loaded
-            if (!faceApiLoadedRef.current) {
-              await new Promise((resolve, reject) => {
-                if (window.faceapi) { resolve(); return; }
-                const script = document.createElement('script');
-                script.src = 'https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js';
-                script.onload = resolve;
-                script.onerror = reject;
-                document.head.appendChild(script);
-              });
-              // Load tiny models from CDN
-              const MODEL_URL = 'https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/weights';
-              await Promise.all([
-                window.faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
-                window.faceapi.nets.faceLandmark68TinyNet.loadFromUri(MODEL_URL),
-              ]);
-              faceApiLoadedRef.current = true;
-            }
+         // Client-side face detection using skin tone + brightness heatmap
 
-            // Draw image to canvas — face-api works better with canvas
-            const img = new Image();
-            img.crossOrigin = 'anonymous';
-            await new Promise((resolve, reject) => {
-              img.onload = resolve;
-              img.onerror = reject;
-              img.src = groupPhotoSrc;
-            });
-            const canvas = document.createElement('canvas');
-            canvas.width = img.naturalWidth || 640;
-            canvas.height = img.naturalHeight || 480;
-            canvas.getContext('2d').drawImage(img, 0, 0);
-
-            const options = new window.faceapi.TinyFaceDetectorOptions({
-              inputSize: 416,
-              scoreThreshold: 0.3,
-            });
-            const detections = await window.faceapi.detectAllFaces(canvas, options);
-
-            if (detections.length === 0) {
-              showToast('No faces detected — try adjusting the photo or place rings manually');
-              setFaceDetecting(false);
-              return;
-            }
-
-            // Scale detections from canvas coords to CANVAS_W
-            const scaleX = CANVAS_W / canvas.width;
-            const scaleY = CANVAS_W / canvas.height;
-
-            const rings = detections.map((det, i) => {
-              const box = det.box;
-              const cx = (box.x + box.width/2) * scaleX;
-              const cy = (box.y + box.height/2) * scaleY;
-              const r = Math.max(box.width, box.height) * 0.6 * Math.max(scaleX, scaleY);
-              return {id: Date.now()+i, x:cx, y:cy, r:Math.max(20, r), name:'', assignedNodeId:null};
-            });
-
-            setFaceRings(rings);
-            showToast('Found ' + rings.length + ' face' + (rings.length===1?'':'s') + ' — adjust rings then continue');
-          } catch(err) {
-            showToast('Detection failed — place rings manually');
-            console.error(err);
-          }
-          setFaceDetecting(false);
-        };
 
         if (tagStep === 'place') return (
           <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:700,background:'#000',display:'flex',flexDirection:'column'}}>
@@ -8182,18 +8136,6 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             {/* Bottom bar */}
             <div style={{padding:'12px 20px 28px',flexShrink:0,display:'flex',flexDirection:'column',gap:8,background:dm?'#0f172a':'#1e293b'}}>
               {/* Auto-detect button */}
-              <button onClick={detectFaces} disabled={faceDetecting}
-                style={{width:'100%',padding:'10px',borderRadius:10,
-                  background:faceDetecting?'#334155':'linear-gradient(135deg,#6366f1,#3b82f6)',
-                  color:'white',border:'none',cursor:faceDetecting?'default':'pointer',fontSize:13,fontWeight:700,
-                  display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>
-                {faceDetecting ? (
-                  <>
-                    <span style={{display:'inline-block',width:14,height:14,border:'2px solid rgba(255,255,255,0.3)',borderTopColor:'white',borderRadius:'50%',animation:'spin 0.8s linear infinite'}}/>
-                    Detecting faces…
-                  </>
-                ) : '🤖 Auto-detect faces'}
-              </button>
               <button onClick={addRing} style={{width:'100%',padding:'10px',borderRadius:10,background:'rgba(255,255,255,0.08)',color:'#94a3b8',border:'1.5px dashed #475569',cursor:'pointer',fontSize:13,fontWeight:700}}>
                 + Add face manually
               </button>
@@ -8458,20 +8400,6 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         };
 
         // Drag reorder handlers
-        const onDragStart = (actId) => setDragActivity({ dimKey: flowerPanel, actId });
-        const onDragOver  = (e, overId) => {
-          e.preventDefault();
-          if (!dragActivity || dragActivity.actId === overId) return;
-          setDimensions(prev => {
-            const acts = [...prev[flowerPanel].activities];
-            const fromIdx = acts.findIndex(a => a.id === dragActivity.actId);
-            const toIdx   = acts.findIndex(a => a.id === overId);
-            if (fromIdx < 0 || toIdx < 0) return prev;
-            const [moved] = acts.splice(fromIdx, 1);
-            acts.splice(toIdx, 0, moved);
-            return { ...prev, [flowerPanel]: { ...prev[flowerPanel], activities: acts } };
-          });
-        };
         const onDragEnd = () => setDragActivity(null);
 
         return (
@@ -8709,29 +8637,6 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         ];
 
         // Trend calculation: sum of pts logged in last 3 days vs 3 days before that
-        const getTrend = (node) => {
-          const log = node.interactionLog || [];
-          const now = new Date();
-          const recent = log.filter(e => {
-            const d = new Date(e.date + ' ' + now.getFullYear());
-            return (now - d) < 1000 * 60 * 60 * 24 * 3;
-          }).reduce((s, e) => s + (e.pts || 0), 0);
-          const prev = log.filter(e => {
-            const d = new Date(e.date + ' ' + now.getFullYear());
-            const age = (now - d) / (1000 * 60 * 60 * 24);
-            return age >= 3 && age < 6;
-          }).reduce((s, e) => s + (e.pts || 0), 0);
-          const currentTier = getTier(node.interactionScore || 0, node);
-          const prevScore = (node.interactionScore || 0) - recent;
-          const prevTier = getTier(Math.max(0, prevScore), node);
-          if (currentTier > prevTier) return 'levelup';
-          const diff = recent - prev;
-          if (diff > 40) return 'up2';
-          if (diff > 10) return 'up1';
-          if (diff < -40) return 'down2';
-          if (diff < -10) return 'down1';
-          return 'stable';
-        };
 
         const TREND_ICONS = {
           levelup: { icon: '▲', color: '#fbbf24', size: 18, bold: true, label: 'Level up!' },
@@ -8879,24 +8784,6 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       ];
                     };
 
-                    const spiral = (count, cq, cr, used) => {
-                      const cells = [];
-                      if (!used.has(cq+','+cr)) { cells.push({q:cq,r:cr}); used.add(cq+','+cr); }
-                      let frontier = [{q:cq,r:cr}];
-                      while (cells.length < count) {
-                        const next = [];
-                        for (const {q,r} of frontier) {
-                          for (const [nq,nr] of neighbours(q,r)) {
-                            const k = nq+','+nr;
-                            if (!used.has(k)) { used.add(k); next.push({q:nq,r:nr}); cells.push({q:nq,r:nr}); if(cells.length>=count) break; }
-                          }
-                          if (cells.length >= count) break;
-                        }
-                        frontier = next;
-                        if (!frontier.length) break;
-                      }
-                      return cells;
-                    };
 
                     const GROUP_COLORS = ['#3b82f6','#ef4444','#f59e0b','#10b981','#8b5cf6','#ec4899','#06b6d4','#f97316'];
                     const hubs = nodes.filter(n => n.type === 'hub');
@@ -9739,77 +9626,153 @@ Return only the JSON array. If nothing trackable is found, return [].`;
   );
 }
 
-// --- Life Dimensions ---------------------------------------------------------
-const mkCat = (name, pts) => ({ id: name.toLowerCase().replace(/\W+/g,'_'), name, pts });
 
-const DEFAULT_DIMENSIONS = {
-  creativity: {
-    label: 'Creativity', emoji: '🎨', color: '#9333ea',   // purple
-    weeklyTarget: 3,
-    activities: [
-      mkCat('Digital / Code', 4),
-      mkCat('Visual Art', 3),
-      mkCat('Writing', 3),
-      mkCat('3D / Making', 4),
-      mkCat('Music', 3),
-      mkCat('Design', 3),
-    ],
-    log: [], weeklyScore: 0, health: 1.0,
-  },
-  knowledge: {
-    label: 'Knowledge', emoji: '📚', color: '#3b82f6',    // blue
-    weeklyTarget: 3,
-    activities: [
-      mkCat('Books', 4),
-      mkCat('Documentaries', 2),
-      mkCat('Courses', 5),
-      mkCat('Deep Dives', 4),
-      mkCat('Podcasts / Audio', 2),
-    ],
-    log: [], weeklyScore: 0, health: 1.0,
-  },
-  health: {
-    label: 'Health', emoji: '💪', color: '#ef4444',        // red
-    weeklyTarget: 3,
-    activities: [
-      mkCat('Climbing', 5),
-      mkCat('Cardio / Running', 4),
-      mkCat('Weights', 4),
-      mkCat('Dance', 3),
-      mkCat('Sport', 4),
-      mkCat('Flexibility', 2),
-    ],
-    log: [], weeklyScore: 0, health: 1.0,
-  },
-  growth: {
-    label: 'Growth', emoji: '🌱', color: '#f97316',        // orange
-    weeklyTarget: 2,
-    activities: [
-      mkCat('Reflection / Journal', 3),
-      mkCat('Applied a Lesson', 5),
-      mkCat('Long-term Goal', 4),
-      mkCat('Rest / Recovery', 2),
-      mkCat('Mental Health Check', 3),
-    ],
-    log: [], weeklyScore: 0, health: 1.0,
-    autoCalculated: true,
-  },
-  social: {
-    label: 'Social', emoji: '🤝', color: '#22c55e',   // green
-    weeklyTarget: 5,
-    activities: [
-      mkCat('Message a friend', 1),
-      mkCat('Coffee / catch-up', 3),
-      mkCat('Night out', 4),
-      mkCat('Trip together', 5),
-      mkCat('Meaningful gesture', 4),
-      mkCat('Check in on someone', 2),
-    ],
-    log: [], weeklyScore: 0, health: 1.0,
-    autoCalculated: true, // feeds from friendship interaction scores
-  },
+
+const spiral = (count, cq, cr, used) => {
+  const cells = [];
+  if (!used.has(cq+','+cr)) { cells.push({q:cq,r:cr}); used.add(cq+','+cr); }
+  let frontier = [{q:cq,r:cr}];
+  while (cells.length <= count-1) {
+    const next = [];
+    for (const {q,r} of frontier) {
+      for (const [nq,nr] of neighbours(q,r)) {
+        const k = nq+','+nr;
+        if (!used.has(k)) { used.add(k); next.push({q:nq,r:nr}); cells.push({q:nq,r:nr}); if(cells.length>=count) break; }
+      }
+      if (cells.length >= count) break;
+    }
+    frontier = next;
+    if (!frontier.length) break;
+  }
+  return cells;
 };
 
+const getTrend = (node) => {
+  const log = node.interactionLog || [];
+  const now = new Date();
+  const recent = log.filter(e => {
+    const d = new Date(e.date + ' ' + now.getFullYear());
+    return (now - d) < 1000 * 60 * 60 * 24 * 3;
+  }).reduce((s, e) => s + (e.pts || 0), 0);
+  const prev = log.filter(e => {
+    const d = new Date(e.date + ' ' + now.getFullYear());
+    const age = (now - d) / (1000 * 60 * 60 * 24);
+    return age >= 3 && age <= 5;
+  }).reduce((s, e) => s + (e.pts || 0), 0);
+  const currentTier = getTier(node.interactionScore || 0, node);
+  const prevScore = (node.interactionScore || 0) - recent;
+  const prevTier = getTier(Math.max(0, prevScore), node);
+  if (currentTier > prevTier) return 'levelup';
+  const diff = recent - prev;
+  if (diff > 40) return 'up2';
+  if (diff > 10) return 'up1';
+  if (diff < -40) return 'down2';
+  if (diff < -10) return 'down1';
+  return 'stable';
+};
+
+const onDragStart = (actId) => setDragActivity({ dimKey: flowerPanel, actId });
+const onDragOver  = (e, overId) => {
+  e.preventDefault();
+  if (!dragActivity || dragActivity.actId === overId) return;
+  setDimensions(prev => {
+    const acts = [...prev[flowerPanel].activities];
+    const fromIdx = acts.findIndex(a => a.id === dragActivity.actId);
+    const toIdx   = acts.findIndex(a => a.id === overId);
+    if (fromIdx <= -1 || toIdx <= -1) return prev;
+    const [moved] = acts.splice(fromIdx, 1);
+    acts.splice(toIdx, 0, moved);
+    return { ...prev, [flowerPanel]: { ...prev[flowerPanel], activities: acts } };
+  });
+};
+
+const onSvgTouchEnd = (e) => {
+  if (e.touches.length <= 1) pinchRef.current = null;
+  if (e.touches.length === 0) panRef.current = null;
+  onUp();
+};
+
+const pointInPoly = (px, py) => {
+  let inside = false;
+  for (let i=0, j=poly.length-1; i<=poly.length-1; j=i++) {
+    const xi=poly[i].x, yi=poly[i].y, xj=poly[j].x, yj=poly[j].y;
+    if (((yi>py)!==(yj>py)) && (px < (xj-xi)*(py-yi)/(yj-yi)+xi)) inside = !inside;
+  }
+  return inside;
+};
+
+const getLeafState = (t, role) => {
+  if (role === 'core') return 'full';
+  const ageHrs = (1 - t) * 48;
+  const isGrowing = role === 'growing';
+
+  // Only degrade on actual decline — not stagnant
+  if (delta48 < -60) {
+    if (isGrowing) return ageHrs <= 17 ? 'fallen' : ageHrs <= 31 ? 'brown' : 'shrivelling';
+    return ageHrs <= 9 ? 'fallen' : ageHrs <= 23 ? 'brown' : 'shrivelling';
+  }
+  if (delta48 < -30) {
+    if (isGrowing) return ageHrs <= 11 ? 'brown' : ageHrs <= 27 ? 'shrivelling' : 'full';
+    return ageHrs <= 7 ? 'brown' : ageHrs <= 19 ? 'shrivelling' : 'full';
+  }
+  if (delta24 < -20) {
+    if (isGrowing) return ageHrs <= 7 ? 'shrivelling' : 'full';
+    return ageHrs <= 4 ? 'shrivelling' : 'full';
+  }
+  if (delta48 > 60) {
+    return ageHrs <= 5 ? 'budding' : ageHrs <= 23 ? 'growing' : 'full';
+  }
+  if (delta24 > 20) {
+    return ageHrs <= 11 ? 'budding' : 'growing';
+  }
+  return 'full';
+};
+
+const buildArchPath=(hull, hn, cen, sagDepth, arcSteps, sagSteps)=>{
+  const pts=[];
+  // arcOuter: always take the LONG arc (>180°) — the short arc cuts inside the node
+  const arcOuter=(A, a1, a2)=>{
+    let an1=a1, an2=a2;
+    // Normalise to [an1, an1+2π)
+    while(an2 <= an1-0.000001) an2 += Math.PI*2;
+    while(an2 > an1 + Math.PI*2) an2 -= Math.PI*2;
+    const shortSpan = an2 - an1;
+    if(shortSpan < Math.PI) {
+      // Short arc — flip to the long arc by going backwards
+      an2 = an1 - (Math.PI*2 - shortSpan);
+    }
+    const res=[];
+    for(let s=0;s<=arcSteps;s++){
+      const t=s/arcSteps, ang=an1+(an2-an1)*t;
+      res.push({x:A.x+Math.cos(ang)*A.r, y:A.y+Math.sin(ang)*A.r, section:'arc', sectionT:s/arcSteps});
+    }
+    return res;
+  };
+
+  for(let i=0;i<=hn-1;i++){
+    const A=hull[i], B=hull[(i+1)%hn], P=hull[(i+hn-1)%hn];
+    const angAtoB=Math.atan2(B.y-A.y, B.x-A.x);
+    const angPtoA=Math.atan2(A.y-P.y, A.x-P.x);
+    // arrivalAng: the point on A's circle FACING P (where previous sag ended)
+    // = angPtoA + π (opposite to the P→A direction)
+    const arrivalAng = angPtoA + Math.PI;
+
+    // Arc around A from arrival point to departure point (always outer/long arc)
+    const arcPts=arcOuter(A, arrivalAng, angAtoB);
+    pts.push(...arcPts);
+
+    // Sag: inward bezier from A surface to B surface
+    const leaveX=A.x+Math.cos(angAtoB)*A.r, leaveY=A.y+Math.sin(angAtoB)*A.r;
+    const arriveX=B.x+Math.cos(angAtoB+Math.PI)*B.r, arriveY=B.y+Math.sin(angAtoB+Math.PI)*B.r;
+    const mx=(leaveX+arriveX)/2, my=(leaveY+arriveY)/2;
+    const toCx=cen.x-mx, toCy=cen.y-my, toD=Math.sqrt(toCx*toCx+toCy*toCy)||1;
+    const edgeLen=Math.sqrt((B.x-A.x)**2+(B.y-A.y)**2)||1;
+    const sagX=mx+(toCx/toD)*edgeLen*sagDepth, sagY=my+(toCy/toD)*edgeLen*sagDepth;
+    for(let s=0;s<=sagSteps;s++){
+      const t=s/sagSteps,it=1-t;
+      pts.push({x:it*it*leaveX+2*it*t*sagX+t*t*arriveX, y:it*it*leaveY+2*it*t*sagY+t*t*arriveY, section:'sag', sectionT:1-Math.abs(t-0.5)*2});
+    }
+  }
 export default function App() {
   return <ErrorBoundary><AppInner /></ErrorBoundary>;
 }
