@@ -632,6 +632,31 @@ function AppInner() {
       } catch(e) { console.warn('Photo restore failed:', e); }
     })();
   }, []); // eslint-disable-line
+
+  // Auto-create hidden hubs for anyone connected directly to the social node.
+  // This gives each social-connected person their own group (with vine border)
+  // that holds them plus anyone branching off them.
+  useEffect(() => {
+    const newHubs = [];
+    const newHubLinks = [];
+    links
+      .filter(l => l.source === 'flower_social' || l.target === 'flower_social')
+      .map(l => l.source === 'flower_social' ? l.target : l.source)
+      .filter(id => { const n = nodes.find(n => n.id === id); return n && n.type !== 'hub' && n.type !== 'flower' && n.id !== 'me'; })
+      .forEach(id => {
+        const hubId = 'hidden_hub_' + id;
+        const person = nodes.find(n => n.id === id);
+        if (!nodes.some(n => n.id === hubId)) {
+          newHubs.push({ id: hubId, type: 'hub', hidden: true, label: (person && person.label ? person.label : 'Friend') + "'s Group", x: (person && person.x ? person.x : 0) + 180, y: (person && person.y ? person.y : 0), pinned: false });
+        }
+        if (!links.some(l => (l.source===hubId&&l.target===id)||(l.target===hubId&&l.source===id))) {
+          newHubLinks.push({ source: hubId, target: id });
+        }
+      });
+    if (newHubs.length > 0) setNodes(prev => [...prev, ...newHubs]);
+    if (newHubLinks.length > 0) setLinks(prev => [...prev, ...newHubLinks]);
+  }, [links]); // eslint-disable-line
+
   const [showPhotoOptions, setShowPhotoOptions] = useState(false);
   const [showAddToGroup, setShowAddToGroup] = useState(false);
 
