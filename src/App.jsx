@@ -7985,7 +7985,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   if(!cropDragRef.current) return;
                   const dx = e.clientX - cropDragRef.current.startX;
                   const dy = e.clientY - cropDragRef.current.startY;
-                  setPhotoCrop(p=>({...p, crop:{...p.crop, x:cropDragRef.current.ox+dx, y:cropDragRef.current.oy+dy}}));
+                  const _ox = cropDragRef.current.ox, _oy = cropDragRef.current.oy;
+                  setPhotoCrop(p=>({...p, crop:{...p.crop, x:_ox+dx, y:_oy+dy}}));
                 }}
                 onPointerUp={()=>{cropDragRef.current=null;}}
                 onWheel={e=>{
