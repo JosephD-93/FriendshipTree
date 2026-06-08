@@ -4737,6 +4737,53 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
               // -- Arch path builder ---------------------------------------------
               // For each hull edge: arc CCW around node A (outer), then inward sag to node B
+              const buildArchPath=(hull, hn, cen, sagDepth, arcSteps, sagSteps)=>{
+                const pts=[];
+                // arcOuter: always take the LONG arc (>180°) — the short arc cuts inside the node
+                const arcOuter=(A, a1, a2)=>{
+                  let an1=a1, an2=a2;
+                  // Normalise to [an1, an1+2π)
+                  while(an2 < an1) an2 += Math.PI*2;
+                  while(an2 > an1 + Math.PI*2) an2 -= Math.PI*2;
+                  const shortSpan = an2 - an1;
+                  if(shortSpan < Math.PI) {
+                    // Short arc — flip to the long arc by going backwards
+                    an2 = an1 - (Math.PI*2 - shortSpan);
+                  }
+                  const res=[];
+                  for(let s=0;s<=arcSteps;s++){
+                    const t=s/arcSteps, ang=an1+(an2-an1)*t;
+                    res.push({x:A.x+Math.cos(ang)*A.r, y:A.y+Math.sin(ang)*A.r, section:'arc', sectionT:s/arcSteps});
+                  }
+                  return res;
+                };
+
+                for(let i=0;i<hn;i++){
+                  const A=hull[i], B=hull[(i+1)%hn], P=hull[(i+hn-1)%hn];
+                  const angAtoB=Math.atan2(B.y-A.y, B.x-A.x);
+                  const angPtoA=Math.atan2(A.y-P.y, A.x-P.x);
+                  // arrivalAng: the point on A's circle FACING P (where previous sag ended)
+                  // = angPtoA + π (opposite to the P→A direction)
+                  const arrivalAng = angPtoA + Math.PI;
+
+                  // Arc around A from arrival point to departure point (always outer/long arc)
+                  const arcPts=arcOuter(A, arrivalAng, angAtoB);
+                  pts.push(...arcPts);
+
+                  // Sag: inward bezier from A surface to B surface
+                  const leaveX=A.x+Math.cos(angAtoB)*A.r, leaveY=A.y+Math.sin(angAtoB)*A.r;
+                  const arriveX=B.x+Math.cos(angAtoB+Math.PI)*B.r, arriveY=B.y+Math.sin(angAtoB+Math.PI)*B.r;
+                  const mx=(leaveX+arriveX)/2, my=(leaveY+arriveY)/2;
+                  const toCx=cen.x-mx, toCy=cen.y-my, toD=Math.sqrt(toCx*toCx+toCy*toCy)||1;
+                  const edgeLen=Math.sqrt((B.x-A.x)**2+(B.y-A.y)**2)||1;
+                  const sagX=mx+(toCx/toD)*edgeLen*sagDepth, sagY=my+(toCy/toD)*edgeLen*sagDepth;
+                  for(let s=0;s<=sagSteps;s++){
+                    const t=s/sagSteps,it=1-t;
+                    pts.push({x:it*it*leaveX+2*it*t*sagX+t*t*arriveX, y:it*it*leaveY+2*it*t*sagY+t*t*arriveY, section:'sag', sectionT:1-Math.abs(t-0.5)*2});
+                  }
+                }
+                return pts;
+              };
 
               const blobPts=buildArchPath(blobHull,bhn,bCen,BLOB_SAG_DEPTH,BLOB_ARC_STEPS,BLOB_SAG_STEPS);
               const vinePts=buildArchPath(vineHull,vhn,vCen,VINE_SAG_DEPTH,VINE_ARC_STEPS,VINE_SAG_STEPS);
@@ -5459,6 +5506,32 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
                   // Get leaf visual state — core leaves always full,
                   // wrapped/growing degrade only on actual score decline (not stagnant)
+                  const getLeafState = (t, role) => {
+                    if (role === 'core') return 'full';
+                    const ageHrs = (1 - t) * 48;
+                    const isGrowing = role === 'growing';
+
+                    // Only degrade on actual decline — not stagnant
+                    if (delta48 < -60) {
+                      if (isGrowing) return ageHrs < 18 ? 'fallen' : ageHrs < 32 ? 'brown' : 'shrivelling';
+                      return ageHrs < 10 ? 'fallen' : ageHrs < 24 ? 'brown' : 'shrivelling';
+                    }
+                    if (delta48 < -30) {
+                      if (isGrowing) return ageHrs < 12 ? 'brown' : ageHrs < 28 ? 'shrivelling' : 'full';
+                      return ageHrs < 8 ? 'brown' : ageHrs < 20 ? 'shrivelling' : 'full';
+                    }
+                    if (delta24 < -20) {
+                      if (isGrowing) return ageHrs < 8 ? 'shrivelling' : 'full';
+                      return ageHrs < 5 ? 'shrivelling' : 'full';
+                    }
+                    if (delta48 > 60) {
+                      return ageHrs < 6 ? 'budding' : ageHrs < 24 ? 'growing' : 'full';
+                    }
+                    if (delta24 > 20) {
+                      return ageHrs < 12 ? 'budding' : 'growing';
+                    }
+                    return 'full';
+                  };
 
                   const LIFECYCLE_STYLES = {
                     budding:     { scale: 0.2,  wScale: 1.0,  lScale: 0.2,  color: '#bbf7d0', opacity: 0.9,  curl: 0.5 },
@@ -6412,6 +6485,14 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               setLassoDrawing(false);
               const rect = e.currentTarget.getBoundingClientRect();
               const poly = lassoPath;
+              const pointInPoly = (px, py) => {
+                let inside = false;
+                for (let i=0, j=poly.length-1; i<poly.length; j=i++) {
+                  const xi=poly[i].x, yi=poly[i].y, xj=poly[j].x, yj=poly[j].y;
+                  if (((yi>py)!==(yj>py)) && (px < (xj-xi)*(py-yi)/(yj-yi)+xi)) inside = !inside;
+                }
+                return inside;
+              };
               const t = transform;
               const selected = nodes.filter(n => {
                 if (n.type !== 'friend' && n.type !== 'hub') return false;
@@ -9692,87 +9773,80 @@ const onSvgTouchEnd = (e) => {
   onUp();
 };
 
-const pointInPoly = (px, py) => {
-  let inside = false;
-  for (let i=0, j=poly.length-1; i<=poly.length-1; j=i++) {
-    const xi=poly[i].x, yi=poly[i].y, xj=poly[j].x, yj=poly[j].y;
-    if (((yi>py)!==(yj>py)) && (px < (xj-xi)*(py-yi)/(yj-yi)+xi)) inside = !inside;
-  }
-  return inside;
+
+
+
+
+const mkCat = (name, pts) => ({ id: name.toLowerCase().replace(/\W+/g,'_'), name, pts });
+
+const DEFAULT_DIMENSIONS = {
+  creativity: {
+    label: 'Creativity', emoji: '🎨', color: '#9333ea',   // purple
+    weeklyTarget: 3,
+    activities: [
+      mkCat('Digital / Code', 4),
+      mkCat('Visual Art', 3),
+      mkCat('Writing', 3),
+      mkCat('3D / Making', 4),
+      mkCat('Music', 3),
+      mkCat('Design', 3),
+    ],
+    log: [], weeklyScore: 0, health: 1.0,
+  },
+  knowledge: {
+    label: 'Knowledge', emoji: '📚', color: '#3b82f6',    // blue
+    weeklyTarget: 3,
+    activities: [
+      mkCat('Books', 4),
+      mkCat('Documentaries', 2),
+      mkCat('Courses', 5),
+      mkCat('Deep Dives', 4),
+      mkCat('Podcasts / Audio', 2),
+    ],
+    log: [], weeklyScore: 0, health: 1.0,
+  },
+  health: {
+    label: 'Health', emoji: '💪', color: '#ef4444',        // red
+    weeklyTarget: 3,
+    activities: [
+      mkCat('Climbing', 5),
+      mkCat('Cardio / Running', 4),
+      mkCat('Weights', 4),
+      mkCat('Dance', 3),
+      mkCat('Sport', 4),
+      mkCat('Flexibility', 2),
+    ],
+    log: [], weeklyScore: 0, health: 1.0,
+  },
+  growth: {
+    label: 'Growth', emoji: '🌱', color: '#f97316',        // orange
+    weeklyTarget: 2,
+    activities: [
+      mkCat('Reflection / Journal', 3),
+      mkCat('Applied a Lesson', 5),
+      mkCat('Long-term Goal', 4),
+      mkCat('Rest / Recovery', 2),
+      mkCat('Mental Health Check', 3),
+    ],
+    log: [], weeklyScore: 0, health: 1.0,
+    autoCalculated: true,
+  },
+  social: {
+    label: 'Social', emoji: '🤝', color: '#22c55e',   // green
+    weeklyTarget: 5,
+    activities: [
+      mkCat('Message a friend', 1),
+      mkCat('Coffee / catch-up', 3),
+      mkCat('Night out', 4),
+      mkCat('Trip together', 5),
+      mkCat('Meaningful gesture', 4),
+      mkCat('Check in on someone', 2),
+    ],
+    log: [], weeklyScore: 0, health: 1.0,
+    autoCalculated: true, // feeds from friendship interaction scores
+  },
 };
 
-const getLeafState = (t, role) => {
-  if (role === 'core') return 'full';
-  const ageHrs = (1 - t) * 48;
-  const isGrowing = role === 'growing';
-
-  // Only degrade on actual decline — not stagnant
-  if (delta48 < -60) {
-    if (isGrowing) return ageHrs <= 17 ? 'fallen' : ageHrs <= 31 ? 'brown' : 'shrivelling';
-    return ageHrs <= 9 ? 'fallen' : ageHrs <= 23 ? 'brown' : 'shrivelling';
-  }
-  if (delta48 < -30) {
-    if (isGrowing) return ageHrs <= 11 ? 'brown' : ageHrs <= 27 ? 'shrivelling' : 'full';
-    return ageHrs <= 7 ? 'brown' : ageHrs <= 19 ? 'shrivelling' : 'full';
-  }
-  if (delta24 < -20) {
-    if (isGrowing) return ageHrs <= 7 ? 'shrivelling' : 'full';
-    return ageHrs <= 4 ? 'shrivelling' : 'full';
-  }
-  if (delta48 > 60) {
-    return ageHrs <= 5 ? 'budding' : ageHrs <= 23 ? 'growing' : 'full';
-  }
-  if (delta24 > 20) {
-    return ageHrs <= 11 ? 'budding' : 'growing';
-  }
-  return 'full';
-};
-
-const buildArchPath=(hull, hn, cen, sagDepth, arcSteps, sagSteps)=>{
-  const pts=[];
-  // arcOuter: always take the LONG arc (>180°) — the short arc cuts inside the node
-  const arcOuter=(A, a1, a2)=>{
-    let an1=a1, an2=a2;
-    // Normalise to [an1, an1+2π)
-    while(an2 <= an1-0.000001) an2 += Math.PI*2;
-    while(an2 > an1 + Math.PI*2) an2 -= Math.PI*2;
-    const shortSpan = an2 - an1;
-    if(shortSpan < Math.PI) {
-      // Short arc — flip to the long arc by going backwards
-      an2 = an1 - (Math.PI*2 - shortSpan);
-    }
-    const res=[];
-    for(let s=0;s<=arcSteps;s++){
-      const t=s/arcSteps, ang=an1+(an2-an1)*t;
-      res.push({x:A.x+Math.cos(ang)*A.r, y:A.y+Math.sin(ang)*A.r, section:'arc', sectionT:s/arcSteps});
-    }
-    return res;
-  };
-
-  for(let i=0;i<=hn-1;i++){
-    const A=hull[i], B=hull[(i+1)%hn], P=hull[(i+hn-1)%hn];
-    const angAtoB=Math.atan2(B.y-A.y, B.x-A.x);
-    const angPtoA=Math.atan2(A.y-P.y, A.x-P.x);
-    // arrivalAng: the point on A's circle FACING P (where previous sag ended)
-    // = angPtoA + π (opposite to the P→A direction)
-    const arrivalAng = angPtoA + Math.PI;
-
-    // Arc around A from arrival point to departure point (always outer/long arc)
-    const arcPts=arcOuter(A, arrivalAng, angAtoB);
-    pts.push(...arcPts);
-
-    // Sag: inward bezier from A surface to B surface
-    const leaveX=A.x+Math.cos(angAtoB)*A.r, leaveY=A.y+Math.sin(angAtoB)*A.r;
-    const arriveX=B.x+Math.cos(angAtoB+Math.PI)*B.r, arriveY=B.y+Math.sin(angAtoB+Math.PI)*B.r;
-    const mx=(leaveX+arriveX)/2, my=(leaveY+arriveY)/2;
-    const toCx=cen.x-mx, toCy=cen.y-my, toD=Math.sqrt(toCx*toCx+toCy*toCy)||1;
-    const edgeLen=Math.sqrt((B.x-A.x)**2+(B.y-A.y)**2)||1;
-    const sagX=mx+(toCx/toD)*edgeLen*sagDepth, sagY=my+(toCy/toD)*edgeLen*sagDepth;
-    for(let s=0;s<=sagSteps;s++){
-      const t=s/sagSteps,it=1-t;
-      pts.push({x:it*it*leaveX+2*it*t*sagX+t*t*arriveX, y:it*it*leaveY+2*it*t*sagY+t*t*arriveY, section:'sag', sectionT:1-Math.abs(t-0.5)*2});
-    }
-  }
 export default function App() {
   return <ErrorBoundary><AppInner /></ErrorBoundary>;
 }
