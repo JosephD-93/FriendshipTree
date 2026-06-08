@@ -152,7 +152,7 @@ class ErrorBoundary extends React.Component {
 }
 
 
-// ── FAB Component ────────────────────────────────────────────────────────────
+// -- FAB Component ------------------------------------------------------------
 function FabMenu(props) {
   const { theme, fabOpen, setFabOpen, fabPos, setFabPos,
     draggingFab, setDraggingFab, heldTool, setHeldTool,
@@ -423,7 +423,7 @@ function AppInner() {
   const idbRef = useRef(null);
   const borderFlowerPositionsRef = useRef({});
 
-  // ── IndexedDB for photo storage ───────────────────────────────────────────
+  // -- IndexedDB for photo storage -------------------------------------------
   const [lastCreatedLink, setLastCreatedLink] = useState(null);
   const lastLinkTimer = useRef(null);
 
@@ -552,13 +552,50 @@ function AppInner() {
     showToast('🗑️ History cleared — people & photos kept');
   };
 
-  // ── IndexedDB photo storage ───────────────────────────────────────────────
+  // -- IndexedDB photo storage -----------------------------------------------
   const openPhotoDB = () => new Promise((resolve, reject) => {
-    const req = indexedDB.open('FriendTreePhotos', 1);
-    req.onupgradeneeded = e => e.target.result.createObjectStore('photos', { keyPath: 'nodeId' });
+    const req = indexedDB.open('FriendTreePhotos', 2);
+    req.onupgradeneeded = e => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains('photos')) db.createObjectStore('photos', { keyPath: 'nodeId' });
+      if (!db.objectStoreNames.contains('gallery')) db.createObjectStore('gallery', { keyPath: 'key' });
+    };
     req.onsuccess = e => resolve(e.target.result);
     req.onerror = e => reject(e.target.error);
   });
+
+  const saveToGallery = (nodeId, dataUrl, meta) => {
+    meta = meta || {};
+    return openPhotoDB().then(db => {
+      const key = nodeId + '_' + Date.now() + '_' + Math.random().toString(36).slice(2,5);
+      return new Promise((res,rej) => {
+        const tx = db.transaction('gallery','readwrite');
+        tx.objectStore('gallery').put({ key, nodeId, dataUrl, sourceType: meta.sourceType||'manual', date: meta.date||'' });
+        tx.oncomplete = () => res(key); tx.onerror = rej;
+      });
+    }).catch(e => console.error('Gallery save failed', e));
+  };
+
+  const loadGallery = (nodeId) => {
+    return openPhotoDB().then(db => {
+      return new Promise((res,rej) => {
+        const tx = db.transaction('gallery','readonly');
+        const req = tx.objectStore('gallery').getAll();
+        req.onsuccess = () => res((req.result||[]).filter(r=>r.nodeId===nodeId));
+        req.onerror = rej;
+      });
+    }).catch(() => []);
+  };
+
+  const deleteFromGallery = (key) => {
+    return openPhotoDB().then(db => {
+      return new Promise((res,rej) => {
+        const tx = db.transaction('gallery','readwrite');
+        tx.objectStore('gallery').delete(key);
+        tx.oncomplete = res; tx.onerror = rej;
+      });
+    }).catch(e => console.error('Gallery delete failed', e));
+  };
 
   const savePhotoToDB = async (nodeId, dataUrl) => {
     try {
@@ -597,6 +634,7 @@ function AppInner() {
   }, []); // eslint-disable-line
   const [showPhotoOptions, setShowPhotoOptions] = useState(false);
   const [showAddToGroup, setShowAddToGroup] = useState(false);
+
   const [avBg,    setAvBg]    = useState('#4f46e5');
   const [avSkin,  setAvSkin]  = useState('#f4c2a1');
   const [avHair,  setAvHair]  = useState('#2d1b00');
@@ -617,6 +655,11 @@ function AppInner() {
   const [liftedNodeId, setLiftedNodeId] = useState(null);
   const [hoverTarget, setHoverTarget] = useState(null);
   const [selectedNodeId, setSelectedNodeId] = useState(null);
+  useEffect(() => {
+    if (!selectedNodeId) { setGalleryItems([]); return; }
+    setGalleryLoading(true);
+    loadGallery(selectedNodeId).then(items => { setGalleryItems(items); setGalleryLoading(false); }).catch(() => setGalleryLoading(false));
+  }, [selectedNodeId]); // eslint-disable-line
   const [toastMessage, setToastMessage] = useState(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [futureOpen, setFutureOpen] = useState(false);
@@ -718,6 +761,9 @@ function AppInner() {
   const [collectedLeaves, setCollectedLeaves] = useState([]);
   const [clearLeavesConfirm, setClearLeavesConfirm] = useState(false);
   const rakeHoldTimer = useRef(null);
+  const [galleryItems, setGalleryItems] = useState([]);
+  const [galleryViewer, setGalleryViewer] = useState(null);
+  const [galleryLoading, setGalleryLoading] = useState(false);
   const rakeDragStart = useRef(null);
   const [vineConnectPrompt, setVineConnectPrompt] = useState(null);
   const [pendingPaths, setPendingPaths] = useState([]);
@@ -2028,7 +2074,7 @@ function AppInner() {
     setShowTutorial(false);
   };
 
-  // ── History — stored in refs to avoid re-renders breaking pointer capture ──
+  // -- History — stored in refs to avoid re-renders breaking pointer capture --
   const historyRef = useRef([]);
   const futureRef  = useRef([]);
   const [historyLen, setHistoryLen] = useState(0); // just for button disabled state
@@ -2128,7 +2174,7 @@ function AppInner() {
 
   const [hexSnapPos, setHexSnapPos] = useState(null); // {x,y} snapped hex centre during drag
 
-  // ── Hex grid utilities ────────────────────────────────────────────────────
+  // -- Hex grid utilities ----------------------------------------------------
   // Flat-top hexagonal grid
   const [gridStyle, setGridStyle] = useState('hex'); // 'hex' | 'hexSmall' | 'square'
   const HEX_SIZE = gridStyle === 'hexSmall' ? 65 : gridStyle === 'square' ? 90 : 110;
@@ -2167,7 +2213,7 @@ function AppInner() {
     });
   };;
 
-  // ── Auto-save to localStorage ─────────────────────────────────────────────
+  // -- Auto-save to localStorage ---------------------------------------------
   // Debounced so photos (large base64) don't block on every render
   const saveTimer = useRef(null);
   useEffect(() => {
@@ -2191,7 +2237,7 @@ function AppInner() {
   useEffect(() => { try { localStorage.setItem('ft_links', JSON.stringify(links)); } catch(e) {} }, [links]);
   useEffect(() => { try { localStorage.setItem('ft_dimensions', JSON.stringify(dimensions)); } catch(e) {} }, [dimensions]);
 
-  // ── Persist all settings to ft_settings ──────────────────────────────────
+  // -- Persist all settings to ft_settings ----------------------------------
   useEffect(() => {
     try {
       localStorage.setItem('ft_settings', JSON.stringify({
@@ -2289,7 +2335,7 @@ function AppInner() {
     reader.readAsText(file);
   };
 
-  // ── Notifications ─────────────────────────────────────────────────────────
+  // -- Notifications ---------------------------------------------------------
   const requestNotifications = async () => {
     if (!('Notification' in window)) { showToast('Notifications not supported in this browser'); return; }
     const perm = await Notification.requestPermission();
@@ -2360,7 +2406,7 @@ function AppInner() {
     return () => clearInterval(iv);
   }, []);
 
-  // ── Voice input ───────────────────────────────────────────────────────────
+  // -- Voice input -----------------------------------------------------------
   const toggleVoice = () => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) { showToast('Speech recognition not supported on this browser'); return; }
@@ -2384,7 +2430,7 @@ function AppInner() {
     setIsListening(true);
   };
 
-  // ── AI diary parsing ──────────────────────────────────────────────────────
+  // -- AI diary parsing ------------------------------------------------------
   const parseDiaryWithAI = async () => {
     if (!diaryText.trim()) return;
     setDiaryLoading(true);
@@ -2442,7 +2488,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
     setDiaryLoading(false);
   };
 
-  // ── Confirm a diary suggestion ────────────────────────────────────────────
+  // -- Confirm a diary suggestion --------------------------------------------
   const confirmSuggestion = (sug) => {
     // Log to dimension
     if (sug.dim && dimensions[sug.dim]) {
@@ -2771,8 +2817,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         );
       })()}
 
-      {/* ── Draggable Edge-Snapping FAB ─────────────────────────────────────── */}
-      {/* ── FAB ── */}
+      {/* -- Draggable Edge-Snapping FAB --------------------------------------- */}
+      {/* -- FAB -- */}
       {viewMode === "canvas" && <FabMenu
         theme={theme} viewMode={viewMode}
         fabOpen={fabOpen} setFabOpen={setFabOpen}
@@ -2812,7 +2858,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         </div>
       )}
 
-      {/* ── Rake tool overlay ── */}
+      {/* -- Rake tool overlay -- */}
       {rakeActive && viewMode === 'canvas' && (()=>{
         const RAKE_R = 36;
         const BIN_SIZE = 56;
@@ -3337,7 +3383,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           {selectedNode ? (
             <div className="space-y-6">
 
-              {/* ── Me Profile Panel ──────────────────────────────────── */}
+              {/* -- Me Profile Panel ------------------------------------ */}
               {selectedNode.id === 'me' && (
                 <div className="space-y-5">
                   <div className="flex items-center space-x-4">
@@ -4607,7 +4653,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               const members = nodes.filter(n=>memberIds.has(n.id)&&n.x!=null&&n.type!=='flower'&&n.id!=='me');
               if (members.length < 2) return null;
 
-              // ── Tuning constants — driven by Appearance settings ──────────────
+              // -- Tuning constants — driven by Appearance settings --------------
               const BLOB_NODE_RADIUS_MULT = vineBorderParams.blobArcRadius;
               const BLOB_NODE_RADIUS_ADD  = 0;
               const BLOB_SAG_DEPTH        = vineBorderParams.blobSagDepth;
@@ -4621,7 +4667,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               const VINE_SAG_DEPTH        = vineBorderParams.vineSagDepth;
               const VINE_SAG_STEPS        = 24;
               const VINE_ARC_STEPS        = 20;
-              // ─────────────────────────────────────────────────────────────────
+              // -----------------------------------------------------------------
 
               const avgScore = members.reduce((s,n)=>s+(n.interactionScore||0),0)/members.length;
               const maxScore = Math.max(...members.map(n=>n.interactionScore||0));
@@ -4659,7 +4705,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               const centroid=(hull)=>({x:hull.reduce((s,p)=>s+p.x,0)/hull.length, y:hull.reduce((s,p)=>s+p.y,0)/hull.length});
               const bCen=centroid(blobHull), vCen=centroid(vineHull);
 
-              // ── Arch path builder ─────────────────────────────────────────────
+              // -- Arch path builder ---------------------------------------------
               // For each hull edge: arc CCW around node A (outer), then inward sag to node B
               const buildArchPath=(hull, hn, cen, sagDepth, arcSteps, sagSteps)=>{
                 const pts=[];
@@ -4724,7 +4770,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 return {x:p.x, y:p.y, inX, inY, section:p.section, sectionT:p.sectionT};
               });
 
-              // ── Blob filter ───────────────────────────────────────────────────
+              // -- Blob filter ---------------------------------------------------
               const blobCol=hub.vineBlobColor||'#15803d';
               const blobOp=hub.vineBlobOpacity??0.85;
               const filterId='mbf'+hub.id.replace(/[^a-z0-9]/gi,'');
@@ -4733,7 +4779,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               const x1=Math.min(...xs)-60, y1=Math.min(...ys)-60;
               const x2=Math.max(...xs)+60, y2=Math.max(...ys)+60;
 
-              // ── Vine strands ──────────────────────────────────────────────────
+              // -- Vine strands --------------------------------------------------
               const totalVinePts=vinePts.length;
               let perim=0;
               for(let i=0;i<totalVinePts;i++){const a=vinePts[i],b=vinePts[(i+1)%totalVinePts];perim+=Math.sqrt((b.x-a.x)**2+(b.y-a.y)**2);}
@@ -4762,7 +4808,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 return {...def,pts,renderIdx};
               });
 
-              // ── Leaves ────────────────────────────────────────────────────────
+              // -- Leaves --------------------------------------------------------
               const LEAF_CHARS={
                 core:   {sizeBase:27,sizeVar:4.5,colorDark:'#14532d',colorLight:'#15803d',aspectW:0.32,bud:false},
                 wrapped:{sizeBase:12,sizeVar:2.4,colorDark:'#166534',colorLight:'#22c55e',aspectW:0.32,bud:false},
@@ -5130,7 +5176,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
             {viewMode === 'canvas' && (
               <g>
-                {/* ── Surrounding flowers — background layer, pointerEvents none ── */}
+                {/* -- Surrounding flowers — background layer, pointerEvents none -- */}
                 {surroundFlowerSettings.showSurround && activeRenderNodes.filter(n=>n.type==='friend').map(node=>{
                   // Find this node's hub
                   const nodeHubId = links.find(l=>l.source===node.id||l.target===node.id)
@@ -5248,7 +5294,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     </g>
                   );
                 })}
-                {/* ── Hub stakes — drawn BEFORE links so vines appear in front ── */}
+                {/* -- Hub stakes — drawn BEFORE links so vines appear in front -- */}
                 {activeRenderNodes.filter(n=>n.type==='hub').map(node=>{
                   const scaleRatio = node.radius ? node.radius / 40 : 1;
                   return (
@@ -5396,7 +5442,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   //   core    → largest, darkest, fully open
                   //   wrapped → medium, mid-green, open
                   //   growing → tiny, lightest, budding (narrow/closed shape)
-                  // ── Leaf lifecycle from score history ────────────────────
+                  // -- Leaf lifecycle from score history --------------------
                   // Each leaf position t (0=root, 1=tip) maps to an age in hours
                   const srcNode = nodes.find(n => n.id === link.source);
                   const tgtNode = nodes.find(n => n.id === link.target);
@@ -5765,7 +5811,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           {isSelected && <rect x="-60" y="-80" width="120" height="100" fill="none" stroke="#10B981" strokeWidth="2" strokeDasharray="4 4" rx="8" />}
                           {isHoverTarget && <rect x="-65" y="-85" width="130" height="110" fill="none" stroke="#3B82F6" strokeWidth="4" strokeDasharray="8 4" rx="10" />}
 
-                          {/* ── SIGN — on top ── */}
+                          {/* -- SIGN — on top -- */}
                           <rect x="-55" y="-50" width="110" height="32" fill="#A0522D" rx="4" />
                           <rect x="-55" y="-50" width="110" height="32" fill="none" stroke="#5C3A21" strokeWidth="2" rx="4" />
                           {theme.showWeathering && <>
@@ -5937,7 +5983,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   )];
                 }
 
-                // ── Canvas person node: render one copy per group membership ──
+                // -- Canvas person node: render one copy per group membership --
                 const gv = node.groupVisibility || {};
                 const groupEntries = Object.entries(gv).filter(([, vis]) => vis >= 2); // vis 2=small, 3=full
 
@@ -6295,7 +6341,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           </g>
         </svg>
 
-        {/* ── Lasso selection popup ──────────────────────────────────────────────── */}
+        {/* -- Lasso selection popup ------------------------------------------------ */}
         {lassoMenuOpen && lassoSelected.length > 0 && (()=>{
           const dm = theme.darkMode;
           const hubs = nodes.filter(n=>n.type==='hub');
@@ -6370,7 +6416,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           );
         })()}
 
-        {/* ── Lasso capture overlay — sits above everything when active ── */}
+        {/* -- Lasso capture overlay — sits above everything when active -- */}
         {lassoMode && (
           <svg style={{position:'absolute',inset:0,width:'100%',height:'100%',zIndex:200,touchAction:'none',cursor:'crosshair'}}
             onPointerDown={e => {
@@ -6429,7 +6475,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           </svg>
         )}
 
-        {/* ── Restore banner after reset ────────────────────────────────────────── */}
+        {/* -- Restore banner after reset ------------------------------------------ */}
       {dataSnapshot && (
         <div style={{position:'fixed',bottom:68,left:8,right:8,zIndex:450,
           background:'#1e3a5f',borderRadius:14,padding:'12px 16px',
@@ -6445,7 +6491,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         </div>
       )}
 
-      {/* ── Tier Pick Mode overlay ───────────────────────────────────────────── */}
+      {/* -- Tier Pick Mode overlay --------------------------------------------- */}
       {tierPickMode && (() => {
         const remaining = nodes.filter(n=>n.type==='friend'&&!(n.interactionScore>0||n.isFamily||n.isPartner)).length;
         return (
@@ -6605,7 +6651,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         )}
       </div>
 
-      {/* ── Quick undo X button for new links ───────────────────────────────── */}
+      {/* -- Quick undo X button for new links --------------------------------- */}
       {lastCreatedLink && (() => {
         const src = nodes.find(n => n.id === lastCreatedLink.source);
         const tgt = nodes.find(n => n.id === lastCreatedLink.target);
@@ -6753,7 +6799,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         </div>
       )}
 
-      {/* ── Confirm Modal ───────────────────────────────────────────────────── */}
+      {/* -- Confirm Modal ----------------------------------------------------- */}
       {confirmModal && (
         <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:900,background:'rgba(0,0,0,0.6)',display:'flex',alignItems:'center',justifyContent:'center'}}
           onClick={e=>{if(e.target===e.currentTarget)setConfirmModal(null);}}>
@@ -6775,7 +6821,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         </div>
       )}
 
-      {/* ── PIN Modal ───────────────────────────────────────────────────────── */}
+      {/* -- PIN Modal --------------------------------------------------------- */}
       {pinModal && (
         <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:800,background:'rgba(0,0,0,0.6)',
           display:'flex',alignItems:'center',justifyContent:'center'}}
@@ -6868,7 +6914,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         );
       })()}
 
-      {/* ── Search Overlay ───────────────────────────────────────────────────── */}
+      {/* -- Search Overlay ----------------------------------------------------- */}
       {searchOpen && (() => {
         const dm = theme.darkMode;
         const q = searchQuery.toLowerCase();
@@ -6928,7 +6974,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         );
       })()}
 
-      {/* ── Partner Flower Customiser ─────────────────────────────────────────── */}
+      {/* -- Partner Flower Customiser ------------------------------------------- */}
       {partnerFlowerEditor && (() => {
         const pn = nodes.find(n=>n.id===partnerFlowerEditor);
         if (!pn) return null;
@@ -7175,7 +7221,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               <div style={{overflowY:'auto',flex:1,padding:'0 20px 40px'}}>
 
                 {tab==='presets' ? (
-                  /* ── Presets grid ── */
+                  /* -- Presets grid -- */
                   <div style={{paddingTop:4}}>
 
                     {/* Edit mode toggle + save current */}
@@ -7289,7 +7335,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   </div>
 
                 ) : (
-                  /* ── Design tab ── */
+                  /* -- Design tab -- */
                   <>
                     {/* Top row: flower left + options right */}
                     <div style={{display:'flex',gap:12,alignItems:'flex-start',margin:'8px 0 12px'}}>
@@ -7559,7 +7605,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           </div>
         );
       })()}
-      {/* ── Photo Slideshow ─────────────────────────────────────────────── */}
+      {/* -- Photo Slideshow ----------------------------------------------- */}
       {photoSlideshow && (() => {
         const sn = nodes.find(n=>n.id===photoSlideshow);
         if(!sn) return null;
@@ -7787,7 +7833,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         );
       })()}
 
-      {/* ── Group Photo Tagger ───────────────────────────────────────────────── */}
+      {/* -- Group Photo Tagger ------------------------------------------------- */}
       {groupPhotoSrc && (() => {
         const dm = theme.darkMode;
         const CANVAS_W = 320;
@@ -8221,7 +8267,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         );
       })()}
 
-      {/* ── Avatar Builder Modal ─────────────────────────────────────────────── */}
+      {/* -- Avatar Builder Modal ----------------------------------------------- */}
       {avatarBuilder && (() => {
         const targetNode = nodes.find(n => n.id === avatarBuilder.nodeId);
         if (!targetNode) return null;
@@ -8348,7 +8394,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         );
       })()}
 
-      {/* ── Flower / Dimension Panel ─────────────────────────────────────────── */}
+      {/* -- Flower / Dimension Panel ------------------------------------------- */}
       {flowerPanel && (() => {
         const dim = dimensions[flowerPanel];
         if (!dim) return null;
@@ -8561,7 +8607,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         );
       })()}
 
-      {/* ── Diary Log Modal ──────────────────────────────────────────────────── */}
+      {/* -- Diary Log Modal ---------------------------------------------------- */}
       {diaryOpen && (
         <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:300,background:'rgba(0,0,0,0.6)',display:'flex',alignItems:'center',justifyContent:'center'}}
           onClick={e => { if(e.target===e.currentTarget) setDiaryOpen(false); }}>
@@ -8646,7 +8692,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         </div>
       )}
 
-      {/* ── Me Dashboard View ────────────────────────────────────────────────── */}
+      {/* -- Me Dashboard View -------------------------------------------------- */}
       {viewMode === 'me' && (() => {
         const dm = theme.darkMode;
         const bg = dm ? '#0f172a' : '#f8fafc';
@@ -8725,7 +8771,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             {/* Tab content */}
             <div style={{flex:1,overflowY:'auto',padding:'16px'}}>
 
-              {/* ── Social tab ── */}
+              {/* -- Social tab -- */}
               {activeTab === 'social' && (
                 <div>
                   {/* Social flower health summary */}
@@ -9261,7 +9307,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 </div>
               )}
 
-              {/* ── Dimension tabs — creativity/knowledge/health/growth only ── */}
+              {/* -- Dimension tabs — creativity/knowledge/health/growth only -- */}
               {['creativity','knowledge','health','growth'].includes(activeTab) && (() => {
                 const dim = dimensions[activeTab];
                 if (!dim || !dim.color) return null;
@@ -9632,7 +9678,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           </div>
         );
       })()}
-      {/* ── Bottom Tab Bar ────────────────────────────────────────────────────── */}
+      {/* -- Bottom Tab Bar ------------------------------------------------------ */}
       <div style={{
         position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 200,
         display: 'flex', alignItems: 'stretch',
@@ -9693,7 +9739,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
   );
 }
 
-// ─── Life Dimensions ─────────────────────────────────────────────────────────
+// --- Life Dimensions ---------------------------------------------------------
 const mkCat = (name, pts) => ({ id: name.toLowerCase().replace(/\W+/g,'_'), name, pts });
 
 const DEFAULT_DIMENSIONS = {
