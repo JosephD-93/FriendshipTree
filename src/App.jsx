@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { 
-  Plus, Trash2, ZoomIn, ZoomOut,
+  Plus, Trash2, ZoomIn, ZoomOut, Home,
   Calendar as CalendarIcon, X, Settings, 
   Moon, Sun, Cloud, Info, Activity, TreePine,
   MessageCircle, Coffee, PartyPopper, Plane, HeartHandshake, Map as MapIcon,
@@ -361,6 +361,8 @@ function AppInner() {
   const [showAddMenu, setShowAddMenu] = useState(false);
   const [notifPermission, setNotifPermission] = useState('Notification' in window ? Notification.permission : 'denied');
   const [flowerPanel, setFlowerPanel] = useState(null);
+  const [flowerMenuOpen, setFlowerMenuOpen] = useState(false);
+  const [tagsMenuOpen, setTagsMenuOpen] = useState(false);
   const [dragActivity, setDragActivity] = useState(null);
   const [activeTab, setActiveTab] = useState('social');
   const [socialView, setSocialView] = useState('gridScore'); // 'gridScore'|'gridMomentum'|'barScore'|'barMomentum'
@@ -655,10 +657,27 @@ function AppInner() {
       });
     if (newHubs.length > 0) setNodes(prev => [...prev, ...newHubs]);
     if (newHubLinks.length > 0) setLinks(prev => [...prev, ...newHubLinks]);
+
+    // Repair any hidden hub whose label is missing/undefined — name it after
+    // the person it belongs to (e.g. "Hayley's Group").
+    setNodes(prev => {
+      let changed = false;
+      const fixed = prev.map(n => {
+        if (n.type === 'hub' && n.hidden && (!n.label || n.label === 'undefined' || /^undefined/.test(n.label))) {
+          const personId = n.id.replace('hidden_hub_', '');
+          const person = prev.find(p => p.id === personId);
+          if (person && person.label) { changed = true; return { ...n, label: person.label + "'s Group" }; }
+        }
+        return n;
+      });
+      return changed ? fixed : prev;
+    });
   }, [links]); // eslint-disable-line
 
   const [showPhotoOptions, setShowPhotoOptions] = useState(false);
   const [showAddToGroup, setShowAddToGroup] = useState(false);
+  const [connSections, setConnSections] = useState({ group: true, subgroups: true, severed: false });
+  const [expandedGroupMembers, setExpandedGroupMembers] = useState({});
 
   const [avBg,    setAvBg]    = useState('#4f46e5');
   const [avSkin,  setAvSkin]  = useState('#f4c2a1');
@@ -697,6 +716,7 @@ function AppInner() {
   const [tierPickMode, setTierPickMode] = useState(false);
   const [photoBorderMode, setPhotoBorderMode] = useState((() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); return s.photoBorderMode !== undefined ? s.photoBorderMode : 'none'; } catch(e) { return 'none'; } })());
   const [showHubMembers, setShowHubMembers] = useState(true);
+  const [groupPhotoLayout, setGroupPhotoLayout] = useState(() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); return s.groupPhotoLayout || 'shells'; } catch(e) { return 'shells'; } }); // 'shells' | 'mandala'
   const [showGroupTable, setShowGroupTable] = useState(false);
   const [hubFlowerMenuOpen, setHubFlowerMenuOpen] = useState(false);
   const [showVineBorders, setShowVineBorders] = useState((() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); return s.showVineBorders !== undefined ? s.showVineBorders : true; } catch(e) { return true; } })());
@@ -2272,6 +2292,7 @@ function AppInner() {
         theme, groupColors, archivedLinks, collapsedGroups,
         photoBorderMode, showMapKey, showVineBorders,
         vineBorderParams, surroundFlowerSettings, activeTags, strandParams, groupBorderParams,
+        groupPhotoLayout,
       }));
     } catch(e) { console.warn('ft_settings save failed:', e.message); }
   }, [theme, groupColors, archivedLinks, collapsedGroups, photoBorderMode,
@@ -2620,6 +2641,61 @@ Return only the JSON array. If nothing trackable is found, return [].`;
   }, [nodes, activeTags]);
 
   const isTagFiltered = (nodeId) => tagFilteredIds === null || tagFilteredIds.has(nodeId);
+
+  // Map each person to the hub group they belong to (visible or hidden hubs),
+  // walking the tree that branches off each hub's directly-linked members.
+  // Used to hide vine links that cross between different groups.
+  const nodeGroupMap = useMemo(() => {
+    const map = {};
+    const allHubs = nodes.filter(n => n.type === 'hub');
+
+    // Pass 1: a person who anchors their own hidden hub (i.e. is connected
+    // directly to social) always belongs to their OWN group — never reassigned.
+    const hiddenHubs = nodes.filter(n => n.type === 'hub' && n.hidden);
+    hiddenHubs.forEach(hub => {
+      links.filter(l => l.source === hub.id || l.target === hub.id).forEach(l => {
+        const pid = l.source === hub.id ? l.target : l.source;
+        const n = nodes.find(x => x.id === pid);
+        if (n && n.type !== 'flower' && n.type !== 'hub' && pid !== 'me') {
+          map[pid] = hub.id;
+        }
+      });
+    });
+
+    // Pass 2: direct visible-hub links — claim only people not already anchored.
+    const visibleHubs = allHubs.filter(h => !h.hidden);
+    visibleHubs.forEach(hub => {
+      links.filter(l => l.source === hub.id || l.target === hub.id).forEach(l => {
+        const pid = l.source === hub.id ? l.target : l.source;
+        const n = nodes.find(x => x.id === pid);
+        if (n && n.type !== 'flower' && n.type !== 'hub' && pid !== 'me' && !map[pid]) {
+          map[pid] = hub.id;
+        }
+      });
+    });
+
+    // Pass 2: walk the tree branching off each hub's members for indirect members
+    allHubs.forEach(hub => {
+      const directIds = links.filter(l => l.source === hub.id || l.target === hub.id).map(l => l.source === hub.id ? l.target : l.source);
+      const visited = new Set(['me', 'flower_social']);
+      allHubs.forEach(h => visited.add(h.id));
+      const queue = [...directIds];
+      while (queue.length > 0) {
+        const id = queue.shift();
+        if (visited.has(id)) continue;
+        visited.add(id);
+        const n = nodes.find(x => x.id === id);
+        if (!n || n.type === 'flower' || n.type === 'hub') continue;
+        // Only claim if not already claimed by a direct hub link
+        if (!map[id]) map[id] = hub.id;
+        links.filter(l => l.source === id || l.target === id).forEach(l => {
+          const oid = l.source === id ? l.target : l.source;
+          if (!visited.has(oid)) queue.push(oid);
+        });
+      }
+    });
+    return map;
+  }, [nodes, links]);
 
   const nodeTransition = (nodeId) =>
     liftedNodeId === nodeId ? 'transform 0.15s ease-out, opacity 0.15s ease-out' : 'transform 0.25s cubic-bezier(0.34,1.56,0.64,1), opacity 0.25s ease';
@@ -3389,21 +3465,21 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         }}>
         <div className={`border-b flex justify-between items-center ${theme.darkMode ? 'border-slate-700 bg-slate-800' : 'border-slate-100 bg-slate-50'}`}
           style={{padding:'8px 16px',minHeight:0}}>
-          {/* Hide name input in header for hubs — shown in preview area instead */}
-          {(!selectedNode || selectedNode.type !== 'hub') && (
+          {/* Name input in header — for people and groups alike */}
+          {selectedNode && (
             <input
               type="text"
-              value={!selectedNode ? '' : selectedNode.id==='me' ? 'Me' : (selectedNode.label && selectedNode.label!=='New Friend' ? selectedNode.label : '')}
-              placeholder={!selectedNode ? '' : 'Name'}
+              value={selectedNode.id==='me' ? 'Me' : (selectedNode.label && selectedNode.label!=='New Friend' && selectedNode.label!=='New Group' ? selectedNode.label : '')}
+              placeholder={selectedNode.type === 'hub' ? 'Group name' : 'Name'}
               onChange={e=>{
                 if(selectedNode && selectedNode.id!=='me'){
-                  updateSelectedNode('label', e.target.value || 'New Friend');
+                  updateSelectedNode('label', e.target.value || (selectedNode.type === 'hub' ? 'New Group' : 'New Friend'));
                 }
               }}
               style={{fontSize:15,fontWeight:700,color:theme.darkMode?'#e2e8f0':'#1e293b',background:'none',border:'none',outline:'none',flex:1,minWidth:0}}
             />
           )}
-          {selectedNode?.type === 'hub' && <div style={{flex:1}}/>}
+                  {!selectedNode && <div style={{flex:1}}/>}
           {selectedNode && <button onClick={() => { setSelectedNodeId(null); setAddFriendForms([]); setShowPhotoOptions(false); }} className={`p-1.5 rounded-full flex-shrink-0 ${theme.darkMode ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-200 hover:bg-slate-300'}`}><X className="w-3.5 h-3.5" /></button>}
         </div>
 
@@ -3782,107 +3858,80 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 </div>
               )}
 
-              {/* Edit/Add Flower — below manual logs */}
-              {selectedNode.type !== 'hub' && (
-                <>
-                  <button
-                    onClick={()=>{setPfSelectedPart('main');setPfColorPickerFor(null);setPfTab('design');setPfFlowerType('main');setPartnerFlowerEditor(selectedNodeId);}}
-                    style={{width:'100%',borderRadius:12,border:'2px solid '+(theme.darkMode?'#334155':'#e2e8f0'),background:theme.darkMode?'#1e293b':'#f8fafc',cursor:'pointer',padding:'8px',display:'flex',alignItems:'center',gap:10,marginTop:12}}>
-                    <svg width={36} height={36} viewBox="-22 -22 44 44" style={{flexShrink:0}}>
+              {/* Flower / Tags / Contact — icon button row with dropdowns below */}
+              {selectedNode.type !== 'hub' && selectedNode.type !== 'flower' && (
+                <div style={{borderTop:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9'),paddingTop:10}}>
+                  <div style={{display:'flex',gap:10,alignItems:'center'}}>
+                    {/* Flower button */}
+                    <button onClick={()=>{setFlowerMenuOpen(o=>!o);setTagsMenuOpen(false);setShowContactDetails(false);}}
+                      style={{width:48,height:48,borderRadius:'50%',border:'2px solid '+(theme.darkMode?'#334155':'#e2e8f0'),background:theme.darkMode?'#1e293b':'white',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',padding:0,position:'relative',flexShrink:0}} title="Flower">
+                      <svg width={32} height={32} viewBox="-22 -22 44 44" style={{flexShrink:0}}>
                       {selectedNode.partnerFlower ? (()=>{
                         const pf = selectedNode.partnerFlower;
                         const pr = 10*(1+(pf.petalLength||0.55)), pw = pr*0.65;
                         const mainPath = Array.from({length:pf.petals||6},(_,pi)=>{
-                          const pa=(pi/(pf.petals||6))*Math.PI*2,tx=Math.cos(pa)*pr,ty=Math.sin(pa)*pr,perpA=pa+Math.PI*0.5;
+                          const pa=(pi/(pf.petals||6))*Math.PI*2,tx=Math.cos(pa)*pr,ty=Math.sin(pa)*pr,perpA=pa+Math.PI/2;
                           const c1x=Math.cos(pa)*pr*0.35+Math.cos(perpA)*pw*0.6,c1y=Math.sin(pa)*pr*0.35+Math.sin(perpA)*pw*0.6;
                           const c2x=Math.cos(pa)*pr*0.85+Math.cos(perpA)*pw*0.5,c2y=Math.sin(pa)*pr*0.85+Math.sin(perpA)*pw*0.5;
                           const c3x=Math.cos(pa)*pr*0.85-Math.cos(perpA)*pw*0.5,c3y=Math.sin(pa)*pr*0.85-Math.sin(perpA)*pw*0.5;
                           const c4x=Math.cos(pa)*pr*0.35-Math.cos(perpA)*pw*0.6,c4y=Math.sin(pa)*pr*0.35-Math.sin(perpA)*pw*0.6;
-                          return 'M 0,0 C '+c1x+','+c1y+' '+c2x+','+c2y+' '+tx+','+ty+' C '+c3x+','+c3y+' '+c4x+','+c4y+' 0,0';
+                          return 'M 0,0 C '+c1x+','+c1y+' '+c2x+','+c2y+' '+tx+','+ty+' C '+c3x+','+c3y+' '+c4x+','+c4y+' 0,0 Z';
                         }).join(' ');
                         return (<>
                           <path d={mainPath} fill={pf.petalColor||'#f43f5e'}/>
-                          <circle r={6} fill={theme.darkMode?'#1e293b':'white'} stroke={pf.borderColor||pf.petalColor} strokeWidth="1.5"/>
+                          <circle r={6} fill={theme.darkMode?'#1e293b':'white'} stroke={pf.borderColor||pf.petalColor||'#f43f5e'} strokeWidth={1.5}/>
                         </>);
                       })() : (
                         <text textAnchor="middle" dominantBaseline="middle" fontSize="24">🌸</text>
                       )}
                     </svg>
-                    <span style={{fontSize:12,fontWeight:700,color:theme.darkMode?'#94a3b8':'#64748b'}}>
-                      {selectedNode.partnerFlower ? 'Edit Flower' : 'Add Flower'}
-                    </span>
-                  </button>
-                  {selectedNode.partnerFlower && (
-                    <div style={{marginTop:8,borderRadius:10,background:theme.darkMode?'#0f172a':'#f1f5f9',overflow:'hidden'}}>
-                      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'8px 12px',borderBottom:`1px solid ${theme.darkMode?'#1e293b':'#e2e8f0'}`}}>
-                        <span style={{fontSize:12,color:theme.darkMode?'#94a3b8':'#64748b',fontWeight:600}}>🌸 Show main flower</span>
-                        <input type="checkbox"
-                          checked={selectedNode.showMainFlower !== false}
-                          onChange={e=>updateSelectedNode('showMainFlower', e.target.checked)}
-                          style={{width:16,height:16,accentColor:'#f43f5e',cursor:'pointer'}}/>
-                      </div>
-                      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'8px 12px'}}>
-                        <span style={{fontSize:12,color:theme.darkMode?'#94a3b8':'#64748b',fontWeight:600}}>🌼 Show mini flowers on border</span>
-                        <input type="checkbox"
-                          checked={selectedNode.showBorderFlowers !== false}
-                          onChange={e=>updateSelectedNode('showBorderFlowers', e.target.checked)}
-                          style={{width:16,height:16,accentColor:'#f59e0b',cursor:'pointer'}}/>
-                      </div>
-                    </div>
-                  )}
-                </>
-              )}
-
-              {/* Contact details — collapsible */}
-              {selectedNode.type !== 'hub' && selectedNode.id !== 'me' && (
-                <div className={`border-t ${theme.darkMode?'border-slate-700':'border-slate-200'}`}>
-                  <button
-                    onClick={()=>setShowContactDetails(p=>!p)}
-                    style={{width:'100%',display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 0',background:'none',border:'none',cursor:'pointer'}}>
-                    <span style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:1,color:theme.darkMode?'#64748b':'#94a3b8',display:'flex',alignItems:'center',gap:5}}>
-                      Contact Details
-                      {(selectedNode.phone||selectedNode.email||selectedNode.address)&&(
-                        <span style={{width:6,height:6,borderRadius:'50%',background:'#10b981',display:'inline-block'}}/>
+                    </button>
+                    {/* Tags button */}
+                    <button onClick={()=>{setTagsMenuOpen(o=>!o);setFlowerMenuOpen(false);setShowContactDetails(false);}}
+                      style={{width:48,height:48,borderRadius:'50%',border:'2px solid '+(theme.darkMode?'#334155':'#e2e8f0'),background:theme.darkMode?'#1e293b':'white',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',padding:0,position:'relative',flexShrink:0}} title="Tags">
+                      <span style={{fontSize:22,fontWeight:800,color:theme.darkMode?'#94a3b8':'#64748b',lineHeight:1}}>#</span>
+                      {(selectedNode.tags||[]).length>0 && (
+                        <span style={{position:'absolute',top:-2,right:-2,minWidth:16,height:16,padding:'0 4px',borderRadius:8,background:'#10b981',color:'white',fontSize:10,fontWeight:700,display:'flex',alignItems:'center',justifyContent:'center'}}>{(selectedNode.tags||[]).length}</span>
                       )}
-                    </span>
-                    <span style={{fontSize:12,color:theme.darkMode?'#64748b':'#94a3b8'}}>{showContactDetails?'▲':'▼'}</span>
-                  </button>
-                  {showContactDetails&&(
-                    <div style={{borderRadius:12,border:'1px solid '+(theme.darkMode?'#334155':'#e2e8f0'),overflow:'hidden',marginBottom:8}}>
-                      <div style={{display:'flex',alignItems:'center',gap:8,padding:'8px 12px',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}>
-                        <input type="tel" value={selectedNode.phone||''}
-                          onChange={e=>updateSelectedNode('phone',e.target.value)}
-                          placeholder="Phone number"
-                          style={{flex:1,background:'none',border:'none',outline:'none',fontSize:13,color:theme.darkMode?'#e2e8f0':'#1e293b',fontWeight:selectedNode.phone?600:400}}
-                        />
-                        {selectedNode.phone&&<a href={'tel:'+selectedNode.phone} style={{fontSize:11,color:'#3b82f6',textDecoration:'none',flexShrink:0,fontWeight:600}}>Call</a>}
-                      </div>
-                      <div style={{display:'flex',alignItems:'center',gap:8,padding:'8px 12px',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}>
-                        <input type="email" value={selectedNode.email||''}
-                          onChange={e=>updateSelectedNode('email',e.target.value)}
-                          placeholder="Email address"
-                          style={{flex:1,background:'none',border:'none',outline:'none',fontSize:13,color:theme.darkMode?'#e2e8f0':'#1e293b',fontWeight:selectedNode.email?600:400}}
-                        />
-                        {selectedNode.email&&<a href={'mailto:'+selectedNode.email} style={{fontSize:11,color:'#3b82f6',textDecoration:'none',flexShrink:0,fontWeight:600}}>Mail</a>}
-                      </div>
-                      <div style={{display:'flex',alignItems:'flex-start',gap:8,padding:'8px 12px'}}>
-                        <textarea value={selectedNode.address||''}
-                          onChange={e=>updateSelectedNode('address',e.target.value)}
-                          placeholder="Address"
-                          rows={selectedNode.address?2:1}
-                          style={{flex:1,background:'none',border:'none',outline:'none',fontSize:13,color:theme.darkMode?'#e2e8f0':'#1e293b',fontWeight:selectedNode.address?600:400,resize:'none',fontFamily:'inherit',lineHeight:1.4}}
-                        />
-                        {selectedNode.address&&<a href={'https://maps.google.com/?q='+encodeURIComponent(selectedNode.address)} target="_blank" rel="noopener noreferrer" style={{fontSize:11,color:'#3b82f6',textDecoration:'none',flexShrink:0,fontWeight:600,marginTop:1}}>Map</a>}
-                      </div>
+                    </button>
+                    {/* Contact button */}
+                    {selectedNode.id !== 'me' && (
+                      <button onClick={()=>{setShowContactDetails(o=>!o);setFlowerMenuOpen(false);setTagsMenuOpen(false);}}
+                        style={{width:48,height:48,borderRadius:'50%',border:'2px solid '+(theme.darkMode?'#334155':'#e2e8f0'),background:theme.darkMode?'#1e293b':'white',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',padding:0,position:'relative',flexShrink:0}} title="Contact details">
+                        <span style={{fontSize:20}}>📞</span>
+                        {(selectedNode.phone||selectedNode.email||selectedNode.address) && (
+                          <span style={{position:'absolute',top:0,right:0,width:8,height:8,borderRadius:'50%',background:'#10b981'}}/>
+                        )}
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Flower dropdown */}
+                  {flowerMenuOpen && (
+                    <div style={{marginTop:8,borderRadius:10,overflow:'hidden',border:'1px solid '+(theme.darkMode?'#1e293b':'#e2e8f0')}}>
+                      {/* Edit designs */}
+                      <button
+                        onClick={()=>{setPfSelectedPart('main');setPfColorPickerFor(null);setPfTab('design');setPfFlowerType('main');setPartnerFlowerEditor(selectedNodeId);setFlowerMenuOpen(false);}}
+                        style={{width:'100%',display:'flex',alignItems:'center',gap:8,padding:'10px 14px',background:'none',border:'none',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#e2e8f0'),cursor:'pointer',color:theme.darkMode?'#e2e8f0':'#1e293b',fontSize:12,fontWeight:600}}>
+                        <span>✏️</span><span>{selectedNode.partnerFlower ? 'Edit designs' : 'Add flower'}</span>
+                      </button>
+                      {selectedNode.partnerFlower && (<>
+                        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'8px 14px'}}>
+                          <span style={{fontSize:12,color:theme.darkMode?'#94a3b8':'#64748b',fontWeight:600}}>🌸 Show main flower</span>
+                          <input type="checkbox" checked={selectedNode.showMainFlower !== false} onChange={e=>updateSelectedNode('showMainFlower', e.target.checked)} style={{width:16,height:16,accentColor:'#f43f5e',cursor:'pointer'}}/>
+                        </div>
+                        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'8px 14px'}}>
+                          <span style={{fontSize:12,color:theme.darkMode?'#94a3b8':'#64748b',fontWeight:600}}>🌼 Show border flowers</span>
+                          <input type="checkbox" checked={selectedNode.showBorderFlowers !== false} onChange={e=>updateSelectedNode('showBorderFlowers', e.target.checked)} style={{width:16,height:16,accentColor:'#f59e0b',cursor:'pointer'}}/>
+                        </div>
+                      </>)}
                     </div>
                   )}
-                </div>
-              )}
 
-              {/* Tags */}
-              {selectedNode.type !== 'hub' && selectedNode.type !== 'flower' && (
-                <div style={{borderTop:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9'),paddingTop:10}}>
-                  {/* Header row: label + add input + colour dot */}
+                  {/* Tags dropdown */}
+                  {tagsMenuOpen && (
+                    <div style={{marginTop:8}}>
+                  {/* Header row: add input + colour dot */}
                   <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:6}}>
                     <span style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:1,color:theme.darkMode?'#64748b':'#94a3b8',flex:1}}>Tags</span>
                     <input type="text" value={tagInput}
@@ -3936,6 +3985,47 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       ))}
                     </div>
                   )}
+                    </div>
+                  )}
+
+                  {/* Contact dropdown */}
+                  {showContactDetails && selectedNode.id !== 'me' && (
+                    <div style={{marginTop:8}}>
+                    <div style={{borderRadius:12,border:'1px solid '+(theme.darkMode?'#334155':'#e2e8f0'),overflow:'hidden',marginBottom:8}}>
+                      <div style={{display:'flex',alignItems:'center',gap:8,padding:'8px 12px',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}>
+                        <input type="tel" value={selectedNode.phone||''}
+                          onChange={e=>updateSelectedNode('phone',e.target.value)}
+                          placeholder="Phone number"
+                          style={{flex:1,background:'none',border:'none',outline:'none',fontSize:13,color:theme.darkMode?'#e2e8f0':'#1e293b',fontWeight:selectedNode.phone?600:400}}
+                        />
+                        {selectedNode.phone&&<a href={'tel:'+selectedNode.phone} style={{fontSize:11,color:'#3b82f6',textDecoration:'none',flexShrink:0,fontWeight:600}}>Call</a>}
+                      </div>
+                      <div style={{display:'flex',alignItems:'center',gap:8,padding:'8px 12px',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}>
+                        <input type="email" value={selectedNode.email||''}
+                          onChange={e=>updateSelectedNode('email',e.target.value)}
+                          placeholder="Email address"
+                          style={{flex:1,background:'none',border:'none',outline:'none',fontSize:13,color:theme.darkMode?'#e2e8f0':'#1e293b',fontWeight:selectedNode.email?600:400}}
+                        />
+                        {selectedNode.email&&<a href={'mailto:'+selectedNode.email} style={{fontSize:11,color:'#3b82f6',textDecoration:'none',flexShrink:0,fontWeight:600}}>Mail</a>}
+                      </div>
+                      <div style={{display:'flex',alignItems:'flex-start',gap:8,padding:'8px 12px'}}>
+                        <textarea value={selectedNode.address||''}
+                          onChange={e=>updateSelectedNode('address',e.target.value)}
+                          placeholder="Address"
+                          rows={selectedNode.address?2:1}
+                          style={{flex:1,background:'none',border:'none',outline:'none',fontSize:13,color:theme.darkMode?'#e2e8f0':'#1e293b',fontWeight:selectedNode.address?600:400,resize:'none',fontFamily:'inherit',lineHeight:1.4}}
+                        />
+                        {selectedNode.address&&<a href={'https://maps.google.com/?q='+encodeURIComponent(selectedNode.address)} target="_blank" rel="noopener noreferrer" style={{fontSize:11,color:'#3b82f6',textDecoration:'none',flexShrink:0,fontWeight:600,marginTop:1}}>Map</a>}
+                      </div>
+                    </div>
+                     {/* Sync with Contacts — greyed but pressable */}
+                     <button onClick={handleImportContact}
+                       style={{width:'100%',marginTop:8,display:'flex',alignItems:'center',justifyContent:'center',gap:6,padding:'7px 12px',borderRadius:10,fontSize:12,fontWeight:600,cursor:'pointer',
+                         background:theme.darkMode?'#1e293b':'#f8fafc',border:'1px solid '+(theme.darkMode?'#334155':'#e2e8f0'),color:theme.darkMode?'#64748b':'#94a3b8'}}>
+                       <BookUser className="w-3.5 h-3.5"/><span>{selectedNode.phone ? 'Re-sync with Contacts' : 'Sync with Contacts'}</span>
+                     </button>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -3946,53 +4036,118 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 const bg2 = dm?'#1e293b':'#f8fafc';
                 const hubId = selectedNode.id;
 
-                // Members of this group
-                const memberIds = new Set(links.filter(l=>l.source===hubId||l.target===hubId).map(l=>l.source===hubId?l.target:l.source));
-                const members = nodes.filter(n=>memberIds.has(n.id)&&n.type!=='flower');
+                // Members of this group. For a hidden hub, include the whole tree
+                // branching off the linked person (e.g. Hayley + Hendrix + others).
+                let members;
+                if (selectedNode.hidden) {
+                  const directIds = links.filter(l=>l.source===hubId||l.target===hubId).map(l=>l.source===hubId?l.target:l.source);
+                  const visited = new Set(['me','flower_social']);
+                  nodes.filter(n=>n.type==='hub').forEach(h=>visited.add(h.id));
+                  const collected = new Set();
+                  const queue = [...directIds];
+                  while (queue.length > 0) {
+                    const id = queue.shift();
+                    if (visited.has(id) || collected.has(id)) continue;
+                    const n = nodes.find(x=>x.id===id);
+                    if (!n || n.type==='flower' || n.type==='hub') continue;
+                    collected.add(id);
+                    links.filter(l=>l.source===id||l.target===id).forEach(l=>{
+                      const oid = l.source===id?l.target:l.source;
+                      if (!visited.has(oid) && !collected.has(oid)) queue.push(oid);
+                    });
+                  }
+                  members = nodes.filter(n=>collected.has(n.id)&&n.type!=='flower');
+                } else {
+                  const memberIds = new Set(links.filter(l=>l.source===hubId||l.target===hubId).map(l=>l.source===hubId?l.target:l.source));
+                  members = nodes.filter(n=>memberIds.has(n.id)&&n.type!=='flower');
+                }
 
                 return (
                   <>
                   {/* Group header — main photo left, members right, vine border around all */}
-                  <div style={{textAlign:'center',padding:'28px 0 8px',position:'relative'}}>
+                  <div style={{textAlign:'center',padding:'4px 0 0',position:'relative'}}>
+                    {/* Photo layout style toggle */}
+                    <div style={{display:'flex',gap:4,justifyContent:'center',marginBottom:6}}>
+                      {[{k:'shells',label:'🌿 Shells'},{k:'mandala',label:'🌻 Mandala'}].map(opt=>(
+                        <button key={opt.k} onClick={()=>setGroupPhotoLayout(opt.k)}
+                          style={{padding:'4px 10px',borderRadius:99,fontSize:11,fontWeight:700,cursor:'pointer',
+                            background:groupPhotoLayout===opt.k?(theme.darkMode?'#15803d':'#15803d'):(theme.darkMode?'#1e293b':'#f1f5f9'),
+                            color:groupPhotoLayout===opt.k?'white':(theme.darkMode?'#94a3b8':'#64748b'),
+                            border:'1px solid '+(theme.darkMode?'#334155':'#e2e8f0')}}>
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
                     {(()=>{
-                      const PREVIEW_W = 280, PREVIEW_H = 200;
+                      const PREVIEW_W = 380, PREVIEW_H = 300;
                       const blobColor = selectedNode.vineBlobColor || '#15803d';
                       const blobOp = selectedNode.vineBlobOpacity ?? 0.9;
                       const filterId = 'prev-' + hubId.replace(/[^a-z0-9]/gi,'');
                       const groupColor = groupColors[hubId] || '#10b981';
 
                       const mainR = 56;
-                      const memberR = 22;
-                      const gap = 6;
-                      const hex = memberR * 2 + gap; // honeycomb cell size
+                      const memberR = mainR / 2;   // members are 1/2 of the main photo
 
-                      // Hub sits centre-left
-                      const mainX = mainR + 18, mainY = PREVIEW_H / 2;
 
-                      // Honeycomb offsets relative to hub: right side first (members 0-2), left side after (3+)
-                      // Honeycomb positions: right column, then left column
-                      const hexOffsets = [
-                        // Right of hub — 3 slots
-                        { dx:  mainR + memberR + gap,       dy: -hex * 0.5 },
-                        { dx:  mainR + memberR + gap,       dy:  hex * 0.5 },
-                        { dx:  mainR + memberR + gap + hex, dy:  0          },
-                        // Left of hub — slots 4+
-                        { dx: -(memberR + gap),             dy: -hex * 0.5 },
-                        { dx: -(memberR + gap),             dy:  hex * 0.5 },
-                        { dx: -(memberR + gap + hex),       dy:  0          },
-                        { dx: -(memberR + gap),             dy: -hex * 1.5  },
-                        { dx: -(memberR + gap),             dy:  hex * 1.5  },
-                      ];
+                      // Sort members by friendship score — strongest nearest the main photo
+                      const sortedMembers = [...members].sort((a,b)=>(b.interactionScore||0)-(a.interactionScore||0));
 
-                      const maxM = Math.min(members.length, hexOffsets.length);
-                      const memberPositions = Array.from({length:maxM},(_,i)=>({
-                        x: mainX + hexOffsets[i].dx,
-                        y: mainY + hexOffsets[i].dy,
-                      }));
+                      let mainX, mainY;
+                      const memberPositions = []; // each: {x, y, r}
 
+                      if (groupPhotoLayout === 'mandala') {
+                        // Centred mandala: main in the middle, full concentric rings,
+                        // each ring holds more photos, sizes grow ~8% per ring outward.
+                        mainX = PREVIEW_W / 2;
+                        mainY = PREVIEW_H / 2;
+                        let idx = 0;
+                        let ring = 1;
+                        let ringR = mainR; // running radius to the inner edge of current ring
+                        let r = memberR;
+                        while (idx < sortedMembers.length && ring < 7) {
+                          // photos per ring scale with circumference
+                          const centreR = ringR + r;            // ring centre-line radius
+                          const fit = Math.max(1, Math.floor((2 * Math.PI * centreR) / (r * 2.1)));
+                          const remaining = sortedMembers.length - idx;
+                          const count = Math.min(fit, remaining);
+                          const rot = (ring % 2) * (Math.PI / count); // offset alternate rings
+                          for (let k = 0; k < count; k++) {
+                            const a = (k / count) * Math.PI * 2 + rot;
+                            memberPositions.push({ x: mainX + Math.cos(a) * centreR, y: mainY + Math.sin(a) * centreR, r });
+                            idx++;
+                          }
+                          ringR = centreR + r * 0.85;  // next ring sits just outside, slight overlap
+                          r = r * 1.08;                 // grow ~8% per ring
+                          ring++;
+                        }
+                      } else {
+                        // 'shells' — concentric layers hugging the RIGHT of the main circle.
+                        mainX = mainR + memberR + 18;
+                        mainY = PREVIEW_H / 2;
+                        const STEP = Math.PI / 4;   // 45°
+                        const HALF = Math.PI / 8;   // 22.5°
+                        const perLayer = 3;
+                        const OVERLAP = 0.82;
+                        let idx = 0;
+                        let layer = 0;
+                        while (idx < sortedMembers.length && layer < 6) {
+                          const layerR = mainR + memberR * OVERLAP + layer * (memberR * 2 * OVERLAP);
+                          const rot = layer * HALF;
+                          const remaining = sortedMembers.length - idx;
+                          const count = Math.min(perLayer, remaining);
+                          for (let k = 0; k < count; k++) {
+                            const a = (k - (count - 1) / 2) * STEP + rot;
+                            memberPositions.push({ x: mainX + Math.cos(a) * layerR, y: mainY + Math.sin(a) * layerR, r: memberR });
+                            idx++;
+                          }
+                          layer++;
+                        }
+                      }
+
+                      const maxM = memberPositions.length;
                       const allNodes = [
                         {x:mainX,y:mainY,r:mainR,photo:selectedNode.img,color:groupColor,isHub:true},
-                        ...memberPositions.map((pos,i)=>({x:pos.x,y:pos.y,r:memberR,photo:members[i]?.img,color:getLevel(members[i]?.interactionScore||0,members[i]).color,isHub:false}))
+                        ...memberPositions.map((pos,i)=>({x:pos.x,y:pos.y,r:pos.r,photo:sortedMembers[i]?.img,color:groupColor,node:sortedMembers[i]})),
                       ];
                       const N=allNodes.length;
                       const blobArcR=n=>n.r*(vineBorderParams.blobArcRadius||1.05);
@@ -4084,16 +4239,18 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       }).join(' ');
                       const isActive=pf&&selectedNode.groupFlowerActive!==false;
 
+                      // Tight bounding box of all nodes so the SVG has no wasted space
+                      const _pad = 10;
+                      const _minX = Math.min(...allNodes.map(n=>n.x-n.r)) - _pad;
+                      const _maxX = Math.max(...allNodes.map(n=>n.x+n.r)) + _pad;
+                      const _minY = Math.min(...allNodes.map(n=>n.y-n.r)) - _pad;
+                      const _maxY = Math.max(...allNodes.map(n=>n.y+n.r)) + _pad;
+                      const _vbW = _maxX - _minX, _vbH = _maxY - _minY;
+                      const groupViewBox = `${_minX} ${_minY} ${_vbW} ${_vbH}`;
+
                       return (
                         <div style={{display:'inline-block',position:'relative'}}>
-                          {/* Open tuner button — temporary for design phase */}
-                          <button onClick={()=>setShowVineTuner(v=>!v)}
-                            style={{width:'100%',marginBottom:6,padding:'6px 12px',borderRadius:8,border:'none',cursor:'pointer',fontSize:11,fontWeight:700,
-                              background:showVineTuner?'#8b5cf6':'#ede9fe',color:showVineTuner?'white':'#8b5cf6',
-                              display:'flex',alignItems:'center',justifyContent:'center',gap:6}}>
-                            🎛 {showVineTuner?'Tuner open ✓':'Open Group Border Tuner'}
-                          </button>
-                          <svg width={PREVIEW_W} height={PREVIEW_H} style={{display:'block',margin:'0 auto'}}>
+                          <svg width={Math.min(PREVIEW_W, _vbW)} height={Math.min(PREVIEW_W, _vbW) * (_vbH/_vbW)} viewBox={groupViewBox} style={{display:'block',margin:'0 auto'}}>
                             <defs>
                               {showVineBorders&&(<filter id={filterId} x="-20%" y="-20%" width="140%" height="140%" filterUnits="userSpaceOnUse" colorInterpolationFilters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation={7} result="blur"/><feColorMatrix in="blur" type="matrix" result="shaped" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 32 -14"/><feFlood result="col" floodColor={blobColor} floodOpacity={blobOp}/><feComposite in="col" in2="shaped" operator="in"/></filter>)}
                               {allNodes.map((_,i)=><clipPath key={i} id={filterId+'p'+i}><circle cx={allNodes[i].x} cy={allNodes[i].y} r={allNodes[i].r-1}/></clipPath>)}
@@ -4198,16 +4355,6 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         </div>
                       );
                     })()}
-                    {/* Group name — top-left, overlaid near the preview */}
-                    <input type="text"
-                      value={selectedNode.label === 'New Group' ? '' : selectedNode.label || ''}
-                      placeholder="Group Name"
-                      autoCapitalize="words"
-                      onChange={e=>updateSelectedNode('label',e.target.value.replace(/\b\w/g,c=>c.toUpperCase())||'New Group')}
-                      style={{position:'absolute',top:8,left:8,width:'calc(100% - 16px)',
-                        fontWeight:800,fontSize:16,background:'transparent',border:'none',outline:'none',
-                        color:dm?'#e2e8f0':'#1e293b',textAlign:'left',
-                        textShadow:dm?'0 1px 4px rgba(0,0,0,0.8)':'0 1px 3px rgba(255,255,255,0.8)'}}/>
                   </div>
                   {/* Vine colour picker popup — triggered from SVG button on preview */}
                   {showVineColorPicker && (
@@ -4243,8 +4390,6 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     </div>
                   )}
 
-
-
                   {/* Members panel — collapsible */}
                   {(()=>{
                     return (
@@ -4261,16 +4406,30 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                               <div style={{padding:16,textAlign:'center',color:sub,fontSize:12,fontStyle:'italic'}}>No members yet — drag people onto this group</div>
                             ):members.map(m=>{
                               const ml=getLevel(m.interactionScore||0,m);
+                              // Birthday countdown
+                              let mDays=null;
+                              if(m.birthday){
+                                const MONTHS={Jan:1,Feb:2,Mar:3,Apr:4,May:5,Jun:6,Jul:7,Aug:8,Sep:9,Oct:10,Nov:11,Dec:12};
+                                const parts=m.birthday.split(' ');let day=null,month=null;
+                                parts.forEach(p=>{const num=parseInt(p.replace(/\D/g,''));const mon=MONTHS[p.replace(/[^A-Za-z]/g,'').slice(0,3)];if(mon)month=mon;else if(num)day=num;});
+                                if(day&&month){const now=new Date(),next=new Date(now.getFullYear(),month-1,day);if(next<now)next.setFullYear(next.getFullYear()+1);mDays=Math.round((next-now)/(1000*60*60*24));}
+                              }
                               return (
-                                <div key={m.id} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 12px',borderTop:`1px solid ${bd}`,cursor:'pointer'}}
+                                <div key={m.id} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 12px',cursor:'pointer'}}
                                   onClick={()=>setSelectedNodeId(m.id)}>
-                                  <img src={m.img} style={{width:32,height:32,borderRadius:'50%',objectFit:'cover',border:`2px solid ${ml.color}`,flexShrink:0}}/>
+                                  <img src={m.img} style={{width:36,height:36,borderRadius:'50%',objectFit:'cover',flexShrink:0}}/>
                                   <div style={{flex:1,minWidth:0}}>
-                                    <div style={{fontSize:12,fontWeight:700,color:dm?'#e2e8f0':'#1e293b',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{m.label}</div>
+                                    <div style={{fontSize:13,fontWeight:700,color:dm?'#e2e8f0':'#1e293b',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{m.label}</div>
                                     <div style={{fontSize:10,color:ml.color,fontWeight:600}}>{ml.emoji} {ml.label}</div>
                                   </div>
+                                  {mDays!==null && (
+                                    <div style={{flexShrink:0,textAlign:'center',padding:'3px 8px',borderRadius:8,background:mDays===0?'#f43f5e':mDays<=7?'rgba(245,158,11,0.15)':'rgba(148,163,184,0.12)'}}>
+                                      <div style={{fontSize:13,fontWeight:800,lineHeight:1,color:mDays===0?'white':mDays<=7?'#f59e0b':(dm?'#94a3b8':'#64748b')}}>{mDays===0?'🎂':mDays}</div>
+                                      <div style={{fontSize:8,color:mDays===0?'white':(dm?'#64748b':'#94a3b8'),fontWeight:600}}>{mDays===0?'today':mDays===1?'day':'days'}</div>
+                                    </div>
+                                  )}
                                   <button onClick={e=>{e.stopPropagation();snapshot();setLinks(p=>p.filter(l=>!(l.source===hubId&&l.target===m.id)&&!(l.target===hubId&&l.source===m.id)));}}
-                                    style={{width:22,height:22,borderRadius:'50%',background:'rgba(239,68,68,0.1)',color:'#ef4444',border:'none',cursor:'pointer',fontSize:13,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>×</button>
+                                    style={{width:22,height:22,borderRadius:'50%',background:'rgba(239,68,68,0.1)',border:'none',color:'#ef4444',cursor:'pointer',flexShrink:0,fontSize:14,lineHeight:1}}>×</button>
                                 </div>
                               );
                             })}
@@ -4300,6 +4459,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                               {other?.img&&<img src={other.img} style={{width:24,height:24,borderRadius:'50%',objectFit:'cover'}}/>}
                               <span style={{flex:1,fontSize:11,color:dm?'#e2e8f0':'#1e293b'}}>{other?.label||otherId}</span>
                               <button onClick={()=>restoreLink(l)} style={{fontSize:10,fontWeight:700,color:'#10b981',background:'none',border:'1px solid #10b981',borderRadius:6,padding:'2px 8px',cursor:'pointer'}}>Restore</button>
+                              <button onClick={()=>setArchivedLinks(prev=>prev.filter(a=>a!==l))} style={{fontSize:10,fontWeight:700,color:'#ef4444',background:'none',border:'1px solid #ef4444',borderRadius:6,padding:'2px 8px',cursor:'pointer'}}>Remove</button>
                             </div>
                           );
                         })}
@@ -4310,106 +4470,259 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 );
               })()}
 
-              {/* Severed connections relevant to this node */}
-              {(() => {
+              {/* Connections section */}
+              {selectedNode.type !== 'hub' && selectedNode.id !== 'me' && (() => {
+                const dm = theme.darkMode;
+                const myGroup = nodeGroupMap[selectedNode.id];
+                // People in the same group (excluding self)
+                const groupPeers = myGroup
+                  ? nodes.filter(n => n.id !== selectedNode.id && n.type !== 'hub' && n.type !== 'flower' && n.id !== 'me' && nodeGroupMap[n.id] === myGroup)
+                  : [];
+                // Sub-groups (visible hubs) branching off this person
+                const subGroups = nodes.filter(n => n.type === 'hub' && !n.hidden &&
+                  links.some(l => (l.source === selectedNode.id && l.target === n.id) || (l.target === selectedNode.id && l.source === n.id)));
                 const severed = archivedLinks.filter(l => l.source === selectedNode.id || l.target === selectedNode.id);
-                if (severed.length === 0) return null;
+
+                const ownHubExists = nodes.some(n => n.id === 'hidden_hub_' + selectedNode.id && n.hidden);
+                // Always show for a real person so they can start a group; only hide
+                // for hubs / me where none of this applies.
+                if (selectedNode.type === 'hub' || selectedNode.id === 'me') return null;
+
+                const headerBtn = (key, label, count) => (
+                  <button onClick={() => setConnSections(p => ({ ...p, [key]: !p[key] }))}
+                    className="w-full flex items-center justify-between py-2 text-left">
+                    <span className="text-xs font-semibold" style={{ color: dm ? '#94a3b8' : '#64748b' }}>{label} ({count})</span>
+                    <span style={{ color: dm ? '#64748b' : '#94a3b8', fontSize: 12 }}>{connSections[key] ? '▾' : '▸'}</span>
+                  </button>
+                );
+
                 return (
-                  <div className={`pt-4 border-t ${theme.darkMode ? 'border-slate-700' : 'border-slate-200'}`}>
-                    <h3 className="text-xs font-semibold uppercase tracking-wider mb-3 flex items-center" style={{ color: '#f97316' }}>
-                      ✂ Severed Connections
+                  <div className={`pt-4 border-t ${dm ? 'border-slate-700' : 'border-slate-200'}`}>
+                    <h3 className="text-xs font-semibold uppercase tracking-wider mb-1 flex items-center text-emerald-600">
+                      <HeartHandshake className="w-4 h-4 mr-1" /> Connections
                     </h3>
-                    <div className="space-y-2">
-                      {severed.map((l, i) => {
-                        const otherId = l.source === selectedNode.id ? l.target : l.source;
-                        const other = nodes.find(n => n.id === otherId);
-                        const cutDate = new Date(l.cutAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-                        return (
-                          <div key={i} className={`flex items-center justify-between px-3 py-2 rounded-lg border ${theme.darkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-                            <div className="flex items-center space-x-2 min-w-0">
-                              {other?.img && <img src={other.img} className="w-6 h-6 rounded-full object-cover flex-shrink-0" alt="" />}
-                              <div className="min-w-0">
-                                <p className="text-xs font-semibold truncate">{other?.label ?? otherId}</p>
-                                <p className="text-[10px] opacity-50">Cut {cutDate}</p>
+
+                    {/* This person's own group + sub-groups, each with expand arrow */}
+                    {(() => {
+                      const dotColor1 = selectedNode.partnerFlower?.petalColor || '#f9a8d4';
+                      const dotColor2 = selectedNode.partnerFlower?.centerColor || selectedNode.partnerFlower?.borderColor || '#fde047';
+
+                      // Gather a hub's full member tree (for hidden hubs) or direct members (visible)
+                      const gatherMembers = (hub) => {
+                        const directIds = links.filter(l=>l.source===hub.id||l.target===hub.id).map(l=>l.source===hub.id?l.target:l.source);
+                        if (!hub.hidden) return nodes.filter(n=>directIds.includes(n.id)&&n.type!=='flower'&&n.type!=='hub');
+                        const visited = new Set(['me','flower_social']);
+                        nodes.filter(n=>n.type==='hub').forEach(h=>visited.add(h.id));
+                        const collected = new Set();
+                        const queue = [...directIds];
+                        while (queue.length>0){const id=queue.shift();if(visited.has(id)||collected.has(id))continue;const n=nodes.find(x=>x.id===id);if(!n||n.type==='flower'||n.type==='hub')continue;collected.add(id);links.filter(l=>l.source===id||l.target===id).forEach(l=>{const oid=l.source===id?l.target:l.source;if(!visited.has(oid)&&!collected.has(oid))queue.push(oid);});}
+                        return nodes.filter(n=>collected.has(n.id)&&n.type!=='flower');
+                      };
+
+                      const daysToBday = (m) => {
+                        if(!m.birthday) return null;
+                        const MONTHS={Jan:1,Feb:2,Mar:3,Apr:4,May:5,Jun:6,Jul:7,Aug:8,Sep:9,Oct:10,Nov:11,Dec:12};
+                        const parts=m.birthday.split(' ');let day=null,month=null;
+                        parts.forEach(p=>{const num=parseInt(p.replace(/\\D/g,''));const mon=MONTHS[p.replace(/[^A-Za-z]/g,'').slice(0,3)];if(mon)month=mon;else if(num)day=num;});
+                        if(day&&month){const now=new Date(),next=new Date(now.getFullYear(),month-1,day);if(next<now)next.setFullYear(next.getFullYear()+1);return Math.round((next-now)/(1000*60*60*24));}
+                        return null;
+                      };
+
+                      const memberList = (members, parentId, addLabel) => (
+                        <div className="space-y-1 mt-1 mb-1 pl-2">
+                          {members.map(m => {
+                            const md = daysToBday(m);
+                            return (
+                              <div key={m.id} onClick={()=>setSelectedNodeId(m.id)}
+                                className={`flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer ${dm?'bg-slate-800 hover:bg-slate-700':'bg-slate-50 hover:bg-slate-100'}`}>
+                                {m.img && <img src={m.img} className="w-7 h-7 rounded-full object-cover flex-shrink-0"/>}
+                                <span className="text-xs font-semibold truncate flex-1">{m.label}</span>
+                                {md!==null && (
+                                  <span style={{flexShrink:0,fontSize:10,fontWeight:700,padding:'2px 6px',borderRadius:6,
+                                    color:md===0?'white':md<=7?'#f59e0b':(dm?'#94a3b8':'#64748b'),
+                                    background:md===0?'#f43f5e':md<=7?'rgba(245,158,11,0.15)':'rgba(148,163,184,0.12)'}}>
+                                    {md===0?'🎂':md+'d'}
+                                  </span>
+                                )}
                               </div>
+                            );
+                          })}
+                          {parentId && (
+                            <button onClick={()=>{
+                              setAddFriendForms(prev => [...prev, { id: `form_${Date.now()}`, name: '', parentId }]);
+                              setTimeout(()=>document.querySelector('.add-friend-form-input')?.focus(),100);
+                            }}
+                              className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer border border-dashed ${dm?'border-slate-600 text-slate-400 hover:bg-slate-800':'border-slate-300 text-slate-500 hover:bg-slate-50'}`}>
+                              <Plus className="w-4 h-4"/>
+                              <span className="text-xs font-semibold">{addLabel}</span>
+                            </button>
+                          )}
+                        </div>
+                      );
+
+                      const ownHub = nodes.find(n => n.id === 'hidden_hub_' + selectedNode.id && n.hidden);
+                      const expKey = (id) => 'eg_' + id;
+
+                      return (<>
+                        {/* No group yet — transparent "Add a group" button */}
+                        {!ownHub && (
+                          <button onClick={()=>{
+                            setAddFriendForms(prev => [...prev, { id: `form_${Date.now()}`, name: '', parentId: selectedNode.id }]);
+                            setTimeout(()=>document.querySelector('.add-friend-form-input')?.focus(),100);
+                          }}
+                            style={{width:'100%',display:'flex',alignItems:'center',justifyContent:'center',gap:8,padding:'11px 14px',borderRadius:10,cursor:'pointer',marginBottom:6,
+                              background:'transparent',border:'1.5px dashed '+(dm?'#15803d':'#22c55e'),color:dm?'#4ade80':'#15803d',fontWeight:600,fontSize:14}}>
+                            <Plus className="w-4 h-4"/>
+                            <span>Start {selectedNode.label}'s group</span>
+                          </button>
+                        )}
+
+                        {/* Own group — green */}
+                        {ownHub && (() => {
+                          const open = expandedGroupMembers[expKey(ownHub.id)];
+                          return (
+                            <div className="mb-1.5">
+                              <div className="flex items-center gap-1.5">
+                                <button onClick={()=>setSelectedNodeId(ownHub.id)}
+                                  style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',gap:8,padding:'11px 14px',borderRadius:10,cursor:'pointer',
+                                    background:dm?'#166534':'#15803d',border:'1px solid '+(dm?'#15803d':'#166534'),color:'white',fontWeight:600,fontSize:15,position:'relative',overflow:'hidden'}}>
+                                  {(() => {
+                                    const pf = selectedNode.partnerFlower;
+                                    if (!pf) return null;
+                                    const petals = pf.petals || 6;
+                                    const pCol = pf.petalColor || '#f9a8d4';
+                                    const cCol = pf.centerColor || pf.borderColor || '#fde047';
+                                    const pl = pf.petalLength || 0.55;
+                                    const miniFlower = (size) => {
+                                      const pr = size * (1 + pl), pw = pr * 0.6;
+                                      const path = Array.from({length:petals},(_,pi)=>{
+                                        const pa=(pi/petals)*Math.PI*2, tx=Math.cos(pa)*pr, ty=Math.sin(pa)*pr, perpA=pa+Math.PI/2;
+                                        const c1x=Math.cos(pa)*pr*0.35+Math.cos(perpA)*pw*0.6, c1y=Math.sin(pa)*pr*0.35+Math.sin(perpA)*pw*0.6;
+                                        const c2x=Math.cos(pa)*pr*0.85+Math.cos(perpA)*pw*0.5, c2y=Math.sin(pa)*pr*0.85+Math.sin(perpA)*pw*0.5;
+                                        const c3x=Math.cos(pa)*pr*0.85-Math.cos(perpA)*pw*0.5, c3y=Math.sin(pa)*pr*0.85-Math.sin(perpA)*pw*0.5;
+                                        const c4x=Math.cos(pa)*pr*0.35-Math.cos(perpA)*pw*0.6, c4y=Math.sin(pa)*pr*0.35-Math.sin(perpA)*pw*0.6;
+                                        return 'M 0,0 C '+c1x+','+c1y+' '+c2x+','+c2y+' '+tx+','+ty+' C '+c3x+','+c3y+' '+c4x+','+c4y+' 0,0 Z';
+                                      }).join(' ');
+                                      return (<g><path d={path} fill={pCol}/><circle r={size*0.4} fill={cCol}/></g>);
+                                    };
+                                    // Flowers clustered at the left and right edges, overlapping the icon/ends
+                                    const spots = [{left:6,top:8,s:6},{left:20,top:24,s:5},{right:8,top:9,s:6},{right:22,top:25,s:5}];
+                                    return (
+                                      <span style={{position:'absolute',inset:0,pointerEvents:'none',opacity:0.6}}>
+                                        {spots.map((sp,i)=>(
+                                          <svg key={i} width={sp.s*3} height={sp.s*3} viewBox={`${-sp.s*1.5} ${-sp.s*1.5} ${sp.s*3} ${sp.s*3}`}
+                                            style={{position:'absolute',left:sp.left,right:sp.right,top:sp.top}}>
+                                            {miniFlower(sp.s)}
+                                          </svg>
+                                        ))}
+                                      </span>
+                                    );
+                                  })()}
+                                  <span style={{position:'relative'}}>👥</span>
+                                  <span className="truncate" style={{position:'relative'}}>{ownHub.label || (selectedNode.label + "'s Group")}</span>
+                                </button>
+                                <button onClick={()=>setExpandedGroupMembers(p=>({...p,[expKey(ownHub.id)]:!p[expKey(ownHub.id)]}))}
+                                  style={{flexShrink:0,width:36,height:36,borderRadius:10,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',
+                                    background:dm?'rgba(22,101,52,0.25)':'rgba(21,128,61,0.12)',border:'1px solid '+(dm?'rgba(22,101,52,0.5)':'rgba(21,128,61,0.3)'),color:dm?'#4ade80':'#15803d',fontSize:13}}>
+                                  {open?'▾':'▸'}
+                                </button>
+                              </div>
+                              {open && memberList(gatherMembers(ownHub).filter(m=>m.id!==selectedNode.id), selectedNode.id, 'Add friend via ' + selectedNode.label)}
                             </div>
-                            <button
-                              onClick={() => restoreLink(l)}
-                              className="ml-2 flex-shrink-0 px-2 py-1 rounded-md text-[10px] font-bold text-emerald-600 border border-emerald-500 hover:bg-emerald-500/10 transition-colors"
-                            >Restore</button>
-                          </div>
-                        );
-                      })}
-                    </div>
+                          );
+                        })()}
+
+                        {/* Sub-groups — brown signposts */}
+                        {subGroups.map(h => {
+                          const open = expandedGroupMembers[expKey(h.id)];
+                          return (
+                            <div key={h.id} className="mb-1.5">
+                              <div className="flex items-center gap-1.5">
+                                <button onClick={()=>setSelectedNodeId(h.id)}
+                                  style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',gap:8,padding:'11px 14px',borderRadius:10,cursor:'pointer',
+                                    background:dm?'#7c4a1e':'#92400e',border:'1px solid '+(dm?'#92400e':'#78350f'),color:'white',fontWeight:600,fontSize:15}}>
+                                  <span>🪧</span>
+                                  <span className="truncate">{selectedNode.label}'s {h.label}</span>
+                                </button>
+                                <button onClick={()=>setExpandedGroupMembers(p=>({...p,[expKey(h.id)]:!p[expKey(h.id)]}))}
+                                  style={{flexShrink:0,width:36,height:36,borderRadius:10,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',
+                                    background:dm?'rgba(124,74,30,0.25)':'rgba(146,64,14,0.12)',border:'1px solid '+(dm?'rgba(124,74,30,0.5)':'rgba(146,64,14,0.3)'),color:dm?'#d6a866':'#92400e',fontSize:13}}>
+                                  {open?'▾':'▸'}
+                                </button>
+                              </div>
+                              {open && memberList(gatherMembers(h), h.id, 'Add friend to ' + h.label)}
+                            </div>
+                          );
+                        })}
+                      </>);
+                    })()}
+
+                    {/* Severed connections */}
+                    {severed.length > 0 && (<>
+                      <div className="flex items-center justify-between">
+                        {headerBtn('severed', '✂ Severed', severed.length)}
+                        {connSections.severed && (
+                          <button onClick={() => setArchivedLinks(prev => prev.filter(a => !(a.source === selectedNode.id || a.target === selectedNode.id)))}
+                            className="ml-2 flex-shrink-0 px-2 py-1 rounded-md text-[10px] font-bold text-red-500 border border-red-400">Clear all</button>
+                        )}
+                      </div>
+                      {connSections.severed && (
+                        <div className="space-y-2">
+                          {severed.map((l, i) => {
+                            const otherId = l.source === selectedNode.id ? l.target : l.source;
+                            const other = nodes.find(n => n.id === otherId);
+                            const cutDate = l.cutAt ? new Date(l.cutAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '';
+                            return (
+                              <div key={i} className={`flex items-center justify-between px-3 py-2 rounded-lg border ${dm ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                                <div className="flex items-center space-x-2 min-w-0">
+                                  {other?.img && <img src={other.img} className="w-6 h-6 rounded-full object-cover flex-shrink-0" />}
+                                  <div className="min-w-0">
+                                    <p className="text-xs font-semibold truncate">{other?.label ?? otherId}</p>
+                                    {cutDate && <p className="text-[10px] opacity-50">Cut {cutDate}</p>}
+                                  </div>
+                                </div>
+                                <div className="flex items-center space-x-1 flex-shrink-0">
+                                  <button onClick={() => restoreLink(l)} className="px-2 py-1 rounded-md text-[10px] font-bold text-emerald-500 border border-emerald-400">Restore</button>
+                                  <button onClick={() => setArchivedLinks(prev => prev.filter(a => a !== l))} className="px-2 py-1 rounded-md text-[10px] font-bold text-red-500 border border-red-400">Remove</button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </>)}
                   </div>
                 );
               })()}
 
               {selectedNode.id !== 'me' && (
                 <div className={`pt-4 border-t space-y-2 ${theme.darkMode ? 'border-slate-700' : 'border-slate-100'}`}>
-                  {/* Add Friend via this person */}
-                  {selectedNode.type !== 'hub' && selectedNode.id !== 'me' && (
-                    <button
-                      onClick={() => {
-                        setAddFriendForms(prev => [...prev, { id: `form_${Date.now()}`, name: '', parentId: selectedNodeId }]);
-                        setTimeout(()=>document.querySelector('.add-friend-form-input')?.focus(),100);
-                      }}
-                      className="w-full flex items-center justify-center space-x-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg transition-all active:scale-95 font-medium"
-                    >
-                      <Plus className="w-4 h-4" />
-                      <span>Add Friend via {selectedNode.label}</span>
-                    </button>
-                  )}
-                  {/* Open hidden group window */}
-                  {selectedNode.type !== 'hub' && selectedNode.id !== 'me' && (()=>{
-                    const hiddenHub = nodes.find(n => n.id === 'hidden_hub_' + selectedNodeId && n.hidden);
-                    if (!hiddenHub) return null;
+                  {/* Add to the group of a person this one is connected to */}
+                  {selectedNode.type !== 'hub' && selectedNode.id !== 'me' && (() => {
+                    // Find people this person is directly connected to who have their
+                    // own hidden group (e.g. Hendrix connected to Hayley → Hayley's group)
+                    const connectedIds = links
+                      .filter(l => l.source === selectedNodeId || l.target === selectedNodeId)
+                      .map(l => l.source === selectedNodeId ? l.target : l.source);
+                    const groupOwner = nodes.find(p =>
+                      connectedIds.includes(p.id) && p.type !== 'hub' && p.type !== 'flower' && p.id !== 'me' &&
+                      nodes.some(h => h.id === 'hidden_hub_' + p.id && h.hidden)
+                    );
+                    if (!groupOwner) return null;
+                    const hubId = 'hidden_hub_' + groupOwner.id;
+                    const alreadyIn = links.some(l => (l.source===hubId&&l.target===selectedNodeId)||(l.source===selectedNodeId&&l.target===hubId));
                     return (
-                      <button onClick={()=>setSelectedNodeId(hiddenHub.id)}
-                        className={`w-full flex items-center justify-center space-x-2 px-4 py-2 rounded-lg transition-all active:scale-95 font-medium border ${theme.darkMode?'bg-slate-700 hover:bg-slate-600 text-slate-200 border-slate-600':'bg-white hover:bg-slate-50 text-slate-700 border-slate-200'}`}>
-                        <span>👥</span>
-                        <span>Open {hiddenHub.label}</span>
+                      <button onClick={()=>{
+                        if(!alreadyIn){ snapshot(); setLinks(prev=>[...prev,{source:hubId,target:selectedNodeId}]); showToast('Added to '+groupOwner.label+"'s group"); }
+                      }} disabled={alreadyIn}
+                        className={`w-full flex items-center justify-center space-x-2 font-medium px-4 py-2 rounded-lg transition-all active:scale-95 ${alreadyIn ? 'bg-emerald-400/40 text-white/70 cursor-default' : 'bg-emerald-400 hover:bg-emerald-500 text-white'}`}>
+                        <Plus className="w-4 h-4"/>
+                        <span>{alreadyIn ? `In ${groupOwner.label}'s group` : `Add to ${groupOwner.label}'s group`}</span>
                       </button>
                     );
                   })()}
-
-                  {/* Add to Group */}
-                  {selectedNode.type !== 'hub' && selectedNode.id !== 'me' && (
-                    <div>
-                      <button onClick={()=>setShowAddToGroup(p=>!p)}
-                        className={`w-full flex items-center justify-center space-x-2 px-4 py-2 rounded-lg transition-all active:scale-95 font-medium border ${theme.darkMode?'bg-slate-700 hover:bg-slate-600 text-slate-200 border-slate-600':'bg-white hover:bg-slate-50 text-slate-700 border-slate-200'}`}>
-                        <TreePine className="w-4 h-4 text-emerald-500"/>
-                        <span>{showAddToGroup?'Cancel':'Add to Group'}</span>
-                      </button>
-                      {showAddToGroup&&(
-                        <div className={`mt-2 rounded-xl border overflow-hidden ${theme.darkMode?'border-slate-700':'border-slate-200'}`}>
-                          {nodes.filter(n=>n.type==='hub'&&!n.hidden).map(hub=>{
-                            const linked=links.some(l=>(l.source===hub.id&&l.target===selectedNodeId)||(l.source===selectedNodeId&&l.target===hub.id));
-                            return (
-                              <button key={hub.id} onClick={()=>{
-                                if(!linked){snapshot();setLinks(prev=>[...prev,{source:hub.id,target:selectedNodeId}]);showToast('Added to '+hub.label);}
-                                setShowAddToGroup(false);
-                              }} className={`w-full text-left px-4 py-2.5 text-sm font-medium transition-colors flex items-center justify-between ${linked?(theme.darkMode?'text-slate-500 bg-slate-800':'text-slate-400 bg-slate-50'):(theme.darkMode?'text-slate-200 hover:bg-slate-700':'text-slate-700 hover:bg-slate-50')}`}>
-                                <span>🌳 {hub.label}</span>
-                                {linked&&<span className="text-xs opacity-50">already in</span>}
-                              </button>
-                            );
-                          })}
-                          {nodes.filter(n=>n.type==='hub'&&!n.hidden).length===0&&(
-                            <div className={`px-4 py-3 text-sm ${theme.darkMode?'text-slate-400':'text-slate-500'}`}>No groups yet</div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )}
                   {/* Gap before resync/delete */}
                   <div style={{height:4}}/>
-                  {/* Sync button */}
-                  {selectedNode.type !== 'hub' && (selectedNode.syncDismissed || selectedNode.phone) && (
-                    <button onClick={handleImportContact} className={`w-full flex items-center justify-center space-x-2 px-3 py-1.5 rounded-lg font-medium text-xs border opacity-60 hover:opacity-100 transition-opacity ${theme.darkMode ? 'bg-slate-800 border-slate-700 text-slate-400' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>
-                      <BookUser className="w-3 h-3" /><span>{selectedNode.phone ? 'Re-sync with Contacts' : 'Sync with Contacts'}</span>
-                    </button>
-                  )}
                   {/* Add group photo — only for hubs */}
                   {selectedNode.type === 'hub' && (
                     <label style={{display:'flex',alignItems:'center',justifyContent:'center',gap:8,width:'100%',padding:'9px',borderRadius:10,background:theme.darkMode?'#1e293b':'#f1f5f9',color:theme.darkMode?'#94a3b8':'#64748b',border:'1.5px dashed '+(theme.darkMode?'#334155':'#cbd5e1'),cursor:'pointer',fontSize:13,fontWeight:700}}>
@@ -4754,7 +5067,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 members = nodes.filter(n=>collected.has(n.id)&&n.x!=null&&n.type!=='flower'&&n.id!=='me');
               } else {
                 const memberIds = new Set(links.filter(l=>l.source===hub.id||l.target===hub.id).map(l=>l.source===hub.id?l.target:l.source));
-                members = nodes.filter(n=>memberIds.has(n.id)&&n.x!=null&&n.type!=='flower'&&n.id!=='me');
+                // Exclude any person who is connected directly to social — the group
+                // hangs OFF them (they're the anchor), they're not a border member.
+                members = nodes.filter(n=>{
+                  if(!memberIds.has(n.id)||n.x==null||n.type==='flower'||n.id==='me') return false;
+                  const onSocial = links.some(l=>(l.source==='flower_social'&&l.target===n.id)||(l.target==='flower_social'&&l.source===n.id));
+                  return !onSocial;
+                });
               }
               // Hidden hubs always show vine border (it's their only visual indicator)
               // Normal hubs only show vine border if showVineBorders is on
@@ -5478,6 +5797,32 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   if (!src || !tgt) return null;
                   // Don't render vines to/from hidden hub nodes — they're invisible
                   if (src.hidden || tgt.hidden) return null;
+
+                  // Person↔person vines: hide only when the two people are in
+                  // DIFFERENT groups (members connect via their hub, not across
+                  // group boundaries). Links involving a hub or the social/me node
+                  // are never affected here.
+                  if (src.type !== 'hub' && tgt.type !== 'hub'
+                      && src.id !== 'me' && tgt.id !== 'me'
+                      && src.type !== 'flower' && tgt.type !== 'flower') {
+                    const sg = nodeGroupMap[src.id], tg = nodeGroupMap[tgt.id];
+                    if (sg && tg && sg !== tg) return null;
+                  }
+                  // Hide a person→hub vine only when the person is a MEMBER of a
+                  // different group. The anchor (a social-connected person the hub
+                  // hangs off) is allowed to connect to its sub-group hub.
+                  if (src.type === 'hub' || tgt.type === 'hub') {
+                    const hubNode = src.type === 'hub' ? src : tgt;
+                    const personNode = src.type === 'hub' ? tgt : src;
+                    const personOnSocial = links.some(l =>
+                      (l.source==='flower_social'&&l.target===personNode.id) ||
+                      (l.target==='flower_social'&&l.source===personNode.id)
+                    );
+                    if (personNode.id !== 'me' && !personOnSocial
+                        && nodeGroupMap[personNode.id] && nodeGroupMap[personNode.id] !== hubNode.id) {
+                      return null;
+                    }
+                  }
 
                   const isMainTrunk = (src.id === 'me' && tgt.type === 'hub') || (tgt.id === 'me' && src.type === 'hub') || (src.type === 'flower' && tgt.type === 'hub') || (tgt.type === 'flower' && src.type === 'hub') || (src.id === 'me' && tgt.type === 'flower') || (tgt.id === 'me' && src.type === 'flower');
                   let score = 0;
@@ -6802,7 +7147,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         )}
         <div className={`absolute bottom-6 right-6 flex items-center space-x-2 p-2 rounded-xl shadow-lg border ${theme.darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
           <button onClick={() => setTransform(p => ({ ...p, scale: Math.max(0.01, p.scale / 1.3) }))} className={`p-2 rounded-lg transition-colors ${theme.darkMode ? 'hover:bg-slate-700 text-slate-300' : 'hover:bg-slate-100 text-slate-600'}`}><ZoomOut className="w-5 h-5" /></button>
-          <span className={`text-xs font-semibold w-12 text-center ${theme.darkMode ? 'text-slate-300' : 'text-slate-500'}`}>{Math.round(transform.scale * 100)}%</span>
+          <button onClick={() => { const rect = svgRef.current ? svgRef.current.getBoundingClientRect() : { width: window.innerWidth, height: window.innerHeight }; setTransform({ x: rect.width/2, y: rect.height/2, scale: 0.5 }); }} title="Recenter" className={`p-2 rounded-lg transition-colors ${theme.darkMode ? 'hover:bg-slate-700 text-slate-300' : 'hover:bg-slate-100 text-slate-600'}`}><Home className="w-5 h-5" /></button>
           <button onClick={() => setTransform(p => ({ ...p, scale: Math.min(3, p.scale * 1.3) }))} className={`p-2 rounded-lg transition-colors ${theme.darkMode ? 'hover:bg-slate-700 text-slate-300' : 'hover:bg-slate-100 text-slate-600'}`}><ZoomIn className="w-5 h-5" /></button>
         </div>
 
