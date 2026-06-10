@@ -1,0 +1,9 @@
+{
+  "appId": "io.github.josephd93.friendshiptree",
+  "appName": "FriendshipTree",
+  "webDir": "dist",
+  "backgroundColor": "#10b981",
+  "android": {
+    "backgroundColor": "#10b981"
+  }
+}
