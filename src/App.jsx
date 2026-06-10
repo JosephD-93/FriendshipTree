@@ -373,6 +373,7 @@ function AppInner() {
   const [photoSlideshow, setPhotoSlideshow] = useState(null); // nodeId
   const [slideIdx, setSlideIdx] = useState(0);
   const [photoCrop, setPhotoCrop] = useState(null);
+  const [profilePhotosViewer, setProfilePhotosViewer] = useState(null); // nodeId when open
   // Group photo tagger
   const [groupPhotoSrc, setGroupPhotoSrc] = useState(null);   // base64 of the group photo
   const [faceRings, setFaceRings] = useState([]);              // [{id,x,y,r,name,assignedNodeId}]
@@ -422,6 +423,7 @@ function AppInner() {
   const cropCanvasRef = useRef(null);
   const cropImgRef = useRef(null);
   const cropDragRef = useRef(null);
+  const cropResizeRef = useRef(false);
   const idbRef = useRef(null);
   const borderFlowerPositionsRef = useRef({});
 
@@ -1750,8 +1752,6 @@ function AppInner() {
             const blobReader = new FileReader();
             blobReader.onload = ev => { updates.img = ev.target.result; setNodes(prev => prev.map(n => n.id === selectedNodeId ? { ...n, ...updates } : n)); };
             blobReader.readAsDataURL(blob);
-            blob = null; // handled async
-            
           }
           setNodes(prev => prev.map(n => n.id === selectedNodeId ? { ...n, ...updates } : n));
           showToast("Contact imported!");
@@ -3597,22 +3597,14 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
                         {/* Main photo — circle with tier colour border */}
                         <div style={{flexShrink:0,position:'relative',cursor:'pointer',
-                          width:106,height:106,
+                          width:132,height:132,
                           borderRadius:'50%',
                           border:`4px solid ${lvl.color}`,
                           boxShadow:`0 0 0 2px ${theme.darkMode?'#0f172a':'white'}, 0 4px 16px ${lvl.color}55`,
                         }}
-                          onClick={()=>{
-                            let origSrc=selectedNode.img;
-                            openPhotoDB().then(db=>{const tx=db.transaction('photos','readonly');const req=tx.objectStore('photos').get(selectedNodeId+'_orig');req.onsuccess=e=>{if(e.target.result&&e.target.result.dataUrl)origSrc=e.target.result.dataUrl;setPhotoCrop({nodeId:selectedNodeId,src:origSrc,originalSrc:origSrc,crop:{x:0,y:0,scale:1}});};req.onerror=()=>setPhotoCrop({nodeId:selectedNodeId,src:origSrc,originalSrc:origSrc,crop:{x:0,y:0,scale:1}});}).catch(()=>setPhotoCrop({nodeId:selectedNodeId,src:origSrc,originalSrc:origSrc,crop:{x:0,y:0,scale:1}}));
-                          }}>
+                          onClick={()=>setProfilePhotosViewer(selectedNodeId)}>
                           <img src={selectedNode.img} alt="Profile"
-                            style={{width:'100%',height:'100%',borderRadius:'50%',objectFit:'cover',display:'block'}}/>
-                          <button title="Build avatar"
-                            onClick={e=>{e.stopPropagation();const n=nodes.find(nd=>nd.id===selectedNodeId);setAvBg((n&&n._avBg)||'#4f46e5');setAvSkin((n&&n._avSkin)||'#f4c2a1');setAvHair((n&&n._avHair)||'#2d1b00');setAvStyle((n&&n._avStyle)||'medium');setAvFace((n&&n._avFace)||'smile');setAvatarBuilder({nodeId:selectedNodeId});}}
-                            style={{position:'absolute',bottom:2,right:2,width:22,height:22,borderRadius:'50%',background:theme.darkMode?'#334155':'#e2e8f0',border:'2px solid '+(theme.darkMode?'#0f172a':'white'),cursor:'pointer',fontSize:11,display:'flex',alignItems:'center',justifyContent:'center',zIndex:2}}>
-                            🎨
-                          </button>
+                            style={{width:'100%',height:'100%',borderRadius:'50%',objectFit:'cover'}}/>
                         </div>
 
                         {/* Right: 2×2 grid */}
@@ -4323,7 +4315,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
                             {/* Hub flower button */}
                             <g transform={`translate(${fx},${fy})`} onClick={()=>setHubFlowerMenuOpen(p=>!p)} style={{cursor:'pointer'}}>
-                              {hubFlowerMenuOpen&&<circle r={fr+4} fill="rgba(255,255,255,0.2)" stroke="white" strokeWidth={1.5} opacity={0.7}/>}}
+                              {hubFlowerMenuOpen&&<circle r={fr+4} fill="rgba(255,255,255,0.2)" stroke="white" strokeWidth={1.5} opacity={0.7}/>}
                               {pf?(<><path d={fpPath} fill={isActive?pf.petalColor:'#94a3b8'} opacity={isActive?1:0.6}/><circle r={fr*0.28} fill={isActive?(pf.centerColor||'#fef08a'):'#e2e8f0'} stroke={isActive?pf.petalColor:'#94a3b8'} strokeWidth={1}/></>):(<><circle r={fr} fill="none" stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="4 3" opacity={0.7}/><text textAnchor="middle" dominantBaseline="middle" fontSize={fr*0.9} style={{userSelect:'none'}}>🌸</text></>)}
                             </g>
                           </svg>
@@ -6676,10 +6668,10 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   return (
                     <g key={copyKey}
                       transform={`translate(${rx}, ${ry}) scale(${copyScale})`}
-                      style={{transition: nodeTransition(node.id), transformOrigin: `${rx}px ${ry}px`}}
                       className="cursor-pointer"
                       onPointerDown={e => handlePointerDown(e, node.id)}
                       style={{
+                        transition: nodeTransition(node.id), transformOrigin: `${rx}px ${ry}px`,
                         WebkitTouchCallout:'none', WebkitUserSelect:'none', userSelect:'none',
                         filter: isSmall ? 'grayscale(80%) opacity(0.7)' : 'none'
                       }}
@@ -7916,7 +7908,6 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                               </g>;
                             })}
                             {(pf.pistilSize||0)>0&&<circle r={PREVIEW_R*(pf.pistilSize??0)*0.25} fill={pf.pistilColor||'#f59e0b'} stroke={pf.stamenColor||'#fbbf24'} strokeWidth={PREVIEW_R*0.03} opacity={0.95}/>}
-                            }
                             <text textAnchor="middle" dominantBaseline="middle" fontSize="20">{partnerFlowerEditor==='me'?'🌸':'💗'}</text>
                           </g>
 
@@ -8172,6 +8163,68 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         );
       })()}
       {/* -- Photo Slideshow ----------------------------------------------- */}
+      {profilePhotosViewer && (() => {
+        const sn = nodes.find(n => n.id === profilePhotosViewer);
+        if (!sn) { setTimeout(()=>setProfilePhotosViewer(null),0); return null; }
+        const dm = theme.darkMode;
+        const profilePics = sn.photos || [];   // past profile pictures {cropped, orig}
+        const activeIdx = sn.activePhotoIdx || 0;
+        return (
+          <div style={{position:'fixed',inset:0,zIndex:600,background:'rgba(0,0,0,0.95)',display:'flex',flexDirection:'column',overflowY:'auto'}}
+            onClick={()=>setProfilePhotosViewer(null)}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'14px 18px',position:'sticky',top:0,background:'rgba(0,0,0,0.6)'}} onClick={e=>e.stopPropagation()}>
+              <span style={{color:'white',fontSize:16,fontWeight:700}}>{sn.label}</span>
+              <button onClick={()=>setProfilePhotosViewer(null)} style={{background:'rgba(255,255,255,0.1)',border:'none',borderRadius:'50%',width:32,height:32,fontSize:18,cursor:'pointer',color:'white'}}>✕</button>
+            </div>
+            <div style={{padding:'8px 18px 24px'}} onClick={e=>e.stopPropagation()}>
+              {/* Profile pictures used in the past */}
+              <div style={{fontSize:12,fontWeight:700,color:'rgba(255,255,255,0.6)',textTransform:'uppercase',letterSpacing:0.5,margin:'8px 0'}}>Profile pictures</div>
+              <div style={{display:'flex',flexWrap:'wrap',gap:10}}>
+                {profilePics.map((p,idx)=>(
+                  <button key={idx} onClick={()=>{setNodes(prev=>prev.map(n=>n.id===sn.id?{...n,img:p.cropped,activePhotoIdx:idx}:n));}}
+                    style={{padding:0,border:`3px solid ${activeIdx===idx?'#10b981':'transparent'}`,borderRadius:'50%',cursor:'pointer',background:'none'}}>
+                    <img src={p.cropped} style={{width:72,height:72,borderRadius:'50%',objectFit:'cover',display:'block'}}/>
+                  </button>
+                ))}
+                {/* Add a new profile picture */}
+                <label style={{width:72,height:72,borderRadius:'50%',border:'2px dashed rgba(255,255,255,0.4)',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',fontSize:28,color:'rgba(255,255,255,0.6)'}}>
+                  +
+                  <input type="file" accept="image/*" style={{display:'none'}} onChange={e=>{const file=e.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=ev=>{setProfilePhotosViewer(null);setPhotoCrop({nodeId:sn.id,src:ev.target.result,originalSrc:ev.target.result,crop:{x:0,y:0,scale:1}});};reader.readAsDataURL(file);}}/>
+                </label>
+                {/* Build avatar — black & white face icon */}
+                <button title="Build avatar"
+                  onClick={()=>{const n=nodes.find(nd=>nd.id===sn.id);setAvBg((n&&n._avBg)||'#4f46e5');setAvSkin((n&&n._avSkin)||'#f4c2a1');setAvHair((n&&n._avHair)||'#2d1b00');setAvStyle((n&&n._avStyle)||'medium');setAvFace((n&&n._avFace)||'smile');setProfilePhotosViewer(null);setAvatarBuilder({nodeId:sn.id});}}
+                  style={{width:72,height:72,borderRadius:'50%',border:'2px solid rgba(255,255,255,0.4)',background:'none',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',padding:0}}>
+                  <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10"/>
+                    <circle cx="9" cy="10" r="1.2" fill="white"/>
+                    <circle cx="15" cy="10" r="1.2" fill="white"/>
+                    <path d="M8.5 14.5 Q12 17 15.5 14.5"/>
+                  </svg>
+                </button>
+              </div>
+
+              {/* Full-scale photos attached to this person (gallery) */}
+              <div style={{fontSize:12,fontWeight:700,color:'rgba(255,255,255,0.6)',textTransform:'uppercase',letterSpacing:0.5,margin:'20px 0 8px'}}>Photos</div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:6}}>
+                {galleryItems.map((item,idx)=>(
+                  <div key={item.key} style={{position:'relative',aspectRatio:'1',borderRadius:8,overflow:'hidden',cursor:'pointer'}}
+                    onClick={()=>setGalleryViewer({items:galleryItems,index:idx})}>
+                    <img src={item.dataUrl} style={{width:'100%',height:'100%',objectFit:'cover',display:'block'}}/>
+                  </div>
+                ))}
+                {/* Add a full photo */}
+                <label style={{aspectRatio:'1',borderRadius:8,border:'2px dashed rgba(255,255,255,0.4)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',cursor:'pointer',gap:4,color:'rgba(255,255,255,0.6)'}}>
+                  <span style={{fontSize:24}}>+</span>
+                  <span style={{fontSize:10}}>Add photo</span>
+                  <input type="file" accept="image/*" style={{display:'none'}} onChange={e=>{const file=e.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=ev=>{saveToGallery(sn.id,ev.target.result,{sourceType:'manual',date:new Date().toISOString()}).then(()=>loadGallery(sn.id).then(u=>setGalleryItems(u)));};reader.readAsDataURL(file);}}/>
+                </label>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {photoSlideshow && (() => {
         const sn = nodes.find(n=>n.id===photoSlideshow);
         if(!sn) return null;
@@ -8283,8 +8336,10 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           const imgCenterX = iw / 2 - (x * cssToImg) / scale;
           const imgCenterY = ih / 2 - (y * cssToImg) / scale;
 
-          // Half-size of the square region to crop from the image
-          const halfSize = (Math.min(renderedW, renderedH) * cssToImg) / (2 * scale);
+          // Half-size of the square region to crop from the image, scaled by the
+          // circle radius the user set (cr is 0-50 SVG units; 50 = full half-width)
+          const crFrac = (photoCrop.crop.cr || 50) / 50;
+          const halfSize = (Math.min(renderedW, renderedH) * cssToImg) / (2 * scale) * crFrac;
 
           const sx = imgCenterX - halfSize;
           const sy = imgCenterY - halfSize;
@@ -8336,7 +8391,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 onPointerUp={()=>{cropDragRef.current=null;}}
                 onWheel={e=>{
                   e.preventDefault();
-                  setPhotoCrop(p=>({...p, crop:{...p.crop, scale:Math.max(0.5,Math.min(4,p.crop.scale*(e.deltaY>0?0.9:1.1)))}}));
+                  setPhotoCrop(p=>({...p, crop:{...p.crop, scale:Math.max(0.5,Math.min(10,p.crop.scale*(e.deltaY>0?0.92:1.08)))}}));
                 }}>
                 <img ref={cropImgRef} src={photoCrop.src} alt="crop"
                   style={{
@@ -8349,15 +8404,46 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     pointerEvents:'none',
                     userSelect:'none',
                   }} />
-                {/* Circle overlay */}
-                <svg style={{position:'absolute',top:0,left:0,right:0,bottom:0,width:'100%',height:'100%',pointerEvents:'none'}} viewBox="0 0 100 100" preserveAspectRatio="none">
-                  <mask id="circle-mask">
-                    <rect width="100" height="100" fill="white"/>
-                    <circle cx="50" cy="50" r="50" fill="black"/>
-                  </mask>
-                  <rect width="100" height="100" fill="rgba(0,0,0,0.55)" mask="url(#circle-mask)"/>
-                  <circle cx="50" cy="50" r="49.5" fill="none" stroke="white" strokeWidth="0.5" opacity="0.6"/>
-                </svg>
+                {/* Circle overlay — radius adjustable by dragging its edge */}
+                {(() => {
+                  const cr = photoCrop.crop.cr || 50; // circle radius in 0-100 SVG units
+                  return (
+                    <svg style={{position:'absolute',top:0,left:0,right:0,bottom:0,width:'100%',height:'100%',pointerEvents:'none'}} viewBox="0 0 100 100" preserveAspectRatio="none">
+                      <mask id="circle-mask">
+                        <rect width="100" height="100" fill="white"/>
+                        <circle cx="50" cy="50" r={cr} fill="black"/>
+                      </mask>
+                      <rect width="100" height="100" fill="rgba(0,0,0,0.55)" mask="url(#circle-mask)"/>
+                      <circle cx="50" cy="50" r={cr-0.5} fill="none" stroke="white" strokeWidth="0.5" opacity="0.9"/>
+                      {/* Centre dot + crosshair */}
+                      <circle cx="50" cy="50" r="1.6" fill="#10b981" opacity="1"/>
+                      <circle cx="50" cy="50" r="1.6" fill="none" stroke="white" strokeWidth="0.4"/>
+                      <line x1="50" y1="44" x2="50" y2="56" stroke="white" strokeWidth="0.35" opacity="0.7"/>
+                      <line x1="44" y1="50" x2="56" y2="50" stroke="white" strokeWidth="0.35" opacity="0.7"/>
+                      {/* Edge handle — drag toward/away from centre to resize */}
+                      <circle cx="50" cy={50 - cr} r="3" fill="#10b981" stroke="white" strokeWidth="0.6"
+                        style={{pointerEvents:'all',cursor:'ns-resize'}}
+                        onPointerDown={e=>{
+                          e.stopPropagation();
+                          e.currentTarget.setPointerCapture(e.pointerId);
+                          cropResizeRef.current = true;
+                        }}
+                        onPointerMove={e=>{
+                          if(!cropResizeRef.current) return;
+                          const svg = e.currentTarget.closest('svg');
+                          const rect = svg.getBoundingClientRect();
+                          // pointer position in 0-100 units
+                          const py = ((e.clientY - rect.top) / rect.height) * 100;
+                          const px = ((e.clientX - rect.left) / rect.width) * 100;
+                          const dist = Math.sqrt((px-50)*(px-50) + (py-50)*(py-50));
+                          const newR = Math.max(10, Math.min(50, dist));
+                          setPhotoCrop(p=>({...p, crop:{...p.crop, cr:newR}}));
+                        }}
+                        onPointerUp={e=>{cropResizeRef.current=false;}}
+                      />
+                    </svg>
+                  );
+                })()}
               </div>
 
               {/* Controls */}
@@ -8365,7 +8451,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 {/* Zoom slider */}
                 <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:14}}>
                   <span style={{fontSize:12,color:dm?'#94a3b8':'#64748b'}}>🔍</span>
-                  <input type="range" min="0.5" max="4" step="0.05"
+                  <input type="range" min="0.5" max="10" step="0.05"
                     value={photoCrop.crop.scale}
                     onChange={e=>setPhotoCrop(p=>({...p,crop:{...p.crop,scale:parseFloat(e.target.value)}}))}
                     style={{flex:1,accentColor:'#10b981'}} />
@@ -8393,7 +8479,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 }} style={{width:'100%',padding:'9px',borderRadius:10,background:dm?'#1e293b':'#f1f5f9',color:dm?'#94a3b8':'#64748b',border:'1px dashed '+(dm?'#334155':'#cbd5e1'),cursor:'pointer',fontWeight:700,fontSize:13,marginTop:2}}>
                   👥 Tag other faces in this photo
                 </button>
-                <p style={{fontSize:10,color:dm?'#475569':'#94a3b8',textAlign:'center',marginTop:8}}>Drag to reposition · Scroll or slide to zoom</p>
+                <p style={{fontSize:10,color:dm?'#475569':'#94a3b8',textAlign:'center',marginTop:8}}>Drag to position · scroll or slider to zoom · centre dot marks the middle</p>eposition · Scroll or slide to zoom</p>
               </div>
             </div>
           </div>
