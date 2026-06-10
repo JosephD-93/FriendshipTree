@@ -336,7 +336,18 @@ function FabMenu(props) {
 
 
 
-const KEYFRAMES_CSS = ['@keyframes spin{to{transform:rotate(360deg)}}', '@keyframes fadein{from{opacity:0}to{opacity:1}}'].join(' ');
+const KEYFRAMES_CSS = [
+  '@keyframes spin{to{transform:rotate(360deg)}}',
+  '@keyframes fadein{from{opacity:0}to{opacity:1}}',
+  // Native (Capacitor) safe-area handling so content clears the phone's
+  // status bar (top) and navigation bar (bottom). Harmless in a browser
+  // where the insets are 0.
+  ':root{--sat:env(safe-area-inset-top,0px);--sab:env(safe-area-inset-bottom,0px);--sal:env(safe-area-inset-left,0px);--sar:env(safe-area-inset-right,0px);}',
+  'body{padding-top:var(--sat);padding-bottom:var(--sab);padding-left:var(--sal);padding-right:var(--sar);box-sizing:border-box;}',
+  // Fixed top bars sit below the status bar
+  '.ft-safe-top{top:var(--sat) !important;}',
+  // Fixed full-screen overlays should still cover the whole screen
+].join(' ');
 
 function AppInner() {
   const svgRef = useRef(null);
@@ -1758,25 +1769,7 @@ function AppInner() {
         }
       } else throw new Error("API not supported");
     } catch(e) {
-      // Mock fallback — sort mock contacts by similarity to current label
-      const mockPool = [
-        { label: 'Alex Johnson', phone: '07700 900123', img: AVATARS.james_f },
-        { label: 'Alice Smith',  phone: '07700 900124', img: AVATARS.alice },
-        { label: 'Alicia Brown', phone: '07700 900125', img: AVATARS.priya },
-        { label: 'James Walker', phone: '07700 900126', img: AVATARS.james_f },
-        { label: 'Simon Taylor', phone: '07700 900127', img: AVATARS.simon },
-      ];
-      // Sort by similarity to current label if one exists
-      const sorted = hasCustomName
-        ? [...mockPool].sort((a, b) => nameSimilarity(b.label, currentLabel) - nameSimilarity(a.label, currentLabel))
-        : mockPool;
-      const best = sorted[0];
-      setNodes(prev => prev.map(n =>
-        n.id === selectedNodeId
-          ? { ...n, label: best.label, phone: best.phone, img: best.img, syncDismissed: true }
-          : n
-      ));
-      showToast(`Contacts unavailable — imported best match: ${best.label}`);
+      showToast('Contacts unavailable on this device — enter details manually');
     }
   };
 
@@ -1864,22 +1857,7 @@ function AppInner() {
         }
       } else throw new Error("API not supported");
     } catch(e) {
-      const allAvatarKeys = Object.keys(AVATARS);
-      const usedKeys = new Set();
-      const pickAvatar = () => {
-        const available = allAvatarKeys.filter(k => !usedKeys.has(k));
-        const key = available[Math.floor(Math.random() * available.length)];
-        usedKeys.add(key);
-        return AVATARS[key];
-      };
-      const mockNames = ['Alice','James','Priya','Sam','Olivia','Marcus','Zara','Leo'];
-      const mocks = Array.from({ length: 3 }, (_, i) => ({
-        label: mockNames[Math.floor(Math.random() * mockNames.length)],
-        img: pickAvatar(),
-        phone: `07700 9001${String(i).padStart(2,'0')}`,
-      }));
-      spawnNodes(mocks);
-      showToast("Contacts API unavailable — added 3 mock friends.");
+      showToast('Contacts unavailable on this device');
     }
   };
 
@@ -2314,9 +2292,9 @@ function AppInner() {
         req.onsuccess = e => resolve(e.target.result || []);
         req.onerror = reject;
       });
-      // Build a map: key -> dataUrl
+      // Build a map: nodeId -> dataUrl (the photos store is keyed by nodeId)
       const photoMap = {};
-      allPhotos.forEach(p => { if (p && p.key && p.dataUrl) photoMap[p.key] = p.dataUrl; });
+      allPhotos.forEach(p => { if (p && p.dataUrl) { const k = p.nodeId || p.key; if (k) photoMap[k] = p.dataUrl; } });
 
       const data = {
         nodes,
@@ -2367,7 +2345,7 @@ function AppInner() {
             const store = tx.objectStore('photos');
             let count = 0;
             for (const [key, dataUrl] of Object.entries(data.photoMap)) {
-              store.put({ key, dataUrl });
+              store.put({ nodeId: key, key, dataUrl });
               count++;
             }
             await new Promise((resolve, reject) => { tx.oncomplete = resolve; tx.onerror = reject; });
@@ -2821,10 +2799,10 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         const tog=(k)=>setTunerSections(p=>({...p,[k]:!p[k]}));
         const op=tunerSections;
         return (
-          <div style={{position:'absolute',top:12,left:12,zIndex:300,
+          <div style={{position:'absolute',top:'calc(env(safe-area-inset-top,0px) + 12px)',left:12,zIndex:300,
             background:dm?'#1e293b':'white',borderRadius:14,padding:'12px 14px',
             boxShadow:'0 4px 24px rgba(0,0,0,0.35)',width:240,pointerEvents:'all',
-            maxHeight:'88vh',overflowY:'auto'}}>
+            maxHeight:'80vh',overflowY:'auto'}}>
             {/* Header */}
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
               <span style={{fontSize:13,fontWeight:800,color:dm?'#e2e8f0':'#1e293b'}}>🎛 Design Tuner</span>
@@ -3461,7 +3439,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           top: 0, left: 0, bottom: 0,
           width: '20rem',
           transform: selectedNode || addFriendForms.length > 0 ? 'translateX(0)' : 'translateX(-100%)',
-          paddingBottom: 56,
+          paddingTop: 'env(safe-area-inset-top,0px)',
+          paddingBottom: 'calc(56px + env(safe-area-inset-bottom,0px))',
         }}>
         <div className={`border-b flex justify-between items-center ${theme.darkMode ? 'border-slate-700 bg-slate-800' : 'border-slate-100 bg-slate-50'}`}
           style={{padding:'8px 16px',minHeight:0}}>
@@ -6995,7 +6974,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       {tierPickMode && (() => {
         const remaining = nodes.filter(n=>n.type==='friend'&&!(n.interactionScore>0||n.isFamily||n.isPartner)).length;
         return (
-          <div style={{position:'fixed',top:0,left:0,right:0,zIndex:300,
+          <div style={{position:'fixed',top:'env(safe-area-inset-top,0px)',left:0,right:0,zIndex:300,
             padding:'10px 16px',background:'#1e3a5f',borderBottom:'3px solid #3b82f6',
             display:'flex',alignItems:'center',justifyContent:'space-between',gap:10}}>
             <span style={{fontSize:13,fontWeight:700,color:'white'}}>
@@ -7008,7 +6987,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       })()}
       {selectForGroupMode && (
         <div style={{
-          position:'fixed', top:0, left:0, right:0, zIndex:300,
+          position:'fixed', top:'env(safe-area-inset-top,0px)', left:0, right:0, zIndex:300,
           display:'flex', flexDirection:'column', gap:6,
           padding:'12px 16px',
           background:'#064e3b',
