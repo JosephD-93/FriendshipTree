@@ -8479,7 +8479,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 }} style={{width:'100%',padding:'9px',borderRadius:10,background:dm?'#1e293b':'#f1f5f9',color:dm?'#94a3b8':'#64748b',border:'1px dashed '+(dm?'#334155':'#cbd5e1'),cursor:'pointer',fontWeight:700,fontSize:13,marginTop:2}}>
                   👥 Tag other faces in this photo
                 </button>
-                <p style={{fontSize:10,color:dm?'#475569':'#94a3b8',textAlign:'center',marginTop:8}}>Drag to position · scroll or slider to zoom · centre dot marks the middle</p>eposition · Scroll or slide to zoom</p>
+                <p style={{fontSize:10,color:dm?'#475569':'#94a3b8',textAlign:'center',marginTop:8}}>Drag to position · scroll or slider to zoom · centre dot marks the middle</p>
               </div>
             </div>
           </div>
