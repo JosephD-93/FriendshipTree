@@ -628,6 +628,22 @@ function AppInner() {
     } catch(e) {}
   };
 
+  // On mount — ask the OS to PERSIST our storage so Android doesn't evict
+  // IndexedDB (which is why photos vanished after closing the native app).
+  useEffect(() => {
+    (async () => {
+      try {
+        if (navigator.storage && navigator.storage.persist) {
+          const already = navigator.storage.persisted ? await navigator.storage.persisted() : false;
+          if (!already) {
+            const granted = await navigator.storage.persist();
+            console.log('Persistent storage:', granted ? 'granted' : 'denied');
+          }
+        }
+      } catch(e) { console.warn('storage.persist failed:', e); }
+    })();
+  }, []);
+
   // On mount — restore photos from IndexedDB onto nodes
   useEffect(() => {
     (async () => {
@@ -3071,7 +3087,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:400,background:'rgba(0,0,0,0.4)'}}>
           <div
             style={{
-            position:'absolute',top:0,right:0,bottom:56,width:'min(100vw,320px)',
+            position:'absolute',top:0,right:0,bottom:0,width:'min(100vw,320px)',
+            paddingTop:'env(safe-area-inset-top,0px)',
+            paddingBottom:'calc(56px + env(safe-area-inset-bottom,0px))',
             display:'flex',flexDirection:'column',
             background:theme.darkMode?'#0f172a':'white',
             boxShadow:'-4px 0 32px rgba(0,0,0,0.3)',
@@ -5981,6 +5999,16 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   const leafTierScale = 0.7 + tier * 0.18;
                   const leafSpacing = Math.max(24, 76 - tier * 8);
 
+                  // --- PEST SEVERITY (friendship cooling) ---
+                  // Lower score = caterpillars eating the leaves. Keep it sparse:
+                  // 1 caterpillar normally, 2 only on a long vine when very neglected.
+                  const pestNode = tgtNode && tgtNode.id !== 'me' ? tgtNode : srcNode;
+                  const pestScore = (pestNode && pestNode.id !== 'me') ? (pestNode.interactionScore || 0) : 100;
+                  const isLongVine = dist > 220;
+                  let caterpillarCount = 0;
+                  if (pestScore < 40) caterpillarCount = 1;
+                  if (pestScore < 15 && isLongVine) caterpillarCount = 2;
+
                   const allLeaves = [];
                   const newFallen = [];
                   activeStrands.forEach(({ pts, role, renderIdx }) => {
@@ -6045,6 +6073,20 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     });
                   }
 
+                  // Assign caterpillars to the biggest, healthiest leaves (most
+                  // visible). They eat bite-holes with yellow edging.
+                  if (caterpillarCount > 0 && allLeaves.length > 0) {
+                    const candidates = allLeaves
+                      .map((lf, idx) => ({ lf, idx }))
+                      .filter(({ lf }) => !lf.bud && !lf.shrivelled && lf.lw > 8)
+                      .sort((a, b) => b.lf.lw - a.lf.lw);
+                    const chosen = candidates.slice(0, caterpillarCount);
+                    chosen.forEach(({ lf }, ci) => {
+                      lf.caterpillar = true;
+                      lf.bites = 2; // a couple of neat bites per infested leaf
+                    });
+                  }
+
                   return (
                     <g key={`link-${i}`}>
                       {/* Render core first, then wrapped strands, growing strand last (on top) */}
@@ -6088,6 +6130,54 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           >
                             <path d={leafD} fill={lf.fill} stroke={lf.stroke} strokeWidth={0.5} />
                             <path d={midrib} fill="none" stroke={lf.stroke} strokeWidth={0.35} opacity={0.5} />
+                            {lf.caterpillar && (() => {
+                              // Bite-holes: small notches with yellow edging eaten from the leaf edge
+                              const holes = [];
+                              const nb = lf.bites || 2;
+                              for (let bi = 0; bi < nb; bi++) {
+                                const bx = lf.lw * (0.4 + 0.4 * (bi / Math.max(1, nb - 1)));
+                                const by = (bi % 2 === 0 ? -1 : 1) * lf.lh * 0.9;
+                                const br = lf.lh * (0.4 + (bi % 2) * 0.12);
+                                holes.push(
+                                  <circle key={`h-${bi}`} cx={bx} cy={by} r={br}
+                                    fill={theme.darkMode ? '#0b1f12' : '#ffffff'}
+                                    stroke="#fde047" strokeWidth={0.6} />
+                                );
+                              }
+                              // Caterpillar: green segments with a RED face (Very
+                              // Hungry Caterpillar style), ~30% smaller than before.
+                              const segs = 5;
+                              const ccx = lf.lw * 0.5, ccy = 0;
+                              const segR = Math.max(1.0, lf.lh * 0.35); // ~30% smaller
+                              const stepX = segR * 1.25;
+                              const startX = ccx - (segs * stepX) / 2;
+                              const cat = [];
+                              // little legs under the body
+                              for (let s = 0; s < segs; s++) {
+                                const segCx = startX + s * stepX;
+                                cat.push(
+                                  <line key={`leg-${s}`} x1={segCx} y1={ccy + segR*0.6} x2={segCx} y2={ccy + segR*1.2}
+                                    stroke="#3f6212" strokeWidth={0.4} />
+                                );
+                              }
+                              // body segments (green), head (red) is the last one
+                              for (let s = 0; s < segs; s++) {
+                                const segCx = startX + s * stepX;
+                                const isHead = s === segs - 1;
+                                cat.push(
+                                  <circle key={`c-${s}`} cx={segCx} cy={ccy - segR*0.15}
+                                    r={isHead ? segR * 1.15 : segR}
+                                    fill={isHead ? '#dc2626' : (s % 2 === 0 ? '#84cc16' : '#65a30d')}
+                                    stroke={isHead ? '#991b1b' : '#3f6212'} strokeWidth={0.4} />
+                                );
+                              }
+                              // eyes + tiny antennae on the red head
+                              const hx = startX + (segs - 1) * stepX;
+                              cat.push(<circle key="eye1" cx={hx + segR*0.35} cy={ccy - segR*0.55} r={segR*0.22} fill="#1a1a1a"/>);
+                              cat.push(<circle key="eye2" cx={hx + segR*0.35} cy={ccy + segR*0.2} r={segR*0.22} fill="#1a1a1a"/>);
+                              cat.push(<line key="ant1" x1={hx + segR*0.6} y1={ccy - segR*0.7} x2={hx + segR*1.1} y2={ccy - segR*1.3} stroke="#991b1b" strokeWidth={0.4}/>);
+                              return (<g>{holes}{cat}</g>);
+                            })()}
                           </g>
                         );
                       })}
@@ -6543,6 +6633,35 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       {photoBorderMode !== 'none' && getPhotoBorderColor(node) && (
                         <circle r={r + 3} fill="none" stroke={getPhotoBorderColor(node)} strokeWidth="4" opacity="0.95"/>
                       )}
+
+                      {/* SNAIL — high-urgency pest. Sits on the photo border and
+                          pulses colour by how neglected the friendship is. */}
+                      {node.type !== 'hub' && node.id !== 'me' && (() => {
+                        const sc = node.interactionScore || 0;
+                        if (sc >= 12) return null; // only very neglected friends
+                        const severe = sc < 5;
+                        const pulseColor = severe ? '#dc2626' : '#f97316';
+                        // position on the border ring at ~ -35° (upper right)
+                        const a = -Math.PI * 0.2;
+                        const sx = Math.cos(a) * (r + 2);
+                        const sy = Math.sin(a) * (r + 2);
+                        const ss = Math.max(5, r * 0.32); // snail size
+                        return (
+                          <g transform={`translate(${sx},${sy})`} style={{pointerEvents:'none'}}>
+                            <style>{`@keyframes snailPulse${node.id.replace(/[^a-zA-Z0-9]/g,'')}{0%,100%{opacity:0.55}50%{opacity:1}}`}</style>
+                            {/* body */}
+                            <ellipse cx={-ss*0.3} cy={ss*0.25} rx={ss*0.7} ry={ss*0.32} fill="#a78b6f" stroke="#6b5840" strokeWidth={0.5}/>
+                            {/* shell — pulses */}
+                            <circle cx={ss*0.15} cy={0} r={ss*0.5} fill={pulseColor} stroke="#7c2d12" strokeWidth={0.6}
+                              style={{animation:`snailPulse${node.id.replace(/[^a-zA-Z0-9]/g,'')} ${severe?0.8:1.6}s ease-in-out infinite`}}/>
+                            {/* shell spiral */}
+                            <circle cx={ss*0.15} cy={0} r={ss*0.28} fill="none" stroke="#7c2d12" strokeWidth={0.5} opacity={0.6}/>
+                            {/* eye stalks */}
+                            <line x1={-ss*0.85} y1={ss*0.1} x2={-ss*1.05} y2={-ss*0.4} stroke="#6b5840" strokeWidth={0.5}/>
+                            <circle cx={-ss*1.05} cy={-ss*0.45} r={ss*0.12} fill="#1a1a1a"/>
+                          </g>
+                        );
+                      })()}
                       {/* Tier picker in tierPickMode */}
                       {tierPickMode && (() => {
                         const scored = node.interactionScore > 0 || node.isFamily || node.isPartner;
