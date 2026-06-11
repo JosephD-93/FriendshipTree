@@ -2755,9 +2755,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
     });
   }, [creaturePerches]);
 
-  // Rare flights: every ~15s, send 1-2 creatures to a new flower
+  // Creatures stay stationary on their perches (no flying about).
   useEffect(() => {
     if (creaturePerches.length < 2) return;
+    return; // flights disabled — butterflies/fireflies rest in place
+    // eslint-disable-next-line no-unreachable
     const iv = setInterval(() => {
       setCreatures(prev => {
         if (prev.length === 0) return prev;
@@ -2872,12 +2874,12 @@ Return only the JSON array. If nothing trackable is found, return [].`;
   return (
     <>
     <style>{KEYFRAMES_CSS}</style>
-    <div className={`fixed inset-0 font-sans overflow-hidden transition-colors duration-300 ${bgClass}`}
+    <div className={`fixed inset-0 font-sans overflow-hidden transition-colors duration-300 ${theme.darkMode ? 'text-slate-100' : 'text-slate-50'}`}
       style={{
         display:'flex', flexDirection:'column',
-        background: theme.darkMode
-          ? '#0f172a'
-          : "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40'%3E%3Cg fill='none' stroke='%23215c36' stroke-width='1' stroke-linecap='round' opacity='0.5'%3E%3Cpath d='M5 38 Q4 30 6 24'/%3E%3Cpath d='M8 38 Q9 31 7 25'/%3E%3Cpath d='M20 40 Q19 33 21 27'/%3E%3Cpath d='M23 40 Q24 34 22 28'/%3E%3Cpath d='M34 38 Q33 31 35 25'/%3E%3Cpath d='M37 38 Q38 32 36 26'/%3E%3Cpath d='M14 36 Q13 30 15 25'/%3E%3Cpath d='M29 37 Q30 31 28 26'/%3E%3C/g%3E%3C/svg%3E\") repeat #19432a",
+        backgroundColor: theme.darkMode ? '#0f172a' : '#19432a',
+        backgroundImage: theme.darkMode ? 'none' : "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='44' height='44'%3E%3Cg fill='none' stroke='%232e7049' stroke-width='1.2' stroke-linecap='round'%3E%3Cpath d='M6 42 Q5 33 7 27'/%3E%3Cpath d='M9 42 Q10 34 8 28'/%3E%3Cpath d='M22 44 Q21 36 23 30'/%3E%3Cpath d='M25 44 Q26 37 24 31'/%3E%3Cpath d='M37 42 Q36 34 38 28'/%3E%3Cpath d='M40 42 Q41 35 39 29'/%3E%3Cpath d='M15 40 Q14 33 16 28'/%3E%3Cpath d='M31 41 Q32 34 30 29'/%3E%3C/g%3E%3C/svg%3E\")",
+        backgroundRepeat: 'repeat',
         color: theme.darkMode ? '#f1f5f9' : '#f0fdf4',
       }}>
       
@@ -7111,18 +7113,20 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   <g key={c.id} transform={`translate(${c.x},${c.y})`} style={{pointerEvents:'none'}}>
                     <style>{`@keyframes ff${idSafe}{0%,100%{opacity:0.25}50%{opacity:1}}`}</style>
                     <g style={{animation:`ff${idSafe} 2.4s ease-in-out ${waveDelay}s infinite`}}>
-                      <circle r={5} fill={glow} opacity={0.25}/>
-                      <circle r={2.6} fill={glow} opacity={0.5}/>
-                      <circle r={1.3} fill="#fffbe6"/>
+                      <circle r={12} fill={glow} opacity={0.22}/>
+                      <circle r={6} fill={glow} opacity={0.5}/>
+                      <circle r={3} fill="#fffbe6"/>
                     </g>
                   </g>
                 );
               }
-              // BUTTERFLY — wings flap in the wave
+              // BUTTERFLY — bigger (snail-sized), stationary, wings flap in the
+              // diagonal wave rhythm.
+              const bs = 2.4; // scale-up factor to match snail size
               return (
-                <g key={c.id} transform={`translate(${c.x},${c.y}) rotate(${c.flying ? (c.toX > c.fromX ? 15 : -15) : 0})`} style={{pointerEvents:'none'}}>
-                  <style>{`@keyframes fl${idSafe}{0%,100%{transform:scaleX(1)}50%{transform:scaleX(0.45)}}`}</style>
-                  <g style={{animation:`fl${idSafe} ${c.flying ? 0.35 : 1.6}s ease-in-out ${waveDelay}s infinite`, transformOrigin:'center'}}>
+                <g key={c.id} transform={`translate(${c.x},${c.y}) scale(${bs})`} style={{pointerEvents:'none'}}>
+                  <style>{`@keyframes fl${idSafe}{0%,100%{transform:scaleX(1)}50%{transform:scaleX(0.5)}}`}</style>
+                  <g style={{animation:`fl${idSafe} 2.4s ease-in-out ${waveDelay}s infinite`, transformOrigin:'center'}}>
                     {/* wings */}
                     <ellipse cx={-3} cy={-1.5} rx={3.2} ry={4} fill="#fb923c" stroke="#c2410c" strokeWidth={0.4}/>
                     <ellipse cx={3} cy={-1.5} rx={3.2} ry={4} fill="#fb923c" stroke="#c2410c" strokeWidth={0.4}/>
