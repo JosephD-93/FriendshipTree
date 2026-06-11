@@ -628,6 +628,22 @@ function AppInner() {
     } catch(e) {}
   };
 
+  // On mount — ask the OS to PERSIST our storage so Android doesn't evict
+  // IndexedDB (which is why photos vanished after closing the native app).
+  useEffect(() => {
+    (async () => {
+      try {
+        if (navigator.storage && navigator.storage.persist) {
+          const already = navigator.storage.persisted ? await navigator.storage.persisted() : false;
+          if (!already) {
+            const granted = await navigator.storage.persist();
+            console.log('Persistent storage:', granted ? 'granted' : 'denied');
+          }
+        }
+      } catch(e) { console.warn('storage.persist failed:', e); }
+    })();
+  }, []);
+
   // On mount — restore photos from IndexedDB onto nodes
   useEffect(() => {
     (async () => {
@@ -729,6 +745,9 @@ function AppInner() {
   const [tierPickMode, setTierPickMode] = useState(false);
   const [photoBorderMode, setPhotoBorderMode] = useState((() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); return s.photoBorderMode !== undefined ? s.photoBorderMode : 'none'; } catch(e) { return 'none'; } })());
   const [showHubMembers, setShowHubMembers] = useState(true);
+  // Butterflies (day) / fireflies (night) perched on flowers & photo edges.
+  // Each: {id, perchKey, x, y, flying, fromX, fromY, toX, toY, flightStart}
+  const [creatures, setCreatures] = useState([]);
   const [groupPhotoLayout, setGroupPhotoLayout] = useState(() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); return s.groupPhotoLayout || 'shells'; } catch(e) { return 'shells'; } }); // 'shells' | 'mandala'
   const [showGroupTable, setShowGroupTable] = useState(false);
   const [hubFlowerMenuOpen, setHubFlowerMenuOpen] = useState(false);
@@ -2682,6 +2701,114 @@ Return only the JSON array. If nothing trackable is found, return [].`;
     return { ...node, renderX: node.x, renderY: node.y, radius: getNodeRadius(node) };
   });
 
+  // ---- Butterfly / firefly perch points (photo edges + flowers) ----
+  const creaturePerches = useMemo(() => {
+    const perches = [];
+    activeRenderNodes.forEach(node => {
+      if (node.type === 'flower' || node.hidden) return;
+      const r = node.radius || 30;
+      // a couple of points on the photo edge
+      [-Math.PI*0.35, Math.PI*0.15].forEach((a, i) => {
+        perches.push({
+          key: `${node.id}-edge${i}`,
+          x: node.renderX + Math.cos(a) * (r + 6),
+          y: node.renderY + Math.sin(a) * (r + 6),
+          nodeId: node.id,
+          score: node.id === 'me' ? 100 : (node.interactionScore || 0),
+        });
+      });
+      // on the main flower if present
+      if (node.partnerFlower && node.showMainFlower !== false) {
+        perches.push({
+          key: `${node.id}-flower`,
+          x: node.renderX + r * 0.9,
+          y: node.renderY - r * 0.9,
+          nodeId: node.id,
+          score: node.id === 'me' ? 100 : (node.interactionScore || 0),
+        });
+      }
+    });
+    return perches;
+  }, [activeRenderNodes]);
+
+  // Initialise / maintain a small population of creatures on perches
+  useEffect(() => {
+    if (creaturePerches.length === 0) { setCreatures([]); return; }
+    setCreatures(prev => {
+      const target = Math.min(8, Math.max(3, Math.floor(creaturePerches.length / 2)));
+      let next = prev.filter(c => creaturePerches.some(p => p.key === c.perchKey) || c.flying);
+      // top up
+      const usedKeys = new Set(next.map(c => c.perchKey));
+      const free = creaturePerches.filter(p => !usedKeys.has(p.key));
+      let fi = 0;
+      while (next.length < target && fi < free.length) {
+        const p = free[fi++];
+        next.push({ id: `cr-${p.key}-${Date.now()}-${fi}`, perchKey: p.key, x: p.x, y: p.y, flying: false, score: p.score });
+      }
+      // refresh perched positions (nodes may have moved)
+      next = next.map(c => {
+        if (c.flying) return c;
+        const p = creaturePerches.find(pp => pp.key === c.perchKey);
+        return p ? { ...c, x: p.x, y: p.y, score: p.score } : c;
+      });
+      return next;
+    });
+  }, [creaturePerches]);
+
+  // Rare flights: every ~15s, send 1-2 creatures to a new flower
+  useEffect(() => {
+    if (creaturePerches.length < 2) return;
+    const iv = setInterval(() => {
+      setCreatures(prev => {
+        if (prev.length === 0) return prev;
+        const movers = prev.filter(c => !c.flying);
+        if (movers.length === 0) return prev;
+        const howMany = Math.random() < 0.5 ? 1 : 2;
+        const picked = [...movers].sort(() => Math.random() - 0.5).slice(0, howMany);
+        const occupied = new Set(prev.map(c => c.perchKey));
+        return prev.map(c => {
+          if (!picked.includes(c)) return c;
+          const dests = creaturePerches.filter(p => !occupied.has(p.key) && p.key !== c.perchKey);
+          if (dests.length === 0) return c;
+          const dest = dests[Math.floor(Math.random() * dests.length)];
+          occupied.add(dest.key);
+          return { ...c, flying: true, fromX: c.x, fromY: c.y, toX: dest.x, toY: dest.y, destKey: dest.key, destScore: dest.score, flightStart: Date.now() };
+        });
+      });
+    }, 15000);
+    return () => clearInterval(iv);
+  }, [creaturePerches]);
+
+  // Animate flights (advance flying creatures to their destination)
+  useEffect(() => {
+    const flying = creatures.some(c => c.flying);
+    if (!flying) return;
+    let raf;
+    const FLIGHT_MS = 2600;
+    const tick = () => {
+      const now = Date.now();
+      let stillFlying = false;
+      setCreatures(prev => prev.map(c => {
+        if (!c.flying) return c;
+        const t = Math.min(1, (now - c.flightStart) / FLIGHT_MS);
+        if (t >= 1) {
+          return { ...c, flying: false, perchKey: c.destKey, x: c.toX, y: c.toY, score: c.destScore ?? c.score };
+        }
+        stillFlying = true;
+        // ease + gentle arc (sine bump perpendicular to travel)
+        const ease = t < 0.5 ? 2*t*t : 1 - Math.pow(-2*t+2,2)/2;
+        const mx = c.fromX + (c.toX - c.fromX) * ease;
+        const my = c.fromY + (c.toY - c.fromY) * ease;
+        const arc = Math.sin(t * Math.PI) * 18;
+        return { ...c, x: mx, y: my - arc };
+      }));
+      if (stillFlying) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [creatures]);
+
+
   const svgGroupRef = useRef(null);
 
   // Apply transform directly to SVG group for smooth panning (bypasses React re-render)
@@ -2748,8 +2875,10 @@ Return only the JSON array. If nothing trackable is found, return [].`;
     <div className={`fixed inset-0 font-sans overflow-hidden transition-colors duration-300 ${bgClass}`}
       style={{
         display:'flex', flexDirection:'column',
-        background: theme.darkMode ? '#0f172a' : '#f8fafc',
-        color: theme.darkMode ? '#f1f5f9' : '#1e293b',
+        background: theme.darkMode
+          ? '#0f172a'
+          : "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40'%3E%3Cg fill='none' stroke='%23215c36' stroke-width='1' stroke-linecap='round' opacity='0.5'%3E%3Cpath d='M5 38 Q4 30 6 24'/%3E%3Cpath d='M8 38 Q9 31 7 25'/%3E%3Cpath d='M20 40 Q19 33 21 27'/%3E%3Cpath d='M23 40 Q24 34 22 28'/%3E%3Cpath d='M34 38 Q33 31 35 25'/%3E%3Cpath d='M37 38 Q38 32 36 26'/%3E%3Cpath d='M14 36 Q13 30 15 25'/%3E%3Cpath d='M29 37 Q30 31 28 26'/%3E%3C/g%3E%3C/svg%3E\") repeat #19432a",
+        color: theme.darkMode ? '#f1f5f9' : '#f0fdf4',
       }}>
       
       {/* Floating merged tuner: vine borders + flowers + strand */}
@@ -3071,7 +3200,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:400,background:'rgba(0,0,0,0.4)'}}>
           <div
             style={{
-            position:'absolute',top:0,right:0,bottom:56,width:'min(100vw,320px)',
+            position:'absolute',top:0,right:0,bottom:0,width:'min(100vw,320px)',
+            paddingTop:'env(safe-area-inset-top,0px)',
+            paddingBottom:'calc(56px + env(safe-area-inset-bottom,0px))',
             display:'flex',flexDirection:'column',
             background:theme.darkMode?'#0f172a':'white',
             boxShadow:'-4px 0 32px rgba(0,0,0,0.3)',
@@ -5981,6 +6112,16 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   const leafTierScale = 0.7 + tier * 0.18;
                   const leafSpacing = Math.max(24, 76 - tier * 8);
 
+                  // --- PEST SEVERITY (friendship cooling) ---
+                  // Lower score = caterpillars eating the leaves. Keep it sparse:
+                  // 1 caterpillar normally, 2 only on a long vine when very neglected.
+                  const pestNode = tgtNode && tgtNode.id !== 'me' ? tgtNode : srcNode;
+                  const pestScore = (pestNode && pestNode.id !== 'me') ? (pestNode.interactionScore || 0) : 100;
+                  const isLongVine = dist > 220;
+                  let caterpillarCount = 0;
+                  if (pestScore < 40) caterpillarCount = 1;
+                  if (pestScore < 15 && isLongVine) caterpillarCount = 2;
+
                   const allLeaves = [];
                   const newFallen = [];
                   activeStrands.forEach(({ pts, role, renderIdx }) => {
@@ -6045,6 +6186,52 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     });
                   }
 
+                  // Assign caterpillars to the biggest, healthiest leaves (most
+                  // visible). They eat bite-holes with yellow edging.
+                  const vineBites = [];
+                  if (caterpillarCount > 0 && allLeaves.length > 0) {
+                    const candidates = allLeaves
+                      .map((lf, idx) => ({ lf, idx }))
+                      .filter(({ lf }) => !lf.bud && !lf.shrivelled && lf.lw > 8)
+                      .sort((a, b) => b.lf.lw - a.lf.lw);
+                    const chosen = candidates.slice(0, caterpillarCount);
+                    chosen.forEach(({ lf }, ci) => {
+                      lf.caterpillar = true;
+                      lf.bites = 2; // a couple of neat bites per infested leaf
+                    });
+
+                    // Scatter extra bite-holes along the VINE near each caterpillar
+                    // (chew marks on the strand around the node's own section).
+                    const coreStrand = activeStrands.find(s => s.role === 'core') || activeStrands[0];
+                    if (coreStrand && coreStrand.pts && coreStrand.pts.length > 3) {
+                      const pts = coreStrand.pts;
+                      chosen.forEach(({ lf }) => {
+                        // find nearest vine point to this leaf
+                        let nearIdx = 0, best = Infinity;
+                        pts.forEach((p, pi) => {
+                          const d2 = (p.x - lf.x) ** 2 + (p.y - lf.y) ** 2;
+                          if (d2 < best) { best = d2; nearIdx = pi; }
+                        });
+                        // a cluster of small holes along the vine around that point
+                        for (let k = -3; k <= 3; k++) {
+                          const pi = nearIdx + k * 2;
+                          if (pi < 1 || pi >= pts.length - 1) continue;
+                          const p = pts[pi];
+                          const pPrev = pts[pi - 1];
+                          const tdx = p.x - pPrev.x, tdy = p.y - pPrev.y;
+                          const tl = Math.sqrt(tdx*tdx + tdy*tdy) || 1;
+                          const px = -tdy / tl, py = tdx / tl; // perpendicular
+                          const off = (k % 2 === 0 ? 1 : -1) * (1.5 + Math.abs(k));
+                          vineBites.push({
+                            x: p.x + px * off,
+                            y: p.y + py * off,
+                            r: 1.1 + (Math.abs(k) % 2) * 0.5,
+                          });
+                        }
+                      });
+                    }
+                  }
+
                   return (
                     <g key={`link-${i}`}>
                       {/* Render core first, then wrapped strands, growing strand last (on top) */}
@@ -6064,6 +6251,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           />
                         );
                       })}
+                      {/* Vine bite-holes chewed by caterpillars (yellow edged) */}
+                      {vineBites.map((vb, vi) => (
+                        <circle key={`vb-${vi}`} cx={vb.x} cy={vb.y} r={vb.r}
+                          fill={theme.darkMode ? '#0b1f12' : '#f0fdf4'}
+                          stroke="#fde047" strokeWidth={0.5} opacity={0.9}
+                          style={{pointerEvents:'none'}}/>
+                      ))}
                       {/* Leaves — drawn after strands */}
                       {allLeaves.map((lf, li) => {
                         if (lf.shrivelled) return null;
@@ -6088,6 +6282,54 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           >
                             <path d={leafD} fill={lf.fill} stroke={lf.stroke} strokeWidth={0.5} />
                             <path d={midrib} fill="none" stroke={lf.stroke} strokeWidth={0.35} opacity={0.5} />
+                            {lf.caterpillar && (() => {
+                              // Bite-holes: small notches with yellow edging eaten from the leaf edge
+                              const holes = [];
+                              const nb = lf.bites || 2;
+                              for (let bi = 0; bi < nb; bi++) {
+                                const bx = lf.lw * (0.4 + 0.4 * (bi / Math.max(1, nb - 1)));
+                                const by = (bi % 2 === 0 ? -1 : 1) * lf.lh * 0.9;
+                                const br = lf.lh * (0.4 + (bi % 2) * 0.12);
+                                holes.push(
+                                  <circle key={`h-${bi}`} cx={bx} cy={by} r={br}
+                                    fill={theme.darkMode ? '#0b1f12' : '#ffffff'}
+                                    stroke="#fde047" strokeWidth={0.6} />
+                                );
+                              }
+                              // Caterpillar: green segments with a RED face (Very
+                              // Hungry Caterpillar style), ~30% smaller than before.
+                              const segs = 5;
+                              const ccx = lf.lw * 0.5, ccy = 0;
+                              const segR = Math.max(1.0, lf.lh * 0.35); // ~30% smaller
+                              const stepX = segR * 1.25;
+                              const startX = ccx - (segs * stepX) / 2;
+                              const cat = [];
+                              // little legs under the body
+                              for (let s = 0; s < segs; s++) {
+                                const segCx = startX + s * stepX;
+                                cat.push(
+                                  <line key={`leg-${s}`} x1={segCx} y1={ccy + segR*0.6} x2={segCx} y2={ccy + segR*1.2}
+                                    stroke="#3f6212" strokeWidth={0.4} />
+                                );
+                              }
+                              // body segments (green), head (red) is the last one
+                              for (let s = 0; s < segs; s++) {
+                                const segCx = startX + s * stepX;
+                                const isHead = s === segs - 1;
+                                cat.push(
+                                  <circle key={`c-${s}`} cx={segCx} cy={ccy - segR*0.15}
+                                    r={isHead ? segR * 1.15 : segR}
+                                    fill={isHead ? '#dc2626' : (s % 2 === 0 ? '#84cc16' : '#65a30d')}
+                                    stroke={isHead ? '#991b1b' : '#3f6212'} strokeWidth={0.4} />
+                                );
+                              }
+                              // eyes + tiny antennae on the red head
+                              const hx = startX + (segs - 1) * stepX;
+                              cat.push(<circle key="eye1" cx={hx + segR*0.35} cy={ccy - segR*0.55} r={segR*0.22} fill="#1a1a1a"/>);
+                              cat.push(<circle key="eye2" cx={hx + segR*0.35} cy={ccy + segR*0.2} r={segR*0.22} fill="#1a1a1a"/>);
+                              cat.push(<line key="ant1" x1={hx + segR*0.6} y1={ccy - segR*0.7} x2={hx + segR*1.1} y2={ccy - segR*1.3} stroke="#991b1b" strokeWidth={0.4}/>);
+                              return (<g>{holes}{cat}</g>);
+                            })()}
                           </g>
                         );
                       })}
@@ -6543,6 +6785,44 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       {photoBorderMode !== 'none' && getPhotoBorderColor(node) && (
                         <circle r={r + 3} fill="none" stroke={getPhotoBorderColor(node)} strokeWidth="4" opacity="0.95"/>
                       )}
+
+                      {/* SNAIL — high-urgency pest. Sits ON the photo border edge,
+                          angled to follow the curve. Brown swirl shell that pulses
+                          red slowly every 5 seconds. */}
+                      {node.type !== 'hub' && node.id !== 'me' && (() => {
+                        const sc = node.interactionScore || 0;
+                        if (sc >= 12) return null; // only very neglected friends
+                        const severe = sc < 5;
+                        // position on the border ring at ~ -35° (upper right)
+                        const a = -Math.PI * 0.2;
+                        const sx = Math.cos(a) * (r + 1);
+                        const sy = Math.sin(a) * (r + 1);
+                        const ss = Math.max(7.5, r * 0.48); // 50% bigger
+                        // angle the snail so its base sits tangent to the border curve
+                        const tangentDeg = (a * 180 / Math.PI) + 90;
+                        const idSafe = node.id.replace(/[^a-zA-Z0-9]/g,'');
+                        return (
+                          <g transform={`translate(${sx},${sy}) rotate(${tangentDeg})`} style={{pointerEvents:'none'}}>
+                            <style>{`@keyframes snailPulse${idSafe}{0%,82%,100%{fill:#7c4a1e}88%,94%{fill:${severe?'#dc2626':'#ef4444'}}}`}</style>
+                            {/* body / foot */}
+                            <ellipse cx={-ss*0.35} cy={ss*0.3} rx={ss*0.8} ry={ss*0.34} fill="#a78b6f" stroke="#6b5840" strokeWidth={0.5}/>
+                            {/* head + eye stalks */}
+                            <line x1={-ss*0.95} y1={ss*0.15} x2={-ss*1.15} y2={-ss*0.45} stroke="#a78b6f" strokeWidth={ss*0.12}/>
+                            <circle cx={-ss*1.15} cy={-ss*0.5} r={ss*0.13} fill="#1a1a1a"/>
+                            {/* shell — brown, pulses red every 5s */}
+                            <circle cx={ss*0.15} cy={-ss*0.05} r={ss*0.55}
+                              stroke="#5a3514" strokeWidth={0.7}
+                              style={{animation:`snailPulse${idSafe} 5s ease-in-out infinite`, fill:'#7c4a1e'}}/>
+                            {/* shell swirl spiral */}
+                            <path d={`M ${ss*0.15},${-ss*0.05}
+                              m 0,${-ss*0.05}
+                              a ${ss*0.12},${ss*0.12} 0 1 1 ${-ss*0.02},${ss*0.16}
+                              a ${ss*0.24},${ss*0.24} 0 1 0 ${ss*0.18},${-ss*0.30}
+                              a ${ss*0.40},${ss*0.40} 0 1 1 ${-ss*0.34},${ss*0.55}`}
+                              fill="none" stroke="#3d240e" strokeWidth={0.6} opacity={0.85}/>
+                          </g>
+                        );
+                      })()}
                       {/* Tier picker in tierPickMode */}
                       {tierPickMode && (() => {
                         const scored = node.interactionScore > 0 || node.isFamily || node.isPartner;
@@ -6817,6 +7097,48 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 style={{ pointerEvents: 'none' }}
               />
             )}
+
+            {/* ---- Butterflies (day) / Fireflies (night) ---- */}
+            {creatures.map(c => {
+              // wave-flap delay based on diagonal position (top-left → bottom-right)
+              const waveDelay = (((c.x + c.y) % 600) / 600) * 2.2; // 0-2.2s offset
+              const idSafe = c.id.replace(/[^a-zA-Z0-9]/g,'');
+              if (theme.darkMode) {
+                // FIREFLY — colour by connection status
+                const sc = c.score ?? 50;
+                const glow = sc >= 45 ? '#4ade80' : sc >= 20 ? '#facc15' : '#f87171';
+                return (
+                  <g key={c.id} transform={`translate(${c.x},${c.y})`} style={{pointerEvents:'none'}}>
+                    <style>{`@keyframes ff${idSafe}{0%,100%{opacity:0.25}50%{opacity:1}}`}</style>
+                    <g style={{animation:`ff${idSafe} 2.4s ease-in-out ${waveDelay}s infinite`}}>
+                      <circle r={5} fill={glow} opacity={0.25}/>
+                      <circle r={2.6} fill={glow} opacity={0.5}/>
+                      <circle r={1.3} fill="#fffbe6"/>
+                    </g>
+                  </g>
+                );
+              }
+              // BUTTERFLY — wings flap in the wave
+              return (
+                <g key={c.id} transform={`translate(${c.x},${c.y}) rotate(${c.flying ? (c.toX > c.fromX ? 15 : -15) : 0})`} style={{pointerEvents:'none'}}>
+                  <style>{`@keyframes fl${idSafe}{0%,100%{transform:scaleX(1)}50%{transform:scaleX(0.45)}}`}</style>
+                  <g style={{animation:`fl${idSafe} ${c.flying ? 0.35 : 1.6}s ease-in-out ${waveDelay}s infinite`, transformOrigin:'center'}}>
+                    {/* wings */}
+                    <ellipse cx={-3} cy={-1.5} rx={3.2} ry={4} fill="#fb923c" stroke="#c2410c" strokeWidth={0.4}/>
+                    <ellipse cx={3} cy={-1.5} rx={3.2} ry={4} fill="#fb923c" stroke="#c2410c" strokeWidth={0.4}/>
+                    <ellipse cx={-2.6} cy={2.5} rx={2.4} ry={2.8} fill="#fdba74" stroke="#c2410c" strokeWidth={0.3}/>
+                    <ellipse cx={2.6} cy={2.5} rx={2.4} ry={2.8} fill="#fdba74" stroke="#c2410c" strokeWidth={0.3}/>
+                    {/* wing spots */}
+                    <circle cx={-3} cy={-1.5} r={0.9} fill="#7c2d12"/>
+                    <circle cx={3} cy={-1.5} r={0.9} fill="#7c2d12"/>
+                  </g>
+                  {/* body */}
+                  <ellipse cx={0} cy={0} rx={0.8} ry={4.5} fill="#451a03"/>
+                  <line x1={0} y1={-4} x2={-1.5} y2={-6} stroke="#451a03" strokeWidth={0.4}/>
+                  <line x1={0} y1={-4} x2={1.5} y2={-6} stroke="#451a03" strokeWidth={0.4}/>
+                </g>
+              );
+            })}
           </g>
         </svg>
 
