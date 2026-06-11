@@ -6075,6 +6075,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
                   // Assign caterpillars to the biggest, healthiest leaves (most
                   // visible). They eat bite-holes with yellow edging.
+                  const vineBites = [];
                   if (caterpillarCount > 0 && allLeaves.length > 0) {
                     const candidates = allLeaves
                       .map((lf, idx) => ({ lf, idx }))
@@ -6085,6 +6086,37 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       lf.caterpillar = true;
                       lf.bites = 2; // a couple of neat bites per infested leaf
                     });
+
+                    // Scatter extra bite-holes along the VINE near each caterpillar
+                    // (chew marks on the strand around the node's own section).
+                    const coreStrand = activeStrands.find(s => s.role === 'core') || activeStrands[0];
+                    if (coreStrand && coreStrand.pts && coreStrand.pts.length > 3) {
+                      const pts = coreStrand.pts;
+                      chosen.forEach(({ lf }) => {
+                        // find nearest vine point to this leaf
+                        let nearIdx = 0, best = Infinity;
+                        pts.forEach((p, pi) => {
+                          const d2 = (p.x - lf.x) ** 2 + (p.y - lf.y) ** 2;
+                          if (d2 < best) { best = d2; nearIdx = pi; }
+                        });
+                        // a cluster of small holes along the vine around that point
+                        for (let k = -3; k <= 3; k++) {
+                          const pi = nearIdx + k * 2;
+                          if (pi < 1 || pi >= pts.length - 1) continue;
+                          const p = pts[pi];
+                          const pPrev = pts[pi - 1];
+                          const tdx = p.x - pPrev.x, tdy = p.y - pPrev.y;
+                          const tl = Math.sqrt(tdx*tdx + tdy*tdy) || 1;
+                          const px = -tdy / tl, py = tdx / tl; // perpendicular
+                          const off = (k % 2 === 0 ? 1 : -1) * (1.5 + Math.abs(k));
+                          vineBites.push({
+                            x: p.x + px * off,
+                            y: p.y + py * off,
+                            r: 1.1 + (Math.abs(k) % 2) * 0.5,
+                          });
+                        }
+                      });
+                    }
                   }
 
                   return (
@@ -6106,6 +6138,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           />
                         );
                       })}
+                      {/* Vine bite-holes chewed by caterpillars (yellow edged) */}
+                      {vineBites.map((vb, vi) => (
+                        <circle key={`vb-${vi}`} cx={vb.x} cy={vb.y} r={vb.r}
+                          fill={theme.darkMode ? '#0b1f12' : '#f0fdf4'}
+                          stroke="#fde047" strokeWidth={0.5} opacity={0.9}
+                          style={{pointerEvents:'none'}}/>
+                      ))}
                       {/* Leaves — drawn after strands */}
                       {allLeaves.map((lf, li) => {
                         if (lf.shrivelled) return null;
@@ -6634,31 +6673,40 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         <circle r={r + 3} fill="none" stroke={getPhotoBorderColor(node)} strokeWidth="4" opacity="0.95"/>
                       )}
 
-                      {/* SNAIL — high-urgency pest. Sits on the photo border and
-                          pulses colour by how neglected the friendship is. */}
+                      {/* SNAIL — high-urgency pest. Sits ON the photo border edge,
+                          angled to follow the curve. Brown swirl shell that pulses
+                          red slowly every 5 seconds. */}
                       {node.type !== 'hub' && node.id !== 'me' && (() => {
                         const sc = node.interactionScore || 0;
                         if (sc >= 12) return null; // only very neglected friends
                         const severe = sc < 5;
-                        const pulseColor = severe ? '#dc2626' : '#f97316';
                         // position on the border ring at ~ -35° (upper right)
                         const a = -Math.PI * 0.2;
-                        const sx = Math.cos(a) * (r + 2);
-                        const sy = Math.sin(a) * (r + 2);
-                        const ss = Math.max(5, r * 0.32); // snail size
+                        const sx = Math.cos(a) * (r + 1);
+                        const sy = Math.sin(a) * (r + 1);
+                        const ss = Math.max(7.5, r * 0.48); // 50% bigger
+                        // angle the snail so its base sits tangent to the border curve
+                        const tangentDeg = (a * 180 / Math.PI) + 90;
+                        const idSafe = node.id.replace(/[^a-zA-Z0-9]/g,'');
                         return (
-                          <g transform={`translate(${sx},${sy})`} style={{pointerEvents:'none'}}>
-                            <style>{`@keyframes snailPulse${node.id.replace(/[^a-zA-Z0-9]/g,'')}{0%,100%{opacity:0.55}50%{opacity:1}}`}</style>
-                            {/* body */}
-                            <ellipse cx={-ss*0.3} cy={ss*0.25} rx={ss*0.7} ry={ss*0.32} fill="#a78b6f" stroke="#6b5840" strokeWidth={0.5}/>
-                            {/* shell — pulses */}
-                            <circle cx={ss*0.15} cy={0} r={ss*0.5} fill={pulseColor} stroke="#7c2d12" strokeWidth={0.6}
-                              style={{animation:`snailPulse${node.id.replace(/[^a-zA-Z0-9]/g,'')} ${severe?0.8:1.6}s ease-in-out infinite`}}/>
-                            {/* shell spiral */}
-                            <circle cx={ss*0.15} cy={0} r={ss*0.28} fill="none" stroke="#7c2d12" strokeWidth={0.5} opacity={0.6}/>
-                            {/* eye stalks */}
-                            <line x1={-ss*0.85} y1={ss*0.1} x2={-ss*1.05} y2={-ss*0.4} stroke="#6b5840" strokeWidth={0.5}/>
-                            <circle cx={-ss*1.05} cy={-ss*0.45} r={ss*0.12} fill="#1a1a1a"/>
+                          <g transform={`translate(${sx},${sy}) rotate(${tangentDeg})`} style={{pointerEvents:'none'}}>
+                            <style>{`@keyframes snailPulse${idSafe}{0%,82%,100%{fill:#7c4a1e}88%,94%{fill:${severe?'#dc2626':'#ef4444'}}}`}</style>
+                            {/* body / foot */}
+                            <ellipse cx={-ss*0.35} cy={ss*0.3} rx={ss*0.8} ry={ss*0.34} fill="#a78b6f" stroke="#6b5840" strokeWidth={0.5}/>
+                            {/* head + eye stalks */}
+                            <line x1={-ss*0.95} y1={ss*0.15} x2={-ss*1.15} y2={-ss*0.45} stroke="#a78b6f" strokeWidth={ss*0.12}/>
+                            <circle cx={-ss*1.15} cy={-ss*0.5} r={ss*0.13} fill="#1a1a1a"/>
+                            {/* shell — brown, pulses red every 5s */}
+                            <circle cx={ss*0.15} cy={-ss*0.05} r={ss*0.55}
+                              stroke="#5a3514" strokeWidth={0.7}
+                              style={{animation:`snailPulse${idSafe} 5s ease-in-out infinite`, fill:'#7c4a1e'}}/>
+                            {/* shell swirl spiral */}
+                            <path d={`M ${ss*0.15},${-ss*0.05}
+                              m 0,${-ss*0.05}
+                              a ${ss*0.12},${ss*0.12} 0 1 1 ${-ss*0.02},${ss*0.16}
+                              a ${ss*0.24},${ss*0.24} 0 1 0 ${ss*0.18},${-ss*0.30}
+                              a ${ss*0.40},${ss*0.40} 0 1 1 ${-ss*0.34},${ss*0.55}`}
+                              fill="none" stroke="#3d240e" strokeWidth={0.6} opacity={0.85}/>
                           </g>
                         );
                       })()}
