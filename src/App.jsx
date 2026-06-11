@@ -745,6 +745,9 @@ function AppInner() {
   const [tierPickMode, setTierPickMode] = useState(false);
   const [photoBorderMode, setPhotoBorderMode] = useState((() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); return s.photoBorderMode !== undefined ? s.photoBorderMode : 'none'; } catch(e) { return 'none'; } })());
   const [showHubMembers, setShowHubMembers] = useState(true);
+  // Butterflies (day) / fireflies (night) perched on flowers & photo edges.
+  // Each: {id, perchKey, x, y, flying, fromX, fromY, toX, toY, flightStart}
+  const [creatures, setCreatures] = useState([]);
   const [groupPhotoLayout, setGroupPhotoLayout] = useState(() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); return s.groupPhotoLayout || 'shells'; } catch(e) { return 'shells'; } }); // 'shells' | 'mandala'
   const [showGroupTable, setShowGroupTable] = useState(false);
   const [hubFlowerMenuOpen, setHubFlowerMenuOpen] = useState(false);
@@ -2698,6 +2701,114 @@ Return only the JSON array. If nothing trackable is found, return [].`;
     return { ...node, renderX: node.x, renderY: node.y, radius: getNodeRadius(node) };
   });
 
+  // ---- Butterfly / firefly perch points (photo edges + flowers) ----
+  const creaturePerches = useMemo(() => {
+    const perches = [];
+    activeRenderNodes.forEach(node => {
+      if (node.type === 'flower' || node.hidden) return;
+      const r = node.radius || 30;
+      // a couple of points on the photo edge
+      [-Math.PI*0.35, Math.PI*0.15].forEach((a, i) => {
+        perches.push({
+          key: `${node.id}-edge${i}`,
+          x: node.renderX + Math.cos(a) * (r + 6),
+          y: node.renderY + Math.sin(a) * (r + 6),
+          nodeId: node.id,
+          score: node.id === 'me' ? 100 : (node.interactionScore || 0),
+        });
+      });
+      // on the main flower if present
+      if (node.partnerFlower && node.showMainFlower !== false) {
+        perches.push({
+          key: `${node.id}-flower`,
+          x: node.renderX + r * 0.9,
+          y: node.renderY - r * 0.9,
+          nodeId: node.id,
+          score: node.id === 'me' ? 100 : (node.interactionScore || 0),
+        });
+      }
+    });
+    return perches;
+  }, [activeRenderNodes]);
+
+  // Initialise / maintain a small population of creatures on perches
+  useEffect(() => {
+    if (creaturePerches.length === 0) { setCreatures([]); return; }
+    setCreatures(prev => {
+      const target = Math.min(8, Math.max(3, Math.floor(creaturePerches.length / 2)));
+      let next = prev.filter(c => creaturePerches.some(p => p.key === c.perchKey) || c.flying);
+      // top up
+      const usedKeys = new Set(next.map(c => c.perchKey));
+      const free = creaturePerches.filter(p => !usedKeys.has(p.key));
+      let fi = 0;
+      while (next.length < target && fi < free.length) {
+        const p = free[fi++];
+        next.push({ id: `cr-${p.key}-${Date.now()}-${fi}`, perchKey: p.key, x: p.x, y: p.y, flying: false, score: p.score });
+      }
+      // refresh perched positions (nodes may have moved)
+      next = next.map(c => {
+        if (c.flying) return c;
+        const p = creaturePerches.find(pp => pp.key === c.perchKey);
+        return p ? { ...c, x: p.x, y: p.y, score: p.score } : c;
+      });
+      return next;
+    });
+  }, [creaturePerches]);
+
+  // Rare flights: every ~15s, send 1-2 creatures to a new flower
+  useEffect(() => {
+    if (creaturePerches.length < 2) return;
+    const iv = setInterval(() => {
+      setCreatures(prev => {
+        if (prev.length === 0) return prev;
+        const movers = prev.filter(c => !c.flying);
+        if (movers.length === 0) return prev;
+        const howMany = Math.random() < 0.5 ? 1 : 2;
+        const picked = [...movers].sort(() => Math.random() - 0.5).slice(0, howMany);
+        const occupied = new Set(prev.map(c => c.perchKey));
+        return prev.map(c => {
+          if (!picked.includes(c)) return c;
+          const dests = creaturePerches.filter(p => !occupied.has(p.key) && p.key !== c.perchKey);
+          if (dests.length === 0) return c;
+          const dest = dests[Math.floor(Math.random() * dests.length)];
+          occupied.add(dest.key);
+          return { ...c, flying: true, fromX: c.x, fromY: c.y, toX: dest.x, toY: dest.y, destKey: dest.key, destScore: dest.score, flightStart: Date.now() };
+        });
+      });
+    }, 15000);
+    return () => clearInterval(iv);
+  }, [creaturePerches]);
+
+  // Animate flights (advance flying creatures to their destination)
+  useEffect(() => {
+    const flying = creatures.some(c => c.flying);
+    if (!flying) return;
+    let raf;
+    const FLIGHT_MS = 2600;
+    const tick = () => {
+      const now = Date.now();
+      let stillFlying = false;
+      setCreatures(prev => prev.map(c => {
+        if (!c.flying) return c;
+        const t = Math.min(1, (now - c.flightStart) / FLIGHT_MS);
+        if (t >= 1) {
+          return { ...c, flying: false, perchKey: c.destKey, x: c.toX, y: c.toY, score: c.destScore ?? c.score };
+        }
+        stillFlying = true;
+        // ease + gentle arc (sine bump perpendicular to travel)
+        const ease = t < 0.5 ? 2*t*t : 1 - Math.pow(-2*t+2,2)/2;
+        const mx = c.fromX + (c.toX - c.fromX) * ease;
+        const my = c.fromY + (c.toY - c.fromY) * ease;
+        const arc = Math.sin(t * Math.PI) * 18;
+        return { ...c, x: mx, y: my - arc };
+      }));
+      if (stillFlying) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [creatures]);
+
+
   const svgGroupRef = useRef(null);
 
   // Apply transform directly to SVG group for smooth panning (bypasses React re-render)
@@ -2764,8 +2875,10 @@ Return only the JSON array. If nothing trackable is found, return [].`;
     <div className={`fixed inset-0 font-sans overflow-hidden transition-colors duration-300 ${bgClass}`}
       style={{
         display:'flex', flexDirection:'column',
-        background: theme.darkMode ? '#0f172a' : '#f8fafc',
-        color: theme.darkMode ? '#f1f5f9' : '#1e293b',
+        background: theme.darkMode
+          ? '#0f172a'
+          : "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40'%3E%3Cg fill='none' stroke='%23215c36' stroke-width='1' stroke-linecap='round' opacity='0.5'%3E%3Cpath d='M5 38 Q4 30 6 24'/%3E%3Cpath d='M8 38 Q9 31 7 25'/%3E%3Cpath d='M20 40 Q19 33 21 27'/%3E%3Cpath d='M23 40 Q24 34 22 28'/%3E%3Cpath d='M34 38 Q33 31 35 25'/%3E%3Cpath d='M37 38 Q38 32 36 26'/%3E%3Cpath d='M14 36 Q13 30 15 25'/%3E%3Cpath d='M29 37 Q30 31 28 26'/%3E%3C/g%3E%3C/svg%3E\") repeat #19432a",
+        color: theme.darkMode ? '#f1f5f9' : '#f0fdf4',
       }}>
       
       {/* Floating merged tuner: vine borders + flowers + strand */}
@@ -6984,6 +7097,48 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 style={{ pointerEvents: 'none' }}
               />
             )}
+
+            {/* ---- Butterflies (day) / Fireflies (night) ---- */}
+            {creatures.map(c => {
+              // wave-flap delay based on diagonal position (top-left → bottom-right)
+              const waveDelay = (((c.x + c.y) % 600) / 600) * 2.2; // 0-2.2s offset
+              const idSafe = c.id.replace(/[^a-zA-Z0-9]/g,'');
+              if (theme.darkMode) {
+                // FIREFLY — colour by connection status
+                const sc = c.score ?? 50;
+                const glow = sc >= 45 ? '#4ade80' : sc >= 20 ? '#facc15' : '#f87171';
+                return (
+                  <g key={c.id} transform={`translate(${c.x},${c.y})`} style={{pointerEvents:'none'}}>
+                    <style>{`@keyframes ff${idSafe}{0%,100%{opacity:0.25}50%{opacity:1}}`}</style>
+                    <g style={{animation:`ff${idSafe} 2.4s ease-in-out ${waveDelay}s infinite`}}>
+                      <circle r={5} fill={glow} opacity={0.25}/>
+                      <circle r={2.6} fill={glow} opacity={0.5}/>
+                      <circle r={1.3} fill="#fffbe6"/>
+                    </g>
+                  </g>
+                );
+              }
+              // BUTTERFLY — wings flap in the wave
+              return (
+                <g key={c.id} transform={`translate(${c.x},${c.y}) rotate(${c.flying ? (c.toX > c.fromX ? 15 : -15) : 0})`} style={{pointerEvents:'none'}}>
+                  <style>{`@keyframes fl${idSafe}{0%,100%{transform:scaleX(1)}50%{transform:scaleX(0.45)}}`}</style>
+                  <g style={{animation:`fl${idSafe} ${c.flying ? 0.35 : 1.6}s ease-in-out ${waveDelay}s infinite`, transformOrigin:'center'}}>
+                    {/* wings */}
+                    <ellipse cx={-3} cy={-1.5} rx={3.2} ry={4} fill="#fb923c" stroke="#c2410c" strokeWidth={0.4}/>
+                    <ellipse cx={3} cy={-1.5} rx={3.2} ry={4} fill="#fb923c" stroke="#c2410c" strokeWidth={0.4}/>
+                    <ellipse cx={-2.6} cy={2.5} rx={2.4} ry={2.8} fill="#fdba74" stroke="#c2410c" strokeWidth={0.3}/>
+                    <ellipse cx={2.6} cy={2.5} rx={2.4} ry={2.8} fill="#fdba74" stroke="#c2410c" strokeWidth={0.3}/>
+                    {/* wing spots */}
+                    <circle cx={-3} cy={-1.5} r={0.9} fill="#7c2d12"/>
+                    <circle cx={3} cy={-1.5} r={0.9} fill="#7c2d12"/>
+                  </g>
+                  {/* body */}
+                  <ellipse cx={0} cy={0} rx={0.8} ry={4.5} fill="#451a03"/>
+                  <line x1={0} y1={-4} x2={-1.5} y2={-6} stroke="#451a03" strokeWidth={0.4}/>
+                  <line x1={0} y1={-4} x2={1.5} y2={-6} stroke="#451a03" strokeWidth={0.4}/>
+                </g>
+              );
+            })}
           </g>
         </svg>
 
