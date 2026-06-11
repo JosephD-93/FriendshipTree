@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# NOTE: android/ is intentionally NOT ignored, so your native config
+# (Kotlin fix, version numbers, manifest permissions) stays backed up
+# on GitHub. Only the heavy auto-generated build caches inside it are
+# ignored below.
+android/build/
+android/app/build/
+android/.gradle/
+android/.idea/
+android/local.properties
+android/captures/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# Env
+.env
+.env.local
