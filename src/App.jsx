@@ -2704,32 +2704,85 @@ Return only the JSON array. If nothing trackable is found, return [].`;
   // ---- Butterfly / firefly perch points (photo edges + flowers) ----
   const creaturePerches = useMemo(() => {
     const perches = [];
-    activeRenderNodes.forEach(node => {
-      if (node.type === 'flower' || node.hidden) return;
-      const r = node.radius || 30;
-      // a couple of points on the photo edge
-      [-Math.PI*0.35, Math.PI*0.15].forEach((a, i) => {
-        perches.push({
-          key: `${node.id}-edge${i}`,
-          x: node.renderX + Math.cos(a) * (r + 6),
-          y: node.renderY + Math.sin(a) * (r + 6),
-          nodeId: node.id,
-          score: node.id === 'me' ? 100 : (node.interactionScore || 0),
-        });
+    const nodeById = {};
+    activeRenderNodes.forEach(n => { nodeById[n.id] = n; });
+
+    // People who emit a colour (trend) and brightness (score) field.
+    const emitters = activeRenderNodes
+      .filter(n => !n.hidden && n.type !== 'flower' && n.type !== 'hub' && n.id !== 'me')
+      .map(n => {
+        const s = n.interactionScore || 0;
+        const delta = s - (n.prevScore || s);
+        // trend → hue category: 1 = up(green), 0 = steady(amber), -1 = down(red)
+        const trend = delta > 20 ? 1 : delta < -20 ? -1 : 0;
+        return { x: n.renderX, y: n.renderY, score: s, trend };
       });
-      // on the main flower if present
-      if (node.partnerFlower && node.showMainFlower !== false) {
-        perches.push({
-          key: `${node.id}-flower`,
-          x: node.renderX + r * 0.9,
-          y: node.renderY - r * 0.9,
-          nodeId: node.id,
-          score: node.id === 'me' ? 100 : (node.interactionScore || 0),
-        });
+
+    // Sample the field at a point: proximity-weighted, nearest dominates so a
+    // firefly next to one person matches them; between people it blends, but
+    // we bias to the nearest so opposite colours don't muddy to grey.
+    const sampleField = (px, py) => {
+      if (emitters.length === 0) return { trend: 0, level: 0.4 };
+      const weighted = emitters.map(e => {
+        const d2 = (e.x - px) ** 2 + (e.y - py) ** 2;
+        const w = 1 / (d2 + 4000); // falloff
+        return { e, w };
+      }).sort((a, b) => b.w - a.w);
+      // nearest emitter dominates colour; blend only the top few, and bias hard
+      const top = weighted.slice(0, 3);
+      const totalW = top.reduce((s, x) => s + x.w, 0) || 1;
+      // brightness: proximity-weighted average score (0-1000 → 0-1)
+      let levelSum = 0; top.forEach(x => { levelSum += (x.e.score / 1000) * x.w; });
+      const level = Math.min(1, levelSum / totalW);
+      // colour: weighted trend, but the nearest gets a big bias to avoid muddy mixes
+      const nearest = top[0];
+      const nearW = nearest.w * 2.2; // amplify nearest
+      let trendSum = nearest.e.trend * nearW;
+      let tW = nearW;
+      top.slice(1).forEach(x => { trendSum += x.e.trend * x.w; tW += x.w; });
+      const trendBlend = trendSum / tW; // -1..1
+      return { trend: trendBlend, level };
+    };
+
+    const addPerch = (key, x, y, angle) => {
+      const f = sampleField(x, y);
+      perches.push({ key, x, y, angle, trend: f.trend, level: f.level });
+    };
+
+    // Rest spots evenly along each vine (natural coverage by length)
+    const seenPairs = new Set();
+    links.forEach(link => {
+      const s = nodeById[link.source], t = nodeById[link.target];
+      if (!s || !t) return;
+      if (s.type === 'flower' || t.type === 'flower') return;
+      if (s.hidden || t.hidden) return;
+      const pairKey = [link.source, link.target].sort().join('|');
+      if (seenPairs.has(pairKey)) return;
+      seenPairs.add(pairKey);
+
+      const dx = t.renderX - s.renderX, dy = t.renderY - s.renderY;
+      const len = Math.sqrt(dx*dx + dy*dy);
+      if (len < 40) return;
+      const angleDeg = Math.atan2(dy, dx) * 180 / Math.PI;
+      const perpX = -dy / len, perpY = dx / len;
+      // one perch per ~90px of vine for even natural spacing
+      const n = Math.max(1, Math.round(len / 90));
+      for (let i = 0; i < n; i++) {
+        const f = (i + 1) / (n + 1);
+        const side = i % 2 === 0 ? 1 : -1;
+        addPerch(`${pairKey}-v${i}`, s.renderX + dx*f + perpX*12*side, s.renderY + dy*f + perpY*12*side, angleDeg);
       }
     });
+
+    // A perch near each person too (so everyone has some nearby)
+    activeRenderNodes.forEach(node => {
+      if (node.hidden || node.type === 'flower' || node.type === 'hub') return;
+      const r = node.radius || 30;
+      addPerch(`${node.id}-rest`, node.renderX + r*0.8, node.renderY - r*0.8, -30);
+    });
+
     return perches;
-  }, [activeRenderNodes]);
+  }, [activeRenderNodes, links]);
 
   // Initialise / maintain a small population of creatures on perches
   useEffect(() => {
@@ -2743,73 +2796,22 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       let fi = 0;
       while (next.length < target && fi < free.length) {
         const p = free[fi++];
-        next.push({ id: `cr-${p.key}-${Date.now()}-${fi}`, perchKey: p.key, x: p.x, y: p.y, flying: false, score: p.score });
+        next.push({ id: `cr-${p.key}-${Date.now()}-${fi}`, perchKey: p.key, x: p.x, y: p.y, angle: p.angle || 0, flying: false, trend: p.trend, level: p.level, jitter: Math.random() });
       }
       // refresh perched positions (nodes may have moved)
       next = next.map(c => {
         if (c.flying) return c;
         const p = creaturePerches.find(pp => pp.key === c.perchKey);
-        return p ? { ...c, x: p.x, y: p.y, score: p.score } : c;
+        return p ? { ...c, x: p.x, y: p.y, angle: p.angle || 0, trend: p.trend, level: p.level } : c;
       });
       return next;
     });
   }, [creaturePerches]);
 
   // Creatures stay stationary on their perches (no flying about).
-  useEffect(() => {
-    if (creaturePerches.length < 2) return;
-    return; // flights disabled — butterflies/fireflies rest in place
-    // eslint-disable-next-line no-unreachable
-    const iv = setInterval(() => {
-      setCreatures(prev => {
-        if (prev.length === 0) return prev;
-        const movers = prev.filter(c => !c.flying);
-        if (movers.length === 0) return prev;
-        const howMany = Math.random() < 0.5 ? 1 : 2;
-        const picked = [...movers].sort(() => Math.random() - 0.5).slice(0, howMany);
-        const occupied = new Set(prev.map(c => c.perchKey));
-        return prev.map(c => {
-          if (!picked.includes(c)) return c;
-          const dests = creaturePerches.filter(p => !occupied.has(p.key) && p.key !== c.perchKey);
-          if (dests.length === 0) return c;
-          const dest = dests[Math.floor(Math.random() * dests.length)];
-          occupied.add(dest.key);
-          return { ...c, flying: true, fromX: c.x, fromY: c.y, toX: dest.x, toY: dest.y, destKey: dest.key, destScore: dest.score, flightStart: Date.now() };
-        });
-      });
-    }, 15000);
-    return () => clearInterval(iv);
-  }, [creaturePerches]);
+  // (Flight behaviour intentionally removed.)
 
-  // Animate flights (advance flying creatures to their destination)
-  useEffect(() => {
-    const flying = creatures.some(c => c.flying);
-    if (!flying) return;
-    let raf;
-    const FLIGHT_MS = 2600;
-    const tick = () => {
-      const now = Date.now();
-      let stillFlying = false;
-      setCreatures(prev => prev.map(c => {
-        if (!c.flying) return c;
-        const t = Math.min(1, (now - c.flightStart) / FLIGHT_MS);
-        if (t >= 1) {
-          return { ...c, flying: false, perchKey: c.destKey, x: c.toX, y: c.toY, score: c.destScore ?? c.score };
-        }
-        stillFlying = true;
-        // ease + gentle arc (sine bump perpendicular to travel)
-        const ease = t < 0.5 ? 2*t*t : 1 - Math.pow(-2*t+2,2)/2;
-        const mx = c.fromX + (c.toX - c.fromX) * ease;
-        const my = c.fromY + (c.toY - c.fromY) * ease;
-        const arc = Math.sin(t * Math.PI) * 18;
-        return { ...c, x: mx, y: my - arc };
-      }));
-      if (stillFlying) raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [creatures]);
-
+  // (Creatures are stationary — no flight animation.)
 
   const svgGroupRef = useRef(null);
 
@@ -7102,44 +7104,123 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
             {/* ---- Butterflies (day) / Fireflies (night) ---- */}
             {creatures.map(c => {
-              // wave-flap delay based on diagonal position (top-left → bottom-right)
-              const waveDelay = (((c.x + c.y) % 600) / 600) * 2.2; // 0-2.2s offset
+              // WAVE: fixed cycle for ALL butterflies so waves never drift/clash.
+              // The delay (0..WAVE_SWEEP) is set purely by diagonal position, so
+              // the wave ripples across; everyone flaps with the SAME duration and
+              // is shut again well before the cycle repeats.
+              const CYCLE = 6;        // seconds — identical for every butterfly
+              const WAVE_SWEEP = 2.6; // seconds the wave takes to cross the screen
+              const flapDelay = (((c.x + c.y) % 800) / 800) * WAVE_SWEEP;
               const idSafe = c.id.replace(/[^a-zA-Z0-9]/g,'');
+              const trend = c.trend ?? 0;       // -1 down .. +1 up
+              const level = c.level ?? 0.4;     // 0..1 brightness
+              // colour from trend: green(up) - amber(steady) - red(down), blended
+              const lerp = (a,b,t)=>a+(b-a)*t;
+              const hex = (r,g,b)=>'#'+[r,g,b].map(v=>Math.max(0,Math.min(255,Math.round(v))).toString(16).padStart(2,'0')).join('');
+              let cr,cg,cb;
+              if (trend >= 0) { // amber -> green
+                const t = trend;
+                cr = lerp(245,74,t); cg = lerp(190,222,t); cb = lerp(70,128,t);
+              } else { // amber -> red
+                const t = -trend;
+                cr = lerp(245,239,t); cg = lerp(190,68,t); cb = lerp(70,68,t);
+              }
+              const col = hex(cr,cg,cb);
+              const jit = c.jitter ?? 0.5;
+
               if (theme.darkMode) {
-                // FIREFLY — colour by connection status
-                const sc = c.score ?? 50;
-                const glow = sc >= 45 ? '#4ade80' : sc >= 20 ? '#facc15' : '#f87171';
+                // ---- FIREFLY ----
+                const fs = 6;
+                // brightness: brighter halo + longer/brighter flash when level high
+                const haloR = fs * (3.2 + level * 2.5);
+                const flashPeak = 0.55 + level * 0.45;
                 return (
-                  <g key={c.id} transform={`translate(${c.x},${c.y})`} style={{pointerEvents:'none'}}>
-                    <style>{`@keyframes ff${idSafe}{0%,100%{opacity:0.25}50%{opacity:1}}`}</style>
-                    <g style={{animation:`ff${idSafe} 2.4s ease-in-out ${waveDelay}s infinite`}}>
-                      <circle r={12} fill={glow} opacity={0.22}/>
-                      <circle r={6} fill={glow} opacity={0.5}/>
-                      <circle r={3} fill="#fffbe6"/>
+                  <g key={c.id} transform={`translate(${c.x},${c.y}) rotate(${(c.angle||0)+90})`} style={{pointerEvents:'none'}}>
+                    <style>{`@keyframes ff${idSafe}{0%,6%{opacity:0.04}13%,17%{opacity:${flashPeak.toFixed(2)}}26%,100%{opacity:0.04}}`}</style>
+                    {/* GLOW from abdomen tip, flashes */}
+                    <g style={{animation:`ff${idSafe} ${CYCLE}s ease-in-out ${flapDelay}s infinite`}}>
+                      <circle cx={0} cy={fs*2.5} r={haloR} fill={col} opacity={0.16}/>
+                      <circle cx={0} cy={fs*2.5} r={haloR*0.55} fill={col} opacity={0.4}/>
+                      <circle cx={0} cy={fs*2.4} r={fs*1.2} fill={col} opacity={0.9}/>
+                      <ellipse cx={0} cy={fs*2.35} rx={fs*0.55} ry={fs*0.75} fill="#fffef0"/>
                     </g>
+                    {/* antennae black w/ yellow stripes */}
+                    {[-1,1].map(side=>{
+                      const x0=side*fs*0.2,y0=-fs*1.85,x1=side*fs*0.95,y1=-fs*2.7;
+                      return (<g key={`a${side}`}>
+                        <line x1={x0} y1={y0} x2={x1} y2={y1} stroke="#111827" strokeWidth={0.5}/>
+                        {[0.3,0.55,0.8].map((t,ti)=>{const ax=x0+(x1-x0)*t,ay=y0+(y1-y0)*t,bx=x0+(x1-x0)*(t+0.08),by=y0+(y1-y0)*(t+0.08);return <line key={ti} x1={ax} y1={ay} x2={bx} y2={by} stroke="#fde047" strokeWidth={0.7}/>;})}
+                      </g>);
+                    })}
+                    {/* legs w/ yellow feet */}
+                    {[-1,1].map(side=>[0.2,0.7,1.2].map((ly,li)=>(
+                      <g key={`l${side}-${li}`}>
+                        <line x1={side*fs*0.45} y1={fs*ly} x2={side*fs*1.25} y2={fs*(ly+0.25)} stroke="#111827" strokeWidth={0.4}/>
+                        <circle cx={side*fs*1.25} cy={fs*(ly+0.25)} r={fs*0.12} fill="#fde047"/>
+                      </g>
+                    )))}
+                    <ellipse cx={0} cy={-fs*1.55} rx={fs*0.4} ry={fs*0.35} fill="#1a1a1a"/>
+                    <ellipse cx={0} cy={-fs*0.95} rx={fs*0.68} ry={fs*0.52} fill="#e23b3b" stroke="#b91c1c" strokeWidth={0.3}/>
+                    <ellipse cx={0} cy={-fs*0.95} rx={fs*0.24} ry={fs*0.3} fill="#1a1a1a"/>
+                    <path d={`M ${-fs*0.78},${-fs*0.2} Q ${-fs*0.92},${fs*1.9} 0,${fs*2.25} Q ${fs*0.92},${fs*1.9} ${fs*0.78},${-fs*0.2} Q 0,${-fs*0.55} ${-fs*0.78},${-fs*0.2} Z`} fill="#1c1917" stroke="#d4b106" strokeWidth={0.7}/>
+                    <line x1={0} y1={-fs*0.2} x2={0} y2={fs*2.0} stroke="#a8a29e" strokeWidth={0.4} opacity={0.7}/>
                   </g>
                 );
               }
-              // BUTTERFLY — bigger (snail-sized), stationary, wings flap in the
-              // diagonal wave rhythm.
-              const bs = 2.4; // scale-up factor to match snail size
+
+              // ---- BUTTERFLY (day) ----
+              // sized ~large leaf; three British species by trend colour.
+              const species = trend >= 0.33 ? 'green' : trend <= -0.33 ? 'red' : 'amber';
+              const bs = 9; // ~large leaf size
+              // brightness from level → wing saturation/opacity
+              const wingOp = 0.55 + level * 0.45;
+              // The flap happens in the FIRST part of the cycle then stays shut.
+              // Jitter only nudges the hold length (percentage), never the
+              // duration — so all butterflies stay perfectly in step.
+              const openAt = 4;                       // % when it starts opening
+              const fullAt = 9;                       // % fully open
+              const holdEnd = 20 + Math.round(jit*8); // 20-28% — randomised hold
+              const shutAt = holdEnd + 8;             // closes by here, then stays shut
+              // wing colours per species
+              const pal = species === 'green'
+                ? { up:'#3f8f3a', low:'#6fbf4a', band:'#2f6b2a', spot:'#fef9c3' }
+                : species === 'red'
+                ? { up:'#b3261e', low:'#e0432f', band:'#7f1d1d', spot:'#fde68a' }
+                : { up:'#d98a1f', low:'#f0b54a', band:'#9a5b12', spot:'#fff7d6' };
+              // antennae/feet tinted to wing
+              const trim = pal.band;
               return (
-                <g key={c.id} transform={`translate(${c.x},${c.y}) scale(${bs})`} style={{pointerEvents:'none'}}>
-                  <style>{`@keyframes fl${idSafe}{0%,100%{transform:scaleX(1)}50%{transform:scaleX(0.5)}}`}</style>
-                  <g style={{animation:`fl${idSafe} 2.4s ease-in-out ${waveDelay}s infinite`, transformOrigin:'center'}}>
-                    {/* wings */}
-                    <ellipse cx={-3} cy={-1.5} rx={3.2} ry={4} fill="#fb923c" stroke="#c2410c" strokeWidth={0.4}/>
-                    <ellipse cx={3} cy={-1.5} rx={3.2} ry={4} fill="#fb923c" stroke="#c2410c" strokeWidth={0.4}/>
-                    <ellipse cx={-2.6} cy={2.5} rx={2.4} ry={2.8} fill="#fdba74" stroke="#c2410c" strokeWidth={0.3}/>
-                    <ellipse cx={2.6} cy={2.5} rx={2.4} ry={2.8} fill="#fdba74" stroke="#c2410c" strokeWidth={0.3}/>
+                <g key={c.id} transform={`translate(${c.x},${c.y}) rotate(${(c.angle||0)+90}) scale(${bs/9})`} style={{pointerEvents:'none'}}>
+                  {/* open quickly, hold (randomised), close, pause, repeat with wave */}
+                  <style>{`@keyframes wing${idSafe}{0%,${openAt}%{transform:scaleX(0.12)}${fullAt}%{transform:scaleX(1)}${holdEnd}%{transform:scaleX(1)}${shutAt}%{transform:scaleX(0.12)}100%{transform:scaleX(0.12)}}`}</style>
+                  {/* CLOSED look: thin coloured band (always under, revealed when wings shut) */}
+                  <rect x={-1.2} y={-9} width={2.4} height={18} rx={1} fill={pal.band}/>
+                  {/* WINGS group — scales horizontally to mimic open/close, bird's-eye */}
+                  <g style={{animation:`wing${idSafe} ${CYCLE}s ease-in-out ${flapDelay}s infinite`, transformBox:'fill-box', transformOrigin:'center'}}>
+                    {/* left + right upper wings */}
+                    <path d="M0,-1 C -10,-10 -11,-2 -8,3 C -6,6 -2,5 0,2 Z" fill={pal.up} opacity={wingOp} stroke={pal.band} strokeWidth={0.4}/>
+                    <path d="M0,-1 C 10,-10 11,-2 8,3 C 6,6 2,5 0,2 Z" fill={pal.up} opacity={wingOp} stroke={pal.band} strokeWidth={0.4}/>
+                    {/* lower wings */}
+                    <path d="M0,2 C -8,4 -8,11 -4,12 C -1,12 0,7 0,4 Z" fill={pal.low} opacity={wingOp} stroke={pal.band} strokeWidth={0.35}/>
+                    <path d="M0,2 C 8,4 8,11 4,12 C 1,12 0,7 0,4 Z" fill={pal.low} opacity={wingOp} stroke={pal.band} strokeWidth={0.35}/>
                     {/* wing spots */}
-                    <circle cx={-3} cy={-1.5} r={0.9} fill="#7c2d12"/>
-                    <circle cx={3} cy={-1.5} r={0.9} fill="#7c2d12"/>
+                    <circle cx={-6} cy={-2} r={1.1} fill={pal.spot}/>
+                    <circle cx={6} cy={-2} r={1.1} fill={pal.spot}/>
                   </g>
                   {/* body */}
-                  <ellipse cx={0} cy={0} rx={0.8} ry={4.5} fill="#451a03"/>
-                  <line x1={0} y1={-4} x2={-1.5} y2={-6} stroke="#451a03" strokeWidth={0.4}/>
-                  <line x1={0} y1={-4} x2={1.5} y2={-6} stroke="#451a03" strokeWidth={0.4}/>
+                  <ellipse cx={0} cy={0} rx={0.9} ry={8.5} fill="#2b1a0a"/>
+                  {/* antennae tinted to wing */}
+                  <line x1={0} y1={-8} x2={-2.5} y2={-12} stroke={trim} strokeWidth={0.6}/>
+                  <line x1={0} y1={-8} x2={2.5} y2={-12} stroke={trim} strokeWidth={0.6}/>
+                  <circle cx={-2.5} cy={-12} r={0.9} fill={trim}/>
+                  <circle cx={2.5} cy={-12} r={0.9} fill={trim}/>
+                  {/* feet tinted to wing */}
+                  {[-1,1].map(side=>[-2,0,2].map((ly,li)=>(
+                    <g key={`bf${side}-${li}`}>
+                      <line x1={side*0.7} y1={ly} x2={side*4} y2={ly+1.5} stroke={trim} strokeWidth={0.5}/>
+                      <circle cx={side*4} cy={ly+1.5} r={0.7} fill={trim}/>
+                    </g>
+                  )))}
                 </g>
               );
             })}
@@ -10562,6 +10643,14 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
 
 const spiral = (count, cq, cr, used) => {
+  const neighbours = (q, r) => {
+    const odd = Math.abs(q) % 2 !== 0;
+    return [
+      [q+1, r+(odd?1:0)], [q+1, r+(odd?0:-1)],
+      [q,   r+1],         [q,   r-1],
+      [q-1, r+(odd?1:0)], [q-1, r+(odd?0:-1)],
+    ];
+  };
   const cells = [];
   if (!used.has(cq+','+cr)) { cells.push({q:cq,r:cr}); used.add(cq+','+cr); }
   let frontier = [{q:cq,r:cr}];
