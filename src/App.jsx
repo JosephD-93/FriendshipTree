@@ -297,22 +297,19 @@ function FabMenu(props) {
           </button>
         </div>
       )}
-      {/* Floating button below FAB when rake active */}
+      {/* Tornado button below FAB when rake active — sweeps leaves away */}
       {rakeActive && (
         <div style={{position:'fixed',left:px,top:py+FAB+8,zIndex:152,display:'flex',flexDirection:'column',alignItems:'center'}}>
           <button
-            onPointerDown={()=>{ rakeHoldTimer.current=setTimeout(()=>setClearLeavesConfirm(true),600); }}
-            onPointerUp={()=>{ clearTimeout(rakeHoldTimer.current); }}
-            onPointerLeave={()=>{ clearTimeout(rakeHoldTimer.current); }}
-            onClick={()=>setRakeActive(false)}
+            onClick={()=>{ if (typeof props.onTornado === 'function') props.onTornado(); }}
             style={{
               width:FAB,height:FAB,borderRadius:'50%',border:'3px solid white',cursor:'pointer',
-              background:'#92400e',
+              background:'#0e7490',
               boxShadow:'0 4px 16px rgba(0,0,0,0.35)',color:'white',
               display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:1,
             }}>
-            <span style={{fontSize:16,lineHeight:1}}>🧹</span>
-            <span style={{fontSize:7,fontWeight:900,letterSpacing:'0.5px'}}>STOP</span>
+            <span style={{fontSize:18,lineHeight:1}}>🌪️</span>
+            <span style={{fontSize:7,fontWeight:900,letterSpacing:'0.5px'}}>CLEAR</span>
           </button>
         </div>
       )}
@@ -341,6 +338,10 @@ function FabMenu(props) {
 const KEYFRAMES_CSS = [
   '@keyframes spin{to{transform:rotate(360deg)}}',
   '@keyframes fadein{from{opacity:0}to{opacity:1}}',
+  '@keyframes leafGrowIn{from{transform:scale(0)}to{transform:scale(1)}}',
+  '@keyframes vineGrow{from{stroke-dasharray:100;stroke-dashoffset:100}to{stroke-dasharray:100;stroke-dashoffset:0}}',
+  '@keyframes tornadoSweep{0%{transform:translateX(-20vw) translateY(10vh) scale(0.6) rotate(0deg);opacity:0}10%{opacity:1}90%{opacity:1}100%{transform:translateX(120vw) translateY(-6vh) scale(1.1) rotate(40deg);opacity:0}}',
+  '@keyframes tornadoSpin{to{transform:rotate(360deg)}}',
   // Native (Capacitor) safe-area handling so content clears the phone's
   // status bar (top) and navigation bar (bottom). Harmless in a browser
   // where the insets are 0.
@@ -840,6 +841,7 @@ function AppInner() {
   const [rakeDragging, setRakeDragging] = useState(false);
   const [collectedLeaves, setCollectedLeaves] = useState([]);
   const [clearLeavesConfirm, setClearLeavesConfirm] = useState(false);
+  const [tornadoActive, setTornadoActive] = useState(false); // tornado sweep animation
   const rakeHoldTimer = useRef(null);
   const [galleryItems, setGalleryItems] = useState([]);
   const [galleryViewer, setGalleryViewer] = useState(null);
@@ -1332,7 +1334,6 @@ function AppInner() {
       setLiftedNodeId(null);
       setHoverTarget(null);
       setHexSnapPos(null);
-    } else {
       setDragNode(null);
     }
 
@@ -2705,6 +2706,14 @@ Return only the JSON array. If nothing trackable is found, return [].`;
   });
 
   // ---- Butterfly / firefly perch points (photo edges + flowers) ----
+  const [borderTick, setBorderTick] = useState(0);
+  // After the borders are drawn into the ref, bump once so firefly perches
+  // pick up the border positions.
+  useEffect(() => {
+    const t = setTimeout(() => setBorderTick(v => v + 1), 300);
+    return () => clearTimeout(t);
+  }, [nodes, links]);
+
   const creaturePerches = useMemo(() => {
     const perches = [];
     const nodeById = {};
@@ -2716,8 +2725,12 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       .map(n => {
         const s = n.interactionScore || 0;
         const delta = s - (n.prevScore || s);
-        // trend → hue category: 1 = up(green), 0 = steady(amber), -1 = down(red)
-        const trend = delta > 20 ? 1 : delta < -20 ? -1 : 0;
+        // Colour reflects friendship health: actively dropping OR a very low
+        // score reads red; rising or healthy reads green; in between amber.
+        let trend;
+        if (delta > 20 || s >= 600) trend = 1;        // rising or strong → green
+        else if (delta < -20 || s < 200) trend = -1;  // dropping or weak → red
+        else trend = 0;                                // steady/mid → amber
         return { x: n.renderX, y: n.renderY, score: s, trend };
       });
 
@@ -2747,10 +2760,42 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       return { trend: trendBlend, level };
     };
 
+    const MIN_SPACING = 42; // px — prevents overcrowding while allowing per-person rings
+    const MIN_SPACING_SQ = MIN_SPACING * MIN_SPACING;
     const addPerch = (key, x, y, angle) => {
+      // density cap: skip if another perch is already very close
+      for (let i = 0; i < perches.length; i++) {
+        const p = perches[i];
+        const dx = p.x - x, dy = p.y - y;
+        if (dx*dx + dy*dy < MIN_SPACING_SQ) return; // too close — drop it
+      }
       const f = sampleField(x, y);
       perches.push({ key, x, y, angle, trend: f.trend, level: f.level });
     };
+
+    // Creatures around each person, scaled to their friendship level:
+    // tier1→2, tier2→2-3, tier3→3-4, tier4/5→4. (Density cap still applies.)
+    activeRenderNodes.forEach(node => {
+      if (node.hidden || node.type === 'flower' || node.type === 'hub') return;
+      const r = node.radius || 30;
+      const s = node.id === 'me' ? 1000 : (node.interactionScore || 0);
+      // tier from score (inline; partner/family treated as top)
+      let tier;
+      if (node.isPartner || node.isFamily) tier = 5;
+      else tier = s < 100 ? 1 : s < 300 ? 2 : s < 600 ? 3 : s < 1000 ? 4 : 5;
+      // base count + a little jitter for the "2-3 / 3-4" ranges
+      const jitterUp = (node.jitterSeed ?? (Math.abs((node.id||'').length * 7 % 3))) ;
+      let count;
+      if (tier <= 1) count = 2;
+      else if (tier === 2) count = 2 + (jitterUp % 2);      // 2-3
+      else if (tier === 3) count = 3 + (jitterUp % 2);      // 3-4
+      else count = 4;                                        // tier 4-5
+      // distribute evenly around the photo edge
+      for (let i = 0; i < count; i++) {
+        const a = (-Math.PI/2) + (i / count) * Math.PI * 2;
+        addPerch(`${node.id}-ring${i}`, node.renderX + Math.cos(a) * (r + 10), node.renderY + Math.sin(a) * (r + 10), (a*180/Math.PI) + 90);
+      }
+    });
 
     // Rest spots evenly along each vine (natural coverage by length)
     const seenPairs = new Set();
@@ -2783,15 +2828,29 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       }
     });
 
-    // A perch near each person too (so everyone has some nearby)
-    activeRenderNodes.forEach(node => {
-      if (node.hidden || node.type === 'flower' || node.type === 'hub') return;
-      const r = node.radius || 30;
-      addPerch(`${node.id}-rest`, node.renderX + r*0.8, node.renderY - r*0.8, -30);
-    });
+    // Perches spaced along each group's VINE BORDER arc (the boundary around
+    // a group). Read the border points computed during the last render.
+    try {
+      const borders = borderFlowerPositionsRef.current || {};
+      Object.keys(borders).forEach(hubId => {
+        const pts = borders[hubId];
+        if (!Array.isArray(pts) || pts.length < 4) return;
+        // sample evenly around the border (one perch per few points)
+        const stepB = Math.max(2, Math.round(pts.length / 8));
+        for (let i = 0; i < pts.length; i += stepB) {
+          const p = pts[i];
+          if (!p) continue;
+          // tangent is perpendicular to the inward normal (inX,inY)
+          const ang = (typeof p.inX === 'number')
+            ? (Math.atan2(p.inX, -p.inY) * 180 / Math.PI)
+            : 0;
+          addPerch(`border-${hubId}-${i}`, p.x, p.y, ang);
+        }
+      });
+    } catch(e) {}
 
     return perches;
-  }, [activeRenderNodes, links]);
+  }, [activeRenderNodes, links, borderTick]);
 
   // Initialise / maintain a population of creatures spread across ALL perches
   useEffect(() => {
@@ -2894,7 +2953,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       style={{
         display:'flex', flexDirection:'column',
         backgroundColor: theme.darkMode ? '#0f172a' : '#19432a',
-        backgroundImage: theme.darkMode ? 'none' : "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='44' height='44'%3E%3Cg fill='none' stroke='%232e7049' stroke-width='1.2' stroke-linecap='round'%3E%3Cpath d='M6 42 Q5 33 7 27'/%3E%3Cpath d='M9 42 Q10 34 8 28'/%3E%3Cpath d='M22 44 Q21 36 23 30'/%3E%3Cpath d='M25 44 Q26 37 24 31'/%3E%3Cpath d='M37 42 Q36 34 38 28'/%3E%3Cpath d='M40 42 Q41 35 39 29'/%3E%3Cpath d='M15 40 Q14 33 16 28'/%3E%3Cpath d='M31 41 Q32 34 30 29'/%3E%3C/g%3E%3C/svg%3E\")",
+        backgroundImage: theme.darkMode ? 'none' : "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cpath d='M64.2 35.8 Q61.7 29.5 60.7 25.4 M66.5 35.8 Q69.0 30.3 70.0 26.6 M68.7 35.8 Q66.2 31.4 65.1 28.5 M81.7 52.3 Q79.5 46.4 78.6 42.4 M83.9 52.3 Q84.6 48.1 84.9 45.3 M86.0 52.3 Q86.5 46.0 86.6 41.8 M78.6 187.6 Q77.1 184.4 76.4 182.2 M80.2 187.6 Q79.4 184.8 79.0 182.9 M81.8 187.6 Q80.4 183.3 79.8 180.3 M110.1 125.6 Q110.5 120.5 110.6 117.1 M112.1 125.6 Q112.1 120.7 112.1 117.5 M114.0 125.6 Q115.5 121.0 116.1 117.9 M116.0 125.6 Q118.2 121.1 119.1 118.2 M117.9 125.6 Q116.6 121.4 116.1 118.6 M37.8 151.5 Q39.5 147.7 40.2 145.1 M39.4 151.5 Q38.5 147.2 38.1 144.3 M41.1 151.5 Q39.4 146.6 38.7 143.4 M42.7 151.5 Q43.9 147.9 44.3 145.5 M32.0 98.0 Q32.3 95.2 32.4 93.4 M33.6 98.0 Q35.0 93.7 35.5 90.8 M35.2 98.0 Q34.5 94.6 34.3 92.4 M36.8 98.0 Q38.0 94.3 38.6 91.9 M38.3 98.0 Q36.6 95.2 35.9 93.4 M53.6 136.3 Q54.3 132.1 54.5 129.3 M55.3 136.3 Q56.7 131.4 57.2 128.2 M56.9 136.3 Q56.4 133.0 56.2 130.8 M58.5 136.3 Q56.4 132.1 55.5 129.4 M60.1 136.3 Q58.6 132.6 58.0 130.2 M26.0 18.8 Q25.3 12.5 25.0 8.3 M28.4 18.8 Q28.3 12.0 28.3 7.4 M30.7 18.8 Q30.1 14.4 29.8 11.4 M54.1 33.2 Q53.6 29.1 53.4 26.4 M56.1 33.2 Q58.2 28.9 59.1 26.1 M58.1 33.2 Q56.2 27.3 55.4 23.3 M60.1 33.2 Q58.7 29.4 58.1 26.9 M62.1 33.2 Q62.1 29.3 62.0 26.6 M113.3 56.3 Q113.8 52.7 114.0 50.3 M114.9 56.3 Q113.3 53.1 112.6 51.0 M116.4 56.3 Q118.3 52.0 119.1 49.1 M117.9 56.3 Q119.0 52.4 119.4 49.8 M85.6 168.3 Q84.8 161.2 84.5 156.5 M88.1 168.3 Q85.3 162.6 84.2 158.9 M90.7 168.3 Q87.6 161.8 86.4 157.5 M93.3 168.3 Q91.3 163.8 90.4 160.8 M95.9 168.3 Q94.8 163.5 94.3 160.3 M15.1 8.0 Q15.6 3.0 15.9 -0.3 M16.8 8.0 Q15.5 5.1 14.9 3.1 M18.5 8.0 Q19.2 4.4 19.4 1.9 M180.7 118.8 Q183.5 113.1 184.6 109.2 M182.8 118.8 Q182.7 114.1 182.6 111.0 M184.8 118.8 Q182.6 115.2 181.7 112.8 M67.4 56.7 Q65.4 51.0 64.6 47.2 M69.8 56.7 Q68.9 49.5 68.5 44.7 M72.3 56.7 Q75.0 50.4 76.1 46.2 M144.1 62.8 Q142.7 57.0 142.1 53.2 M146.4 62.8 Q144.3 58.0 143.5 54.8 M148.6 62.8 Q148.8 56.8 148.9 52.8 M148.7 68.7 Q150.2 63.8 150.8 60.5 M150.5 68.7 Q149.1 63.9 148.6 60.8 M152.2 68.7 Q151.5 64.5 151.3 61.7 M9.6 13.1 Q10.2 9.6 10.4 7.3 M11.5 13.1 Q13.0 9.3 13.7 6.7 M13.3 13.1 Q12.6 8.3 12.3 5.1 M15.2 13.1 Q13.1 7.7 12.2 4.0 M23.0 94.5 Q25.1 89.7 25.9 86.6 M24.9 94.5 Q24.8 89.2 24.7 85.6 M26.8 94.5 Q28.4 89.7 29.0 86.4 M28.7 94.5 Q29.5 91.1 29.9 88.9 M170.7 151.9 Q170.2 145.2 170.1 140.7 M173.0 151.9 Q170.4 146.0 169.3 142.1 M175.4 151.9 Q176.8 145.0 177.4 140.4 M177.8 151.9 Q179.3 146.6 180.0 143.0 M19.7 37.2 Q22.6 32.4 23.7 29.1 M22.3 37.2 Q19.8 30.0 18.8 25.2 M24.9 37.2 Q28.4 30.0 29.8 25.1' fill='none' stroke='%232e7049' stroke-width='1.1' stroke-linecap='round' stroke-opacity='0.55'/%3E%3Ccircle cx='127.7' cy='70.8' r='2.6' fill='%232e7049' fill-opacity='0.5'/%3E%3Ccircle cx='130.1' cy='75.1' r='2.6' fill='%232e7049' fill-opacity='0.5'/%3E%3Ccircle cx='125.2' cy='75.1' r='2.6' fill='%232e7049' fill-opacity='0.5'/%3E%3Cline x1='127.7' y1='73.7' x2='127.7' y2='78.3' stroke='%232e7049' stroke-width='0.6' stroke-opacity='0.5'/%3E%3Ccircle cx='35.1' cy='11.1' r='3.1' fill='%232e7049' fill-opacity='0.5'/%3E%3Ccircle cx='38.0' cy='16.2' r='3.1' fill='%232e7049' fill-opacity='0.5'/%3E%3Ccircle cx='32.1' cy='16.2' r='3.1' fill='%232e7049' fill-opacity='0.5'/%3E%3Cline x1='35.1' y1='14.5' x2='35.1' y2='20.1' stroke='%232e7049' stroke-width='0.6' stroke-opacity='0.5'/%3E%3Ccircle cx='126.3' cy='101.3' r='3.0' fill='%232e7049' fill-opacity='0.5'/%3E%3Ccircle cx='129.2' cy='106.4' r='3.0' fill='%232e7049' fill-opacity='0.5'/%3E%3Ccircle cx='123.4' cy='106.4' r='3.0' fill='%232e7049' fill-opacity='0.5'/%3E%3Cline x1='126.3' y1='104.7' x2='126.3' y2='110.2' stroke='%232e7049' stroke-width='0.6' stroke-opacity='0.5'/%3E%3Ccircle cx='88.4' cy='162.2' r='2.9' fill='%232e7049' fill-opacity='0.5'/%3E%3Ccircle cx='91.1' cy='167.0' r='2.9' fill='%232e7049' fill-opacity='0.5'/%3E%3Ccircle cx='85.6' cy='167.0' r='2.9' fill='%232e7049' fill-opacity='0.5'/%3E%3Cline x1='88.4' y1='165.4' x2='88.4' y2='170.7' stroke='%232e7049' stroke-width='0.6' stroke-opacity='0.5'/%3E%3Ccircle cx='49.1' cy='53.8' r='2.3' fill='%232e7049' fill-opacity='0.5'/%3E%3Ccircle cx='51.3' cy='57.6' r='2.3' fill='%232e7049' fill-opacity='0.5'/%3E%3Ccircle cx='47.0' cy='57.6' r='2.3' fill='%232e7049' fill-opacity='0.5'/%3E%3Cline x1='49.1' y1='56.3' x2='49.1' y2='60.4' stroke='%232e7049' stroke-width='0.6' stroke-opacity='0.5'/%3E%3Ccircle cx='54.3' cy='112.8' r='2.2' fill='%232e7049' fill-opacity='0.5'/%3E%3Ccircle cx='56.5' cy='116.4' r='2.2' fill='%232e7049' fill-opacity='0.5'/%3E%3Ccircle cx='52.2' cy='116.4' r='2.2' fill='%232e7049' fill-opacity='0.5'/%3E%3Cline x1='54.3' y1='115.2' x2='54.3' y2='119.2' stroke='%232e7049' stroke-width='0.6' stroke-opacity='0.5'/%3E%3C/svg%3E\")",
         backgroundRepeat: 'repeat',
         color: theme.darkMode ? '#f1f5f9' : '#f0fdf4',
       }}>
@@ -3061,11 +3120,38 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         commitAllPaths={commitAllPaths} setVineDrawMode={setVineDrawMode}
         setMacheteMode={setMacheteMode} setPendingPaths={setPendingPaths} setCurrentStroke={setCurrentStroke}
         rakeActive={rakeActive} setRakeActive={setRakeActive}
+        onTornado={()=>{
+          setTornadoActive(true);
+          // clear the fallen leaves partway through the sweep
+          setTimeout(()=>{ setFallenLeaves([]); setCollectedLeaves([]); }, 900);
+          setTimeout(()=>{ setTornadoActive(false); }, 1900);
+        }}
         lassoMode={lassoMode} setLassoMode={setLassoMode}
         setLassoPath={setLassoPath} setLassoSelected={setLassoSelected} setLassoMenuOpen={setLassoMenuOpen}
       />}
 
-      {/* Clear all leaves confirm popup */}
+      {/* Tornado sweep — clears fallen leaves with a whirlwind crossing the screen */}
+      {tornadoActive && (
+        <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:480,pointerEvents:'none',overflow:'hidden'}}>
+          <div style={{position:'absolute',top:'40%',left:0,width:140,height:200,animation:'tornadoSweep 1.9s ease-in-out forwards'}}>
+            <svg width="140" height="200" viewBox="0 0 140 200">
+              <g style={{transformOrigin:'70px 100px',animation:'tornadoSpin 0.5s linear infinite'}}>
+                {/* funnel made of stacked swirling ellipses */}
+                <path d="M30,10 Q70,0 110,10 L92,60 Q70,52 48,60 Z" fill="#94a3b8" opacity="0.45"/>
+                <path d="M44,62 Q70,54 96,62 L84,108 Q70,102 56,108 Z" fill="#cbd5e1" opacity="0.5"/>
+                <path d="M56,110 Q70,104 84,110 L78,150 Q70,146 62,150 Z" fill="#e2e8f0" opacity="0.55"/>
+                <path d="M62,152 Q70,148 78,152 L74,184 Q70,182 66,184 Z" fill="#f1f5f9" opacity="0.6"/>
+              </g>
+              {/* swirling debris lines */}
+              <g stroke="#a16207" strokeWidth="2" opacity="0.6" fill="none">
+                <path d="M20,40 Q60,30 100,42"/>
+                <path d="M28,90 Q70,82 108,92"/>
+                <path d="M40,140 Q70,134 96,142"/>
+              </g>
+            </svg>
+          </div>
+        </div>
+      )}
       {clearLeavesConfirm && (
         <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:500,background:'rgba(0,0,0,0.6)',display:'flex',alignItems:'center',justifyContent:'center'}}
           onPointerDown={()=>setClearLeavesConfirm(false)}>
@@ -4985,7 +5071,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           bottom: 56, // leave room for bottom tab bar
           cursor: macheteMode ? 'crosshair' : vineDrawMode ? 'cell' : (isPanning ? 'grabbing' : 'grab'),
           backgroundColor: theme.darkMode ? '#0f172a' : '#19432a',
-          backgroundImage: theme.darkMode ? 'none' : "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='44' height='44'%3E%3Cg fill='none' stroke='%232e7049' stroke-width='1.2' stroke-linecap='round'%3E%3Cpath d='M6 42 Q5 33 7 27'/%3E%3Cpath d='M9 42 Q10 34 8 28'/%3E%3Cpath d='M22 44 Q21 36 23 30'/%3E%3Cpath d='M25 44 Q26 37 24 31'/%3E%3Cpath d='M37 42 Q36 34 38 28'/%3E%3Cpath d='M40 42 Q41 35 39 29'/%3E%3Cpath d='M15 40 Q14 33 16 28'/%3E%3Cpath d='M31 41 Q32 34 30 29'/%3E%3C/g%3E%3C/svg%3E\")",
+          backgroundImage: theme.darkMode ? 'none' : "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cpath d='M64.2 35.8 Q61.7 29.5 60.7 25.4 M66.5 35.8 Q69.0 30.3 70.0 26.6 M68.7 35.8 Q66.2 31.4 65.1 28.5 M81.7 52.3 Q79.5 46.4 78.6 42.4 M83.9 52.3 Q84.6 48.1 84.9 45.3 M86.0 52.3 Q86.5 46.0 86.6 41.8 M78.6 187.6 Q77.1 184.4 76.4 182.2 M80.2 187.6 Q79.4 184.8 79.0 182.9 M81.8 187.6 Q80.4 183.3 79.8 180.3 M110.1 125.6 Q110.5 120.5 110.6 117.1 M112.1 125.6 Q112.1 120.7 112.1 117.5 M114.0 125.6 Q115.5 121.0 116.1 117.9 M116.0 125.6 Q118.2 121.1 119.1 118.2 M117.9 125.6 Q116.6 121.4 116.1 118.6 M37.8 151.5 Q39.5 147.7 40.2 145.1 M39.4 151.5 Q38.5 147.2 38.1 144.3 M41.1 151.5 Q39.4 146.6 38.7 143.4 M42.7 151.5 Q43.9 147.9 44.3 145.5 M32.0 98.0 Q32.3 95.2 32.4 93.4 M33.6 98.0 Q35.0 93.7 35.5 90.8 M35.2 98.0 Q34.5 94.6 34.3 92.4 M36.8 98.0 Q38.0 94.3 38.6 91.9 M38.3 98.0 Q36.6 95.2 35.9 93.4 M53.6 136.3 Q54.3 132.1 54.5 129.3 M55.3 136.3 Q56.7 131.4 57.2 128.2 M56.9 136.3 Q56.4 133.0 56.2 130.8 M58.5 136.3 Q56.4 132.1 55.5 129.4 M60.1 136.3 Q58.6 132.6 58.0 130.2 M26.0 18.8 Q25.3 12.5 25.0 8.3 M28.4 18.8 Q28.3 12.0 28.3 7.4 M30.7 18.8 Q30.1 14.4 29.8 11.4 M54.1 33.2 Q53.6 29.1 53.4 26.4 M56.1 33.2 Q58.2 28.9 59.1 26.1 M58.1 33.2 Q56.2 27.3 55.4 23.3 M60.1 33.2 Q58.7 29.4 58.1 26.9 M62.1 33.2 Q62.1 29.3 62.0 26.6 M113.3 56.3 Q113.8 52.7 114.0 50.3 M114.9 56.3 Q113.3 53.1 112.6 51.0 M116.4 56.3 Q118.3 52.0 119.1 49.1 M117.9 56.3 Q119.0 52.4 119.4 49.8 M85.6 168.3 Q84.8 161.2 84.5 156.5 M88.1 168.3 Q85.3 162.6 84.2 158.9 M90.7 168.3 Q87.6 161.8 86.4 157.5 M93.3 168.3 Q91.3 163.8 90.4 160.8 M95.9 168.3 Q94.8 163.5 94.3 160.3 M15.1 8.0 Q15.6 3.0 15.9 -0.3 M16.8 8.0 Q15.5 5.1 14.9 3.1 M18.5 8.0 Q19.2 4.4 19.4 1.9 M180.7 118.8 Q183.5 113.1 184.6 109.2 M182.8 118.8 Q182.7 114.1 182.6 111.0 M184.8 118.8 Q182.6 115.2 181.7 112.8 M67.4 56.7 Q65.4 51.0 64.6 47.2 M69.8 56.7 Q68.9 49.5 68.5 44.7 M72.3 56.7 Q75.0 50.4 76.1 46.2 M144.1 62.8 Q142.7 57.0 142.1 53.2 M146.4 62.8 Q144.3 58.0 143.5 54.8 M148.6 62.8 Q148.8 56.8 148.9 52.8 M148.7 68.7 Q150.2 63.8 150.8 60.5 M150.5 68.7 Q149.1 63.9 148.6 60.8 M152.2 68.7 Q151.5 64.5 151.3 61.7 M9.6 13.1 Q10.2 9.6 10.4 7.3 M11.5 13.1 Q13.0 9.3 13.7 6.7 M13.3 13.1 Q12.6 8.3 12.3 5.1 M15.2 13.1 Q13.1 7.7 12.2 4.0 M23.0 94.5 Q25.1 89.7 25.9 86.6 M24.9 94.5 Q24.8 89.2 24.7 85.6 M26.8 94.5 Q28.4 89.7 29.0 86.4 M28.7 94.5 Q29.5 91.1 29.9 88.9 M170.7 151.9 Q170.2 145.2 170.1 140.7 M173.0 151.9 Q170.4 146.0 169.3 142.1 M175.4 151.9 Q176.8 145.0 177.4 140.4 M177.8 151.9 Q179.3 146.6 180.0 143.0 M19.7 37.2 Q22.6 32.4 23.7 29.1 M22.3 37.2 Q19.8 30.0 18.8 25.2 M24.9 37.2 Q28.4 30.0 29.8 25.1' fill='none' stroke='%232e7049' stroke-width='1.1' stroke-linecap='round' stroke-opacity='0.55'/%3E%3Ccircle cx='127.7' cy='70.8' r='2.6' fill='%232e7049' fill-opacity='0.5'/%3E%3Ccircle cx='130.1' cy='75.1' r='2.6' fill='%232e7049' fill-opacity='0.5'/%3E%3Ccircle cx='125.2' cy='75.1' r='2.6' fill='%232e7049' fill-opacity='0.5'/%3E%3Cline x1='127.7' y1='73.7' x2='127.7' y2='78.3' stroke='%232e7049' stroke-width='0.6' stroke-opacity='0.5'/%3E%3Ccircle cx='35.1' cy='11.1' r='3.1' fill='%232e7049' fill-opacity='0.5'/%3E%3Ccircle cx='38.0' cy='16.2' r='3.1' fill='%232e7049' fill-opacity='0.5'/%3E%3Ccircle cx='32.1' cy='16.2' r='3.1' fill='%232e7049' fill-opacity='0.5'/%3E%3Cline x1='35.1' y1='14.5' x2='35.1' y2='20.1' stroke='%232e7049' stroke-width='0.6' stroke-opacity='0.5'/%3E%3Ccircle cx='126.3' cy='101.3' r='3.0' fill='%232e7049' fill-opacity='0.5'/%3E%3Ccircle cx='129.2' cy='106.4' r='3.0' fill='%232e7049' fill-opacity='0.5'/%3E%3Ccircle cx='123.4' cy='106.4' r='3.0' fill='%232e7049' fill-opacity='0.5'/%3E%3Cline x1='126.3' y1='104.7' x2='126.3' y2='110.2' stroke='%232e7049' stroke-width='0.6' stroke-opacity='0.5'/%3E%3Ccircle cx='88.4' cy='162.2' r='2.9' fill='%232e7049' fill-opacity='0.5'/%3E%3Ccircle cx='91.1' cy='167.0' r='2.9' fill='%232e7049' fill-opacity='0.5'/%3E%3Ccircle cx='85.6' cy='167.0' r='2.9' fill='%232e7049' fill-opacity='0.5'/%3E%3Cline x1='88.4' y1='165.4' x2='88.4' y2='170.7' stroke='%232e7049' stroke-width='0.6' stroke-opacity='0.5'/%3E%3Ccircle cx='49.1' cy='53.8' r='2.3' fill='%232e7049' fill-opacity='0.5'/%3E%3Ccircle cx='51.3' cy='57.6' r='2.3' fill='%232e7049' fill-opacity='0.5'/%3E%3Ccircle cx='47.0' cy='57.6' r='2.3' fill='%232e7049' fill-opacity='0.5'/%3E%3Cline x1='49.1' y1='56.3' x2='49.1' y2='60.4' stroke='%232e7049' stroke-width='0.6' stroke-opacity='0.5'/%3E%3Ccircle cx='54.3' cy='112.8' r='2.2' fill='%232e7049' fill-opacity='0.5'/%3E%3Ccircle cx='56.5' cy='116.4' r='2.2' fill='%232e7049' fill-opacity='0.5'/%3E%3Ccircle cx='52.2' cy='116.4' r='2.2' fill='%232e7049' fill-opacity='0.5'/%3E%3Cline x1='54.3' y1='115.2' x2='54.3' y2='119.2' stroke='%232e7049' stroke-width='0.6' stroke-opacity='0.5'/%3E%3C/svg%3E\")",
           backgroundRepeat: 'repeat',
           overflow: 'hidden',
         }}
@@ -5082,9 +5168,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           <rect width="100%" height="100%" fill="url(#bg-grid)" />
 
           <g ref={svgGroupRef} transform={`translate(${transform.x}, ${transform.y}) scale(${transform.scale})`}>
-            {/* Background fill */}
+            {/* Background fill — green in light mode (grass texture shows from the Canvas div behind) */}
             <rect x="-50000" y="-50000" width="100000" height="100000"
-              fill={theme.darkMode ? '#0f172a' : '#f8fafc'} />
+              fill={theme.darkMode ? '#0f172a' : '#19432a'} fillOpacity={theme.darkMode ? 1 : 0.55} />
 
             {/* Group vine borders — parametric arch system */}
             {/* Always compute border flower positions, even when vine borders hidden */}
@@ -5927,7 +6013,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
             {viewMode === 'canvas' && (
               <g>
-                {!sliderDragging && links.map((link, i) => {
+                {!sliderDragging && (() => {
+                  const linkParts = links.map((link, i) => {
                   const src = activeRenderNodes.find(n => n.id === link.source);
                   const tgt = activeRenderNodes.find(n => n.id === link.target);
                   if (!src || !tgt) return null;
@@ -6266,9 +6353,69 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     }
                   }
 
-                  return (
-                    <g key={`link-${i}`}>
-                      {/* Render core first, then wrapped strands, growing strand last (on top) */}
+                  // --- UNDER-PASS FADE ---------------------------------------
+                  // When a long vine to the social node / a far group would pass
+                  // OVER another group's area, fade it along that stretch so it
+                  // reads as going underneath (without thinning much).
+                  let underPassGrad = null;
+                  const gradId = `vfade-${i}`;
+                  try {
+                    // Only fade under a group that is genuinely VISIBLE on screen.
+                    // Hidden hubs (group centres with no visible footprint) must
+                    // NOT cause fading, or vines vanish for no visible reason.
+                    const otherHubs = activeRenderNodes.filter(n =>
+                      n.type === 'hub' && !n.hidden &&
+                      n.id !== src.id && n.id !== tgt.id);
+                    let nearestT = null, nearestDistOver = Infinity, nearestR = 90;
+                    otherHubs.forEach(h => {
+                      const hx = h.renderX, hy = h.renderY;
+                      if (typeof hx !== 'number' || typeof hy !== 'number') return;
+                      // project hub centre onto the vine segment
+                      const t = (((hx - src.renderX) * dx) + ((hy - src.renderY) * dy)) / (dist*dist);
+                      if (t <= 0.08 || t >= 0.92) return; // must be in the middle stretch
+                      const projX = src.renderX + dx * t, projY = src.renderY + dy * t;
+                      const gap = Math.hypot(hx - projX, hy - projY);
+                      const groupR = Math.max(90, (h.radius || 40) * 3); // generous group footprint
+                      if (gap < groupR && gap < nearestDistOver) {
+                        nearestDistOver = gap; nearestT = t; nearestR = groupR;
+                      }
+                    });
+                    if (nearestT !== null) {
+                      // Fade the vine across the WHOLE width of the group it passes
+                      // under, so it clearly dissolves beneath and re-emerges.
+                      const c = Math.max(0.12, Math.min(0.88, nearestT));
+                      // half-width as a fraction of the vine, based on group size
+                      const w = Math.min(0.42, Math.max(0.22, (nearestR / dist)));
+                      const soft = w * 0.55; // soft transition shoulder
+                      underPassGrad = (
+                        <linearGradient id={gradId}
+                          x1={src.renderX} y1={src.renderY} x2={tgt.renderX} y2={tgt.renderY}
+                          gradientUnits="userSpaceOnUse">
+                          <stop offset="0" stopColor="#fff"/>
+                          <stop offset={Math.max(0,c-w).toFixed(3)} stopColor="#fff"/>
+                          <stop offset={Math.max(0,c-soft).toFixed(3)} stopColor="#000"/>
+                          <stop offset={c.toFixed(3)} stopColor="#000"/>
+                          <stop offset={Math.min(1,c+soft).toFixed(3)} stopColor="#000"/>
+                          <stop offset={Math.min(1,c+w).toFixed(3)} stopColor="#fff"/>
+                          <stop offset="1" stopColor="#fff"/>
+                        </linearGradient>
+                      );
+                    }
+                  } catch(e) {}
+
+                  return {
+                    key: `link-${i}`,
+                    vine: (
+                    <g key={`vine-${i}`}>
+                      {underPassGrad && <defs>
+                        {underPassGrad}
+                        <mask id={`vmask-${i}`} maskUnits="userSpaceOnUse"
+                          x="-50000" y="-50000" width="100000" height="100000">
+                          <rect x="-50000" y="-50000" width="100000" height="100000"
+                            fill={`url(#${gradId})`} />
+                        </mask>
+                      </defs>}
+                      <g {...(underPassGrad ? { mask: `url(#vmask-${i})` } : {})}>
                       {activeStrands.map(({ d, width, role, colorDark, colorLight }, si) => {
                         // Compute total path length for dasharray when animating
                         const pathLen = dist * 1.1; // approximate
@@ -6285,6 +6432,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           />
                         );
                       })}
+                      </g>
+                    </g>
+                    ),
+                    foliage: (
+                    <g key={`foliage-${i}`}>
                       {/* Vine bite-holes chewed by caterpillars (yellow edged) */}
                       {vineBites.map((vb, vi) => (
                         <circle key={`vb-${vi}`} cx={vb.x} cy={vb.y} r={vb.r}
@@ -6292,7 +6444,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           stroke="#fde047" strokeWidth={0.5} opacity={0.9}
                           style={{pointerEvents:'none'}}/>
                       ))}
-                      {/* Leaves — drawn after strands */}
+                      {/* Leaves — drawn after strands. Hidden while dragging for
+                          performance; they grow back from zero when you drop. */}
                       {allLeaves.map((lf, li) => {
                         if (lf.shrivelled) return null;
                         if (lf.bud) {
@@ -6368,8 +6521,14 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         );
                       })}
                     </g>
-                  );
-                })}
+                    ),
+                  };
+                  }).filter(Boolean);
+                  return (<>
+                    <g className="vines-layer">{linkParts.map(p => p && p.vine)}</g>
+                    <g className="foliage-layer">{linkParts.map(p => p && p.foliage)}</g>
+                  </>);
+                })()}
               </g>
             )}
 
@@ -7138,9 +7297,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               // The delay (0..WAVE_SWEEP) is set purely by diagonal position, so
               // the wave ripples across; everyone flaps with the SAME duration and
               // is shut again well before the cycle repeats.
-              const CYCLE = 6;        // seconds — identical for every butterfly
+              const CYCLE = 6;        // seconds — identical for every creature
               const WAVE_SWEEP = 2.6; // seconds the wave takes to cross the screen
-              const flapDelay = (((c.x + c.y) % 800) / 800) * WAVE_SWEEP;
+              // NEGATIVE delay phase-locks every creature to one shared timeline,
+              // so the wave can never drift no matter when each mounts/re-renders.
+              const flapDelay = -(((c.x + c.y) % 800) / 800) * WAVE_SWEEP;
               const idSafe = c.id.replace(/[^a-zA-Z0-9]/g,'');
               const trend = c.trend ?? 0;       // -1 down .. +1 up
               const level = c.level ?? 0.4;     // 0..1 brightness
@@ -7164,11 +7325,19 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 // brightness: brighter halo + longer/brighter flash when level high
                 const haloR = fs * (3.6 + level * 3.0);
                 const flashPeak = 0.8 + level * 0.2;
+                // Fireflies flash on EVERY wave pass. The flash cycle equals the
+                // wave sweep so the ripple repeats continuously; negative delay
+                // (scaled to this cycle) keeps every firefly phase-locked.
+                const FF_CYCLE = WAVE_SWEEP * 1.4; // ~3.6s — one flash per wave
+                const ffDelay = -(((c.x + c.y) % 800) / 800) * WAVE_SWEEP;
+                // gentle per-firefly variation in WHERE in the flash it peaks
+                const peakStart = 30 + Math.round(jit * 8); // 30-38%
+                const peakEnd = peakStart + 7;
                 return (
                   <g key={c.id} transform={`translate(${c.x},${c.y}) rotate(${(c.angle||0)+90})`} style={{pointerEvents:'none'}}>
-                    <style>{`@keyframes ff${idSafe}{0%,6%{opacity:0.03}13%,18%{opacity:${flashPeak.toFixed(2)}}28%,100%{opacity:0.03}}`}</style>
+                    <style>{`@keyframes ff${idSafe}{0%,${peakStart-18}%{opacity:0.04}${peakStart}%,${peakEnd}%{opacity:${flashPeak.toFixed(2)}}${peakEnd+16}%,100%{opacity:0.04}}`}</style>
                     {/* GLOW from abdomen tip, flashes — layered for a bright bloom */}
-                    <g style={{animation:`ff${idSafe} ${CYCLE}s ease-in-out ${flapDelay}s infinite`}}>
+                    <g style={{animation:`ff${idSafe} ${FF_CYCLE.toFixed(2)}s ease-in-out ${ffDelay.toFixed(2)}s infinite`, animationPlayState: (liftedNodeId || isPanning) ? 'paused' : 'running'}}>
                       <circle cx={0} cy={fs*2.5} r={haloR} fill={col} opacity={0.22}/>
                       <circle cx={0} cy={fs*2.5} r={haloR*0.6} fill={col} opacity={0.55}/>
                       <circle cx={0} cy={fs*2.45} r={fs*1.6} fill={col} opacity={0.95}/>
@@ -7227,7 +7396,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   {/* CLOSED look: thin coloured band (always under, revealed when wings shut) */}
                   <rect x={-1.4} y={-15} width={2.8} height={30} rx={1.2} fill={pal.band}/>
                   {/* WINGS group — scales horizontally to mimic open/close, bird's-eye */}
-                  <g style={{animation:`wing${idSafe} ${CYCLE}s ease-in-out ${flapDelay}s infinite`, transformBox:'fill-box', transformOrigin:'center'}}>
+                  <g style={{animation:`wing${idSafe} ${CYCLE}s ease-in-out ${flapDelay}s infinite`, animationPlayState: (liftedNodeId || isPanning) ? 'paused' : 'running', transformBox:'fill-box', transformOrigin:'center'}}>
                     <g transform="scale(2, 1.75)">
                     {/* left + right upper wings */}
                     <path d="M0,-1 C -10,-10 -11,-2 -8,3 C -6,6 -2,5 0,2 Z" fill={pal.up} opacity={wingOp} stroke={pal.band} strokeWidth={0.4}/>
