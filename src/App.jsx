@@ -11447,11 +11447,26 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               // the neighbouring cell too so newly auto-placed people don't land
               // directly beside one and overlap it.
               if (n.type === 'hub' && saved.col + 1 < COLS) occupied.add(`${saved.col+1},${saved.row}`);
+            } else if (saved && saved.col >= 0 && saved.col < COLS) {
+              // Saved cell exists but collides with someone already placed -- find
+              // the NEAREST free cell to where this node actually belongs, not the
+              // first free cell from the absolute top of the page. Searching from
+              // row 0 every time was sending colliding nodes flying to the top.
+              let foundCol = saved.col, foundRow = saved.row, found = false;
+              for (let ring = 0; ring <= 30 && !found; ring++) {
+                for (let dc = -ring; dc <= ring && !found; dc++) {
+                  for (let dr = -ring; dr <= ring && !found; dr++) {
+                    if (Math.max(Math.abs(dc), Math.abs(dr)) !== ring) continue;
+                    const c = saved.col + dc, r = saved.row + dr;
+                    if (c < 0 || c >= COLS || r < 0) continue;
+                    if (!occupied.has(`${c},${r}`)) { foundCol = c; foundRow = r; found = true; }
+                  }
+                }
+              }
+              placed[n.id] = { col: foundCol, row: foundRow };
+              occupied.add(`${foundCol},${foundRow}`);
+              if (n.type === 'hub' && foundCol + 1 < COLS) occupied.add(`${foundCol+1},${foundRow}`);
             } else {
-              // Either no saved position, or the saved cell is already taken by
-              // someone else (can happen when a node was unreachable for a while
-              // and its old slot got reused, then it reappears) -- find a fresh
-              // spot instead of overlapping whoever's already there.
               pending.push(n);
             }
           });
