@@ -1844,6 +1844,10 @@ function AppInner() {
   const [feedScrollTop, setFeedScrollTop] = useState(0);
   const [feedDragMode, setFeedDragMode] = useState((() => { try { return JSON.parse(localStorage.getItem('ft_settings')||'{}').feedDragMode || 'onehand'; } catch(e) { return 'onehand'; } })()); // 'onehand' | 'twohand'
   const [feedMacheteMode, setFeedMacheteMode] = useState(false); // axe tool toggle for Feed -- when on, the page freezes and a finger-drag draws a slash trail that cuts any connection it crosses
+  const [feedShowSettings, setFeedShowSettings] = useState(null); // null, or the dimKey whose band was double-tapped
+  const [feedShowNames, setFeedShowNames] = useState((() => { try { return JSON.parse(localStorage.getItem('ft_settings')||'{}').feedShowNames ?? true; } catch(e) { return true; } })());
+  const [feedShowBorderColors, setFeedShowBorderColors] = useState((() => { try { return JSON.parse(localStorage.getItem('ft_settings')||'{}').feedShowBorderColors ?? true; } catch(e) { return true; } })());
+  const [feedShowGrid, setFeedShowGrid] = useState(false);
   const [feedSlashing, setFeedSlashing] = useState(false); // true while actively mid-slash (freezes scroll)
   const [feedSlashTrail, setFeedSlashTrail] = useState([]); // [{x,y}] points of the current slash, in screen coordinates
   const [darknessFilter, setDarknessFilter] = useState((() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); return s.darknessFilter !== undefined ? s.darknessFilter : true; } catch(e) { return true; } })());
@@ -4013,10 +4017,11 @@ function AppInner() {
         photoBorderMode, showMapKey, showVineBorders, darknessFilter, windowThemeKey, customWindowTheme,
         vineBorderParams, surroundFlowerSettings, activeTags, strandParams, groupBorderParams,
         groupPhotoLayout, visibleTools, assistantCharacter, simpleMode, mapStyle, feedDragMode,
+        feedShowNames, feedShowBorderColors,
       }));
     } catch(e) { console.warn('ft_settings save failed:', e.message); }
   }, [theme, groupColors, archivedLinks, collapsedGroups, minimisedNodes, gridStyle, photoBorderMode,
-      showMapKey, showVineBorders, darknessFilter, windowThemeKey, customWindowTheme, vineBorderParams, surroundFlowerSettings, activeTags, strandParams, groupBorderParams, assistantCharacter, simpleMode, mapStyle, feedDragMode]);
+      showMapKey, showVineBorders, darknessFilter, windowThemeKey, customWindowTheme, vineBorderParams, surroundFlowerSettings, activeTags, strandParams, groupBorderParams, assistantCharacter, simpleMode, mapStyle, feedDragMode, feedShowNames, feedShowBorderColors]);
 
 
   useEffect(() => {
@@ -11502,6 +11507,51 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           return placed;
         };
 
+        // Re-pack a dimension's whole layout: clears every saved position for this
+        // dimension, then re-places everyone in an order that keeps each group's
+        // own members right next to their hub, and lets the auto-placement's
+        // existing collision logic naturally avoid overlaps -- rather than the
+        // raw tree-walk order, which can scatter a group's members far from each
+        // other and leave gaps.
+        const optimizeClusters = (targetDimKey) => {
+          const flowerDef = sectionDefs.find(s => s.dimKey === targetDimKey);
+          if (!flowerDef) return;
+          const { members: rawMembers, parentOf: rawParentOf } = buildMembers(flowerDef.flowerId);
+          // Order: walk parent-first, then immediately place all of that parent's
+          // direct children together, before moving to the next sibling -- this is
+          // what keeps a group visually clustered with its own people instead of
+          // interleaved with everyone else's.
+          const ordered = [];
+          const visited = new Set();
+          const visit = (parentId) => {
+            const children = rawMembers.filter(m => rawParentOf[m.id] === parentId);
+            children.forEach(c => {
+              if (visited.has(c.id)) return;
+              visited.add(c.id);
+              ordered.push(c);
+            });
+            children.forEach(c => { if (c.type === 'hub') visit(c.id); });
+          };
+          visit(flowerDef.flowerId);
+          setFeedPositions(prev => {
+            const next = { ...prev };
+            Object.keys(next).forEach(k => { if (k.startsWith(`${targetDimKey}:`)) delete next[k]; });
+            const occupied = new Set();
+            let row = 0, col = 0;
+            ordered.forEach(n => {
+              while (occupied.has(`${col},${row}`)) {
+                col++; if (col >= COLS) { col = 0; row++; }
+              }
+              next[`${targetDimKey}:${n.id}`] = { col, row };
+              occupied.add(`${col},${row}`);
+              if (n.type === 'hub' && col + 1 < COLS) occupied.add(`${col+1},${row}`);
+              col++; if (col >= COLS) { col = 0; row++; }
+            });
+            return next;
+          });
+          showToast('🧩 Layout optimised');
+        };
+
         // Drop the currently-carried node (and its branch, if any) at a screen
         // point. Resolves the target grid cell from the drop point, finds the
         // nearest free cell if it's taken, applies the same delta to every
@@ -11769,9 +11819,20 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 <div key={dimKey} data-feed-section={dimKey} style={{borderBottom:`1px solid ${dm?'#1e293b':'#e2e8f0'}`, padding:'0'}}>
                   <div style={{position:'relative', height:sectionH}}>
                     {/* Flower band, full height of the section */}
-                    <div data-feed-node-id={flowerId} style={{position:'absolute', left:0, top:0, bottom:0, width:BAND_W,
+                    <div data-feed-node-id={flowerId}
+                      onClick={() => {
+                        const now = Date.now();
+                        const lastTap = feedLastTapRef.current.get(flowerId) || 0;
+                        if (now - lastTap < 500) {
+                          feedLastTapRef.current.delete(flowerId);
+                          setFeedShowSettings(dimKey);
+                        } else {
+                          feedLastTapRef.current.set(flowerId, now);
+                        }
+                      }}
+                      style={{position:'absolute', left:0, top:0, bottom:0, width:BAND_W,
                       background:dim.color, display:'flex', flexDirection:'column', alignItems:'center',
-                      justifyContent:'center', gap:6, borderRight:'3px solid #000000'}}>
+                      justifyContent:'center', gap:6, borderRight:'3px solid #000000', cursor:'pointer'}}>
                       <div style={{fontSize:22}}>{dim.emoji}</div>
                       <div style={{fontSize:11, fontWeight:800, color:'white', writingMode:'vertical-rl',
                         textOrientation:'mixed', letterSpacing:0.5}}>{dim.label}</div>
@@ -11907,9 +11968,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       }}
                       style={{position:'absolute', left:BAND_W, top:0, height:sectionH, width:stripW}}>
 
-                      {/* Faint grid preview while dragging within this section -- same idea as
-                          the original map's local hex cluster shown around a lifted node. */}
-                      {feedCarrying && feedCarrying.dimKey === dimKey && (() => {
+                      {/* Faint grid preview while dragging within this section, or
+                          persistently if the "Show grid lattice" setting is on. */}
+                      {(feedShowGrid || (feedCarrying && feedCarrying.dimKey === dimKey)) && (() => {
                         const strokeCol = dm ? 'rgba(16,185,129,0.35)' : 'rgba(16,185,129,0.3)';
                         const cells = [];
                         for (let c = 0; c < COLS; c++) {
@@ -11950,7 +12011,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         const hubColor = isHub ? resolveHubColor(node.id) : null;
                         const myGroupId = nodeGroupMap[node.id];
                         const groupColor = node.personalColor || (myGroupId ? resolveHubColor(myGroupId) : null);
-                        const ringColor = isHub ? hubColor : (groupColor || dim.color);
+                        const ringColor = !feedShowBorderColors ? (dm?'#475569':'#94a3b8') : (isHub ? hubColor : (groupColor || dim.color));
                         const isCarried = feedCarrying && (feedCarrying.nodeId === node.id || (feedCarrying.branchIds && feedCarrying.branchIds.has(node.id))) && feedCarrying.dimKey === dimKey;
                         const boxW = isHub ? pillW : r * 2;
                         const boxH = isHub ? pillH : r * 2;
@@ -12086,7 +12147,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                 </>
                               )}
                             </svg>
-                            {!isHub && (
+                            {!isHub && feedShowNames && (
                               <div style={{fontSize:10,fontWeight:600,color:dm?'#cbd5e1':'#334155',
                                 marginTop:2, whiteSpace:'nowrap', maxWidth:r*2+20, overflow:'hidden', textOverflow:'ellipsis'}}>
                                 {node.label}
@@ -12200,6 +12261,62 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 the finger directly. The page is frozen (scroll locked) for the
                 duration of the carry, so there's no scroll offset to account for --
                 screenX/screenY are just the live pointer position. */}
+            {/* Feed settings panel -- opened by double-tapping a dimension band */}
+            {feedShowSettings && (
+              <>
+                <div style={{position:'fixed', top:0, left:0, right:0, bottom:0, zIndex:398, background:'rgba(0,0,0,0.5)'}}
+                  onClick={()=>setFeedShowSettings(false)}/>
+                <div style={{position:'fixed', left:16, right:16, top:'20%', zIndex:399,
+                  background:dm?'#1e293b':'white', borderRadius:16, boxShadow:'0 8px 32px rgba(0,0,0,0.4)',
+                  border:`1px solid ${dm?'#334155':'#e2e8f0'}`, padding:16, maxHeight:'60%', overflowY:'auto'}}>
+                  <div style={{fontSize:16, fontWeight:800, color:dm?'#e2e8f0':'#1e293b', marginBottom:12}}>
+                    🗺️ Stacked View Settings{dimensions[feedShowSettings] ? ` — ${dimensions[feedShowSettings].label}` : ''}
+                  </div>
+
+                  <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', padding:'10px 0', borderBottom:`1px solid ${dm?'#334155':'#f1f5f9'}`}}>
+                    <span style={{fontSize:14, color:dm?'#e2e8f0':'#334155'}}>Show names</span>
+                    <input type="checkbox" checked={feedShowNames} onChange={e=>setFeedShowNames(e.target.checked)} style={{width:20,height:20,accentColor:'#10b981'}}/>
+                  </div>
+
+                  <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', padding:'10px 0', borderBottom:`1px solid ${dm?'#334155':'#f1f5f9'}`}}>
+                    <span style={{fontSize:14, color:dm?'#e2e8f0':'#334155'}}>Group colour borders</span>
+                    <input type="checkbox" checked={feedShowBorderColors} onChange={e=>setFeedShowBorderColors(e.target.checked)} style={{width:20,height:20,accentColor:'#10b981'}}/>
+                  </div>
+
+                  <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', padding:'10px 0', borderBottom:`1px solid ${dm?'#334155':'#f1f5f9'}`}}>
+                    <span style={{fontSize:14, color:dm?'#e2e8f0':'#334155'}}>Show grid lattice</span>
+                    <input type="checkbox" checked={feedShowGrid} onChange={e=>setFeedShowGrid(e.target.checked)} style={{width:20,height:20,accentColor:'#10b981'}}/>
+                  </div>
+
+                  <button onClick={()=>{ optimizeClusters(feedShowSettings); }}
+                    style={{width:'100%', marginTop:12, padding:'12px', borderRadius:10, border:'none',
+                      background:'#10b981', color:'white', fontWeight:700, fontSize:14, cursor:'pointer'}}>
+                    🧩 Optimise clusters (this dimension)
+                  </button>
+
+                  <button onClick={()=>{
+                      const dk = feedShowSettings;
+                      setFeedPositions(prev => {
+                        const next = { ...prev };
+                        Object.keys(next).forEach(k => { if (k.startsWith(`${dk}:`)) delete next[k]; });
+                        return next;
+                      });
+                      showToast('↩️ Layout reset');
+                    }}
+                    style={{width:'100%', marginTop:8, padding:'12px', borderRadius:10, border:`1px solid ${dm?'#475569':'#cbd5e1'}`,
+                      background:'none', color:dm?'#e2e8f0':'#334155', fontWeight:700, fontSize:14, cursor:'pointer'}}>
+                    ↩️ Reset layout (this dimension)
+                  </button>
+
+                  <button onClick={()=>setFeedShowSettings(false)}
+                    style={{width:'100%', marginTop:8, padding:'10px', borderRadius:10, border:'none',
+                      background:'none', color:dm?'#94a3b8':'#64748b', fontWeight:600, fontSize:13, cursor:'pointer'}}>
+                    Close
+                  </button>
+                </div>
+              </>
+            )}
+
             {/* Visible slash trail while actively cutting with the axe tool */}
             {feedSlashing && feedSlashTrail.length > 1 && (
               <svg style={{position:'fixed', top:0, left:0, width:'100%', height:'100%', zIndex:300, pointerEvents:'none'}}>
