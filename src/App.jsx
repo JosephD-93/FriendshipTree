@@ -1825,6 +1825,7 @@ function AppInner() {
   // person's real canvas x/y -- this is purely where they sit within the Feed view's
   // fixed-width hex strip for that one dimension.
   const [feedPositions, setFeedPositions] = useState((() => { try { return JSON.parse(localStorage.getItem('ft_feed_positions')||'{}'); } catch(e) { return {}; } })());
+  const feedLayoutHistory = useRef([]); // snapshots of feedPositions taken before any destructive layout operation (optimise, reset), so they can be undone -- the main app's undo only tracks nodes/links, never this
   useEffect(() => { try { localStorage.setItem('ft_feed_positions', JSON.stringify(feedPositions)); } catch(e) {} }, [feedPositions]);
   const feedScrollRef = useRef(null);
   const feedDragRAF = useRef(null); // pending requestAnimationFrame id, used to throttle drag position updates to once per repaint instead of once per raw pointer event
@@ -11517,39 +11518,148 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           const flowerDef = sectionDefs.find(s => s.dimKey === targetDimKey);
           if (!flowerDef) return;
           const { members: rawMembers, parentOf: rawParentOf } = buildMembers(flowerDef.flowerId);
-          // Order: walk parent-first, then immediately place all of that parent's
-          // direct children together, before moving to the next sibling -- this is
-          // what keeps a group visually clustered with its own people instead of
-          // interleaved with everyone else's.
-          const ordered = [];
-          const visited = new Set();
-          const visit = (parentId) => {
-            const children = rawMembers.filter(m => rawParentOf[m.id] === parentId);
-            children.forEach(c => {
-              if (visited.has(c.id)) return;
-              visited.add(c.id);
-              ordered.push(c);
-            });
-            children.forEach(c => { if (c.type === 'hub') visit(c.id); });
+
+          // Save the current layout for this dimension so this can be undone --
+          // the main app's undo only tracks nodes/links, never feedPositions, so
+          // a destructive layout change had no way back without this.
+          const before = {};
+          Object.keys(feedPositions).forEach(k => { if (k.startsWith(`${targetDimKey}:`)) before[k] = feedPositions[k]; });
+          feedLayoutHistory.current = [...feedLayoutHistory.current.slice(-9), { dimKey: targetDimKey, positions: before }];
+
+          // Each DIRECT child of the flower (a top-level person or group) becomes
+          // its own cluster -- that child plus everyone nested under it. Clusters
+          // are stacked one after another DOWN the page, in their existing
+          // relative vertical order (by current average row, falling back to 0
+          // for anyone never placed) -- NOT collapsed to the top. Within a
+          // cluster, the group/anchor comes first and its own members follow
+          // immediately after, so they read as visually grouped together.
+          const topLevel = rawMembers.filter(m => rawParentOf[m.id] === flowerDef.flowerId);
+          const clusterOf = (rootId) => {
+            const out = [rootId];
+            const stack = [rootId];
+            while (stack.length) {
+              const cur = stack.pop();
+              rawMembers.forEach(m => {
+                if (rawParentOf[m.id] === cur && !out.includes(m.id)) { out.push(m.id); stack.push(m.id); }
+              });
+            }
+            return out;
           };
-          visit(flowerDef.flowerId);
+          const avgRow = (ids) => {
+            const rows = ids.map(id => feedPositions[`${targetDimKey}:${id}`]?.row).filter(r => r != null);
+            return rows.length ? rows.reduce((a,b)=>a+b,0) / rows.length : 9999;
+          };
+          const clusters = topLevel
+            .map(root => ({ root, ids: clusterOf(root.id) }))
+            .sort((a, b) => avgRow(a.ids) - avgRow(b.ids));
+
           setFeedPositions(prev => {
             const next = { ...prev };
             Object.keys(next).forEach(k => { if (k.startsWith(`${targetDimKey}:`)) delete next[k]; });
-            const occupied = new Set();
-            let row = 0, col = 0;
-            ordered.forEach(n => {
-              while (occupied.has(`${col},${row}`)) {
+            let rowCursor = 0;
+            clusters.forEach(({ ids }) => {
+              const occupied = new Set();
+              let row = 0, col = 0;
+              ids.forEach(id => {
+                const n = rawMembers.find(m => m.id === id);
+                while (occupied.has(`${col},${row}`)) {
+                  col++; if (col >= COLS) { col = 0; row++; }
+                }
+                next[`${targetDimKey}:${id}`] = { col, row: rowCursor + row };
+                occupied.add(`${col},${row}`);
+                if (n && n.type === 'hub' && col + 1 < COLS) occupied.add(`${col+1},${row}`);
                 col++; if (col >= COLS) { col = 0; row++; }
-              }
-              next[`${targetDimKey}:${n.id}`] = { col, row };
-              occupied.add(`${col},${row}`);
-              if (n.type === 'hub' && col + 1 < COLS) occupied.add(`${col+1},${row}`);
-              col++; if (col >= COLS) { col = 0; row++; }
+              });
+              const usedRows = Math.max(...ids.map(id => {
+                const p = next[`${targetDimKey}:${id}`];
+                return p ? p.row - rowCursor : 0;
+              })) + 1;
+              rowCursor += usedRows + 1; // +1 row gap between clusters
             });
             return next;
           });
-          showToast('🧩 Layout optimised');
+          showToast('🧩 Clusters optimised — tap ↩️ to undo');
+        };
+
+        const undoFeedLayout = () => {
+          const last = feedLayoutHistory.current.pop();
+          if (!last) { showToast('Nothing to undo'); return; }
+          setFeedPositions(prev => {
+            const next = { ...prev };
+            Object.keys(next).forEach(k => { if (k.startsWith(`${last.dimKey}:`)) delete next[k]; });
+            Object.entries(last.positions).forEach(([k, v]) => { next[k] = v; });
+            return next;
+          });
+          showToast('↩️ Layout restored');
+        };
+
+        // Build a simplified Feed layout FROM the main map's real positions --
+        // same cluster-by-group structure as optimizeClusters, but clusters are
+        // ordered by their actual position on the main canvas (angle around the
+        // flower, breaking ties by distance) instead of their current Feed row.
+        // This is what makes "who's grouped near each other on the real map"
+        // carry over into a sensible, standardised arrangement here, rather than
+        // an exact pixel copy (which wouldn't fit this grid at all).
+        const copyLayoutFromMap = (targetDimKey) => {
+          const flowerDef = sectionDefs.find(s => s.dimKey === targetDimKey);
+          if (!flowerDef) return;
+          const flowerNode = nodes.find(n => n.id === flowerDef.flowerId);
+          if (!flowerNode) return;
+          const { members: rawMembers, parentOf: rawParentOf } = buildMembers(flowerDef.flowerId);
+
+          const before = {};
+          Object.keys(feedPositions).forEach(k => { if (k.startsWith(`${targetDimKey}:`)) before[k] = feedPositions[k]; });
+          feedLayoutHistory.current = [...feedLayoutHistory.current.slice(-9), { dimKey: targetDimKey, positions: before }];
+
+          const topLevel = rawMembers.filter(m => rawParentOf[m.id] === flowerDef.flowerId);
+          const clusterOf = (rootId) => {
+            const out = [rootId];
+            const stack = [rootId];
+            while (stack.length) {
+              const cur = stack.pop();
+              rawMembers.forEach(m => {
+                if (rawParentOf[m.id] === cur && !out.includes(m.id)) { out.push(m.id); stack.push(m.id); }
+              });
+            }
+            return out;
+          };
+          // Each cluster's "real position" is its root's actual canvas x/y, used
+          // to compute the angle around the flower and distance from it -- this
+          // is the actual spatial relationship being carried over.
+          const clusters = topLevel.map(root => {
+            const rn = nodes.find(n => n.id === root.id) || root;
+            const dx = (rn.x ?? 0) - (flowerNode.x ?? 0), dy = (rn.y ?? 0) - (flowerNode.y ?? 0);
+            const angle = Math.atan2(dy, dx);
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            return { root, ids: clusterOf(root.id), angle, dist };
+          }).sort((a, b) => a.angle - b.angle || a.dist - b.dist);
+
+          setFeedPositions(prev => {
+            const next = { ...prev };
+            Object.keys(next).forEach(k => { if (k.startsWith(`${targetDimKey}:`)) delete next[k]; });
+            let rowCursor = 0;
+            clusters.forEach(({ ids }) => {
+              const occupied = new Set();
+              let row = 0, col = 0;
+              ids.forEach(id => {
+                const n = rawMembers.find(m => m.id === id);
+                while (occupied.has(`${col},${row}`)) {
+                  col++; if (col >= COLS) { col = 0; row++; }
+                }
+                next[`${targetDimKey}:${id}`] = { col, row: rowCursor + row };
+                occupied.add(`${col},${row}`);
+                if (n && n.type === 'hub' && col + 1 < COLS) occupied.add(`${col+1},${row}`);
+                col++; if (col >= COLS) { col = 0; row++; }
+              });
+              const usedRows = Math.max(...ids.map(id => {
+                const p = next[`${targetDimKey}:${id}`];
+                return p ? p.row - rowCursor : 0;
+              })) + 1;
+              rowCursor += usedRows + 1;
+            });
+            return next;
+          });
+          showToast('🗺️ Layout copied from map — tap Undo to restore');
         };
 
         // Drop the currently-carried node (and its branch, if any) at a screen
@@ -12294,18 +12404,33 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     🧩 Optimise clusters (this dimension)
                   </button>
 
+                  <button onClick={()=>{ copyLayoutFromMap(feedShowSettings); }}
+                    style={{width:'100%', marginTop:8, padding:'12px', borderRadius:10, border:'none',
+                      background:'#3b82f6', color:'white', fontWeight:700, fontSize:14, cursor:'pointer'}}>
+                    🗺️ Copy layout from map
+                  </button>
+
                   <button onClick={()=>{
                       const dk = feedShowSettings;
+                      const before = {};
+                      Object.keys(feedPositions).forEach(k => { if (k.startsWith(`${dk}:`)) before[k] = feedPositions[k]; });
+                      feedLayoutHistory.current = [...feedLayoutHistory.current.slice(-9), { dimKey: dk, positions: before }];
                       setFeedPositions(prev => {
                         const next = { ...prev };
                         Object.keys(next).forEach(k => { if (k.startsWith(`${dk}:`)) delete next[k]; });
                         return next;
                       });
-                      showToast('↩️ Layout reset');
+                      showToast('↩️ Layout reset — tap Undo to restore');
                     }}
                     style={{width:'100%', marginTop:8, padding:'12px', borderRadius:10, border:`1px solid ${dm?'#475569':'#cbd5e1'}`,
                       background:'none', color:dm?'#e2e8f0':'#334155', fontWeight:700, fontSize:14, cursor:'pointer'}}>
                     ↩️ Reset layout (this dimension)
+                  </button>
+
+                  <button onClick={()=>{ undoFeedLayout(); }}
+                    style={{width:'100%', marginTop:8, padding:'12px', borderRadius:10, border:`1px solid ${dm?'#475569':'#cbd5e1'}`,
+                      background:'none', color:dm?'#e2e8f0':'#334155', fontWeight:700, fontSize:14, cursor:'pointer'}}>
+                    ⏪ Undo last layout change
                   </button>
 
                   <button onClick={()=>setFeedShowSettings(false)}
