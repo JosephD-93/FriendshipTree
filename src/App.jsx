@@ -7,6 +7,7 @@ import {
   BookUser
 } from 'lucide-react';
 
+
 const APP_VERSION = '3.1';
 const INTERACTION_DISTANCE = 70;
 const TIER_COLORS_GLOBAL = ['#bef264','#84cc16','#166534','#3b82f6','#9333ea'];
@@ -15,13 +16,16 @@ const MAX_SCORE = 1000;
 const DECAY_RATE_PER_DAY = 5;
 const CALENDAR_NODE_SCALE = 8.4; // 30% smaller than original 15, then 20% more
 
+
 const MONTH_COLORS = [
   '#1E3A8A', '#3B82F6', '#10B981', '#22C55E',
   '#84CC16', '#F59E0B', '#EF4444', '#F97316',
   '#D97706', '#9A3412', '#78350F', '#312E81'
 ];
 
+
 const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
 
 // Inline SVG avatar data URIs — no network required, no XML comments (breaks JSX)
 const makeAvatar = (bg, skin, hair, extraPath) => {
@@ -47,6 +51,24 @@ const makeAvatar = (bg, skin, hair, extraPath) => {
   ].join('');
   return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(s);
 };
+
+// Plain neutral silhouette (mannequin-head style) for brand new people with no photo yet.
+// Background colour is randomised per call from a friendly palette.
+const BLANK_AVATAR_COLORS = ['#64748b','#7c3aed','#0f766e','#b45309','#be185d','#1d4ed8','#0e7490','#65a30d','#9333ea','#0891b2'];
+const makeBlankAvatar = () => {
+  const bg = BLANK_AVATAR_COLORS[Math.floor(Math.random() * BLANK_AVATAR_COLORS.length)];
+  const s = [
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">`,
+    `<rect width="100" height="100" fill="${bg}"/>`,
+    // Plain head silhouette
+    `<circle cx="50" cy="40" r="20" fill="rgba(255,255,255,0.92)"/>`,
+    // Shoulders/bust silhouette
+    `<path d="M14 100 Q14 62 50 62 Q86 62 86 100 Z" fill="rgba(255,255,255,0.92)"/>`,
+    `</svg>`,
+  ].join('');
+  return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(s);
+};
+
 
 const AVATARS = {
   me: makeAvatar('#4f46e5','#f4c2a1','#2d1b00',
@@ -83,8 +105,13 @@ const AVATARS = {
     '<ellipse cx="50" cy="35" rx="24" ry="13" fill="#1a1a1a"/><ellipse cx="50" cy="22" rx="9" ry="9" fill="#1a1a1a"/><rect x="46" y="22" width="8" height="14" fill="#1a1a1a"/>'),
 };
 
+
 const L4 = 600;
 const L5 = 1000;
+// New friends start halfway through Tier 1 (Acquaintance, 0-99) rather than at zero,
+// so they're not immediately flagged as "neglected" before any interaction has happened.
+const STARTING_SCORE = 50;
+
 
 // Blank startup — just Me and the 5 life flowers
 const INITIAL_NODES = [
@@ -96,6 +123,7 @@ const INITIAL_NODES = [
   { id: 'flower_growth',     type: 'flower', dimKey: 'growth',     label: 'Growth',     x: 165,  y: 95,   pinned: false },
 ];
 
+
 const INITIAL_LINKS = [
   { source: 'me', target: 'flower_social'     },
   { source: 'me', target: 'flower_creativity' },
@@ -103,6 +131,7 @@ const INITIAL_LINKS = [
   { source: 'me', target: 'flower_health'     },
   { source: 'me', target: 'flower_growth'     },
 ];
+
 
 // Full demo snapshot — loaded when ✨ Demo is pressed
 const DEMO_NODES = [
@@ -120,6 +149,7 @@ const DEMO_NODES = [
   { id: 'imogen', label: 'Imogen', img: AVATARS.imogen,  x: -330, y: -572, pinned: false, birthday: '3rd Jun 95'   },
 ];
 
+
 const DEMO_LINKS = [
   { source: 'flower_social', target: 'hub_musicals' },
   { source: 'flower_social', target: 'hub_family'   },
@@ -134,6 +164,7 @@ const DEMO_LINKS = [
   { source: 'hub_family',    target: 'dad'    },
   { source: 'hub_climbing',  target: 'hayley' },
 ];
+
 
 class ErrorBoundary extends React.Component {
   constructor(props) { super(props); this.state = { error: null }; }
@@ -152,6 +183,8 @@ class ErrorBoundary extends React.Component {
 }
 
 
+
+
 // -- FAB Component ------------------------------------------------------------
 function FabMenu(props) {
   const { theme, setTheme, fabOpen, setFabOpen, fabPos, setFabPos,
@@ -163,17 +196,22 @@ function FabMenu(props) {
     rakeActive, setRakeActive,
     lassoMode, setLassoMode, setLassoPath, setLassoSelected, setLassoMenuOpen,
     visibleTools = {},
+    simpleMode, setSimpleMode, mapStyle, setMapStyle,
   } = props;
+
 
   const dm = theme.darkMode;
   const bg = dm?'#1e293b':'white';
   const col = dm?'#e2e8f0':'#334155';
   const FAB=52, TOOL=44, ICON_R=82, LABEL_R=130;
   const W=window.innerWidth, H=window.innerHeight;
+  const [showMapStylePicker, setShowMapStylePicker] = React.useState(false);
+
 
   const py = fabPos.edge==='bottom'?H-FAB-64:fabPos.edge==='top'?8:Math.max(8,Math.min(H-FAB-64,fabPos.offset*H-FAB/2));
   const px = fabPos.edge==='right'?W-FAB-8:fabPos.edge==='left'?8:Math.max(8,Math.min(W-FAB-8,fabPos.offset*W-FAB/2));
   const cx=px+FAB/2, cy=py+FAB/2;
+
 
   const snapEdge=(ex,ey)=>{
     const d={left:ex,right:W-ex,top:ey,bottom:H-ey};
@@ -182,7 +220,9 @@ function FabMenu(props) {
     return {edge,offset:off};
   };
 
+
   const tools = [
+    {id:'mapstyle',icon:'👁️',label:'Map Style',fn:()=>{setShowMapStylePicker(p=>!p);},active:mapStyle!=='full'},
     {id:'search',icon:'🔍',label:'Search',  fn:()=>{setSearchOpen(true);setFabOpen(false);}},
     {id:'undo',  icon:'↩', label:'Undo',    fn:()=>undo(), holdFn:()=>redo(), holdIcon:'↪',holdLabel:'Redo', dim:historyLen===0&&futureLen===0},
     {id:'vine',  icon:'🌿',label:vineDrawMode?'Commit':'Vine', fn:()=>{vineDrawMode?(commitAllPaths(),setVineDrawMode(false)):(setVineDrawMode(true),setMacheteMode(false),setPendingPaths([]),setCurrentStroke([]));setFabOpen(false);}, active:vineDrawMode},
@@ -194,9 +234,11 @@ function FabMenu(props) {
   ].filter(t => t.id === 'cfg' || t.id === 'daynight' || visibleTools[t.id] !== false);
   const n=tools.length;
 
+
   // Fan angle pointing inward from whichever edge we're on
   const cAngle=fabPos.edge==='left'?0:fabPos.edge==='right'?180:fabPos.edge==='top'?90:270;
   const spread=(n-1)*36;
+
 
   // For each tool, compute icon pos and label pos at same angle, further out
   // Clamp label to stay on screen
@@ -213,13 +255,44 @@ function FabMenu(props) {
     };
   };
 
+
   const fabIconCol=fabOpen?'white':(vineDrawMode||macheteMode||rakeActive||lassoMode?'white':'#10b981');
   const fabBg=fabOpen?'#dc2626':(vineDrawMode||macheteMode||rakeActive||lassoMode?'#10b981':bg);
+
+
 
 
   return (
     <>
       {fabOpen&&<div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:149}} onClick={()=>setFabOpen(false)}/>}
+
+      {/* Map style picker -- opened by the eye icon in the FAB. Three buttons for
+          Detailed (full), Simple, and Stacked (feed) views. */}
+      {showMapStylePicker && (
+        <>
+          <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:154}}
+            onClick={()=>setShowMapStylePicker(false)}/>
+          <div style={{position:'fixed', left:cx-100, top:cy-220, width:200, zIndex:155,
+            background:bg, borderRadius:16, boxShadow:'0 8px 32px rgba(0,0,0,0.4)',
+            border:`1px solid ${dm?'#334155':'#e2e8f0'}`, overflow:'hidden'}}>
+            {[
+              {key:'full', emoji:'🌿', name:'Detailed'},
+              {key:'simple', emoji:'⚪', name:'Simple'},
+              {key:'feed', emoji:'📜', name:'Stacked'},
+              {key:'feedDetailed', emoji:'🌱', name:'Stacked + Detailed'},
+            ].map(opt => (
+              <button key={opt.key}
+                onClick={()=>{ setMapStyle(opt.key); setSimpleMode(opt.key === 'simple'); setShowMapStylePicker(false); setFabOpen(false); }}
+                style={{display:'flex',alignItems:'center',gap:10,width:'100%',padding:'12px 16px',
+                  background:mapStyle===opt.key?(dm?'#0f2d1a':'#ecfdf5'):'none',border:'none',cursor:'pointer',
+                  borderBottom:`1px solid ${dm?'#334155':'#f1f5f9'}`,textAlign:'left'}}>
+                <span style={{fontSize:18}}>{opt.emoji}</span>
+                <span style={{fontSize:14,fontWeight:700,color:mapStyle===opt.key?'#10b981':col}}>{opt.name}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
       {tools.map((t,i)=>{
         const pos=getPositions(i);
         const held=heldTool===t.id;
@@ -336,6 +409,10 @@ function FabMenu(props) {
 
 
 
+
+
+
+
 const KEYFRAMES_CSS = [
   '@keyframes spin{to{transform:rotate(360deg)}}',
   '@keyframes fadein{from{opacity:0}to{opacity:1}}',
@@ -354,10 +431,838 @@ const KEYFRAMES_CSS = [
   // Fixed full-screen overlays should still cover the whole screen
 ].join(' ');
 
+
+// Lazy-loading component that scans all hub galleries for photos tagging a given person
+// Compact swipeable card panel that appears above the molehill
+// Small SVG line chart for the mole cards -- one line per person, ending in their photo/initial
+function MoleLineChart({ people, color, height }) {
+  const W = 260, H = height || 110, PAD_L = 6, PAD_R = 26, PAD_T = 14, PAD_B = 14;
+  const plotW = W - PAD_L - PAD_R, plotH = H - PAD_T - PAD_B;
+  if (!people.length) return null;
+
+  // Build a series per person from scoreHistory, restricted to the last ~7 days
+  // (fallback to a flat 2-point line spanning prevScore -> current if no recent history)
+  const WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+  const cutoff = Date.now() - WINDOW_MS;
+  const series = people.map(n => {
+    const recentHist = (n.scoreHistory || []).filter(h => h.ts >= cutoff);
+    const pts = recentHist.length >= 2
+      ? recentHist.map(h => h.score)
+      : [n.prevScore||0, n.interactionScore||0];
+    return { node: n, pts };
+  });
+
+  const allVals = series.flatMap(s => s.pts);
+  const minV = Math.min(...allVals, 0);
+  const maxV = Math.max(...allVals, 10);
+  const range = Math.max(1, maxV - minV);
+
+  const colorFor = (i) => {
+    const palette = [color, '#60a5fa', '#f472b6', '#a78bfa', '#fb923c', '#34d399'];
+    return palette[i % palette.length];
+  };
+
+  return (
+    <div>
+      <div style={{fontSize:10,color:'#64748b',marginBottom:2}}>Last 7 days</div>
+      <svg viewBox={`0 0 ${W} ${H}`} width='100%' height={H} style={{display:'block',overflow:'visible'}}>
+      {/* Baseline grid */}
+      <line x1={PAD_L} y1={PAD_T+plotH} x2={PAD_L+plotW} y2={PAD_T+plotH} stroke='#334155' strokeWidth='1'/>
+      {series.map((s, i) => {
+        const n = s.node;
+        const pts = s.pts;
+        const stepX = plotW / Math.max(1, pts.length - 1);
+        const coords = pts.map((v, pi) => ({
+          x: PAD_L + pi * stepX,
+          y: PAD_T + plotH - ((v - minV) / range) * plotH,
+        }));
+        const d = coords.map((c,ci) => `${ci===0?'M':'L'}${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ');
+        const lineColor = colorFor(i);
+        const endPt = coords[coords.length - 1];
+        const initials = (n.label||'?').trim().split(/\s+/).map(w=>w[0]).slice(0,2).join('').toUpperCase();
+        return (
+          <g key={n.id}>
+            <path d={d} fill='none' stroke={lineColor} strokeWidth='2.5' strokeLinecap='round' strokeLinejoin='round' opacity='0.9'/>
+            {/* Face/initial bubble at the end of the line */}
+            <g transform={`translate(${endPt.x},${endPt.y})`}>
+              <circle r='10' fill={n.img ? '#0f172a' : lineColor} stroke={lineColor} strokeWidth='1.5'/>
+              {n.img ? (
+                <>
+                  <defs>
+                    <clipPath id={`moleChartClip-${n.id}`}><circle r='9'/></clipPath>
+                  </defs>
+                  <image href={n.img} x='-9' y='-9' width='18' height='18'
+                    clipPath={`url(#moleChartClip-${n.id})`} preserveAspectRatio='xMidYMid slice'/>
+                </>
+              ) : (
+                <text y='3.5' textAnchor='middle' fontSize='8' fontWeight='700' fill='white'>{initials}</text>
+              )}
+            </g>
+          </g>
+        );
+      })}
+    </svg>
+    </div>
+  );
+}
+
+
+
+// ============================================================================
+// Shared vine/leaf/underpass renderer -- extracted from the main canvas's
+// per-link rendering so BOTH the full canvas and the Feed (Stacked + Detailed)
+// view can produce the exact same strand-braiding, leaf-lifecycle, and
+// under-node fade behaviour from just two endpoints and some node metadata.
+// Pure function: no React hooks, no closures over component state -- every
+// input it needs is passed in explicitly.
+// ============================================================================
+// ============================================================================
+// Shared convex-hull + sagging-arch path builder -- extracted from the main
+// canvas's group blob/vine border so the Feed view can wrap the same organic
+// border around a cluster of grid-positioned circles, not just free-floating
+// canvas ones. Pure geometry: takes {x,y,r} points, returns {x,y,section,
+// sectionT} path points. No React, no canvas-specific state.
+// ============================================================================
+function buildClusterHull(pts) {
+  if (pts.length <= 1) return pts;
+  const cross = (O, A, B) => (A.x - O.x) * (B.y - O.y) - (A.y - O.y) * (B.x - O.x);
+  const s = [...pts].sort((a, b) => a.x - b.x || a.y - b.y);
+  const lo = [], up = [];
+  for (const p of s) { while (lo.length >= 2 && cross(lo[lo.length-2], lo[lo.length-1], p) <= 0) lo.pop(); lo.push(p); }
+  for (const p of [...s].reverse()) { while (up.length >= 2 && cross(up[up.length-2], up[up.length-1], p) <= 0) up.pop(); up.push(p); }
+  return [...lo.slice(0, -1), ...up.slice(0, -1)];
+}
+
+function buildArchPath(hull, sagDepth, arcSteps, sagSteps) {
+  const hn = hull.length;
+  const pts = [];
+  if (hn === 0) return pts;
+  const cen = { x: hull.reduce((s,p)=>s+p.x,0)/hn, y: hull.reduce((s,p)=>s+p.y,0)/hn };
+  if (hn === 1) {
+    const A = hull[0];
+    const steps = arcSteps * 6;
+    for (let s = 0; s <= steps; s++) {
+      const ang = (s / steps) * Math.PI * 2;
+      pts.push({ x: A.x + Math.cos(ang) * A.r, y: A.y + Math.sin(ang) * A.r, section: 'arc', sectionT: (s % arcSteps) / arcSteps });
+    }
+    return pts;
+  }
+  const arcOuter = (A, a1, a2) => {
+    let an1 = a1, an2 = a2;
+    while (an2 < an1) an2 += Math.PI * 2;
+    while (an2 > an1 + Math.PI * 2) an2 -= Math.PI * 2;
+    const shortSpan = an2 - an1;
+    if (shortSpan < Math.PI) an2 = an1 - (Math.PI * 2 - shortSpan);
+    const res = [];
+    for (let s = 0; s <= arcSteps; s++) {
+      const t = s / arcSteps, ang = an1 + (an2 - an1) * t;
+      res.push({ x: A.x + Math.cos(ang) * A.r, y: A.y + Math.sin(ang) * A.r, section: 'arc', sectionT: s / arcSteps });
+    }
+    return res;
+  };
+  for (let i = 0; i < hn; i++) {
+    const A = hull[i], B = hull[(i+1) % hn], P = hull[(i+hn-1) % hn];
+    const angAtoB = Math.atan2(B.y - A.y, B.x - A.x);
+    const angPtoA = Math.atan2(A.y - P.y, A.x - P.x);
+    const arrivalAng = angPtoA + Math.PI;
+    pts.push(...arcOuter(A, arrivalAng, angAtoB));
+    const leaveX = A.x + Math.cos(angAtoB) * A.r, leaveY = A.y + Math.sin(angAtoB) * A.r;
+    const arriveX = B.x + Math.cos(angAtoB + Math.PI) * B.r, arriveY = B.y + Math.sin(angAtoB + Math.PI) * B.r;
+    const mx = (leaveX + arriveX) / 2, my = (leaveY + arriveY) / 2;
+    const toCx = cen.x - mx, toCy = cen.y - my, toD = Math.sqrt(toCx*toCx + toCy*toCy) || 1;
+    const edgeLen = Math.sqrt((B.x-A.x)**2 + (B.y-A.y)**2) || 1;
+    const sagX = mx + (toCx/toD) * edgeLen * sagDepth, sagY = my + (toCy/toD) * edgeLen * sagDepth;
+    for (let s = 0; s <= sagSteps; s++) {
+      const t = s / sagSteps, it = 1 - t;
+      pts.push({ x: it*it*leaveX + 2*it*t*sagX + t*t*arriveX, y: it*it*leaveY + 2*it*t*sagY + t*t*arriveY, section: 'sag', sectionT: 1 - Math.abs(t-0.5)*2 });
+    }
+  }
+  return pts;
+}
+
+function renderMinimisedBundle(b, darkMode, onExpand) {
+              const rootFlower = b.rootFlower;
+              const rootChildPeople = b.rootChildPeople || [];
+              const subGroups = b.subGroups || [];
+              const total = 1 + rootChildPeople.length + subGroups.reduce((s,g)=>s+1+g.people.length,0);
+              const FR = 13;
+              const myPetalColor = '#ffffff';
+              const myCenterColor = '#fde68a';
+              const makeFlowerPath = (petals, len, scale=1) => {
+                const P = petals || 6;
+                const fpr = FR * scale * (1 + (len ?? 0.45));
+                const fpw = fpr * 0.5;
+                return Array.from({length:P},(_,pi)=>{
+                  const pa=(pi/P)*Math.PI*2;
+                  const tx=Math.cos(pa)*fpr,ty=Math.sin(pa)*fpr,pp=pa+Math.PI*0.5;
+                  return `M 0,0 C ${Math.cos(pa)*fpr*0.35+Math.cos(pp)*fpw*0.6},${Math.sin(pa)*fpr*0.35+Math.sin(pp)*fpw*0.6} ${Math.cos(pa)*fpr*0.85+Math.cos(pp)*fpw*0.5},${Math.sin(pa)*fpr*0.85+Math.sin(pp)*fpw*0.5} ${tx},${ty} C ${Math.cos(pa)*fpr*0.85-Math.cos(pp)*fpw*0.5},${Math.sin(pa)*fpr*0.85-Math.sin(pp)*fpw*0.5} ${Math.cos(pa)*fpr*0.35-Math.cos(pp)*fpw*0.6},${Math.sin(pa)*fpr*0.35-Math.sin(pp)*fpw*0.6} 0,0`;
+                }).join(' ');
+              };
+              // trend → colour (green up / amber steady / red down), like live creatures
+              const trendColor = (trend) => {
+                const lerp = (a,b,t)=>a+(b-a)*t;
+                const hx = (r,g,b)=>'#'+[r,g,b].map(v=>Math.max(0,Math.min(255,Math.round(v))).toString(16).padStart(2,'0')).join('');
+                if (trend >= 0) { const t=trend; return hx(lerp(255,34,t),lerp(190,255,t),lerp(30,90,t)); }
+                const t=-trend; return hx(lerp(255,255,t),lerp(190,40,t),lerp(30,40,t));
+              };
+              // a static resting creature on a flower — no animation (saves redraws).
+              // Colour reflects friendship score (trend). Randomly placed/rotated
+              // on the flower using a stable per-person seed.
+              const restingButterfly = (key, trend, seed, scale=1) => {
+                const tint = trendColor(trend ?? 0);
+                const ang = (seed ?? 0.5) * Math.PI * 2;
+                const rad = FR * 0.35 * scale * (0.4 + (seed ?? 0.5) * 0.6);
+                const ox = Math.cos(ang) * rad, oy = Math.sin(ang) * rad - FR*0.3*scale;
+                const rot = ((seed ?? 0.5) * 140) - 70;
+                // species palette from trend, matching the big butterflies
+                const pal = (trend ?? 0) > 0
+                  ? { up:'#3f8f3a', low:'#6fbf4a', band:'#2f6b2a', spot:'#fef9c3' }
+                  : (trend ?? 0) < 0
+                  ? { up:'#b3261e', low:'#e0432f', band:'#7f1d1d', spot:'#fde68a' }
+                  : { up:'#d98a1f', low:'#f0b54a', band:'#9a5b12', spot:'#fff7d6' };
+                const trim = pal.band;
+                if (darkMode) {
+                  // static lit firefly
+                  const s = 2.5 * scale;
+                  return (
+                    <g key={key} transform={`translate(${ox},${oy})`} style={{pointerEvents:'none'}}>
+                      <circle r={s*1.8} fill={tint} opacity={0.22}/>
+                      <circle r={s*1.0} fill={tint} opacity={0.5}/>
+                      <circle r={s*0.55} fill="#fffbe6" stroke="#1f2937" strokeWidth={0.4}/>
+                    </g>
+                  );
+                }
+                // EXACT same butterfly as the big one, static (wings open), 1/3 size
+                const miniScale = (scale) * 0.33; // a third of the size
+                return (
+                  <g key={key} transform={`translate(${ox},${oy}) rotate(${rot}) scale(${miniScale})`} style={{pointerEvents:'none'}}>
+                    {/* wings open (static) */}
+                    <g transform="scale(2, 1.75)">
+                      <path d="M0,-1 C -10,-10 -11,-2 -8,3 C -6,6 -2,5 0,2 Z" fill={pal.up} opacity={0.95} stroke={pal.band} strokeWidth={0.4}/>
+                      <path d="M0,-1 C 10,-10 11,-2 8,3 C 6,6 2,5 0,2 Z" fill={pal.up} opacity={0.95} stroke={pal.band} strokeWidth={0.4}/>
+                      <path d="M0,2 C -8,4 -8,11 -4,12 C -1,12 0,7 0,4 Z" fill={pal.low} opacity={0.95} stroke={pal.band} strokeWidth={0.35}/>
+                      <path d="M0,2 C 8,4 8,11 4,12 C 1,12 0,7 0,4 Z" fill={pal.low} opacity={0.95} stroke={pal.band} strokeWidth={0.35}/>
+                      <circle cx={-6} cy={-2} r={1.1} fill={pal.spot}/>
+                      <circle cx={6} cy={-2} r={1.1} fill={pal.spot}/>
+                    </g>
+                    {/* body: abdomen, thorax, head */}
+                    <path d={`M ${-1.1},-2 Q ${-1.4},6 0,11 Q ${1.4},6 ${1.1},-2 Z`} fill="#2b1a0a"/>
+                    <ellipse cx={0} cy={-3.5} rx={1.9} ry={3.2} fill="#3a2410"/>
+                    <circle cx={0} cy={-7.6} r={1.6} fill="#2b1a0a"/>
+                    <circle cx={-0.7} cy={-7.9} r={0.45} fill="#0a0a0a"/>
+                    <circle cx={0.7} cy={-7.9} r={0.45} fill="#0a0a0a"/>
+                    {/* antennae */}
+                    <line x1={-0.4} y1={-8.6} x2={-6.7} y2={-18.8} stroke={trim} strokeWidth={0.6}/>
+                    <line x1={0.4} y1={-8.6} x2={6.7} y2={-18.8} stroke={trim} strokeWidth={0.6}/>
+                    <circle cx={-6.7} cy={-18.8} r={0.9} fill={trim}/>
+                    <circle cx={6.7} cy={-18.8} r={0.9} fill={trim}/>
+                    {/* legs */}
+                    {[-1,1].map(side=>([[-3.5,3.6,-2.0],[-2,4.0,0],[-0.5,3.6,2.0]].map((lg,li)=>(
+                      <g key={`ml${side}-${li}`}>
+                        <line x1={side*0.7} y1={lg[0]} x2={side*(0.7+lg[1])} y2={lg[0]+lg[2]} stroke={trim} strokeWidth={0.5}/>
+                        <circle cx={side*(0.7+lg[1])} cy={lg[0]+lg[2]} r={0.7} fill={trim}/>
+                      </g>
+                    ))))}
+                  </g>
+                );
+              };
+              const flower = (key, petalC, centerC, petals, len, scale, butterfly=null) => (
+                <g key={key}>
+                  <path d={makeFlowerPath(petals, len, scale)} fill={petalC} opacity={0.95}/>
+                  <circle r={FR*0.24*(scale||1)} fill={centerC} stroke={petalC} strokeWidth={0.5}/>
+                  {butterfly && restingButterfly('bf'+key, butterfly.trend, butterfly.seed, scale)}
+                </g>
+              );
+              // cluster a list of people flowers around a local centre
+              const peopleCluster = (people, keyPrefix) => {
+                const n = people.length;
+                const ring = n <= 1 ? 0 : (n <= 7 ? 17 : 24);
+                return people.map((p, i) => {
+                  const ang = (i / Math.max(1,n)) * Math.PI*2 - Math.PI/2;
+                  const fx = (i===0 && n>1) ? 0 : Math.cos(ang)*ring;
+                  const fy = (i===0 && n>1) ? 0 : Math.sin(ang)*ring;
+                  return (
+                    <g key={keyPrefix+p.id} transform={`translate(${fx},${fy})`}>
+                      {flower('f'+p.id, p.petalColor||myPetalColor, p.centerColor||myCenterColor, p.petals, p.petalLength, 0.9, {trend:p.trend, seed:p.seed})}
+                    </g>
+                  );
+                });
+              };
+              const childGap = 46;   // distance from root to the children bundle (left)
+              const groupGap = 50;   // distance from root to each sub-group (right)
+              return (
+                <g key={`bundle-${b.anchorId}`}>
+                  <g transform={`translate(${b.cx},${b.cy})`}
+                   style={{cursor:'pointer'}}
+                   onClick={(e)=>{ e.stopPropagation(); onExpand(b.anchorId); }}>
+
+
+                    {/* soft green border framing the whole bundle (lighter than a full vine) */}
+                    {(() => {
+                      const hasChildren = rootChildPeople.length > 0;
+                      const hasGroups = subGroups.length > 0;
+                      // extent: bundle reaches left for children, right for sub-groups
+                      const left = hasChildren ? (childGap + 36) : 32;
+                      const right = hasGroups ? (groupGap + (subGroups.some(g=>g.people.length)?70:30)) : 32;
+                      const halfH = (hasGroups && subGroups.length>1) ? (subGroups.length*26 + 30) : 38;
+                      const cxMid = (right - left) / 2;
+                      const rx = (left + right) / 2 + 8;
+                      const ry = halfH + 6;
+                      // a few leaves spaced around the ellipse
+                      const leaves = 7;
+                      const leafEls = Array.from({length:leaves},(_,i)=>{
+                        const a = (i/leaves)*Math.PI*2 - Math.PI/2;
+                        const lx = cxMid + Math.cos(a)*rx;
+                        const ly = Math.sin(a)*ry;
+                        const rot = (a*180/Math.PI) + 90;
+                        return (
+                          <g key={'bl'+i} transform={`translate(${lx},${ly}) rotate(${rot})`}>
+                            <path d="M0,0 C 4,-5 4,-9 0,-12 C -4,-9 -4,-5 0,0 Z"
+                              fill={darkMode?'#15803d':'#4ade80'} opacity={0.8}/>
+                          </g>
+                        );
+                      });
+                      return (
+                        <g style={{pointerEvents:'none'}}>
+                          <ellipse cx={cxMid} cy={0} rx={rx} ry={ry} fill="none"
+                            stroke={darkMode?'#22c55e':'#4ade80'} strokeWidth={2}
+                            strokeDasharray="1 0" opacity={0.55}/>
+                          {leafEls}
+                        </g>
+                      );
+                    })()}
+
+
+                    {/* internal connectors: root → children (left), root → each sub-group (right) */}
+                    {rootChildPeople.length > 0 && (
+                      <line x1={0} y1={0} x2={-childGap} y2={0} stroke={darkMode?'#2f5d3a':'#a7d8b4'} strokeWidth={2.5} opacity={0.7}/>
+                    )}
+                    {subGroups.map((g, gi) => {
+                      const gy = subGroups.length===1 ? 0 : (gi - (subGroups.length-1)/2) * 46;
+                      return <line key={'gl'+g.id} x1={0} y1={0} x2={groupGap} y2={gy} stroke={darkMode?'#2f5d3a':'#a7d8b4'} strokeWidth={2.5} opacity={0.7}/>;
+                    })}
+
+
+                    {/* ROOT person flower — centre, slightly larger */}
+                    {flower('root'+b.anchorId, rootFlower.petalColor||myPetalColor, rootFlower.centerColor||myCenterColor, rootFlower.petals, rootFlower.petalLength, 1.35, {trend:rootFlower.trend, seed:rootFlower.seed})}
+
+
+                    {/* CHILD PEOPLE bundle — to the LEFT of the root */}
+                    {rootChildPeople.length > 0 && (
+                      <g transform={`translate(${-childGap - 8},0)`}>
+                        <circle r={ (rootChildPeople.length<=1?14:30) } fill={darkMode?'rgba(20,83,45,0.4)':'rgba(220,252,231,0.55)'} stroke={darkMode?'#22c55e':'#86efac'} strokeWidth={1.2}/>
+                        {peopleCluster(rootChildPeople, 'cp')}
+                      </g>
+                    )}
+
+
+                    {/* SUB-GROUPS — to the RIGHT: each a brown flower with its people beside it */}
+                    {subGroups.map((g, gi) => {
+                      const gy = subGroups.length===1 ? 0 : (gi - (subGroups.length-1)/2) * 46;
+                      return (
+                        <g key={'sg'+g.id} transform={`translate(${groupGap + 8},${gy})`}>
+                          {/* the group's people, just past the brown flower */}
+                          {g.people.length > 0 && (
+                            <g transform={`translate(${(g.people.length<=1?22:34)},0)`}>
+                              <circle r={ (g.people.length<=1?13:26) } fill={darkMode?'rgba(20,83,45,0.4)':'rgba(220,252,231,0.5)'} stroke={darkMode?'#22c55e':'#86efac'} strokeWidth={1.1}/>
+                              {peopleCluster(g.people, 'gp'+g.id)}
+                            </g>
+                          )}
+                          {/* connector group → its people */}
+                          {g.people.length > 0 && (
+                            <line x1={0} y1={0} x2={(g.people.length<=1?22:34)} y2={0} stroke={darkMode?'#2f5d3a':'#a7d8b4'} strokeWidth={2} opacity={0.6}/>
+                          )}
+                          {/* the brown GROUP flower */}
+                          {flower('bf'+g.id, g.color, '#f5e6c8', 6, 0.55, 1.4, null)}
+                        </g>
+                      );
+                    })}
+
+
+                    {/* count badge — top area */}
+                    <g transform={`translate(0,${-46})`}>
+                      <circle r={9} fill={darkMode?'#16a34a':'#15803d'}/>
+                      <text textAnchor="middle" dy="3" fontSize="10" fontWeight="800" fill="white">{total}</text>
+                    </g>
+                  </g>
+                </g>
+              );
+}
+
+function renderVineLink({
+  key, srcX, srcY, tgtX, tgtY, i, score, scoreHistory,
+  blockerNodes, // [{id, x, y, r}] -- every OTHER node that could occlude this link
+  darkMode, dashOffset, growingProgress, fallenLeafIds, onNewFallenLeaves,
+  scale = 1, // shrinks leaf/strand sizing for tighter layouts (e.g. Feed) without affecting the main canvas
+}) {
+  const dx = tgtX - srcX, dy = tgtY - srcY;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  if (dist === 0) return null;
+
+  const perpX = -dy / dist;
+  const perpY =  dx / dist;
+  const STEPS = Math.max(60, Math.floor(dist / 5));
+
+  const OCTAVES_MAP = [
+    { freq: 1.0,          amp: 0.5,  phase: 0.0 + i * 0.7 },
+    { freq: 1.6180339887, amp: 0.22, phase: 2.1 + i * 0.4 },
+    { freq: 2.7182818284, amp: 0.10, phase: 4.7 + i * 0.2 },
+    { freq: 4.236,        amp: 0.05, phase: 1.3             },
+  ];
+  const spineWiggle = (t) => {
+    let w = 0;
+    for (const o of OCTAVES_MAP) w += Math.sin(t * 2.8 * o.freq * Math.PI * 2 + o.phase) * o.amp;
+    return w * dist * 0.045;
+  };
+
+  const tier = 5; // forced -- all vines use the T5 appearance
+  const coreRadius = 1.5 + tier * 0.8;
+
+  const STRAND_DEFS = [
+    { width: 3.2,  wrapFreq: 0,   wrapAmp: 0,    colorDark: '#14532d', colorLight: '#15803d', role: 'core'    },
+    { width: 1.2,  wrapFreq: 2.5, wrapAmp: 1.0,  colorDark: '#16a34a', colorLight: '#4ade80', role: 'growing' },
+    { width: 2.0,  wrapFreq: 1.4, wrapAmp: 0.7,  colorDark: '#15803d', colorLight: '#22c55e', role: 'wrapped' },
+    { width: 1.6,  wrapFreq: 1.9, wrapAmp: 0.85, colorDark: '#16a34a', colorLight: '#4ade80', role: 'wrapped' },
+    { width: 1.3,  wrapFreq: 2.2, wrapAmp: 0.95, colorDark: '#22c55e', colorLight: '#86efac', role: 'wrapped' },
+  ];
+  const TIER_STRAND_SETS = [null, [0,1], [0,2,1], [0,2,3,1], [0,2,3,4,1], [0,2,3,4,1]];
+  const coreWidthScale = [0, 1, 1.4, 1.9, 2.5, 3.2][tier];
+
+  const activeStrands = TIER_STRAND_SETS[tier].map((si, renderIdx) => {
+    const def = { ...STRAND_DEFS[si] };
+    if (def.role === 'core') def.width *= coreWidthScale;
+    def.width *= scale;
+    const phaseBase = (renderIdx / TIER_STRAND_SETS[tier].length) * Math.PI * 2 + i * 1.3;
+    const pts = [];
+    for (let s = 0; s <= STEPS; s++) {
+      const t = s / STEPS;
+      const spine = spineWiggle(t);
+      const bx = srcX + dx * t;
+      const by = srcY + dy * t;
+      let offset;
+      if (def.role === 'core') {
+        offset = spine;
+      } else {
+        const coil = Math.sin(t * def.wrapFreq * Math.PI * 2 + phaseBase) * coreRadius * def.wrapAmp;
+        const jitter = def.role === 'growing'
+          ? Math.sin(t * 7.3 * Math.PI * 2 + phaseBase * 1.7) * coreRadius * 0.18
+          : Math.sin(t * 4.1 * Math.PI * 2 + phaseBase * 0.9) * coreRadius * 0.10;
+        offset = spine + coil + jitter;
+      }
+      pts.push({ x: bx + perpX * offset, y: by + perpY * offset, t });
+    }
+    return { ...def, pts, d: `M ${pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' L ')}`, renderIdx };
+  });
+
+  // --- LEAVES per strand -- lifecycle driven by real score history ---------
+  const now = Date.now();
+  const HOUR = 3600000;
+  const hist = scoreHistory || [];
+  const scoreThen48 = hist.length > 0 ? (hist.find(h => (now - h.ts) >= 48 * HOUR) || hist[0]).score : score;
+  const scoreThen24 = hist.length > 0 ? (hist.find(h => (now - h.ts) >= 24 * HOUR) || hist[0]).score : score;
+  const delta48 = score - scoreThen48;
+  const delta24 = score - scoreThen24;
+
+  const getLeafState = (t, role) => {
+    if (role === 'core') return 'full';
+    const ageHrs = (1 - t) * 48;
+    const isGrowing = role === 'growing';
+    if (delta48 < -60) {
+      if (isGrowing) return ageHrs < 18 ? 'fallen' : ageHrs < 32 ? 'brown' : 'shrivelling';
+      return ageHrs < 10 ? 'fallen' : ageHrs < 24 ? 'brown' : 'shrivelling';
+    }
+    if (delta48 < -30) {
+      if (isGrowing) return ageHrs < 12 ? 'brown' : ageHrs < 28 ? 'shrivelling' : 'full';
+      return ageHrs < 8 ? 'brown' : ageHrs < 20 ? 'shrivelling' : 'full';
+    }
+    if (delta24 < -20) {
+      if (isGrowing) return ageHrs < 8 ? 'shrivelling' : 'full';
+      return ageHrs < 5 ? 'shrivelling' : 'full';
+    }
+    if (delta48 > 60) return ageHrs < 6 ? 'budding' : ageHrs < 24 ? 'growing' : 'full';
+    if (delta24 > 20) return ageHrs < 12 ? 'budding' : 'growing';
+    return 'full';
+  };
+
+  const LIFECYCLE_STYLES = {
+    budding:     { scale: 0.2,  lScale: 0.2,  color: '#bbf7d0', opacity: 0.9,  curl: 0.5 },
+    growing:     { scale: 0.55, lScale: 0.55, color: '#4ade80', opacity: 0.85, curl: 0.2 },
+    full:        { scale: 1.0,  lScale: 1.0,  color: null,       opacity: null, curl: 0 },
+    shrivelling: { scale: 0.82, lScale: 0.82, color: '#ca8a04', opacity: 0.8,  curl: 0.3 },
+    brown:       { scale: 0.68, lScale: 0.68, color: '#78350f', opacity: 0.65, curl: 0.5 },
+    fallen:      { scale: 0,    lScale: 0,    color: null,       opacity: 0,    curl: 0 },
+  };
+
+  const LEAF_CHARS = {
+    core:    { sizeBase: 27, sizeVar: 4.5, colorDark: '#14532d', colorLight: '#15803d', aspectW: 0.32, bud: false },
+    wrapped: { sizeBase: 12, sizeVar: 2.4, colorDark: '#166534', colorLight: '#22c55e', aspectW: 0.32, bud: false },
+    growing: { sizeBase: 3,  sizeVar: 0.9, colorDark: '#16a34a', colorLight: '#4ade80', aspectW: 0.32, bud: true  },
+  };
+  const leafTierScale = (0.7 + tier * 0.18) * scale;
+  const leafSpacing = Math.max(24, 76 - tier * 8);
+
+  const allLeaves = [];
+  const newFallen = [];
+  activeStrands.forEach(({ pts, role, renderIdx }) => {
+    const lc = LEAF_CHARS[role];
+    const leafCount = Math.max(2, Math.floor(dist / leafSpacing));
+    for (let li = 0; li < leafCount; li++) {
+      const t = (li + 0.5 + renderIdx * 0.3) / leafCount;
+      if (t > 1) continue;
+      const ptIdx = Math.min(pts.length - 2, Math.floor(t * (pts.length - 1)));
+      const p = pts[ptIdx];
+      const p2 = pts[Math.min(pts.length - 1, ptIdx + 1)];
+      if (!p || !p2) continue;
+      const tangAngle = Math.atan2(p2.y - p.y, p2.x - p.x) * 180 / Math.PI;
+      const side = ((li + renderIdx) % 2 === 0) ? 1 : -1;
+      const sv = 0.7 + 0.6 * Math.abs(Math.sin(li * 3.7 + renderIdx * 1.9 + i));
+      const leafState = getLeafState(t, role);
+      const ls = LIFECYCLE_STYLES[leafState];
+      if (ls.scale === 0) {
+        const fallenId = `${key}_${role}_${li}`;
+        if (!fallenLeafIds || !fallenLeafIds.has(fallenId)) {
+          const randRot = (Math.random() * 40 - 20);
+          const perpOffset = 8 + Math.random() * 6;
+          const baseLwF = (lc.sizeBase + lc.sizeVar * sv) * leafTierScale * 0.68;
+          newFallen.push({
+            id: fallenId, x: p.x + (side * perpOffset), y: p.y + (side * perpOffset),
+            angle: tangAngle + randRot, lw: baseLwF, lh: baseLwF * lc.aspectW,
+            fill: '#78350f', stroke: '#5a2d0c',
+          });
+        }
+        continue;
+      }
+      const baseLw = (lc.sizeBase + lc.sizeVar * sv) * leafTierScale;
+      const lw = baseLw * ls.scale;
+      const lh = lw * lc.aspectW;
+      const fill = ls.color || (darkMode ? lc.colorDark : lc.colorLight);
+      const stroke = leafState === 'full' || leafState === 'growing' || leafState === 'budding'
+        ? (darkMode ? '#0f2d1a' : '#14532d') : '#78350f';
+      const opacity = ls.opacity ?? (lc.bud ? 0.7 : 0.88);
+      const curlAngle = tangAngle + side * (42 + ls.curl * 35);
+      allLeaves.push({ x: p.x, y: p.y, angle: curlAngle, lw, lh, fill, stroke, bud: lc.bud || leafState === 'budding', opacity, shrivelled: ls.curl > 0.3 });
+    }
+  });
+
+  if (newFallen.length > 0 && onNewFallenLeaves) onNewFallenLeaves(newFallen);
+
+  // --- UNDER-PASS FADE -------------------------------------------------------
+  const UNDERPASS_FADE = 26;
+  const blockerCircles = (blockerNodes || []).map(n => {
+    const baseR = n.r || 40;
+    const pad = Math.min(34, Math.max(8, baseR * 0.85));
+    return { x: n.x, y: n.y, r: baseR + pad };
+  });
+  const opacityAt = (px, py) => {
+    let minOpacity = 1;
+    for (const bc of blockerCircles) {
+      const ddx = px - bc.x, ddy = py - bc.y;
+      const d = Math.sqrt(ddx * ddx + ddy * ddy);
+      let o;
+      if (d <= bc.r) o = 0;
+      else if (d >= bc.r + UNDERPASS_FADE) o = 1;
+      else o = (d - bc.r) / UNDERPASS_FADE;
+      if (o < minOpacity) minOpacity = o;
+    }
+    return minOpacity;
+  };
+  const ptInBlocker = (px, py) => opacityAt(px, py) <= 0;
+
+  const splitPathGraded = (pts) => {
+    if (blockerCircles.length === 0) {
+      return [{ d: `M ${pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' L ')}`, opacity: 1 }];
+    }
+    const withOpacity = pts.map(p => ({ ...p, o: opacityAt(p.x, p.y) }));
+    const segments = [];
+    let seg = null;
+    for (const p of withOpacity) {
+      if (p.o <= 0.02) { if (seg && seg.length > 1) segments.push(seg); seg = null; }
+      else { if (!seg) seg = []; seg.push(p); }
+    }
+    if (seg && seg.length > 1) segments.push(seg);
+    const out = [];
+    for (const s of segments) {
+      const chunkSize = 3;
+      for (let ci = 0; ci < s.length - 1; ci += chunkSize) {
+        const chunk = s.slice(ci, Math.min(s.length, ci + chunkSize + 1));
+        if (chunk.length < 2) continue;
+        const avgO = chunk.reduce((sum, p) => sum + p.o, 0) / chunk.length;
+        out.push({ d: `M ${chunk.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' L ')}`, opacity: avgO });
+      }
+    }
+    return out;
+  };
+
+  const visibleLeaves = blockerCircles.length > 0 ? allLeaves.filter(lf => !ptInBlocker(lf.x, lf.y)) : allLeaves;
+
+  return {
+    vine: (
+      <g key={`vine-${key}`}>
+        {activeStrands.map(({ pts, width, role, colorDark, colorLight }, si) => {
+          const pathLen = dist * 1.1;
+          const baseOpacity = role === 'growing' ? 0.78 : role === 'core' ? 1 : 0.9;
+          const segs = splitPathGraded(pts);
+          return segs.map((seg, segi) => (
+            <path key={`s-${si}-${segi}`} d={seg.d} fill="none"
+              stroke={darkMode ? colorDark : colorLight}
+              strokeWidth={width} strokeLinejoin="round" strokeLinecap="round"
+              opacity={baseOpacity * seg.opacity}
+              {...(dashOffset != null ? {
+                strokeDasharray: pathLen * 3,
+                strokeDashoffset: (pathLen * 3) * (1 - (growingProgress || 0)),
+              } : {})}
+            />
+          ));
+        })}
+      </g>
+    ),
+    foliage: (
+      <g key={`foliage-${key}`}>
+        {visibleLeaves.map((lf, li) => {
+          if (lf.shrivelled) return null;
+          if (lf.bud) {
+            return (
+              <circle key={`lf-${li}`} cx={lf.x} cy={lf.y} r={Math.max(1.5, lf.lw * 0.3)}
+                fill="#bbf7d0" stroke="#4ade80" strokeWidth={0.4} opacity={lf.opacity} style={{pointerEvents:'none'}}/>
+            );
+          }
+          const leafD = `M 0,0 C ${lf.lw*0.25},${-lf.lh} ${lf.lw*0.75},${-lf.lh} ${lf.lw},0 C ${lf.lw*0.75},${lf.lh} ${lf.lw*0.25},${lf.lh} 0,0 Z`;
+          const midrib = `M ${lf.lw*0.05},0 L ${lf.lw*0.82},0`;
+          return (
+            <g key={`lf-${li}`} transform={`translate(${lf.x},${lf.y}) rotate(${lf.angle})`} opacity={lf.opacity} style={{pointerEvents:'none'}}>
+              <path d={leafD} fill={lf.fill} stroke={lf.stroke} strokeWidth={0.5}/>
+              <path d={midrib} fill="none" stroke={lf.stroke} strokeWidth={0.35} opacity={0.5}/>
+            </g>
+          );
+        })}
+      </g>
+    ),
+  };
+}
+
+function MoleCards({ slides, left, top, cardWidth, cardHeight, pillLeft, pillTop, onClose }) {
+  const [idx, setIdx] = React.useState(0);
+  const swipeRef = React.useRef(null);
+  const bodyRef = React.useRef(null);
+  const onTouchStart = e => {
+    e.stopPropagation();
+    swipeRef.current = e.touches[0].clientX;
+  };
+  const onTouchMove = e => { e.stopPropagation(); };
+  const onTouchEnd = e => {
+    e.stopPropagation();
+    if (swipeRef.current == null) return;
+    const dx = e.changedTouches[0].clientX - swipeRef.current;
+    if (dx < -40 && idx < slides.length - 1) setIdx(i => i + 1);
+    if (dx >  40 && idx > 0)                 setIdx(i => i - 1);
+    swipeRef.current = null;
+  };
+  const W = cardWidth || 260;
+  const maxH = cardHeight || Math.round(window.innerHeight * 0.52);
+  const current = slides[idx];
+  const accent = current.color || '#3b82f6';
+  return (
+    <>
+      {/* Big bubble -- content only, outlined border in the slide's accent colour.
+          Spans the full screen width, maxed-out height from near the top of the
+          screen down to just before the mole's head. */}
+      <div style={{position:'fixed',left,top:`calc(${top}px + env(safe-area-inset-top, 0px))`,zIndex:151,width:W,pointerEvents:'all',
+        background:'#1e293b',borderRadius:16,
+        boxShadow:'0 8px 32px rgba(0,0,0,0.65)',border:`2px solid ${accent}`,transition:'border-color 0.25s',
+        display:'flex',flexDirection:'column',height:maxH,maxHeight:maxH}}
+        onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}
+        onPointerDown={e=>e.stopPropagation()}>
+
+        {/* Scrollable content area */}
+        <div ref={bodyRef} style={{padding:'16px 16px 14px',overflowY:'auto',flex:1}}>
+          {current.content}
+        </div>
+
+        {/* Dot indicators -- tinted to match active slide */}
+        <div style={{display:'flex',justifyContent:'center',gap:5,padding:'6px 0 10px',flexShrink:0}}>
+          {slides.map((sl,i)=>(
+            <div key={i} onClick={()=>setIdx(i)} style={{width:i===idx?18:6,height:6,borderRadius:3,
+              background:i===idx?(sl.color||'#3b82f6'):'#334155',cursor:'pointer',transition:'width 0.2s, background-color 0.2s'}}/>
+          ))}
+        </div>
+      </div>
+
+      {/* Tail -- on the middle of the big bubble's bottom edge, just left of where the
+          mini pill sits (far right of screen), pointing down toward the mole. */}
+      <svg width="34" height="22" viewBox="0 0 34 22"
+        style={{position:'fixed', left: pillLeft - 36, top: `calc(${top}px + env(safe-area-inset-top, 0px) + ${maxH - 2}px)`,
+          zIndex:151, pointerEvents:'none', overflow:'visible'}}>
+        <path d="M 4,0 L 26,0 Q 22,12 14,19 Q 10,21 12,13 Q 13,6 4,0 Z"
+          fill={accent} stroke={accent} strokeWidth="1.5"/>
+      </svg>
+
+      {/* Small title pill -- solid filled in the same accent colour, positioned at the
+          farthest right of the screen, just below where the tail points. Holds the
+          title, prev/next chevrons, and close button -- kept separate from the big
+          bubble so it never eats into its writing space. */}
+      <div className='mole-tabs' style={{position:'fixed',left:pillLeft,top:pillTop,zIndex:151,
+        display:'flex',alignItems:'center',gap:6,width:170,
+        padding:'8px 8px 8px 14px',borderRadius:20,
+        background:accent,boxShadow:'0 4px 16px rgba(0,0,0,0.4)',transition:'background-color 0.25s',
+        pointerEvents:'all'}}
+        onPointerDown={e=>e.stopPropagation()}>
+        {slides.length > 1 && (
+          <button onClick={()=>setIdx(i=>Math.max(0,i-1))} disabled={idx===0}
+            style={{background:'none',border:'none',color:idx===0?'rgba(255,255,255,0.35)':'white',fontSize:18,
+              cursor:idx===0?'default':'pointer',padding:'0 2px',flexShrink:0,lineHeight:1}}>‹</button>
+        )}
+        <span style={{fontSize:14,fontWeight:800,color:'white',flex:1,whiteSpace:'nowrap',
+          overflow:'hidden',textOverflow:'ellipsis'}}>
+          {current.label}
+        </span>
+        {slides.length > 1 && (
+          <button onClick={()=>setIdx(i=>Math.min(slides.length-1,i+1))} disabled={idx===slides.length-1}
+            style={{background:'none',border:'none',color:idx===slides.length-1?'rgba(255,255,255,0.35)':'white',fontSize:18,
+              cursor:idx===slides.length-1?'default':'pointer',padding:'0 2px',flexShrink:0,lineHeight:1}}>›</button>
+        )}
+        <button onClick={onClose}
+          style={{background:'rgba(255,255,255,0.2)',border:'none',color:'white',fontSize:16,fontWeight:700,
+            cursor:'pointer',lineHeight:1,width:24,height:24,borderRadius:'50%',
+            display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+          ×
+        </button>
+      </div>
+    </>
+  );
+}
+
+
+// Small circular thumbnails of group photos where this person is tagged,
+// shown in the profile pictures row so they can be cropped to a profile pic.
+function TaggedProfilePics({ nodeId, openPhotoDB, currentImg, onSelect }) {
+  const [pics, setPics] = React.useState([]);
+  React.useEffect(() => {
+    openPhotoDB().then(db => new Promise((res, rej) => {
+      const tx = db.transaction('gallery', 'readonly');
+      const req = tx.objectStore('gallery').getAll();
+      req.onsuccess = e => res(e.target.result || []);
+      req.onerror = rej;
+    })).then(all => {
+      setPics(all.filter(item =>
+        item.sourceType === 'group' &&
+        Array.isArray(item.taggedNodeIds) &&
+        item.taggedNodeIds.includes(nodeId)
+      ));
+    }).catch(() => {});
+  }, [nodeId]); // eslint-disable-line
+
+  return pics.map(item => (
+    <div key={item.key} style={{position:'relative'}}>
+      <button
+        onClick={() => onSelect(item.dataUrl)}
+        title="Use as profile picture"
+        style={{padding:0,border:`3px solid ${currentImg===item.dataUrl?'#10b981':'rgba(16,185,129,0.4)'}`,
+          borderRadius:'50%',cursor:'pointer',background:'none',position:'relative'}}>
+        <img src={item.dataUrl} style={{width:72,height:72,borderRadius:'50%',objectFit:'cover',display:'block'}}/>
+      </button>
+      {/* Group badge */}
+      <div style={{position:'absolute',bottom:2,right:2,width:18,height:18,borderRadius:'50%',
+        background:'#10b981',display:'flex',alignItems:'center',justifyContent:'center',
+        fontSize:10,border:'1.5px solid rgba(0,0,0,0.4)',pointerEvents:'none'}}>
+        👥
+      </div>
+    </div>
+  ));
+}
+
+
+function TaggedPhotosSection({ nodeId, nodes, links, openPhotoDB, setHubGalleryOpen,
+  setHubGalleryItems, setHubGalleryLoading, loadGallery, setHubGalleryViewer,
+  onUseAsProfilePic }) {
+  const [taggedPhotos, setTaggedPhotos] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  React.useEffect(() => {
+    setLoading(true);
+    openPhotoDB().then(db => {
+      return new Promise((res, rej) => {
+        const tx = db.transaction('gallery', 'readonly');
+        const req = tx.objectStore('gallery').getAll();
+        req.onsuccess = e => res(e.target.result || []);
+        req.onerror = rej;
+      });
+    }).then(all => {
+      const mine = all.filter(item =>
+        item.sourceType === 'group' &&
+        Array.isArray(item.taggedNodeIds) &&
+        item.taggedNodeIds.includes(nodeId)
+      );
+      setTaggedPhotos(mine);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, [nodeId]); // eslint-disable-line
+
+  if (loading) return null;
+  if (taggedPhotos.length === 0) return null;
+
+  return (
+    <>
+      <div style={{fontSize:12,fontWeight:700,color:'rgba(255,255,255,0.5)',textTransform:'uppercase',
+        letterSpacing:0.5,margin:'20px 0 8px'}}>Tagged in group photos</div>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:6}}>
+        {taggedPhotos.map((item, idx) => {
+          const hub = nodes.find(n => n.id === item.nodeId && n.type === 'hub');
+          return (
+            <div key={item.key} style={{position:'relative',aspectRatio:'1',borderRadius:8,overflow:'hidden',cursor:'pointer'}}
+              onClick={()=>{
+                if (hub) {
+                  setHubGalleryOpen(hub.id);
+                  setHubGalleryLoading(true);
+                  loadGallery(hub.id).then(items => {
+                    setHubGalleryItems(items);
+                    setHubGalleryLoading(false);
+                    const i = items.findIndex(it => it.key === item.key);
+                    setHubGalleryViewer({items, index: Math.max(0, i)});
+                  }).catch(()=>setHubGalleryLoading(false));
+                }
+              }}>
+              <img src={item.dataUrl} style={{width:'100%',height:'100%',objectFit:'cover',display:'block'}}/>
+              {/* Group label at bottom */}
+              {hub && (
+                <div style={{position:'absolute',bottom:0,left:0,right:0,padding:'2px 5px',
+                  background:'rgba(0,0,0,0.55)',fontSize:8,color:'rgba(255,255,255,0.8)',fontWeight:600,
+                  overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                  {hub.label || 'Group'}
+                </div>
+              )}
+              {/* Use as profile pic button */}
+              {onUseAsProfilePic && (
+                <button
+                  onClick={e => { e.stopPropagation(); onUseAsProfilePic(item.dataUrl); }}
+                  title="Use as profile picture"
+                  style={{position:'absolute',top:4,right:4,width:26,height:26,borderRadius:'50%',
+                    background:'rgba(0,0,0,0.6)',border:'1.5px solid rgba(255,255,255,0.5)',
+                    color:'white',fontSize:13,cursor:'pointer',display:'flex',
+                    alignItems:'center',justifyContent:'center',lineHeight:1}}>
+                  📷
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
+
 function AppInner() {
   const svgRef = useRef(null);
   const [nodes, setNodes] = useState(() => {
-    try { const s = localStorage.getItem('ft_nodes'); return s ? JSON.parse(s) : INITIAL_NODES; } catch(e) { return INITIAL_NODES; }
+    try {
+      const s = localStorage.getItem('ft_nodes');
+      const loaded = s ? JSON.parse(s) : INITIAL_NODES;
+      // Ensure mole node exists
+      if (!loaded.find(n => n.id === 'mole')) {
+        const savedPos = (() => { try { return JSON.parse(localStorage.getItem('ft_mole_pos')||'null'); } catch(_){ return null; } })();
+        loaded.push({ id:'mole', type:'mole', label:'Mole', x: savedPos?.x ?? 280, y: savedPos?.y ?? 280, pinned:false });
+      }
+      return loaded;
+    } catch(e) { return INITIAL_NODES; }
   });
   const [links, setLinks] = useState(() => {
     try { const s = localStorage.getItem('ft_links'); return s ? JSON.parse(s) : INITIAL_LINKS; } catch(e) { return INITIAL_LINKS; }
@@ -376,6 +1281,12 @@ function AppInner() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddMenu, setShowAddMenu] = useState(false);
+  const [bottomAddDrag, setBottomAddDrag] = useState(null); // {x,y} while dragging the bottom-bar Add button out
+  const [showMapStyleBar, setShowMapStyleBar] = useState(false); // section above the bottom bar, opened by holding the Map tab
+  const mapHoldTimer = useRef(null);
+  const bottomAddDragStart = useRef(null);
+  const [addCircleDrag, setAddCircleDrag] = useState(null); // {kind,x,y} while dragging a person/group circle from the Add menu
+  const addCircleDragStart = useRef(null);
   const [notifPermission, setNotifPermission] = useState('Notification' in window ? Notification.permission : 'denied');
   const [flowerPanel, setFlowerPanel] = useState(null);
   const [flowerMenuOpen, setFlowerMenuOpen] = useState(false);
@@ -429,7 +1340,7 @@ function AppInner() {
   const [customPresets, setCustomPresets] = useState(() => {
     try { return JSON.parse(localStorage.getItem('ft_flower_presets') || '[]'); } catch(e) { return []; }
   });
-  const [settingsSections, setSettingsSections] = useState({appearance:true,toolbar:false,filters:false,data:false,reset:false,security:false,future:false});
+  const [settingsSections, setSettingsSections] = useState({appearance:false,toolbar:false,filters:false,data:false,reset:false,security:false,future:false,assistant:false});
   const [fontSize, setFontSize] = useState(() => { try { return parseFloat(localStorage.getItem('ft_fontSize')||'1'); } catch(e) { return 1; } });
   useEffect(() => {
     document.documentElement.style.fontSize = `${fontSize * 16}px`;
@@ -444,14 +1355,43 @@ function AppInner() {
   const idbRef = useRef(null);
   const borderFlowerPositionsRef = useRef({});
 
+
   // -- IndexedDB for photo storage -------------------------------------------
   const [lastCreatedLink, setLastCreatedLink] = useState(null);
   const lastLinkTimer = useRef(null);
+
 
   const showLinkUndo = (source, target) => {
     clearTimeout(lastLinkTimer.current);
     setLastCreatedLink({ source, target });
     lastLinkTimer.current = setTimeout(() => setLastCreatedLink(null), 4000);
+  };
+
+
+  // Resolve a hub's display colour: explicit groupColors entry if the user set
+  // one, otherwise the same auto-assigned rotating palette colour used
+  // throughout the app so every group still reads as visually distinct even
+  // without manual customisation. Shared by getPhotoBorderColor below and by
+  // the Feed view, so both agree on what colour a given group actually is.
+  const resolveHubColor = (hubId) => {
+    if (groupColors[hubId]) return groupColors[hubId];
+    const idx = nodes.filter(n => n.type === 'hub').findIndex(n => n.id === hubId);
+    return PRIMARY_GROUP_COLORS[idx % PRIMARY_GROUP_COLORS.length];
+  };
+
+  // Initials shown on a circle with no photo. Multi-word names use the first
+  // letter of the first two words (e.g. "John Smith" -> "JS"). A single-word
+  // name instead uses its own first two letters, capitalised like a normal
+  // word -- "Hendrix" -> "He", "Harrison" -> "Ha" -- rather than collapsing
+  // to a single capital letter.
+  const getInitials = (label) => {
+    const words = (label || '?').trim().split(/\s+/).filter(Boolean);
+    if (words.length === 0) return '?';
+    if (words.length === 1) {
+      const w = words[0];
+      return w.length >= 2 ? (w[0].toUpperCase() + w[1].toLowerCase()) : w[0].toUpperCase();
+    }
+    return words.slice(0, 2).map(w => w[0].toUpperCase()).join('');
   };
 
   const getPhotoBorderColor = (node) => {
@@ -471,9 +1411,7 @@ function AppInner() {
       });
       if (!hubLink) return null; // no group, no personal colour = no border
       const hubId = nodes.find(n=>n.id===hubLink.source)?.type==='hub' ? hubLink.source : hubLink.target;
-      if (groupColors[hubId]) return groupColors[hubId];
-      const idx = nodes.filter(n=>n.type==='hub').findIndex(n=>n.id===hubId);
-      return PRIMARY_GROUP_COLORS[idx % PRIMARY_GROUP_COLORS.length];
+      return resolveHubColor(hubId);
     }
     if (photoBorderMode === 'momentum') {
       const s = node.interactionScore || 0;
@@ -486,7 +1424,9 @@ function AppInner() {
     return null;
   };
 
+
   const snapshotRef = useRef(null);
+
 
   const saveSnapshot = () => {
     // Capture synchronously using refs so we always get current values
@@ -496,6 +1436,7 @@ function AppInner() {
     };
     setDataSnapshot(snapshotRef.current);
   };
+
 
   const restoreSnapshot = () => {
     const snap = snapshotRef.current;
@@ -507,11 +1448,13 @@ function AppInner() {
     showToast('↩ Data restored');
   };
 
+
   const openPinModal = (mode, title, onSuccess) => {
     setPinModal({ mode, title, onSuccess });
     setPinInput('');
     setPinError('');
   };
+
 
   const handlePinDigit = (d) => {
     const next = (pinInput + d).slice(0, 6);
@@ -538,15 +1481,22 @@ function AppInner() {
     }
   };
 
+
   const handlePinBackspace = () => setPinInput(p => p.slice(0,-1));
+
 
   const clearPhotoDB = async () => {
     try {
       const db = idbRef.current || (idbRef.current = await openPhotoDB());
-      const tx = db.transaction('photos', 'readwrite');
+      // Clear BOTH stores -- 'photos' (per-person profile pics) and 'gallery'
+      // (group hub photo galleries). Previously only 'photos' was cleared,
+      // leaving old group gallery images behind after a reset.
+      const tx = db.transaction(['photos', 'gallery'], 'readwrite');
       tx.objectStore('photos').clear();
+      tx.objectStore('gallery').clear();
     } catch(e) {}
   };
+
 
   const clearAllData = () => {
     clearTimeout(saveTimer.current);
@@ -573,6 +1523,7 @@ function AppInner() {
     showToast('🗑️ History cleared — people & photos kept');
   };
 
+
   // -- IndexedDB photo storage -----------------------------------------------
   const openPhotoDB = () => new Promise((resolve, reject) => {
     const req = indexedDB.open('FriendTreePhotos', 2);
@@ -585,17 +1536,19 @@ function AppInner() {
     req.onerror = e => reject(e.target.error);
   });
 
+
   const saveToGallery = (nodeId, dataUrl, meta) => {
     meta = meta || {};
     return openPhotoDB().then(db => {
       const key = nodeId + '_' + Date.now() + '_' + Math.random().toString(36).slice(2,5);
       return new Promise((res,rej) => {
         const tx = db.transaction('gallery','readwrite');
-        tx.objectStore('gallery').put({ key, nodeId, dataUrl, sourceType: meta.sourceType||'manual', date: meta.date||'' });
+        tx.objectStore('gallery').put({ key, nodeId, dataUrl, sourceType: meta.sourceType||'manual', date: meta.date||'', taggedNodeIds: meta.taggedNodeIds||[] });
         tx.oncomplete = () => res(key); tx.onerror = rej;
       });
     }).catch(e => console.error('Gallery save failed', e));
   };
+
 
   const loadGallery = (nodeId) => {
     return openPhotoDB().then(db => {
@@ -608,6 +1561,7 @@ function AppInner() {
     }).catch(() => []);
   };
 
+
   const deleteFromGallery = (key) => {
     return openPhotoDB().then(db => {
       return new Promise((res,rej) => {
@@ -618,6 +1572,29 @@ function AppInner() {
     }).catch(e => console.error('Gallery delete failed', e));
   };
 
+
+  // Update the taggedNodeIds array on a gallery item and persist it
+  const updateGalleryItemTags = async (key, taggedNodeIds) => {
+    try {
+      const db = idbRef.current || (idbRef.current = await openPhotoDB());
+      const existing = await new Promise((res, rej) => {
+        const tx = db.transaction('gallery', 'readonly');
+        const req = tx.objectStore('gallery').get(key);
+        req.onsuccess = e => res(e.target.result);
+        req.onerror = rej;
+      });
+      if (!existing) return;
+      const updated = { ...existing, taggedNodeIds };
+      await new Promise((res, rej) => {
+        const tx = db.transaction('gallery', 'readwrite');
+        tx.objectStore('gallery').put(updated);
+        tx.oncomplete = res; tx.onerror = rej;
+      });
+      return updated;
+    } catch(e) { console.warn('Tag update failed', e); }
+  };
+
+
   const savePhotoToDB = async (nodeId, dataUrl) => {
     try {
       const db = idbRef.current || (idbRef.current = await openPhotoDB());
@@ -626,6 +1603,7 @@ function AppInner() {
     } catch(e) { console.warn('Photo save failed:', e); }
   };
 
+
   const deletePhotoFromDB = async (nodeId) => {
     try {
       const db = idbRef.current || (idbRef.current = await openPhotoDB());
@@ -633,6 +1611,7 @@ function AppInner() {
       tx.objectStore('photos').delete(nodeId);
     } catch(e) {}
   };
+
 
   // On mount — ask the OS to PERSIST our storage so Android doesn't evict
   // IndexedDB (which is why photos vanished after closing the native app).
@@ -649,6 +1628,7 @@ function AppInner() {
       } catch(e) { console.warn('storage.persist failed:', e); }
     })();
   }, []);
+
 
   // When the user shares an Instagram/Messenger/etc. profile into FriendshipTree,
   // capture it and ask which friend it's for.
@@ -674,6 +1654,8 @@ function AppInner() {
   }, []);
 
 
+
+
   // On mount — restore photos from IndexedDB onto nodes
   useEffect(() => {
     (async () => {
@@ -693,6 +1675,7 @@ function AppInner() {
       } catch(e) { console.warn('Photo restore failed:', e); }
     })();
   }, []); // eslint-disable-line
+
 
   // Auto-create hidden hubs for anyone connected directly to the social node.
   // This gives each social-connected person their own group (with vine border)
@@ -717,6 +1700,7 @@ function AppInner() {
     if (newHubs.length > 0) setNodes(prev => [...prev, ...newHubs]);
     if (newHubLinks.length > 0) setLinks(prev => [...prev, ...newHubLinks]);
 
+
     // Repair any hidden hub whose label is missing/undefined — name it after
     // the person it belongs to (e.g. "Hayley's Group").
     setNodes(prev => {
@@ -733,10 +1717,12 @@ function AppInner() {
     });
   }, [links]); // eslint-disable-line
 
+
   const [showPhotoOptions, setShowPhotoOptions] = useState(false);
   const [showAddToGroup, setShowAddToGroup] = useState(false);
   const [connSections, setConnSections] = useState({ group: true, subgroups: true, severed: false });
   const [expandedGroupMembers, setExpandedGroupMembers] = useState({});
+
 
   const [avBg,    setAvBg]    = useState('#4f46e5');
   const [avSkin,  setAvSkin]  = useState('#f4c2a1');
@@ -755,6 +1741,7 @@ function AppInner() {
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
   const [dragNode, setDragNode] = useState(null);
   const isPanningOverride = useRef(false); // set synchronously when pan wins over drag
+  const liftedIdRef = useRef(null); // mirrors liftedNodeId synchronously for move handler
   const [liftedNodeId, setLiftedNodeId] = useState(null);
   const [hoverTarget, setHoverTarget] = useState(null);
   const [selectedNodeId, setSelectedNodeId] = useState(null);
@@ -825,7 +1812,76 @@ function AppInner() {
   const [socialInputValue, setSocialInputValue] = useState('');
   const [hubFlowerMenuOpen, setHubFlowerMenuOpen] = useState(false);
   const [showVineBorders, setShowVineBorders] = useState((() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); return s.showVineBorders !== undefined ? s.showVineBorders : true; } catch(e) { return true; } })());
+  const [simpleMode, setSimpleMode] = useState((() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); return s.simpleMode || false; } catch(e) { return false; } })());
+  // mapStyle: 'full' (decorated canvas) | 'simple' (plain circles, same canvas) | 'feed' (stacked dimension sections, vertical scroll)
+  const [mapStyle, setMapStyle] = useState((() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); if (s.mapStyle) return s.mapStyle; return s.simpleMode ? 'simple' : 'full'; } catch(e) { return 'full'; } })());
+  // Per-dimension feed layout: { "dimKey:nodeId": {col, row} }. Independent of each
+  // person's real canvas x/y -- this is purely where they sit within the Feed view's
+  // fixed-width hex strip for that one dimension.
+  const [feedPositions, setFeedPositions] = useState((() => { try { return JSON.parse(localStorage.getItem('ft_feed_positions')||'{}'); } catch(e) { return {}; } })());
+  useEffect(() => { try { localStorage.setItem('ft_feed_positions', JSON.stringify(feedPositions)); } catch(e) {} }, [feedPositions]);
+  const feedScrollRef = useRef(null);
+  const feedDragRAF = useRef(null); // pending requestAnimationFrame id, used to throttle drag position updates to once per repaint instead of once per raw pointer event
+  const feedLiveTouchRef = useRef(null); // {x, y, pointerId} -- continuously updated on every move from touch-down, even before the 350ms lift fires, so the lift starts from a fresh position instead of a stale touch-down snapshot
+  const feedHoldTimer = useRef(null);
+  const feedLiftTimer = useRef(null);
+  const feedLastTapRef = useRef(new Map()); // nodeId -> timestamp, for double-tap-to-minimise detection in Feed
+  const feedSingleTapTimersRef = useRef(new Map()); // nodeId -> timer, one independent pending-open timer PER node (a single shared slot was the actual bug: tapping a different node mid-sequence stomped on it)
+  const feedJustPlaced = useRef(new Set()); // node ids that were just placed via hold-to-place, so the resulting click on THAT specific node doesn't open its detail panel
+  // A lifted/"carried" node, shown as a fixed overlay that rides along on
+  // screen as the page scrolls beneath it. Stored in PAGE coordinates (i.e.
+  // including scroll offset) so its on-screen position can be recomputed
+  // correctly as you scroll. dropMode is 'onehand' (same finger lifts, then
+  // scrolls, then taps again to place) or 'twohand' (one finger holds while
+  // a second, independent finger scrolls; lifting the holding finger drops it).
+  const [feedCarrying, setFeedCarrying] = useState(null); // {dimKey, nodeId, branchIds, pageX, pageY, dropMode, holdPointerId}
+  const [feedScrollTop, setFeedScrollTop] = useState(0);
+  const [feedDragMode, setFeedDragMode] = useState((() => { try { return JSON.parse(localStorage.getItem('ft_settings')||'{}').feedDragMode || 'onehand'; } catch(e) { return 'onehand'; } })()); // 'onehand' | 'twohand'
   const [darknessFilter, setDarknessFilter] = useState((() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); return s.darknessFilter !== undefined ? s.darknessFilter : true; } catch(e) { return true; } })());
+
+
+  // ---- Person-window theme system ----
+  const WINDOW_THEMES = {
+    'morning-garden': {
+      name: 'Morning Garden', emoji: '🌿',
+      bg:'#faf8f3', headerBg:'#e8ede0', border:'#d4d9c8',
+      cellBg:'#f0ede4', bodyText:'#1c2117', secondText:'#5c6652',
+      accent:'#4a7c3f', accentText:'#ffffff',
+    },
+    'blossom': {
+      name: 'Blossom', emoji: '🌸',
+      bg:'#fdf6f9', headerBg:'#f5e6ee', border:'#e8c8d8',
+      cellBg:'#f9eff4', bodyText:'#2d1a24', secondText:'#7a4a62',
+      accent:'#b5547a', accentText:'#ffffff',
+    },
+    'ocean': {
+      name: 'Ocean', emoji: '🌊',
+      bg:'#f3f8fc', headerBg:'#deeaf5', border:'#b8d4e8',
+      cellBg:'#eaf3fa', bodyText:'#0d2233', secondText:'#3a6080',
+      accent:'#1a6fa8', accentText:'#ffffff',
+    },
+    'golden-hour': {
+      name: 'Golden Hour', emoji: '🌅',
+      bg:'#fdf9f0', headerBg:'#f5e8c8', border:'#e0c88a',
+      cellBg:'#f8f0db', bodyText:'#2a1f0a', secondText:'#7a5c20',
+      accent:'#c47d1a', accentText:'#ffffff',
+    },
+    'slate': {
+      name: 'Slate', emoji: '🪨',
+      bg:'#f5f6f7', headerBg:'#e4e7ec', border:'#c8cdd6',
+      cellBg:'#eceef2', bodyText:'#1a1d24', secondText:'#4a5268',
+      accent:'#4a5568', accentText:'#ffffff',
+    },
+    'custom': {
+      name: 'Custom', emoji: '🎨',
+      bg:'#faf8f3', headerBg:'#e8ede0', border:'#d4d9c8',
+      cellBg:'#f0ede4', bodyText:'#1c2117', secondText:'#5c6652',
+      accent:'#4a7c3f', accentText:'#ffffff',
+    },
+  };
+  const [windowThemeKey, setWindowThemeKey] = useState((() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); return s.windowThemeKey || 'morning-garden'; } catch(e) { return 'morning-garden'; } })());
+  const [customWindowTheme, setCustomWindowTheme] = useState((() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); return s.customWindowTheme || WINDOW_THEMES['morning-garden']; } catch(e) { return WINDOW_THEMES['morning-garden']; } })());
+  const [showThemeMaker, setShowThemeMaker] = useState(false);
   const [showVineColorPicker, setShowVineColorPicker] = useState(false);
   const [showVineTuner, setShowVineTuner] = useState(false);
   const [tunerSections, setTunerSections] = useState({borders:true,flowers:false,strands:false,groupBorder:false});
@@ -847,6 +1903,7 @@ function AppInner() {
   const [lockPin, setLockPin] = useState(() => { try { return localStorage.getItem('ft_pin') || ''; } catch(e) { return ''; } });
   const [lockTimer, setLockTimerVal] = useState(() => { try { return localStorage.getItem('ft_lockTimer') || 'close'; } catch(e) { return 'close'; } });
   const lastActiveRef = useRef(Date.now());
+
 
   // Check if app should lock based on timer
   useEffect(() => {
@@ -896,6 +1953,7 @@ function AppInner() {
   const [selectedForGroup, setSelectedForGroup] = useState([]);
   const selectedForGroupRef = useRef([]);
 
+
   // Keep ref in sync with state
   useEffect(() => { selectedForGroupRef.current = selectedForGroup; }, [selectedForGroup]); // null | { hubId }
   const [slashTrail, setSlashTrail] = useState([]);
@@ -917,6 +1975,29 @@ function AppInner() {
   const [galleryItems, setGalleryItems] = useState([]);
   const [galleryViewer, setGalleryViewer] = useState(null);
   const [galleryLoading, setGalleryLoading] = useState(false);
+  // Hub gallery
+  const [hubGalleryOpen, setHubGalleryOpen] = useState(null);
+  // Mole assistant
+  const [moleOut, setMoleOut] = useState(false);
+  const [moleRumble, setMoleRumble] = useState(false);
+  const [moleSummary, setMoleSummary] = useState(null);
+  const [moleLoading, setMoleLoading] = useState(false);
+  const [moleBubbleStage, setMoleBubbleStage] = useState('hint'); // 'welcome' (greeting) -> 'full' (card carousel)
+  const [moleHasNews, setMoleHasNews] = useState(true); // '!' shown on the hill when he has something to share
+  // molePos derived from the mole node -- drag uses handlePointerDown like any node
+  const moleNode = nodes.find(n => n.id === 'mole');
+  const molePos = moleNode ? { x: moleNode.x, y: moleNode.y } : { x: 280, y: 280 };
+  const [aiKeys, setAiKeys] = useState(() => { try { return JSON.parse(localStorage.getItem('ft_ai_keys')||'{}'); } catch(e) { return {}; } });
+  const [aiProvider, setAiProvider] = useState(() => localStorage.getItem('ft_ai_provider')||'gemini');
+  const [assistantCharacter, setAssistantCharacter] = useState(() => { try { return JSON.parse(localStorage.getItem('ft_settings')||'{}').assistantCharacter||'diglett'; } catch(e) { return 'diglett'; } });
+  const [aiResponse, setAiResponse] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+  const moleDragRef = useRef(null);
+  const panRafRef = useRef(null);
+  const [hubGalleryItems, setHubGalleryItems] = useState([]);
+  const [hubGalleryLoading, setHubGalleryLoading] = useState(false);
+  const [hubGalleryViewer, setHubGalleryViewer] = useState(null);
+  const [hubTaggingPhoto, setHubTaggingPhoto] = useState(null);
   const rakeDragStart = useRef(null);
   const [vineConnectPrompt, setVineConnectPrompt] = useState(null);
   const [pendingPaths, setPendingPaths] = useState([]);
@@ -935,6 +2016,7 @@ function AppInner() {
   const lastPanPos = useRef({ x: 0, y: 0 });
   const panTimer = useRef(null);
 
+
   useEffect(() => {
     if (svgRef.current) {
       const rect = svgRef.current.getBoundingClientRect();
@@ -942,15 +2024,20 @@ function AppInner() {
     }
   }, [viewMode]);
 
+
   useEffect(() => {
     const checkDecay = () => {
       const now = Date.now();
       const daysPassed = Math.floor((now - lastDecayCheck) / (1000 * 60 * 60 * 24));
       if (daysPassed > 0) {
         setNodes(prev => prev.map(n => {
-          if (n.type === 'hub' || n.id === 'me') return n;
+          if (n.type === 'hub' || n.type === 'mole' || n.id === 'me') return n;
           const newScore = Math.max(0, (n.interactionScore || 0) - (daysPassed * DECAY_RATE_PER_DAY));
-          return { ...n, interactionScore: newScore };
+          // Record this in scoreHistory too -- otherwise a purely passive decline
+          // (no interactions logged) never shows up in any 7-day trend lookup,
+          // since history previously only got entries when points were added.
+          const newHistory = [...(n.scoreHistory || []), { score: newScore, ts: now }].slice(-48);
+          return { ...n, interactionScore: newScore, scoreHistory: newHistory };
         }));
         setLastDecayCheck(now);
       }
@@ -959,6 +2046,7 @@ function AppInner() {
     const interval = setInterval(checkDecay, 1000 * 60 * 60);
     return () => clearInterval(interval);
   }, [lastDecayCheck]);
+
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -972,9 +2060,11 @@ function AppInner() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+
   const getConnectionCount = useCallback((nodeId) => {
     return links.filter(l => l.source === nodeId || l.target === nodeId).length;
   }, [links]);
+
 
   const calculateHubStrength = useCallback((hubId) => {
     const connectedFriends = links
@@ -987,6 +2077,7 @@ function AppInner() {
     return Math.min(MAX_SCORE, totalScore);
   }, [links, nodes]);
 
+
   const getNodeRadius = useCallback((node) => {
     if (node.id === 'me') return 80;
     if (node.type === 'hub') return 40;
@@ -995,6 +2086,15 @@ function AppInner() {
     const normalized = Math.min(score / 300, 1);
     return 40 + (normalized * 40);
   }, []);
+
+
+  // Holds the current grid config (gridStyle, HEX_SIZE, snapToHex) so findFreeSpot
+  // (defined here, early in the component) can read live values without referencing
+  // gridStyle/HEX_SIZE/snapToHex directly -- those are declared much later in the
+  // component body, and referencing them directly here (even just in a dependency
+  // array) would throw a "used before initialization" error since they haven't
+  // been declared yet at this point in the render pass.
+  const gridConfigRef = useRef({ gridStyle: 'hex', HEX_SIZE: 110, snapToHex: (x, y) => ({ x, y }) });
 
   // Find the nearest free position for a node so it doesn't sit on top of others.
   // Spirals outward from the desired spot until it finds a gap.
@@ -1006,20 +2106,44 @@ function AppInner() {
       const r = (n.type === 'hub' ? 40 : 70) + myR * 0.5;
       return Math.hypot(n.x - px, n.y - py) < r;
     });
-    if (!clashes(x, y)) return { x, y };
-    // spiral search
-    const step = 40;
-    for (let ring = 1; ring <= 12; ring++) {
-      const pts = Math.max(6, ring * 6);
-      for (let i = 0; i < pts; i++) {
-        const a = (i / pts) * Math.PI * 2;
-        const px = x + Math.cos(a) * step * ring;
-        const py = y + Math.sin(a) * step * ring;
-        if (!clashes(px, py)) return { x: px, y: py };
+    // Snap the starting point to the grid first, matching whichever style is
+    // currently selected (hex / hexSmall / square) -- snapToHex already branches
+    // on gridStyle internally.
+    const { gridStyle: gs, HEX_SIZE: hs, snapToHex: snap } = gridConfigRef.current;
+    const start = snap(x, y);
+    if (!clashes(start.x, start.y)) return { x: start.x, y: start.y };
+    // Search outward ring by ring, but only ever testing real grid cells so the
+    // final position is always exactly on-grid, never an arbitrary spiral point.
+    if (gs === 'square') {
+      for (let ring = 1; ring <= 14; ring++) {
+        for (let dx = -ring; dx <= ring; dx++) {
+          for (let dy = -ring; dy <= ring; dy++) {
+            if (Math.max(Math.abs(dx), Math.abs(dy)) !== ring) continue; // only the ring's edge
+            const px = start.x + dx * hs, py = start.y + dy * hs;
+            if (!clashes(px, py)) return { x: px, y: py };
+          }
+        }
+      }
+      return { x: start.x, y: start.y };
+    }
+    // Hex grid: walk outward in axial coordinate rings from the starting hex.
+    const startQ = start.q ?? 0, startR = start.r ?? 0;
+    for (let ring = 1; ring <= 14; ring++) {
+      // Generate all axial cells exactly `ring` steps away from the start.
+      for (let dq = -ring; dq <= ring; dq++) {
+        for (let dr = Math.max(-ring, -dq - ring); dr <= Math.min(ring, -dq + ring); dr++) {
+          const ds = -dq - dr;
+          if (Math.max(Math.abs(dq), Math.abs(dr), Math.abs(ds)) !== ring) continue;
+          const q = startQ + dq, r = startR + dr;
+          const px = hs * 1.5 * q;
+          const py = hs * (Math.sqrt(3) / 2 * q + Math.sqrt(3) * r);
+          if (!clashes(px, py)) return { x: px, y: py };
+        }
       }
     }
-    return { x, y }; // give up — return original
+    return { x: start.x, y: start.y }; // give up — return the snapped starting point
   }, []);
+
 
   // Resolve all current overlaps once (e.g. on app open): nudge any overlapping
   // real nodes to the nearest free spot.
@@ -1037,6 +2161,7 @@ function AppInner() {
     });
   }, [findFreeSpot]);
 
+
   // One-time on app open: separate any nodes that are sitting on top of each other.
   const didResolveOverlapsRef = useRef(false);
   useEffect(() => {
@@ -1045,6 +2170,7 @@ function AppInner() {
     const t = setTimeout(() => resolveAllOverlaps(), 1200);
     return () => clearTimeout(t);
   }, [resolveAllOverlaps]);
+
 
   // When a branch is EXPANDED (un-minimised), its members return to their saved
   // positions — but nudge any that now overlap, so spacing limits are respected
@@ -1077,8 +2203,13 @@ function AppInner() {
 
 
 
+
+
+
+
   const handlePointerDown = (e, nodeId) => {
     if (vineDrawMode && viewMode === 'canvas') return;
+
 
     // Track every pointer with its starting position
     activePointers.current.set(e.pointerId, {
@@ -1088,7 +2219,9 @@ function AppInner() {
       decidedPan: false,
     });
 
+
     const allPtrs = Array.from(activePointers.current.values());
+
 
     if (allPtrs.length === 2) {
       // Pinch zoom init
@@ -1098,6 +2231,7 @@ function AppInner() {
       initialPinchScale.current = transform.scale;
       return;
     }
+
 
     if (nodeId && viewMode === 'canvas') {
       const touchedNode = nodes.find(n => n.id === nodeId);
@@ -1125,6 +2259,13 @@ function AppInner() {
       const node = nodes.find(n => n.id === nodeId);
       if (!node) return;
       setDragNode({ id: nodeId, startX: node.x, startY: node.y, pointerId: e.pointerId });
+
+      // Mole lifts immediately -- no hold required
+      if (node.type === 'mole') {
+        groupDragIds.current = null;
+        setLiftedNodeId(nodeId);
+        return;
+      }
 
       // DEFAULT group-move: if this node has downstream members, dragging it
       // moves the whole branch as a cluster (keeps relative arrangement).
@@ -1161,6 +2302,7 @@ function AppInner() {
           groupDragIds.current = null;
         }
       })();
+
 
       clearTimeout(liftTimer.current);
       clearTimeout(groupLiftTimer.current);
@@ -1213,9 +2355,11 @@ function AppInner() {
         });
       }, 150);
 
+
       // Capture pointer start position for movement threshold check
       groupHoldStartPos.current = { x: e.clientX, y: e.clientY };
       const MOVE_CANCEL_PX = 12;
+
 
       // 2s hold while staying still — drag node with all connected friends
       const dragNodeId = nodeId;
@@ -1232,7 +2376,9 @@ function AppInner() {
             const draggedNode = currentNodes.find(n => n.id === dragNodeId);
             if (!draggedNode) return currentLinks;
 
+
             const visited = new Set([dragNodeId]);
+
 
             if (draggedNode.type === 'hub') {
               currentLinks.forEach(l => {
@@ -1258,6 +2404,7 @@ function AppInner() {
               }
             }
 
+
             if (visited.size > 1) {
               const origins = {};
               currentNodes.forEach(n => { if (visited.has(n.id)) origins[n.id] = { x: n.x, y: n.y }; });
@@ -1266,6 +2413,7 @@ function AppInner() {
               groupDragIds.current = visited;
               showToast('🌿 Moving group · ' + (visited.size-1) + ' member' + (visited.size-1===1?'':'s'));
             }
+
 
             return currentLinks;
           });
@@ -1284,6 +2432,7 @@ function AppInner() {
     setShowTutorial(false);
   };
 
+
   const handlePointerMove = (e) => {
     if (vineDrawMode && isDrawing.current && viewMode === 'canvas') {
       const rect = svgRef.current ? svgRef.current.getBoundingClientRect() : { left:0, top:0 };
@@ -1292,6 +2441,7 @@ function AppInner() {
       setCurrentStroke(prev => [...prev, { x: sx, y: sy }]);
       return;
     }
+
 
     // Update hold start pos tracking so group drag timer can check movement
     if (groupHoldStartPos.current) {
@@ -1304,12 +2454,15 @@ function AppInner() {
       }
     }
 
+
     const ptr = activePointers.current.get(e.pointerId);
     if (!ptr) return;
     ptr.x = e.clientX;
     ptr.y = e.clientY;
 
+
     const allPtrs = Array.from(activePointers.current.values());
+
 
     // Pinch zoom
     if (allPtrs.length === 2) {
@@ -1323,9 +2476,10 @@ function AppInner() {
       return;
     }
 
+
     // Node touch — decide: pan or drag?
     if (ptr.nodeId && dragNode && !ptr.decidedPan) {
-      if (!liftedNodeId) {
+      if (!liftedNodeId && !liftedIdRef.current) {
         // Not lifted yet — check if we should switch to pan
         const moved = Math.sqrt((ptr.x - ptr.startX)**2 + (ptr.y - ptr.startY)**2);
         if (moved > 12) {
@@ -1337,6 +2491,7 @@ function AppInner() {
           ptr.decidedPan = true;
           ptr.nodeId = null; // treat as background touch from now on
           setDragNode(null);
+          liftedIdRef.current = null;
           setLiftedNodeId(null);
           setIsPanning(true);
           setPanStart({ x: ptr.startX - transform.x, y: ptr.startY - transform.y });
@@ -1348,6 +2503,7 @@ function AppInner() {
         ptr.decidedPan = false; // lifted — this is a drag
       }
     }
+
 
     // Panning
     if (isPanning && !liftedNodeId) {
@@ -1366,8 +2522,9 @@ function AppInner() {
       return;
     }
 
+
     // Dragging a lifted node
-    if (liftedNodeId && dragNode && !isPanningOverride.current) {
+    if ((liftedNodeId || liftedIdRef.current) && dragNode && !isPanningOverride.current) {
       const rect = svgRef.current ? svgRef.current.getBoundingClientRect() : { left:0, top:0 };
       const svgX = (e.clientX - rect.left - transform.x) / transform.scale;
       const svgY = (e.clientY - rect.top - transform.y) / transform.scale;
@@ -1389,6 +2546,7 @@ function AppInner() {
       nodes.forEach(n => {
         if (n.id === dragNode.id) return;
         if (n.type === 'flower' && n.id !== 'flower_social') return;
+        if (n.type === 'mole') return;
         if (n.hidden) return;
         // Skip nodes that are minimised or collapsed inside a bundle — they're
         // not visibly present, so dragging onto their old spot must NOT connect.
@@ -1401,6 +2559,7 @@ function AppInner() {
     }
   };
 
+
   const handlePointerUp = (e) => {
     if (vineDrawMode && isDrawing.current && viewMode === 'canvas') {
       isDrawing.current = false;
@@ -1411,6 +2570,7 @@ function AppInner() {
       return;
     }
 
+
     clearTimeout(liftTimer.current);
     clearTimeout(groupLiftTimer.current);
     groupDragIds.current = null;
@@ -1419,8 +2579,10 @@ function AppInner() {
     if (!ptr) return;
     activePointers.current.delete(e.pointerId);
 
+
     const moved = Math.sqrt((ptr.x - ptr.startX)**2 + (ptr.y - ptr.startY)**2);
     const wasTap = moved < 12;
+
 
     if (ptr.nodeId && wasTap && viewMode === 'canvas') {
       // Select-for-group mode — tap toggles selection
@@ -1441,7 +2603,8 @@ function AppInner() {
       const now = Date.now();
       const tappedNode = nodes.find(n => n.id === ptr.nodeId);
 
-      if (now - lastTime < 400) {
+
+      if (now - lastTime < 500) {
         // a second tap arrived — cancel any pending single-tap open
         if (singleTapTimerRef.current) { clearTimeout(singleTapTimerRef.current); singleTapTimerRef.current = null; }
         if (tapCount >= 3 && tappedNode?.type === 'hub') {
@@ -1464,9 +2627,14 @@ function AppInner() {
             } else {
               showToast('🔒 Border locked — unlock in group settings');
             }
+          } else if (tappedNode?.type === 'mole') {
+            // Double-tap mole: activate him
+            if (singleTapTimerRef.current) { clearTimeout(singleTapTimerRef.current); singleTapTimerRef.current = null; }
+            openMole();
           } else {
             // Double-tap person or hub: minimise / expand their branch.
-            // The single-tap open was deferred, so the window never appears.
+            if (singleTapTimerRef.current) { clearTimeout(singleTapTimerRef.current); singleTapTimerRef.current = null; }
+            setSelectedNodeId(null);
             const willMin = !minimisedNodes.includes(ptr.nodeId);
             setMinimisedNodes(prev => prev.includes(ptr.nodeId) ? prev.filter(id => id !== ptr.nodeId) : [...prev, ptr.nodeId]);
             showToast(willMin ? '📁 Minimised' : '📂 Expanded');
@@ -1478,23 +2646,34 @@ function AppInner() {
           lastTapRef.current.set(ptr.nodeId + '_count', tapCount);
         }
       } else {
-        // First tap — wait briefly to see if a second tap (double-tap) follows.
-        // If not, open the sidebar. This stops the window from flashing open
-        // on a double-tap-to-minimise.
+        // First tap -- wait to see if double-tap follows
         lastTapRef.current.set(ptr.nodeId, now);
         lastTapRef.current.set(ptr.nodeId + '_count', 1);
-        if (tappedNode?.type !== 'flower') {
+        if (tappedNode?.type === 'mole') {
+          // Single tap: if he's out but the card is closed, reopen it. Otherwise do nothing
+          // (double-tap is reserved for summoning/dismissing him).
+          if (moleOut && moleSummary && moleBubbleStage !== 'full') {
+            setMoleBubbleStage('full');
+          }
+        } else if (tappedNode?.type !== 'flower') {
           const nid = ptr.nodeId;
           if (singleTapTimerRef.current) clearTimeout(singleTapTimerRef.current);
           singleTapTimerRef.current = setTimeout(() => {
             setSelectedNodeId(nid);
             singleTapTimerRef.current = null;
-          }, 420);
+          }, 520);
         }
       }
     }
 
+
     if (liftedNodeId && dragNode) {
+      // Mole: just drop wherever, no snap or link prompts
+      if (dragNode.id === 'mole') {
+        liftedIdRef.current = null;
+        setLiftedNodeId(null); setDragNode(null); setHoverTarget(null); setHexSnapPos(null);
+        return;
+      }
       const groupDragging = groupDragIds.current && groupDragIds.current.size > 1;
       // Settle to snapped position — then pop to nearest free spot if it overlaps.
       // When group-dragging, the live-drag already placed the whole branch, so
@@ -1524,6 +2703,7 @@ function AppInner() {
           setNodes(prev => prev.map(n => n.id === dragNode.id ? { ...n, x: dragNode.startX, y: dragNode.startY } : n));
           setMergePrompt({ type: 'group', a: dragNode.id, b: hoverTarget });
 
+
         // Anything→Social flower: connect and bounce back
         } else if (targetNode?.id === 'flower_social') {
           const alreadyLinked = links.some(l =>
@@ -1539,6 +2719,7 @@ function AppInner() {
             showToast('Already connected to Social');
           }
 
+
         // Person/Me→Person/Me: connect prompt, bounce back
         } else if (targetNode?.type !== 'hub' && targetNode?.type !== 'flower' &&
                    draggedNode?.type !== 'hub' && draggedNode?.type !== 'flower') {
@@ -1553,6 +2734,7 @@ function AppInner() {
             showToast('Already connected');
           }
 
+
         // Person→Hub: join group, bounce back
         } else if (targetNode?.type === 'hub') {
           const alreadyLinked = links.some(l =>
@@ -1565,6 +2747,7 @@ function AppInner() {
             showLinkUndo(hoverTarget, dragNode.id);
             showToast('🌱 Added to ' + targetNode.label);
           }
+
 
         // Hub→Person or anything else with a valid target: connect, bounce back
         } else if (targetNode) {
@@ -1590,11 +2773,13 @@ function AppInner() {
         }
       }
       setDragNode(null);
+      liftedIdRef.current = null;
       setLiftedNodeId(null);
       setHoverTarget(null);
       setHexSnapPos(null);
       setDragNode(null);
     }
+
 
     isPanningOverride.current = false;
     if (activePointers.current.size === 0) {
@@ -1602,11 +2787,13 @@ function AppInner() {
     }
   };
 
+
   const handleWheel = (e) => {
     e.preventDefault();
     const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
     setTransform(prev => ({ ...prev, scale: Math.min(Math.max(0.01, prev.scale * zoomFactor), 3) }));
   };
+
 
   const showToast = (msg) => {
     setToastMessage(msg);
@@ -1616,6 +2803,7 @@ function AppInner() {
     const now = Date.now();
     const hoursAgo = (h) => now - h * 3600000;
     const daysAgo  = (d) => new Date(now - d * 864e5).toLocaleDateString('en-GB', { day:'numeric', month:'short' });
+
 
     const buildHistory = (currentScore, trend) => {
       const entries = [];
@@ -1632,6 +2820,7 @@ function AppInner() {
       return entries;
     };
 
+
     // First: add all demo people and groups (merge — don't duplicate)
     setNodes(prev => {
       const existingIds = new Set(prev.map(n => n.id));
@@ -1643,6 +2832,7 @@ function AppInner() {
       const toAdd = DEMO_LINKS.filter(l => !existingKeys.has(`${l.source}-${l.target}`));
       return [...prev, ...toAdd];
     });
+
 
     // Then: populate scores and history on named nodes
     const friendData = {
@@ -1685,6 +2875,7 @@ function AppInner() {
       ]},
     };
 
+
     setNodes(prev => prev.map(n => {
       const data = friendData[n.id];
       if (!data) return n;
@@ -1696,6 +2887,7 @@ function AppInner() {
         ...(data.tags    ? { tags:    data.tags    } : {}),
       };
     }));
+
 
     setDimensions(prev => ({
       ...prev,
@@ -1725,12 +2917,16 @@ function AppInner() {
       ]},
     }));
 
+
     showToast('🌳 Demo loaded — leaves show budding, shrivelling & browning!');
   };
 
 
+
+
   const getCalendarLayout = useCallback(() => {
     const calendarNodes = nodes.filter(n => n.type !== 'hub' && n.birthday);
+
 
     // Parse birthday string in any reasonable format including "11th Mar 93"
     const parseBirthdayDate = (str) => {
@@ -1754,6 +2950,7 @@ function AppInner() {
       return new Date(fullYear, month, day);
     };
 
+
     const getDayOfYear = (dateString) => {
       const d = parseBirthdayDate(dateString) || new Date(dateString);
       if (!d || isNaN(d.getTime())) return { day: 0, month: 0, year: 2000, dateStr: '' };
@@ -1763,11 +2960,13 @@ function AppInner() {
       return { day: Math.floor(diff / oneDay), month: d.getMonth(), year: d.getFullYear(), dateStr: d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) };
     };
 
+
     let processedNodes = calendarNodes.map(n => {
       const info = getDayOfYear(n.birthday);
       const radius = getNodeRadius(n);
       return { ...n, dayOfYear: info.day, birthMonth: info.month, birthYear: info.year, displayDate: info.dateStr, radius };
     }).sort((a, b) => a.dayOfYear - b.dayOfYear);
+
 
     const spacingPerDay = 15;
     let prevS = -99999;
@@ -1781,10 +2980,12 @@ function AppInner() {
       return { ...n, s };
     });
 
+
     // MONTH_S is always exactly one year of spacing — months always span the full vine
     const MONTH_S = 365 * spacingPerDay;
     // Total vine length must accommodate all nodes but is at least one year
     const MAX_S = Math.max(MONTH_S, prevS + 500 * CALENDAR_NODE_SCALE);
+
 
     // --- ORGANIC VINE WIGGLE ---
     // Pure sine looks mechanical. A vine grows with:
@@ -1795,6 +2996,7 @@ function AppInner() {
     // and add a phase-shift per octave so they feel independent.
     // Crucially we clamp the cumulative angle change so the vine never
     // reverses direction (no loops) — it always makes net forward progress.
+
 
     // --- LAYOUT SYSTEM ---
     // Each layout maps t∈[0,1] to an (x,y) spine point
@@ -1839,7 +3041,9 @@ function AppInner() {
       },
     };
 
+
     const getPoint = LAYOUTS[calendarLayout] || LAYOUTS.circle;
+
 
     // Small organic wiggle perpendicular to spine for vine texture
     const OCTAVES = [
@@ -1853,6 +3057,7 @@ function AppInner() {
       return w;
     };
 
+
     const steps = 800;
     const pathPoints = [];
     for (let i = 0; i <= steps; i++) {
@@ -1861,6 +3066,7 @@ function AppInner() {
       pathPoints.push(`${p.x.toFixed(1)},${p.y.toFixed(1)}`);
     }
     const pathD = `M ${pathPoints.join(' L ')}`;
+
 
     const STRAND_COUNT = 3;
     const STRAND_SPREAD = 70;
@@ -1874,7 +3080,9 @@ function AppInner() {
       });
     });
 
+
     const DAYS_IN_MONTH = [31,28,31,30,31,30,31,31,30,31,30,31];
+
 
     // Compute t-bounds per month using MONTH_S — months always span 0→1 across the full vine
     let dayAccum = 0;
@@ -1884,6 +3092,7 @@ function AppInner() {
       const tEnd = Math.min((dayAccum * spacingPerDay) / MONTH_S, 1);
       return { tStart, tEnd };
     });
+
 
     // Per-month, per-strand path strings — carry tStart/tEnd for grown/ungrown split
     const strandSegments = monthTBounds.map(({ tStart, tEnd }) => ({
@@ -1896,6 +3105,7 @@ function AppInner() {
       }),
     }));
 
+
     // Month marker positions — use MONTH_S so markers always span full vine
     dayAccum = 0;
     const monthMarkers = DAYS_IN_MONTH.map((days, mi) => {
@@ -1906,11 +3116,13 @@ function AppInner() {
       return { x: p.x, y: p.y, shortLabel: MONTH_NAMES[mi], color: MONTH_COLORS[mi], t };
     });
 
+
     // Today as fraction of year — also relative to MONTH_S
     const now = new Date();
     const startOfYear = new Date(now.getFullYear(), 0, 0);
     const dayOfYear = Math.floor((now - startOfYear) / (1000 * 60 * 60 * 24));
     const todayT = Math.min((dayOfYear * spacingPerDay) / MONTH_S, 1);
+
 
     const LEAF_SPACING = 0.012;
     const leaves = [];
@@ -1924,6 +3136,7 @@ function AppInner() {
       leaves.push({ x: p0.x, y: p0.y, angle, side, scale, mi });
     }
 
+
     const positionedNodes = processedNodes.map(n => {
       const t = n.s / MAX_S;
       // Place photo outside the vine — perpendicular offset
@@ -1935,15 +3148,19 @@ function AppInner() {
       return { ...n, renderX: p.x, renderY: p.y, age, isMilestone, monthColor: MONTH_COLORS[n.birthMonth] };
     });
 
+
     return { pathD, strandSegments, monthMarkers, leaves, nodes: positionedNodes, todayT };
   }, [nodes, getNodeRadius, calendarLayout]);
 
+
   const { pathD: calendarPath, strandSegments: calendarStrandSegments, monthMarkers: calendarMonthMarkers, leaves: calendarLeaves, nodes: calendarRenderNodes, todayT: calendarTodayT = 1 } = viewMode === 'calendar' ? getCalendarLayout() : { pathD: '', strandSegments: [], monthMarkers: [], leaves: [], nodes: [], todayT: 1 };
+
 
   const ACTIVITY_LABELS = {
     message: 'Message', hangout: 'Hangout', nightout: 'Night Out',
     trip: 'Trip Away', gesture: 'Meaningful Gesture', general: 'Interaction',
   };
+
 
   const logActivity = (points, type = 'general') => {
     if (!selectedNodeId) return;
@@ -1982,6 +3199,7 @@ function AppInner() {
     }));
   };
 
+
   // Simple string similarity score (0-1) — higher = more similar
   const nameSimilarity = (a, b) => {
     if (!a || !b) return 0;
@@ -1993,12 +3211,12 @@ function AppInner() {
     return shared / Math.max(al.length, bl.length);
   };
 
+
   const createFriendFromForm = (formId, img, blob = null, nameOverride = null) => {
     const form = addFriendForms.find(f => f.id === formId);
     if (!form) return;
     const resolvedName = nameOverride || form.name;
     const newId = `node_${Date.now()}`;
-    const avatarKeys = Object.keys(AVATARS);
     // Place near parent if one set, otherwise random open space
     const anchor = form.parentId
       ? nodes.find(n => n.id === form.parentId) || { x: 0, y: 0 }
@@ -2007,10 +3225,10 @@ function AppInner() {
     snapshot();
     setNodes(prev => [...prev, {
       id: newId,
-      label: resolvedName.trim() || 'New Friend',
-      img: img || AVATARS[avatarKeys[Math.floor(Math.random()*avatarKeys.length)]],
+      label: resolvedName.trim(),
+      img: img || makeBlankAvatar(),
       x: clearPos.x, y: clearPos.y,
-      interactionScore: form.initialScore || 0,
+      interactionScore: form.initialScore || STARTING_SCORE,
       pinned: false, type: 'friend',
       syncDismissed: !!img,
     }]);
@@ -2022,8 +3240,9 @@ function AppInner() {
     }
     setSelectedNodeId(newId);
     setAddFriendForms(prev => prev.filter(f => f.id !== formId));
-    showToast('🌱 ' + (resolvedName.trim() || 'New Friend') + ' added');
+    showToast(resolvedName.trim() ? `🌱 ${resolvedName.trim()} added` : '🌱 New friend added');
   };
+
 
   // Open a friend's linked phone contact in the system Contacts app so the
   // user can edit it manually (safe — we never write to contacts ourselves).
@@ -2034,17 +3253,21 @@ function AppInner() {
     s = s.replace(/^https?:\/\//i, '').replace(/^www\./i, '').replace(/^web\./i, '').replace(/^m\./i, '');
     const clean = (h) => (h || '').split(/[/?#]/)[0].replace(/^@/, '').trim();
 
+
     // Instagram
     let m = s.match(/^(?:instagram\.com|ig\.me\/m)\/([^/?#]+)/i);
     if (m) return { field: 'instagram', value: clean(m[1]), label: 'Instagram' };
+
 
     // Facebook profile by NUMERIC ID (profile.php?id=123...) — this works with m.me!
     m = s.match(/facebook\.com\/profile\.php\?id=(\d+)/i);
     if (m) return { field: 'messenger', value: m[1], label: 'Messenger (ID)' };
 
+
     // Newer profile format facebook.com/people/Some-Name/<numeric-id>/ — extract the ID
     m = s.match(/facebook\.com\/people\/[^/]+\/(?:pfbid\w+|(\d+))/i);
     if (m && m[1]) return { field: 'messenger', value: m[1], label: 'Messenger (ID)' };
+
 
     // Messenger thread links messenger.com/t/<id>, messenger.com/messages/t/<id>
     m = s.match(/^(?:messenger\.com|m\.me)\/(?:messages\/)?t\/([^/?#]+)/i);
@@ -2052,10 +3275,12 @@ function AppInner() {
     m = s.match(/facebook\.com\/messages\/t\/([^/?#]+)/i);
     if (m) return { field: 'messenger', value: clean(m[1]), label: 'Messenger' };
 
+
     // Facebook SHARE / short redirect links — keep the FULL url; opening it while
     // logged in resolves to the person. Store the whole link so openMessage uses it directly.
     m = s.match(/^(?:facebook\.com\/share\/[^\s]+|fb\.me\/[^\s]+|fb\.watch\/[^\s]+|facebook\.com\/share\.php[^\s]*)/i);
     if (m) return { field: 'messenger', value: 'https://' + m[0], label: 'Messenger (link)', isFullUrl: true };
+
 
     // Plain m.me / facebook.com username
     m = s.match(/^(?:m\.me|facebook\.com|fb\.com)\/([^/?#]+)/i);
@@ -2067,14 +3292,17 @@ function AppInner() {
       }
     }
 
+
     // WhatsApp → phone number
     m = s.match(/^(?:wa\.me|api\.whatsapp\.com\/send|chat\.whatsapp\.com)\/?\??(?:phone=)?(\+?\d[\d\s-]+)/i);
     if (m) return { field: 'phone', value: m[1].replace(/[\s-]/g,''), label: 'Phone (WhatsApp)' };
+
 
     // a plain phone-ish string
     if (/^\+?[\d\s-]{7,}$/.test(raw.trim())) return { field: 'phone', value: raw.replace(/[\s-]/g,''), label: 'Phone' };
     return null;
   };
+
 
   const openMessage = async (node, platform) => {
     if (!node) return;
@@ -2108,6 +3336,7 @@ function AppInner() {
     }
   };
 
+
   const openContactInPhone = async (node) => {
     const isNative = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
     if (!isNative) { showToast('Only available in the installed app'); return; }
@@ -2134,8 +3363,10 @@ function AppInner() {
     showToast('Could not open Contacts on this device');
   };
 
+
   const handleImportContact = async () => {
     const isNative = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+
 
     // NATIVE: real Android contacts via @capacitor-community/contacts
     if (isNative && window.Capacitor.Plugins && window.Capacitor.Plugins.Contacts) {
@@ -2174,6 +3405,7 @@ function AppInner() {
       }
     }
 
+
     // WEB / PWA: browser Contacts API
     try {
       if ('contacts' in navigator && 'ContactsManager' in window) {
@@ -2199,6 +3431,7 @@ function AppInner() {
     }
   };
 
+
   const addFriendsFromContacts = async () => {
     const spawnNodes = (contactList) => {
       // Determine parent — selected person/hub, else flower_social, else me
@@ -2206,6 +3439,7 @@ function AppInner() {
         ? nodes.find(n => n.id === selectedNodeId && n.type !== 'flower')
         : nodes.find(n => n.id === 'flower_social');
       const parent = parentNode || nodes.find(n => n.id === 'me') || { x: 0, y: 0, id: 'me' };
+
 
       const newNodes = contactList.map((contact, idx) => {
         // Place around parent using findClearPosition logic
@@ -2221,7 +3455,7 @@ function AppInner() {
           phone: contact.phone || '',
           x: snapped.x,
           y: snapped.y,
-          interactionScore: 0,
+          interactionScore: STARTING_SCORE,
           pinned: false,
           type: 'friend',
         };
@@ -2236,6 +3470,7 @@ function AppInner() {
       setShowTutorial(false);
       showToast(`${newNodes.length} friend${newNodes.length !== 1 ? 's' : ''} added${parentNode && parentNode.id !== 'me' ? ` via ${parent.label}` : ''}!`);
     };
+
 
     // NATIVE: real Android contacts via @capacitor-community/contacts
     const isNative = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
@@ -2254,7 +3489,7 @@ function AppInner() {
             label: firstName,
             contactName: fullName !== firstName ? fullName : null,
             phone: (c.phones && c.phones[0] && c.phones[0].number) || '',
-            img: (c.image && c.image.base64String) ? ('data:image/jpeg;base64,' + c.image.base64String) : AVATARS.james_f,
+            img: (c.image && c.image.base64String) ? ('data:image/jpeg;base64,' + c.image.base64String) : makeBlankAvatar(),
           };
         });
         spawnNodes(mapped);
@@ -2266,6 +3501,7 @@ function AppInner() {
       }
     }
 
+
     try {
       if ('contacts' in navigator && 'ContactsManager' in window) {
         const props = ['name', 'tel', 'icon'];
@@ -2276,7 +3512,7 @@ function AppInner() {
             const fullName = c.name?.[0] || 'Friend';
             const firstName = fullName.split(' ')[0]; // first name only
             // Upscale contact thumbnail using canvas
-            let img = AVATARS.james_f;
+            let img = makeBlankAvatar();
             if (c.icon?.length) {
               img = await new Promise(res => {
                 const reader = new FileReader();
@@ -2316,6 +3552,7 @@ function AppInner() {
     }
   };
 
+
   // Find a clear position near `nearNode` that doesn't overlap any existing node
   const findClearPosition = (nearNode, currentNodes) => {
     const MIN_DIST = 120;
@@ -2324,9 +3561,11 @@ function AppInner() {
     const DIRECTIONS = 20;
     const CLEAR_R = 70; // clearance radius for new position
 
+
     // Prefer to place along the line from Me toward nearNode, offset to the side
     const meNode = currentNodes.find(n => n.id === 'me') || { x: 0, y: 0 };
     const toTarget = Math.atan2(nearNode.y - meNode.y, nearNode.x - meNode.x);
+
 
     for (let dist = MIN_DIST; dist <= MAX_DIST; dist += STEP) {
       for (let di = 0; di < DIRECTIONS; di++) {
@@ -2347,6 +3586,7 @@ function AppInner() {
     return { x: nearNode.x + MIN_DIST, y: nearNode.y };
   };
 
+
   // Detect if a stroke ends in a loop (tip comes back near the start of the stroke)
   // Detect if a stroke ends in a loop (tip comes back near an earlier point)
   // Returns centroid position only — the loop itself is not drawn
@@ -2365,6 +3605,7 @@ function AppInner() {
     return null;
   };
 
+
   // Animate one vine growing along a custom path using dashoffset
   const animateVine = (linkId, totalLen) => {
     const startTime = performance.now();
@@ -2381,8 +3622,10 @@ function AppInner() {
     requestAnimationFrame(tick);
   };
 
+
   const processSinglePath = (rawPts) => {
     if (rawPts.length < 4) return;
+
 
     // Smooth + downsample for analysis only (not for rendering)
     const smoothed = rawPts.map((p, i) => {
@@ -2391,6 +3634,7 @@ function AppInner() {
     });
     const step = Math.max(1, Math.floor(smoothed.length / 60));
     const pts = smoothed.filter((_, i) => i % step === 0);
+
 
     // Find which existing node a stretch of points passes through
     const findNodeOnSegment = (segPts, excludeId = null) => {
@@ -2416,8 +3660,10 @@ function AppInner() {
       return best;
     };
 
+
     // Check for loop anywhere in the stroke
     const loop = detectLoop(pts);
+
 
     if (loop) {
       // Use the full path to find source (not just pre-loop) for better Me detection
@@ -2431,11 +3677,14 @@ function AppInner() {
       return;
     }
 
+
     // No loop — scan full path for both nodes (allows line that overlaps Me then someone else)
     const sourceNode = findNodeOnSegment(pts.slice(0, Math.ceil(pts.length * 0.5)));
     const targetNode = findNodeOnSegment(pts.slice(Math.floor(pts.length * 0.3)), sourceNode?.id);
 
+
     if (!sourceNode || !targetNode) return; // must cross two known nodes
+
 
     // Avoid duplicate links
     const alreadyLinked = links.some(l =>
@@ -2447,11 +3696,13 @@ function AppInner() {
       return;
     }
 
+
     // Check for a severed archived connection to restore
     const archived = archivedLinks.find(l =>
       (l.source === sourceNode.id && l.target === targetNode.id) ||
       (l.source === targetNode.id && l.target === sourceNode.id)
     );
+
 
     // Orient: closer-to-Me = source
     const mePos = nodes.find(n => n.id === 'me') || { x: 0, y: 0 };
@@ -2461,7 +3712,9 @@ function AppInner() {
       ? [sourceNode.id, targetNode.id]
       : [targetNode.id, sourceNode.id];
 
+
     snapshot();
+
 
     if (archived) {
       setLinks(prev => [...prev, { source: finalSrc, target: finalTgt }]);
@@ -2478,12 +3731,14 @@ function AppInner() {
     }
   };
 
+
   const commitAllPaths = () => {
     // Commit all accumulated strokes simultaneously
     pendingPaths.forEach(({ pts }) => processSinglePath(pts));
     setPendingPaths([]);
     setCurrentStroke([]);
   };
+
 
   const restoreLink = (archivedLink) => {
     // Remove from archive
@@ -2497,6 +3752,7 @@ function AppInner() {
     showToast('🌿 Connection restored');
   };
 
+
   const addNewHub = () => {
     const id = `hub_${Date.now()}`;
     // Default parent is flower_social (all social connections route through it)
@@ -2507,6 +3763,7 @@ function AppInner() {
       ? nodes.find(n => n.id === 'me') || { x: 0, y: 0 }
       : { x: (Math.random() - 0.5) * 600, y: (Math.random() - 0.5) * 600 };
 
+
     // Try candidate positions radiating outward from the parent in 24 directions,
     // at increasing distances, until we find one that doesn't overlap any existing node.
     const MIN_DIST = 160;   // closest we'll place it
@@ -2515,9 +3772,11 @@ function AppInner() {
     const HUB_RADIUS = 60;  // clearance bubble for the new hub sign
     const DIRECTIONS = 24;
 
+
     let bestX = anchorNode.x + MIN_DIST;
     let bestY = anchorNode.y;
     let placed = false;
+
 
     outer:
     for (let dist = MIN_DIST; dist <= MAX_DIST; dist += STEP) {
@@ -2541,6 +3800,7 @@ function AppInner() {
       }
     }
 
+
     const newHub = {
       id, type: 'hub', label: 'New Group',
       x: bestX, y: bestY, pinned: false,
@@ -2555,11 +3815,13 @@ function AppInner() {
     setShowTutorial(false);
   };
 
+
   // -- History — stored in refs to avoid re-renders breaking pointer capture --
   const historyRef = useRef([]);
   const futureRef  = useRef([]);
   const [historyLen, setHistoryLen] = useState(0); // just for button disabled state
   const [futureLen,  setFutureLen]  = useState(0);
+
 
   const snapshot = useCallback(() => {
     // Read latest nodes/links via functional updater to avoid closure staleness
@@ -2574,6 +3836,7 @@ function AppInner() {
       return currentNodes; // no change
     });
   }, []);
+
 
   const undo = useCallback(() => {
     if (historyRef.current.length === 0) return;
@@ -2590,6 +3853,7 @@ function AppInner() {
     });
   }, []);
 
+
   const redo = useCallback(() => {
     if (futureRef.current.length === 0) return;
     const next = futureRef.current[0];
@@ -2604,6 +3868,7 @@ function AppInner() {
       return next.nodes;
     });
   }, []);
+
 
   // Normalise any birthday string to "11th Mar 93" format
   const normaliseBirthday = (raw) => {
@@ -2653,12 +3918,15 @@ function AppInner() {
     return parts.join(' ');
   };
 
+
   const [hexSnapPos, setHexSnapPos] = useState(null); // {x,y} snapped hex centre during drag
+
 
   // -- Hex grid utilities ----------------------------------------------------
   // Flat-top hexagonal grid
   const [gridStyle, setGridStyle] = useState((() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); return s.gridStyle || 'hex'; } catch(e) { return 'hex'; } })()); // 'hex' | 'hexSmall' | 'square'
   const HEX_SIZE = gridStyle === 'hexSmall' ? 65 : gridStyle === 'square' ? 90 : 110;
+
 
   const snapToHex = (x, y) => {
     if (gridStyle === 'square') {
@@ -2676,6 +3944,13 @@ function AppInner() {
     return { x: hx, y: hy, q: rq, r: rr };
   };
 
+  // Keep findFreeSpot's grid-config ref in sync -- this runs after every render,
+  // well after gridStyle/HEX_SIZE/snapToHex are all properly initialised.
+  useEffect(() => {
+    gridConfigRef.current = { gridStyle, HEX_SIZE, snapToHex };
+  }, [gridStyle, HEX_SIZE]);
+
+
   const hexCorners = (cx, cy) => {
     // 6 corners of a flat-top hex
     return Array.from({length: 6}, (_, i) => {
@@ -2683,6 +3958,7 @@ function AppInner() {
       return [cx + HEX_SIZE * Math.cos(angle), cy + HEX_SIZE * Math.sin(angle)];
     });
   };
+
 
   const hexNeighbours = (q, r) => {
     const dirs = [[1,0],[-1,0],[0,1],[0,-1],[1,-1],[-1,1]];
@@ -2693,6 +3969,7 @@ function AppInner() {
       return { q: nq, r: nr, x: nx, y: ny };
     });
   };;
+
 
   // -- Auto-save to localStorage ---------------------------------------------
   // Debounced so photos (large base64) don't block on every render
@@ -2718,70 +3995,301 @@ function AppInner() {
   useEffect(() => { try { localStorage.setItem('ft_links', JSON.stringify(links)); } catch(e) {} }, [links]);
   useEffect(() => { try { localStorage.setItem('ft_dimensions', JSON.stringify(dimensions)); } catch(e) {} }, [dimensions]);
 
+
   // -- Persist all settings to ft_settings ----------------------------------
   useEffect(() => {
     try {
       localStorage.setItem('ft_settings', JSON.stringify({
         theme, groupColors, archivedLinks, collapsedGroups, minimisedNodes, gridStyle,
-        photoBorderMode, showMapKey, showVineBorders, darknessFilter,
+        photoBorderMode, showMapKey, showVineBorders, darknessFilter, windowThemeKey, customWindowTheme,
         vineBorderParams, surroundFlowerSettings, activeTags, strandParams, groupBorderParams,
-        groupPhotoLayout, visibleTools,
+        groupPhotoLayout, visibleTools, assistantCharacter, simpleMode, mapStyle, feedDragMode,
       }));
     } catch(e) { console.warn('ft_settings save failed:', e.message); }
   }, [theme, groupColors, archivedLinks, collapsedGroups, minimisedNodes, gridStyle, photoBorderMode,
-      showMapKey, showVineBorders, darknessFilter, vineBorderParams, surroundFlowerSettings, activeTags, strandParams, groupBorderParams]);
+      showMapKey, showVineBorders, darknessFilter, windowThemeKey, customWindowTheme, vineBorderParams, surroundFlowerSettings, activeTags, strandParams, groupBorderParams, assistantCharacter, simpleMode, mapStyle, feedDragMode]);
+
 
   useEffect(() => {
     try { localStorage.setItem('ft_fallenLeaves', JSON.stringify(fallenLeaves)); } catch(e) {}
   }, [fallenLeaves]);
 
-  const exportData = async () => {
-    showToast('📦 Preparing export…');
-    try {
-      // Collect all IndexedDB photos
-      const db = idbRef.current || (idbRef.current = await openPhotoDB());
-      const allPhotos = await new Promise((resolve, reject) => {
-        const tx = db.transaction('photos', 'readonly');
-        const store = tx.objectStore('photos');
-        const req = store.getAll();
-        req.onsuccess = e => resolve(e.target.result || []);
-        req.onerror = reject;
-      });
-      // Build a map: nodeId -> dataUrl (the photos store is keyed by nodeId)
-      const photoMap = {};
-      allPhotos.forEach(p => { if (p && p.dataUrl) { const k = p.nodeId || p.key; if (k) photoMap[k] = p.dataUrl; } });
 
-      const data = {
-        nodes,
-        links,
-        dimensions,
-        photoMap,
-        version: 2,
-        exportedAt: new Date().toISOString(),
-      };
-      const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `friendshiptree-${new Date().toLocaleDateString('en-GB').replace(/\//g,'-')}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-      const photoCount = Object.keys(photoMap).length;
-      showToast(`📦 Exported! (${photoCount} photo${photoCount!==1?'s':''} included)`);
-    } catch(err) {
-      console.error('Export error:', err);
-      // Fallback: export without photos
-      const data = { nodes, links, dimensions, version: 1, exportedAt: new Date().toISOString() };
-      const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `friendshiptree-${new Date().toLocaleDateString('en-GB').replace(/\//g,'-')}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-      showToast('📦 Exported (photos not included)');
+  // Smooth animated pan to a canvas coordinate
+  const smoothPanTo = (canvasX, canvasY, targetScale) => {
+    if (panRafRef.current) cancelAnimationFrame(panRafRef.current);
+    const rect = svgRef.current ? svgRef.current.getBoundingClientRect() : { width: window.innerWidth, height: window.innerHeight };
+    const scl = targetScale || transform.scale;
+    const destX = rect.width  / 2 - canvasX * scl;
+    const destY = rect.height / 2 - canvasY * scl;
+    const start = performance.now();
+    const dur = 520;
+    const fromX = transform.x, fromY = transform.y, fromS = transform.scale;
+    const ease = t => t < 0.5 ? 2*t*t : -1+(4-2*t)*t;
+    const step = (now) => {
+      const p = Math.min(1, (now - start) / dur);
+      const e = ease(p);
+      const next = { x: fromX + (destX-fromX)*e, y: fromY + (destY-fromY)*e, scale: fromS + (scl-fromS)*e };
+      applyTransform(next);
+      setTransform(next);
+      if (p < 1) panRafRef.current = requestAnimationFrame(step);
+    };
+    panRafRef.current = requestAnimationFrame(step);
+  };
+
+  // Generate mole garden summary from current node scores vs prevScore
+  const generateMoleSummary = () => {
+    const people = nodes.filter(n => n.type !== 'hub' && n.type !== 'flower' && n.type !== 'mole' && n.id !== 'me');
+    const daysSince = Math.round((Date.now() - lastDecayCheck) / (1000*60*60*24)) || 1;
+    const risers = people.filter(n => (n.interactionScore||0) > (n.prevScore||0))
+      .sort((a,b) => ((b.interactionScore||0)-(b.prevScore||0)) - ((a.interactionScore||0)-(a.prevScore||0)))
+      .slice(0,3);
+    const fallers = people.filter(n => (n.interactionScore||0) < (n.prevScore||0))
+      .sort((a,b) => ((a.interactionScore||0)-(a.prevScore||0)) - ((b.interactionScore||0)-(b.prevScore||0)))
+      .slice(0,3);
+    const neglected = people.filter(n => (n.interactionScore||0) < 100 && n.interactionLog && n.interactionLog.length === 0)
+      .slice(0,3);
+    const total = people.length;
+    const avgScore = total > 0 ? Math.round(people.reduce((s,n) => s+(n.interactionScore||0),0)/total) : 0;
+    return { risers, fallers, neglected, daysSince, total, avgScore, people };
+  };
+
+  // Synthesised sounds using Web Audio API -- no asset files needed
+  const moleAudioCtxRef = useRef(null);
+  // Stable randomised blink delays for the three dugtrio heads — computed once per mount
+  // so they don't re-randomise on every render, but each head blinks independently.
+  const dugtrioBlinks = useRef([
+    `${(Math.random() * 2).toFixed(2)}s`,
+    `${(Math.random() * 2 + 1).toFixed(2)}s`,
+    `${(Math.random() * 2 + 2.5).toFixed(2)}s`,
+  ]).current;
+  const getMoleAudioCtx = () => {
+    if (!moleAudioCtxRef.current) {
+      try { moleAudioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)(); }
+      catch(e) { return null; }
+    }
+    return moleAudioCtxRef.current;
+  };
+  // Cork/bottle 'pop' for the mole emerging
+  const playMolePopSound = () => {
+    const ctx = getMoleAudioCtx(); if (!ctx) return;
+    try {
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(180, now);
+      osc.frequency.exponentialRampToValueAtTime(950, now + 0.08);
+      osc.frequency.exponentialRampToValueAtTime(420, now + 0.14);
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(0.5, now + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.start(now); osc.stop(now + 0.18);
+      // tiny noise burst on top for the 'cork friction' texture
+      const bufLen = Math.floor(ctx.sampleRate * 0.05);
+      const buf = ctx.createBuffer(1, bufLen, ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i=0;i<bufLen;i++) data[i] = (Math.random()*2-1) * (1 - i/bufLen);
+      const noise = ctx.createBufferSource(); noise.buffer = buf;
+      const nGain = ctx.createGain(); nGain.gain.setValueAtTime(0.15, now);
+      nGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.05);
+      noise.connect(nGain); nGain.connect(ctx.destination);
+      noise.start(now);
+    } catch(e) {}
+  };
+  // Soft 'plug' thud for the mole going back into the hill
+  const playMolePlugSound = () => {
+    const ctx = getMoleAudioCtx(); if (!ctx) return;
+    try {
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(380, now);
+      osc.frequency.exponentialRampToValueAtTime(110, now + 0.12);
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(0.4, now + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.2);
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.start(now); osc.stop(now + 0.22);
+    } catch(e) {}
+  };
+
+
+  // Convert a screen drop point (from dragging the bottom bar's Add button) into canvas
+  // coordinates and open the existing Friend/Group spawn popup there.
+  const spawnNodeAtScreenPoint = (screenX, screenY) => {
+    const rect = svgRef.current ? svgRef.current.getBoundingClientRect() : { left:0, top:0 };
+    const svgX = (screenX - rect.left - transform.x) / transform.scale;
+    const svgY = (screenY - rect.top - transform.y) / transform.scale;
+    setSpawnPopup({ x: svgX, y: svgY, r: 40, sourceNodeId: null, sourceLabel: null });
+  };
+
+  // Directly create a friend or group at a screen drop point -- used when the type is
+  // already known (dragging the green person circle or brown group circle from the Add menu).
+  const spawnTypedNodeAtScreenPoint = (screenX, screenY, kind) => {
+    const rect = svgRef.current ? svgRef.current.getBoundingClientRect() : { left:0, top:0 };
+    const svgX = (screenX - rect.left - transform.x) / transform.scale;
+    const svgY = (screenY - rect.top - transform.y) / transform.scale;
+    snapshot();
+    if (kind === 'group') {
+      const newId = `hub_${Date.now()}`;
+      setNodes(prev => [...prev, {
+        id: newId, type: 'hub', label: 'New Group',
+        x: svgX, y: svgY, pinned: false,
+      }]);
+      setSelectedNodeId(newId);
+    } else {
+      const newId = `node_${Date.now()}`;
+      setNodes(prev => [...prev, {
+        id: newId, label: '',
+        img: makeBlankAvatar(),
+        x: svgX, y: svgY,
+        interactionScore: STARTING_SCORE, pinned: false, type: 'friend',
+      }]);
+      setSelectedNodeId(newId);
     }
   };
+
+
+  const openMole = () => {
+    if (moleOut) { playMolePlugSound(); setMoleOut(false); setMoleSummary(null); setMoleBubbleStage('hint'); return; }
+    // Zoom so the mole fills 40% of screen height, then place him bottom-left.
+    // The bubble appears upper-right, occupying the remaining space.
+    const sh = window.innerHeight, sw = window.innerWidth;
+    const MOLE_H = 140; // canvas units: node base to top of head
+    const panScale = Math.min(3, (sh * 0.40) / MOLE_H);
+    // Target screen position: bottom-left quadrant, with enough clearance to clear
+    // the fixed bottom tab bar (~80-90px incl. safe-area inset) which sits in front
+    // of the canvas (the canvas has no explicit z-index, so anything overlapping
+    // the bar visually disappears behind it).
+    const BOTTOM_BAR_CLEARANCE = 110;
+    const targetScreenX = sw * 0.22;
+    const targetScreenY = Math.min(sh * 0.70, sh - BOTTOM_BAR_CLEARANCE);
+    // Adjust the canvas centre point so smoothPanTo lands the mole at that screen position
+    const panCX = molePos.x + (sw / 2 - targetScreenX) / panScale;
+    const panCY = molePos.y + (sh / 2 - targetScreenY) / panScale;
+    smoothPanTo(panCX, panCY, panScale);
+    // '!' disappears the moment he's summoned
+    setMoleHasNews(false);
+    // Start rumble after pan arrives (~520ms)
+    setTimeout(() => {
+      setMoleRumble(true);
+      setTimeout(() => {
+        setMoleRumble(false);
+        playMolePopSound();
+        setMoleOut(true);
+        setMoleBubbleStage('welcome');
+        const summary = generateMoleSummary();
+        setMoleSummary(summary);
+        // Welcome greeting shows briefly, then the full card carousel takes over
+        setTimeout(() => { setMoleBubbleStage('full'); }, 1400);
+      }, 800);
+    }, 480);
+  };
+
+  const askAI = async (prompt) => {
+    setAiLoading(true);
+    setAiResponse('');
+    try {
+      const key = aiKeys[aiProvider];
+      if (!key) { setAiResponse('No API key set for ' + aiProvider + '. Add it in the Keys tab.'); setAiLoading(false); return; }
+      let text = '';
+      if (aiProvider === 'gemini') {
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${key}`, {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ contents:[{parts:[{text:prompt}]}], generationConfig:{maxOutputTokens:400,temperature:0.7} })
+        });
+        const d = await res.json();
+        text = d.candidates?.[0]?.content?.parts?.[0]?.text || d.error?.message || 'No response';
+      } else if (aiProvider === 'openai') {
+        const res = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST', headers: {'Content-Type':'application/json','Authorization':`Bearer ${key}`},
+          body: JSON.stringify({ model:'gpt-4o-mini', messages:[{role:'user',content:prompt}], max_tokens:400 })
+        });
+        const d = await res.json();
+        text = d.choices?.[0]?.message?.content || d.error?.message || 'No response';
+      } else if (aiProvider === 'claude') {
+        const res = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+          body: JSON.stringify({ model:'claude-haiku-4-5-20251001', max_tokens:400, messages:[{role:'user',content:prompt}] })
+        });
+        const d = await res.json();
+        text = d.content?.[0]?.text || d.error?.message || 'No response';
+      }
+      setAiResponse(text);
+    } catch(e) { setAiResponse('Error: ' + e.message); }
+    setAiLoading(false);
+  };
+
+  const openGemini = (text) => {
+    const L = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.AppLauncher;
+    const S = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Share;
+    if (L && L.openUrl) {
+      // Try Gemini deep link first
+      L.openUrl({ url: 'com.google.android.apps.bard://' }).catch(() => {
+        // Fallback: share the summary text so user can paste into Gemini
+        if (S) S.share({ title: 'FriendshipTree Garden Summary', text, dialogTitle: 'Open with Gemini or copy' });
+        else window.open('https://gemini.google.com', '_blank');
+      });
+    } else if (S) {
+      S.share({ title: 'FriendshipTree Garden Summary', text, dialogTitle: 'Open with Gemini or copy' });
+    }
+  };
+
+
+  const exportData = async () => {
+    showToast('💦 Preparing export…');
+    try {
+      const db = idbRef.current || (idbRef.current = await openPhotoDB());
+      const [allPhotos, allGallery] = await Promise.all([
+        new Promise((res, rej) => { const tx = db.transaction('photos','readonly'); const req = tx.objectStore('photos').getAll(); req.onsuccess = e => res(e.target.result||[]); req.onerror = rej; }),
+        new Promise((res, rej) => { const tx = db.transaction('gallery','readonly'); const req = tx.objectStore('gallery').getAll(); req.onsuccess = e => res(e.target.result||[]); req.onerror = rej; }),
+      ]);
+      const photoMap = {};
+      allPhotos.forEach(p => { if (p && p.dataUrl) { const k = p.nodeId || p.key; if (k) photoMap[k] = p.dataUrl; } });
+      const photoCount = Object.keys(photoMap).length;
+      const galleryCount = allGallery.length;
+      const filename = `friendshiptree-${new Date().toLocaleDateString('en-GB').replace(/\//g,'-')}.json`;
+      const data = { nodes, links, dimensions, photoMap, gallery: allGallery, version: 3, exportedAt: new Date().toISOString() };
+      const jsonStr = JSON.stringify(data);
+      const isNative = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+      const ShareP = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Share;
+      const FilesystemP = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Filesystem;
+      if (isNative && FilesystemP && ShareP) {
+        const b64 = btoa(unescape(encodeURIComponent(jsonStr)));
+        await FilesystemP.writeFile({ path: filename, data: b64, directory: 'CACHE' });
+        const uriResult = await FilesystemP.getUri({ path: filename, directory: 'CACHE' });
+        await ShareP.share({
+          title: 'FriendshipTree Backup',
+          text: `FriendshipTree backup — ${photoCount} profile photo${photoCount!==1?'s':''}, ${galleryCount} gallery image${galleryCount!==1?'s':''}`,
+          url: uriResult.uri,
+          dialogTitle: 'Save or share your FriendshipTree backup',
+        });
+        showToast(`📤 Share sheet open! (${photoCount + galleryCount} photos)`);
+      } else {
+        const blob = new Blob([jsonStr], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = filename; a.click();
+        URL.revokeObjectURL(url);
+        showToast(`📦 Downloaded! (${photoCount + galleryCount} photos included)`);
+      }
+    } catch(err) {
+      console.error('Export error:', err);
+      try {
+        const filename = `friendshiptree-${new Date().toLocaleDateString('en-GB').replace(/\//g,'-')}.json`;
+        const data = { nodes, links, dimensions, version: 1, exportedAt: new Date().toISOString() };
+        const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob); const a = document.createElement('a');
+        a.href = url; a.download = filename; a.click(); URL.revokeObjectURL(url);
+        showToast('📦 Exported (no photos — retry for full backup)');
+      } catch(e2) { showToast('❌ Export failed'); }
+    }
+  };
+
 
   const importData = (file) => {
     const reader = new FileReader();
@@ -2791,31 +4299,45 @@ function AppInner() {
         if (data.nodes) setNodes(data.nodes);
         if (data.links) setLinks(data.links);
         if (data.dimensions) setDimensions(prev => ({ ...prev, ...data.dimensions }));
-
-        // Restore IndexedDB photos if present
+        const isNative = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+        const FilesystemP = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Filesystem;
+        let photoCount = 0;
         if (data.photoMap && Object.keys(data.photoMap).length > 0) {
           try {
             const db = idbRef.current || (idbRef.current = await openPhotoDB());
             const tx = db.transaction('photos', 'readwrite');
             const store = tx.objectStore('photos');
-            let count = 0;
             for (const [key, dataUrl] of Object.entries(data.photoMap)) {
               store.put({ nodeId: key, key, dataUrl });
-              count++;
+              photoCount++;
+              if (isNative && FilesystemP) {
+                try {
+                  const b64 = dataUrl.split(',')[1];
+                  const ext = dataUrl.startsWith('data:image/png') ? 'png' : 'jpg';
+                  await FilesystemP.writeFile({ path: `ft_photo_${key}.${ext}`, data: b64, directory: 'DOCUMENTS', recursive: true });
+                } catch(fsErr) { console.warn('Filesystem photo write failed', fsErr); }
+              }
             }
             await new Promise((resolve, reject) => { tx.oncomplete = resolve; tx.onerror = reject; });
-            showToast(`✅ Tree imported! (${count} photo${count!==1?'s':''} restored)`);
-          } catch(photoErr) {
-            console.warn('Photo restore failed:', photoErr);
-            showToast('✅ Tree imported (photos could not be restored)');
-          }
-        } else {
-          showToast('✅ Tree imported!');
+          } catch(photoErr) { console.warn('Photo restore failed:', photoErr); }
         }
+        let galleryCount = 0;
+        if (data.gallery && data.gallery.length > 0) {
+          try {
+            const db = idbRef.current || (idbRef.current = await openPhotoDB());
+            const tx = db.transaction('gallery', 'readwrite');
+            const store = tx.objectStore('gallery');
+            for (const item of data.gallery) { store.put(item); galleryCount++; }
+            await new Promise((resolve, reject) => { tx.oncomplete = resolve; tx.onerror = reject; });
+          } catch(galErr) { console.warn('Gallery restore failed:', galErr); }
+        }
+        const total = photoCount + galleryCount;
+        showToast(total > 0 ? `✅ Imported! (${total} photo${total!==1?'s':''} restored)` : '✅ Tree imported!');
       } catch(e) { showToast('❌ Invalid file — could not import'); }
     };
     reader.readAsText(file);
   };
+
 
   // -- Notifications ---------------------------------------------------------
   const requestNotifications = async () => {
@@ -2840,6 +4362,7 @@ function AppInner() {
     setNotifPermission(perm);
     if (perm === 'granted') showToast('🔔 Notifications enabled!');
   };
+
 
   // Schedule a yearly 9am reminder on each friend's birthday (native only).
   const scheduleBirthdayReminders = async () => {
@@ -2872,6 +4395,7 @@ function AppInner() {
     } catch (e) { console.warn('Birthday schedule failed:', e); }
   };
 
+
   // Staggered "time to reconnect" nudges for neglected friends (native only).
   const scheduleReconnectReminders = async () => {
     const LN = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.LocalNotifications;
@@ -2879,7 +4403,7 @@ function AppInner() {
     try {
       const stale = nodes
         .filter(n => n.type !== 'hub' && n.type !== 'flower' && n.id !== 'me')
-        .filter(n => (n.interactionScore || 0) < 200)
+        .filter(n => (n.interactionScore || 0) < 200 && n.type !== 'mole')
         .slice(0, 5);
       const notifs = stale.map((n, i) => ({
         id: 20000 + i,
@@ -2891,12 +4415,14 @@ function AppInner() {
     } catch (e) { console.warn('Reconnect schedule failed:', e); }
   };
 
+
   // Re-schedule native birthday reminders whenever the friend list changes.
   useEffect(() => {
     if (notifPermission === 'granted' && window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.LocalNotifications) {
       scheduleBirthdayReminders();
     }
   }, [notifPermission, nodes]);
+
 
   useEffect(() => {
     if (notifPermission !== 'granted') return;
@@ -2920,6 +4446,7 @@ function AppInner() {
     const iv = setInterval(check, 6 * 3600 * 1000);
     return () => clearInterval(iv);
   }, [notifPermission, nodes]);
+
 
   useEffect(() => {
     const checkWeekly = () => {
@@ -2961,6 +4488,7 @@ function AppInner() {
     return () => clearInterval(iv);
   }, []);
 
+
   // -- Voice input -----------------------------------------------------------
   const toggleVoice = () => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -2985,6 +4513,7 @@ function AppInner() {
     setIsListening(true);
   };
 
+
   // -- AI diary parsing ------------------------------------------------------
   const parseDiaryWithAI = async () => {
     if (!diaryText.trim()) return;
@@ -2992,19 +4521,24 @@ function AppInner() {
     setDiaryError('');
     setDiarySuggestions([]);
 
+
     const friendNames = nodes.filter(n => n.type !== 'hub' && n.type !== 'flower' && n.id !== 'me').map(n => n.label);
     const dimInfo = ['creativity','knowledge','health','growth'].map(k => {
       const d = dimensions[k];
       return `${d.emoji} ${d.label} (${k}): categories = ${d.categories.join(', ')}`;
     }).join('\n');
 
+
     const prompt = `You are a life activity parser. The user has written a diary entry about their day.
 Extract activities and return ONLY a JSON array (no markdown, no explanation).
 
+
 Known friends: ${friendNames.join(', ')}
+
 
 Life dimensions and their categories:
 ${dimInfo}
+
 
 For each activity found, create an entry:
 {
@@ -3016,10 +4550,13 @@ For each activity found, create an entry:
   "durationMins": estimated minutes if mentioned or guessable, else null
 }
 
+
 Diary entry:
 "${diaryText}"
 
+
 Return only the JSON array. If nothing trackable is found, return [].`;
+
 
     try {
       const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -3042,6 +4579,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
     }
     setDiaryLoading(false);
   };
+
 
   // -- Confirm a diary suggestion --------------------------------------------
   const confirmSuggestion = (sug) => {
@@ -3080,13 +4618,16 @@ Return only the JSON array. If nothing trackable is found, return [].`;
     setDiarySuggestions(prev => prev.map(s => s.id === sug.id ? { ...s, confirmed: true } : s));
   };
 
+
   const confirmAllSuggestions = () => {
     diarySuggestions.filter(s => !s.confirmed).forEach(confirmSuggestion);
   };
 
+
   const updateSelectedNode = (key, value) => {
     setNodes(prev => prev.map(n => n.id === selectedNodeId ? { ...n, [key]: value } : n));
   };
+
 
   // Returns true if segments (p1→p2) and (p3→p4) intersect
   const segmentsIntersect = (p1, p2, p3, p4) => {
@@ -3098,6 +4639,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
     const u = ((p3.x - p1.x) * d1y - (p3.y - p1.y) * d1x) / denom;
     return t >= 0 && t <= 1 && u >= 0 && u <= 1;
   };
+
 
   // Check if the slash trail's last segment crosses any active link's centre-line
   const checkSlashCuts = (trail) => {
@@ -3131,12 +4673,14 @@ Return only the JSON array. If nothing trackable is found, return [].`;
     });
   };
 
+
   // All unique tags across all people
   const allTags = useMemo(() => {
     const tags = new Set();
     nodes.forEach(n => (n.tags || []).forEach(t => tags.add(t)));
     return [...tags].sort();
   }, [nodes]);
+
 
   // IDs of people that pass the active tag filter (empty = show all)
   const tagFilteredIds = useMemo(() => {
@@ -3146,7 +4690,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
     );
   }, [nodes, activeTags]);
 
+
   const isTagFiltered = (nodeId) => tagFilteredIds === null || tagFilteredIds.has(nodeId);
+
 
   // Map each person to the hub group they belong to (visible or hidden hubs),
   // walking the tree that branches off each hub's directly-linked members.
@@ -3154,6 +4700,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
   const nodeGroupMap = useMemo(() => {
     const map = {};
     const allHubs = nodes.filter(n => n.type === 'hub');
+
 
     // Pass 1: a person who anchors their own hidden hub (i.e. is connected
     // directly to social) always belongs to their OWN group — never reassigned.
@@ -3168,6 +4715,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       });
     });
 
+
     // Pass 2: direct visible-hub links — claim only people not already anchored.
     const visibleHubs = allHubs.filter(h => !h.hidden);
     visibleHubs.forEach(hub => {
@@ -3179,6 +4727,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         }
       });
     });
+
 
     // Pass 2: walk the tree branching off each hub's members for indirect members
     allHubs.forEach(hub => {
@@ -3202,6 +4751,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
     });
     return map;
   }, [nodes, links]);
+
 
   // ---- MINIMISE: collapse a node's whole downstream branch ----
   const collapseInfo = useMemo(() => {
@@ -3261,9 +4811,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         .map(nb => nodes.find(x => x.id === nb))
         .filter(Boolean);
 
+
       const rootChildPeople = [];   // direct people under the root (the 2 children)
       const subGroups = [];         // { hub, people:[...] } for each visible sub-group
       const parentNeighbour = parent[rootId];
+
 
       // mark everything downstream hidden + record members (for expand/bookkeeping)
       const markStack = [...(adj[rootId] || []).filter(nb => nb !== parentNeighbour)];
@@ -3278,6 +4830,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         if (n.type !== 'flower') { hidden.add(id); if (n.type !== 'hub') members.push(id); }
         (adj[id] || []).forEach(nb => { if (!markSeen.has(nb) && nb !== parentNeighbour) markStack.push(nb); });
       }
+
 
       // classify the root's DIRECT neighbours (away from parent)
       childrenOf(rootId, parentNeighbour).forEach(child => {
@@ -3303,6 +4856,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           rootChildPeople.push(flowerOf(child));
         }
       });
+
 
       const rootFlower = flowerOf(rootNode);
       const count = members.length;
@@ -3360,6 +4914,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       }
     });
 
+
     // ---- Position top-level bundles: keep each bundle's true bearing from the
     // social node, pull it inward to touch the edge (shortest vine), and push it
     // outward only as much as needed to clear neighbours or the me node. ----
@@ -3371,6 +4926,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       const TWO_PI = Math.PI * 2;
       const BUNDLE_R = 60;          // bundle footprint radius for spacing
       const edgeDist = sR + BUNDLE_R - 6; // distance for "touching" the edge
+
 
       // each bundle keeps its real angle from social (its bearing on the map)
       const bearing = b => {
@@ -3384,8 +4940,10 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       };
       social.sort((a, b) => distOf(a) - distOf(b));
 
+
       // me node centre (a blocker the bundle must clear)
       const meBlock = meNode ? { x: meNode.x, y: meNode.y, r: (getNodeRadius(meNode) || 80) + BUNDLE_R - 10 } : null;
+
 
       const placedB = []; // already-positioned bundles to test against
       social.forEach(b => {
@@ -3418,6 +4976,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       });
     }
 
+
     // Resolve overlaps among the remaining (non-social-anchored) bundles.
     const MIN_SEP = 78;
     for (let iter = 0; iter < 24; iter++) {
@@ -3445,14 +5004,17 @@ Return only the JSON array. If nothing trackable is found, return [].`;
     return { hidden, bundles };
   }, [minimisedNodes, nodes, links, getNodeRadius, groupColors]);
 
+
   const nodeTransition = (nodeId) =>
     liftedNodeId === nodeId ? 'transform 0.15s ease-out, opacity 0.15s ease-out' : 'transform 0.25s cubic-bezier(0.34,1.56,0.64,1), opacity 0.25s ease';
+
 
   const activeRenderNodes = viewMode === 'calendar' ? calendarRenderNodes : nodes
     .filter(node => !collapseInfo.hidden.has(node.id))
     .map(node => {
     return { ...node, renderX: node.x, renderY: node.y, radius: getNodeRadius(node) };
   });
+
 
   // ---- Butterfly / firefly perch points (photo edges + flowers) ----
   const [borderTick, setBorderTick] = useState(0);
@@ -3463,7 +5025,30 @@ Return only the JSON array. If nothing trackable is found, return [].`;
     return () => clearTimeout(t);
   }, [nodes, links]);
 
+
   const frozenPerchesRef = useRef([]);
+  // Bounds [lo, hi) of the numeric tier a score currently sits in -- used to judge
+  // "near the bottom of their current level" rather than a single global threshold.
+  const getTierBounds = (score) => {
+    if (score < 100) return [0, 100];
+    if (score < 300) return [100, 300];
+    if (score < 600) return [300, 600];
+    if (score < 1000) return [600, 1000];
+    return [1000, 1000 + 400]; // open-ended top tier; treat as a 400-wide band for "position in tier"
+  };
+  // True 7-day trend from scoreHistory (falls back to prevScore if no history old enough yet).
+  // Returns the point delta over the last week: positive = improving, negative = declining.
+  const getWeeklyDelta = (node) => {
+    const hist = node?.scoreHistory || [];
+    const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const cur = node?.interactionScore || 0;
+    if (hist.length === 0) return cur - (node?.prevScore || cur);
+    // Find the oldest entry still within the last 7 days; if everything is newer
+    // than 7 days, use the very first entry we have as the closest available baseline.
+    const within = hist.filter(h => h.ts >= cutoff);
+    const baseline = within.length > 0 ? within[0].score : hist[0].score;
+    return cur - baseline;
+  };
   const creaturePerches = useMemo(() => {
     // While a node is being dragged, freeze the perches so creatures don't
     // recalculate/jump — keep their relative positions until drop.
@@ -3474,20 +5059,24 @@ Return only the JSON array. If nothing trackable is found, return [].`;
     const nodeById = {};
     activeRenderNodes.forEach(n => { nodeById[n.id] = n; });
 
+
     // People who emit a colour (trend) and brightness (score) field.
     const emitters = activeRenderNodes
-      .filter(n => !n.hidden && n.type !== 'flower' && n.type !== 'hub' && n.id !== 'me')
+      .filter(n => !n.hidden && n.type !== 'flower' && n.type !== 'hub' && n.type !== 'mole' && n.id !== 'me')
       .map(n => {
         const s = n.interactionScore || 0;
-        const delta = s - (n.prevScore || s);
-        // Colour reflects friendship health: actively dropping OR a very low
-        // score reads red; rising or healthy reads green; in between amber.
+        const weeklyDelta = getWeeklyDelta(n);
+        // Colour reflects the last 7 days of movement: meaningfully up this week
+        // reads green, meaningfully down reads red, roughly flat reads amber —
+        // independent of the absolute score, so a new mid-tier friend with no
+        // history yet reads as neutral amber rather than red.
         let trend;
-        if (delta > 20 || s >= 600) trend = 1;        // rising or strong → green
-        else if (delta < -20 || s < 200) trend = -1;  // dropping or weak → red
-        else trend = 0;                                // steady/mid → amber
+        if (weeklyDelta > 20) trend = 1;        // improving this week → green
+        else if (weeklyDelta < -20) trend = -1; // declining this week → red
+        else trend = 0;                          // roughly steady this week → amber
         return { x: n.renderX, y: n.renderY, score: s, trend };
       });
+
 
     // Sample the field at a point: proximity-weighted, nearest dominates so a
     // firefly next to one person matches them; between people it blends, but
@@ -3515,6 +5104,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       return { trend: trendBlend, level };
     };
 
+
     const MIN_SPACING = 42; // px — prevents overcrowding while allowing per-person rings
     const MIN_SPACING_SQ = MIN_SPACING * MIN_SPACING;
     const addPerch = (key, x, y, angle) => {
@@ -3528,10 +5118,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       perches.push({ key, x, y, angle, trend: f.trend, level: f.level });
     };
 
+
     // Creatures around each person, scaled to their friendship level:
     // tier1→2, tier2→2-3, tier3→3-4, tier4/5→4. (Density cap still applies.)
     activeRenderNodes.forEach(node => {
-      if (node.hidden || node.type === 'flower' || node.type === 'hub') return;
+      if (node.hidden || node.type === 'flower' || node.type === 'hub' || node.type === 'mole') return;
       const r = node.radius || 30;
       const s = node.id === 'me' ? 1000 : (node.interactionScore || 0);
       // tier from score (inline; partner/family treated as top)
@@ -3552,8 +5143,10 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       }
     });
 
+
     // (Creatures no longer rest on connection vines — only on vine borders
     // and photo edges.)
+
 
     // Perches spaced along each group's VINE BORDER arc (the boundary around
     // a group). Read the border points computed during the last render.
@@ -3578,9 +5171,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       });
     } catch(e) {}
 
+
     return perches;
   }, [activeRenderNodes, links, borderTick, liftedNodeId, dragNode]);
   useEffect(() => { if (!liftedNodeId && !dragNode) frozenPerchesRef.current = creaturePerches; }, [creaturePerches, liftedNodeId, dragNode]);
+
 
   // Initialise / maintain a population of creatures spread across ALL perches
   useEffect(() => {
@@ -3615,12 +5210,16 @@ Return only the JSON array. If nothing trackable is found, return [].`;
     });
   }, [creaturePerches, creaturesAway, creaturesReturning]);
 
+
   // Creatures stay stationary on their perches (no flying about).
   // (Flight behaviour intentionally removed.)
 
+
   // (Creatures are stationary — no flight animation.)
 
+
   const svgGroupRef = useRef(null);
+
 
   // Apply transform directly to SVG group for smooth panning (bypasses React re-render)
   const applyTransform = useCallback((t) => {
@@ -3629,10 +5228,27 @@ Return only the JSON array. If nothing trackable is found, return [].`;
     }
   }, []);
 
+
   const selectedNode = nodes.find(n => n.id === selectedNodeId);
   const bgClass = theme.darkMode ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-800';
-  const sidebarBg = theme.darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200';
-  const panelBg = theme.darkMode ? 'bg-slate-900 border-slate-700 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700';
+  const sidebarBg = theme.darkMode ? 'bg-slate-800 border-slate-700' : 'bg-stone-50 border-stone-200';
+  const panelBg = theme.darkMode ? 'bg-slate-900 border-slate-700 text-slate-300' : 'bg-stone-50 border-stone-200 text-slate-700';
+  // Person window day-mode palette — driven by the selected window theme
+  const _pwLight = windowThemeKey === 'custom' ? customWindowTheme : (WINDOW_THEMES[windowThemeKey] || WINDOW_THEMES['morning-garden']);
+  const pw = {
+    bg:          theme.darkMode ? '#1e293b' : _pwLight.bg,
+    headerBg:    theme.darkMode ? '#162032' : _pwLight.headerBg,
+    border:      theme.darkMode ? '#334155' : _pwLight.border,
+    labelText:   theme.darkMode ? '#94a3b8' : _pwLight.secondText,
+    bodyText:    theme.darkMode ? '#e2e8f0' : _pwLight.bodyText,
+    secondText:  theme.darkMode ? '#64748b' : _pwLight.secondText,
+    cellBg:      theme.darkMode ? '#0f172a' : _pwLight.cellBg,
+    accentGreen: theme.darkMode ? '#14532d' : _pwLight.accent+'22',
+    accentBorder:theme.darkMode ? '#166634' : _pwLight.accent,
+    accent:      _pwLight.accent,
+    accentText:  _pwLight.accentText,
+  };
+
 
   let nextMessagePoints = 5;
   if (selectedNode && selectedNode.type !== 'hub') {
@@ -3643,6 +5259,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       else if (msgs.count > 0) nextMessagePoints = 1;
     }
   }
+
 
   // --- FRIENDSHIP LEVELS ---
   const FRIENDSHIP_LEVELS = [
@@ -3680,14 +5297,19 @@ Return only the JSON array. If nothing trackable is found, return [].`;
     return FRIENDSHIP_LEVELS.find(l => l.tier === t) || FRIENDSHIP_LEVELS[0];
   };
 
+
   const linkParts = useMemo(() => {
     if (sliderDragging) return [];
-    return links.map((link, i) => {
+    const newFallenAccum = [];
+    const fallenLeafIdSet = new Set(fallenLeaves.map(fl => fl.id));
+    const blockerNodesAll = activeRenderNodes.filter(n => !n.hidden && n.renderX != null && n.renderY != null);
+    const result = links.map((link, i) => {
                   const src = activeRenderNodes.find(n => n.id === link.source);
                   const tgt = activeRenderNodes.find(n => n.id === link.target);
                   if (!src || !tgt) return null;
-                  // Don't render vines to/from hidden hub nodes — they're invisible
+                  // Don't render vines to/from hidden hub nodes -- they're invisible
                   if (src.hidden || tgt.hidden) return null;
+
 
                   // Person↔person vines: hide only when the two people are in
                   // DIFFERENT groups (members connect via their hub, not across
@@ -3715,6 +5337,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     }
                   }
 
+
                   const isMainTrunk = (src.id === 'me' && tgt.type === 'hub') || (tgt.id === 'me' && src.type === 'hub') || (src.type === 'flower' && tgt.type === 'hub') || (tgt.type === 'flower' && src.type === 'hub') || (src.id === 'me' && tgt.type === 'flower') || (tgt.id === 'me' && src.type === 'flower');
                   let score = 0;
                   if (isMainTrunk) {
@@ -3723,7 +5346,6 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   } else {
                     score = (src.type !== 'hub' ? src.interactionScore : tgt.interactionScore) || 0;
                   }
-                  const tier = 5; // forced — all vines use T5 appearance
 
                   // Growing animation state for drawn vines
                   const growingVine = link.drawnLinkId
@@ -3733,466 +5355,34 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     ? growingVine.totalLen * (1 - growingVine.progress)
                     : null;
 
-                  const dx = tgt.renderX - src.renderX;
-                  const dy = tgt.renderY - src.renderY;
-                  const dist = Math.sqrt(dx * dx + dy * dy);
-                  if (dist === 0) return null;
-
-                  const perpX = -dy / dist;
-                  const perpY =  dx / dist;
-                  const STEPS = link.customPathPts
-                    ? link.customPathPts.length - 1
-                    : Math.max(60, Math.floor(dist / 5));
-
-                  // --- ORGANIC BASE WIGGLE for the whole vine ---
-                  // Used as the spine reference; strands wrap around this.
-                  const OCTAVES_MAP = [
-                    { freq: 1.0,          amp: 0.5,  phase: 0.0 + i * 0.7 },
-                    { freq: 1.6180339887, amp: 0.22, phase: 2.1 + i * 0.4 },
-                    { freq: 2.7182818284, amp: 0.10, phase: 4.7 + i * 0.2 },
-                    { freq: 4.236,        amp: 0.05, phase: 1.3             },
-                  ];
-                  const spineWiggle = (t) => {
-                    let w = 0;
-                    for (const o of OCTAVES_MAP) w += Math.sin(t * 2.8 * o.freq * Math.PI * 2 + o.phase) * o.amp;
-                    return w * dist * 0.045;
-                  };
-
-                  // --- STRAND DEFINITIONS — tier forced to 5 for all vines ---
-                  const coreRadius = 1.5 + tier * 0.8;
-
-                  const STRAND_DEFS = [
-                    { width: 3.2,  wrapFreq: 0,   wrapAmp: 0,    colorDark: '#14532d', colorLight: '#15803d', role: 'core'    },
-                    { width: 1.2,  wrapFreq: 2.5, wrapAmp: 1.0,  colorDark: '#16a34a', colorLight: '#4ade80', role: 'growing' },
-                    { width: 2.0,  wrapFreq: 1.4, wrapAmp: 0.7,  colorDark: '#15803d', colorLight: '#22c55e', role: 'wrapped' },
-                    { width: 1.6,  wrapFreq: 1.9, wrapAmp: 0.85, colorDark: '#16a34a', colorLight: '#4ade80', role: 'wrapped' },
-                    { width: 1.3,  wrapFreq: 2.2, wrapAmp: 0.95, colorDark: '#22c55e', colorLight: '#86efac', role: 'wrapped' },
-                  ];
-
-                  const TIER_STRAND_SETS = [
-                    null,
-                    [0, 1],
-                    [0, 2, 1],
-                    [0, 2, 3, 1],
-                    [0, 2, 3, 4, 1],
-                    [0, 2, 3, 4, 1],
-                  ];
-
-                  const coreWidthScale = [0, 1, 1.4, 1.9, 2.5, 3.2][tier];
-
-                  const activeStrands = TIER_STRAND_SETS[tier].map((si, renderIdx) => {
-                    const def = { ...STRAND_DEFS[si] };
-                    if (def.role === 'core') def.width *= coreWidthScale;
-                    const phaseBase = (renderIdx / TIER_STRAND_SETS[tier].length) * Math.PI * 2 + i * 1.3;
-
-                    const pts = [];
-                    for (let s = 0; s <= STEPS; s++) {
-                      const t = s / STEPS;
-
-                      // For custom-path links, interpolate along the drawn pts directly
-                      let bx, by;
-                      if (link.customPathPts && link.customPathPts.length > 1) {
-                        const cpPts = link.customPathPts;
-                        const cpIdx = Math.min(cpPts.length - 2, Math.floor(t * (cpPts.length - 1)));
-                        const frac = t * (cpPts.length - 1) - cpIdx;
-                        bx = cpPts[cpIdx].x + (cpPts[cpIdx+1].x - cpPts[cpIdx].x) * frac;
-                        by = cpPts[cpIdx].y + (cpPts[cpIdx+1].y - cpPts[cpIdx].y) * frac;
-                        // Local tangent-based perp for this segment
-                        const tdx = cpPts[Math.min(cpIdx+1, cpPts.length-1)].x - cpPts[cpIdx].x;
-                        const tdy = cpPts[Math.min(cpIdx+1, cpPts.length-1)].y - cpPts[cpIdx].y;
-                        const tlen = Math.sqrt(tdx*tdx + tdy*tdy) || 1;
-                        const lpx = -tdy / tlen, lpy = tdx / tlen;
-                        const coil = def.role === 'core' ? 0
-                          : Math.sin(t * def.wrapFreq * Math.PI * 2 + phaseBase) * coreRadius * def.wrapAmp
-                            + Math.sin(t * 4.1 * Math.PI * 2 + phaseBase * 0.9) * coreRadius * 0.10;
-                        pts.push({ x: bx + lpx * coil, y: by + lpy * coil, t });
-                      } else {
-                        const spine = spineWiggle(t);
-                        bx = src.renderX + dx * t;
-                        by = src.renderY + dy * t;
-                        let offset;
-                        if (def.role === 'core') {
-                          offset = spine;
-                        } else {
-                          const coil = Math.sin(t * def.wrapFreq * Math.PI * 2 + phaseBase) * coreRadius * def.wrapAmp;
-                          const jitter = def.role === 'growing'
-                            ? Math.sin(t * 7.3 * Math.PI * 2 + phaseBase * 1.7) * coreRadius * 0.18
-                            : Math.sin(t * 4.1 * Math.PI * 2 + phaseBase * 0.9) * coreRadius * 0.10;
-                          offset = spine + coil + jitter;
-                        }
-                        pts.push({ x: bx + perpX * offset, y: by + perpY * offset, t });
-                      }
-                    }
-
-                    return {
-                      ...def,
-                      pts,
-                      d: `M ${pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' L ')}`,
-                      renderIdx,
-                    };
-                  });
-
-                  // --- LEAVES per strand ---
-                  // Leaf character maps to strand role:
-                  //   core    → largest, darkest, fully open
-                  //   wrapped → medium, mid-green, open
-                  //   growing → tiny, lightest, budding (narrow/closed shape)
-                  // -- Leaf lifecycle from score history --------------------
-                  // Each leaf position t (0=root, 1=tip) maps to an age in hours
                   const srcNode = nodes.find(n => n.id === link.source);
                   const tgtNode = nodes.find(n => n.id === link.target);
                   const scoreHistory = tgtNode?.scoreHistory || srcNode?.scoreHistory || [];
-                  const now = Date.now();
-                  const HOUR = 3600000;
 
-                  // Score 48h ago vs now
-                  const scoreThen48 = scoreHistory.length > 0
-                    ? (scoreHistory.find(h => (now - h.ts) >= 48 * HOUR) || scoreHistory[0]).score
-                    : score;
-                  const scoreThen24 = scoreHistory.length > 0
-                    ? (scoreHistory.find(h => (now - h.ts) >= 24 * HOUR) || scoreHistory[0]).score
-                    : score;
-                  const delta48 = score - scoreThen48;
-                  const delta24 = score - scoreThen24;
+                  const blockerNodes = blockerNodesAll
+                    .filter(n => n.id !== src.id && n.id !== tgt.id)
+                    .map(n => ({ id: n.id, x: n.renderX, y: n.renderY, r: n.radius || 40 }));
 
-                  // Get leaf visual state — core leaves always full,
-                  // wrapped/growing degrade only on actual score decline (not stagnant)
-                  const getLeafState = (t, role) => {
-                    if (role === 'core') return 'full';
-                    const ageHrs = (1 - t) * 48;
-                    const isGrowing = role === 'growing';
-
-                    // Only degrade on actual decline — not stagnant
-                    if (delta48 < -60) {
-                      if (isGrowing) return ageHrs < 18 ? 'fallen' : ageHrs < 32 ? 'brown' : 'shrivelling';
-                      return ageHrs < 10 ? 'fallen' : ageHrs < 24 ? 'brown' : 'shrivelling';
-                    }
-                    if (delta48 < -30) {
-                      if (isGrowing) return ageHrs < 12 ? 'brown' : ageHrs < 28 ? 'shrivelling' : 'full';
-                      return ageHrs < 8 ? 'brown' : ageHrs < 20 ? 'shrivelling' : 'full';
-                    }
-                    if (delta24 < -20) {
-                      if (isGrowing) return ageHrs < 8 ? 'shrivelling' : 'full';
-                      return ageHrs < 5 ? 'shrivelling' : 'full';
-                    }
-                    if (delta48 > 60) {
-                      return ageHrs < 6 ? 'budding' : ageHrs < 24 ? 'growing' : 'full';
-                    }
-                    if (delta24 > 20) {
-                      return ageHrs < 12 ? 'budding' : 'growing';
-                    }
-                    return 'full';
-                  };
-
-                  const LIFECYCLE_STYLES = {
-                    budding:     { scale: 0.2,  wScale: 1.0,  lScale: 0.2,  color: '#bbf7d0', opacity: 0.9,  curl: 0.5 },
-                    growing:     { scale: 0.55, wScale: 1.0,  lScale: 0.55, color: '#4ade80', opacity: 0.85, curl: 0.2 },
-                    full:        { scale: 1.0,  wScale: 1.0,  lScale: 1.0,  color: null,       opacity: null, curl: 0 },
-                    shrivelling: { scale: 0.82, wScale: 1.0,  lScale: 0.82, color: '#ca8a04', opacity: 0.8,  curl: 0.3 },
-                    brown:       { scale: 0.68, wScale: 1.0,  lScale: 0.68, color: '#78350f', opacity: 0.65, curl: 0.5 },
-                    fallen:      { scale: 0,    wScale: 0,    lScale: 0,    color: null,       opacity: 0,    curl: 0 },
-                  };
-
-                  const LEAF_CHARS = {
-                    core:    { sizeBase: 27, sizeVar: 4.5, colorDark: '#14532d', colorLight: '#15803d', aspectW: 0.32, bud: false },
-                    wrapped: { sizeBase: 12, sizeVar: 2.4, colorDark: '#166534', colorLight: '#22c55e', aspectW: 0.32, bud: false },
-                    growing: { sizeBase: 3,  sizeVar: 0.9, colorDark: '#16a34a', colorLight: '#4ade80', aspectW: 0.32, bud: true  },
-                  };
-                  const leafTierScale = 0.7 + tier * 0.18;
-                  const leafSpacing = Math.max(24, 76 - tier * 8);
-
-                  // --- PEST SEVERITY (friendship cooling) ---
-                  // Lower score = caterpillars eating the leaves. Keep it sparse:
-                  // 1 caterpillar normally, 2 only on a long vine when very neglected.
-                  const pestNode = tgtNode && tgtNode.id !== 'me' ? tgtNode : srcNode;
-                  const pestScore = (pestNode && pestNode.id !== 'me') ? (pestNode.interactionScore || 0) : 100;
-                  const isLongVine = dist > 220;
-                  let caterpillarCount = 0;
-                  // Caterpillars + bites parked as a future feature for now.
-                  // (was: 1 if score<40, 2 if score<15 on a long vine)
-
-                  const allLeaves = [];
-                  const newFallen = [];
-                  activeStrands.forEach(({ pts, role, renderIdx }) => {
-                    const lc = LEAF_CHARS[role];
-                    const leafCount = Math.max(2, Math.floor(dist / leafSpacing));
-                    for (let li = 0; li < leafCount; li++) {
-                      const t = (li + 0.5 + renderIdx * 0.3) / leafCount;
-                      if (t > 1) continue;
-                      const ptIdx = Math.min(pts.length - 2, Math.floor(t * (pts.length - 1)));
-                      const p  = pts[ptIdx];
-                      const p2 = pts[Math.min(pts.length - 1, ptIdx + 1)];
-                      if (!p || !p2) continue;
-                      const tangAngle = Math.atan2(p2.y - p.y, p2.x - p.x) * 180 / Math.PI;
-                      const side = ((li + renderIdx) % 2 === 0) ? 1 : -1;
-                      const sv = 0.7 + 0.6 * Math.abs(Math.sin(li * 3.7 + renderIdx * 1.9 + i));
-
-                      // Lifecycle state — pass role so core leaves are always full
-                      const leafState = getLeafState(t, role);
-                      const ls = LIFECYCLE_STYLES[leafState];
-                      if (ls.scale === 0) {
-                        // Fallen — displace slightly outside vine, random rotation -20 to +20
-                        const fallenId = link.source + '_' + link.target + '_' + role + '_' + li;
-                        const alreadyFallen = fallenLeaves.some(fl => fl.id === fallenId);
-                        if (!alreadyFallen) {
-                          const randRot = (Math.random() * 40 - 20);
-                          const perpOffset = 8 + Math.random() * 6;
-                          const baseLwF = (lc.sizeBase + lc.sizeVar * sv) * leafTierScale * 0.68;
-                          newFallen.push({
-                            id: fallenId,
-                            x: p.x + (side * perpOffset),
-                            y: p.y + (side * perpOffset),
-                            angle: tangAngle + randRot,
-                            lw: baseLwF,
-                            lh: baseLwF * lc.aspectW,
-                            fill: '#78350f',
-                            stroke: '#5a2d0c',
-                          });
-                        }
-                        continue;
-                      }
-
-                      const baseLw = (lc.sizeBase + lc.sizeVar * sv) * leafTierScale;
-                      const lw = baseLw * ls.scale;           // length scaled uniformly
-                      const lh = lw * lc.aspectW;             // width maintains aspect ratio
-                      const fill = ls.color || (theme.darkMode ? lc.colorDark : lc.colorLight);
-                      const stroke = leafState === 'full' || leafState === 'growing' || leafState === 'budding'
-                        ? (theme.darkMode ? '#0f2d1a' : '#14532d')
-                        : '#78350f';
-                      const opacity = ls.opacity ?? (lc.bud ? 0.7 : 0.88);
-                      // Curl: shrivelling/brown leaves tilt inward more
-                      const curlAngle = tangAngle + side * (42 + ls.curl * 35);
-                      allLeaves.push({ x: p.x, y: p.y, angle: curlAngle, lw, lh, fill, stroke, bud: lc.bud || leafState === 'budding', opacity, shrivelled: ls.curl > 0.3 });
-                    }
+                  const parts = renderVineLink({
+                    key: `link-${i}`, srcX: src.renderX, srcY: src.renderY,
+                    tgtX: tgt.renderX, tgtY: tgt.renderY, i, score, scoreHistory,
+                    blockerNodes, darkMode: theme.darkMode, dashOffset,
+                    growingProgress: growingVine ? growingVine.progress : null,
+                    fallenLeafIds: fallenLeafIdSet,
+                    onNewFallenLeaves: (nf) => newFallenAccum.push(...nf),
                   });
-
-                  // Flush any newly fallen leaves into persistent state (once, not every render)
-                  if (newFallen.length > 0) {
-                    setFallenLeaves(prev => {
-                      const existingIds = new Set(prev.map(fl => fl.id));
-                      const truly_new = newFallen.filter(fl => !existingIds.has(fl.id));
-                      return truly_new.length > 0 ? [...prev, ...truly_new] : prev;
-                    });
-                  }
-
-                  // Assign caterpillars to the biggest, healthiest leaves (most
-                  // visible). They eat bite-holes with yellow edging.
-                  const vineBites = [];
-                  if (caterpillarCount > 0 && allLeaves.length > 0) {
-                    const candidates = allLeaves
-                      .map((lf, idx) => ({ lf, idx }))
-                      .filter(({ lf }) => !lf.bud && !lf.shrivelled && lf.lw > 8)
-                      .sort((a, b) => b.lf.lw - a.lf.lw);
-                    const chosen = candidates.slice(0, caterpillarCount);
-                    chosen.forEach(({ lf }, ci) => {
-                      lf.caterpillar = true;
-                      lf.bites = 2; // a couple of neat bites per infested leaf
-                    });
-
-                    // Scatter extra bite-holes along the VINE near each caterpillar
-                    // (chew marks on the strand around the node's own section).
-                    const coreStrand = activeStrands.find(s => s.role === 'core') || activeStrands[0];
-                    if (coreStrand && coreStrand.pts && coreStrand.pts.length > 3) {
-                      const pts = coreStrand.pts;
-                      chosen.forEach(({ lf }) => {
-                        // find nearest vine point to this leaf
-                        let nearIdx = 0, best = Infinity;
-                        pts.forEach((p, pi) => {
-                          const d2 = (p.x - lf.x) ** 2 + (p.y - lf.y) ** 2;
-                          if (d2 < best) { best = d2; nearIdx = pi; }
-                        });
-                        // a cluster of small holes along the vine around that point
-                        for (let k = -3; k <= 3; k++) {
-                          const pi = nearIdx + k * 2;
-                          if (pi < 1 || pi >= pts.length - 1) continue;
-                          const p = pts[pi];
-                          const pPrev = pts[pi - 1];
-                          const tdx = p.x - pPrev.x, tdy = p.y - pPrev.y;
-                          const tl = Math.sqrt(tdx*tdx + tdy*tdy) || 1;
-                          const px = -tdy / tl, py = tdx / tl; // perpendicular
-                          const off = (k % 2 === 0 ? 1 : -1) * (1.5 + Math.abs(k));
-                          vineBites.push({
-                            x: p.x + px * off,
-                            y: p.y + py * off,
-                            r: 1.1 + (Math.abs(k) % 2) * 0.5,
-                          });
-                        }
-                      });
-                    }
-                  }
-
-                  // --- UNDER-PASS FADE ---------------------------------------
-                  // When a long vine to the social node / a far group would pass
-                  // OVER another group's area, fade it along that stretch so it
-                  // reads as going underneath (without thinning much).
-                  let underPassGrad = null;
-                  const gradId = `vfade-${i}`;
-                  try {
-                    // Only fade under a group that is genuinely VISIBLE on screen.
-                    // Hidden hubs (group centres with no visible footprint) must
-                    // NOT cause fading, or vines vanish for no visible reason.
-                    const otherHubs = activeRenderNodes.filter(n =>
-                      n.type === 'hub' && !n.hidden &&
-                      n.id !== src.id && n.id !== tgt.id);
-                    let nearestT = null, nearestDistOver = Infinity, nearestR = 90;
-                    otherHubs.forEach(h => {
-                      const hx = h.renderX, hy = h.renderY;
-                      if (typeof hx !== 'number' || typeof hy !== 'number') return;
-                      // project hub centre onto the vine segment
-                      const t = (((hx - src.renderX) * dx) + ((hy - src.renderY) * dy)) / (dist*dist);
-                      if (t <= 0.08 || t >= 0.92) return; // must be in the middle stretch
-                      const projX = src.renderX + dx * t, projY = src.renderY + dy * t;
-                      const gap = Math.hypot(hx - projX, hy - projY);
-                      const groupR = Math.max(90, (h.radius || 40) * 3); // generous group footprint
-                      if (gap < groupR && gap < nearestDistOver) {
-                        nearestDistOver = gap; nearestT = t; nearestR = groupR;
-                      }
-                    });
-                    if (nearestT !== null) {
-                      // Fade the vine across the WHOLE width of the group it passes
-                      // under, so it clearly dissolves beneath and re-emerges.
-                      const c = Math.max(0.12, Math.min(0.88, nearestT));
-                      // half-width as a fraction of the vine, based on group size
-                      const w = Math.min(0.42, Math.max(0.22, (nearestR / dist)));
-                      const soft = w * 0.55; // soft transition shoulder
-                      underPassGrad = (
-                        <linearGradient id={gradId}
-                          x1={src.renderX} y1={src.renderY} x2={tgt.renderX} y2={tgt.renderY}
-                          gradientUnits="userSpaceOnUse">
-                          <stop offset="0" stopColor="#fff"/>
-                          <stop offset={Math.max(0,c-w).toFixed(3)} stopColor="#fff"/>
-                          <stop offset={Math.max(0,c-soft).toFixed(3)} stopColor="#000"/>
-                          <stop offset={c.toFixed(3)} stopColor="#000"/>
-                          <stop offset={Math.min(1,c+soft).toFixed(3)} stopColor="#000"/>
-                          <stop offset={Math.min(1,c+w).toFixed(3)} stopColor="#fff"/>
-                          <stop offset="1" stopColor="#fff"/>
-                        </linearGradient>
-                      );
-                    }
-                  } catch(e) {}
-
-                  return {
-                    key: `link-${i}`,
-                    vine: (
-                    <g key={`vine-${i}`}>
-                      {underPassGrad && <defs>
-                        {underPassGrad}
-                        <mask id={`vmask-${i}`} maskUnits="userSpaceOnUse"
-                          x="-50000" y="-50000" width="100000" height="100000">
-                          <rect x="-50000" y="-50000" width="100000" height="100000"
-                            fill={`url(#${gradId})`} />
-                        </mask>
-                      </defs>}
-                      <g {...(underPassGrad ? { mask: `url(#vmask-${i})` } : {})}>
-                      {activeStrands.map(({ d, width, role, colorDark, colorLight }, si) => {
-                        // Compute total path length for dasharray when animating
-                        const pathLen = dist * 1.1; // approximate
-                        return (
-                          <path key={`s-${si}`} d={d} fill="none"
-                            stroke={theme.darkMode ? colorDark : colorLight}
-                            strokeWidth={width}
-                            strokeLinejoin="round" strokeLinecap="round"
-                            opacity={role === 'growing' ? 0.78 : role === 'core' ? 1 : 0.9}
-                            {...(dashOffset !== null ? {
-                              strokeDasharray: pathLen * 3,
-                              strokeDashoffset: (pathLen * 3) * (1 - growingVine.progress),
-                            } : {})}
-                          />
-                        );
-                      })}
-                      </g>
-                    </g>
-                    ),
-                    foliage: (
-                    <g key={`foliage-${i}`}>
-                      {/* Vine bite-holes chewed by caterpillars (yellow edged) */}
-                      {vineBites.map((vb, vi) => (
-                        <circle key={`vb-${vi}`} cx={vb.x} cy={vb.y} r={vb.r}
-                          fill={theme.darkMode ? '#0b1f12' : '#f0fdf4'}
-                          stroke="#fde047" strokeWidth={0.5} opacity={0.9}
-                          style={{pointerEvents:'none'}}/>
-                      ))}
-                      {/* Leaves — drawn after strands. Hidden while dragging for
-                          performance; they grow back from zero when you drop. */}
-                      {allLeaves.map((lf, li) => {
-                        if (lf.shrivelled) return null;
-                        if (lf.bud) {
-                          // Buds = small light green circle, no pointy shape
-                          return (
-                            <circle key={`lf-${li}`}
-                              cx={lf.x} cy={lf.y} r={Math.max(1.5, lf.lw * 0.3)}
-                              fill='#bbf7d0' stroke='#4ade80' strokeWidth={0.4}
-                              opacity={lf.opacity} style={{pointerEvents:'none'}}/>
-                          );
-                        }
-                        const leafD = lf.shrivelled
-                          ? `M 0,0 C ${lf.lw*0.15},${-lf.lh*0.4} ${lf.lw*0.7},${-lf.lh*0.35} ${lf.lw},0 C ${lf.lw*0.7},${lf.lh*0.35} ${lf.lw*0.15},${lf.lh*0.4} 0,0 Z`
-                          : `M 0,0 C ${lf.lw*0.25},${-lf.lh} ${lf.lw*0.75},${-lf.lh} ${lf.lw},0 C ${lf.lw*0.75},${lf.lh} ${lf.lw*0.25},${lf.lh} 0,0 Z`;
-                        const midrib = `M ${lf.lw*0.05},0 L ${lf.lw*0.82},0`;
-                        return (
-                          <g key={`lf-${li}`}
-                            transform={`translate(${lf.x},${lf.y}) rotate(${lf.angle})`}
-                            opacity={lf.opacity}
-                            style={{ pointerEvents: 'none' }}
-                          >
-                            <path d={leafD} fill={lf.fill} stroke={lf.stroke} strokeWidth={0.5} />
-                            <path d={midrib} fill="none" stroke={lf.stroke} strokeWidth={0.35} opacity={0.5} />
-                            {lf.caterpillar && (() => {
-                              // Bite-holes: small notches with yellow edging eaten from the leaf edge
-                              const holes = [];
-                              const nb = lf.bites || 2;
-                              for (let bi = 0; bi < nb; bi++) {
-                                const bx = lf.lw * (0.4 + 0.4 * (bi / Math.max(1, nb - 1)));
-                                const by = (bi % 2 === 0 ? -1 : 1) * lf.lh * 0.9;
-                                const br = lf.lh * (0.4 + (bi % 2) * 0.12);
-                                holes.push(
-                                  <circle key={`h-${bi}`} cx={bx} cy={by} r={br}
-                                    fill={theme.darkMode ? '#0b1f12' : '#ffffff'}
-                                    stroke="#fde047" strokeWidth={0.6} />
-                                );
-                              }
-                              // Caterpillar: green segments with a RED face (Very
-                              // Hungry Caterpillar style), ~30% smaller than before.
-                              const segs = 5;
-                              const ccx = lf.lw * 0.5, ccy = 0;
-                              const segR = Math.max(1.0, lf.lh * 0.35); // ~30% smaller
-                              const stepX = segR * 1.25;
-                              const startX = ccx - (segs * stepX) / 2;
-                              const cat = [];
-                              // little legs under the body
-                              for (let s = 0; s < segs; s++) {
-                                const segCx = startX + s * stepX;
-                                cat.push(
-                                  <line key={`leg-${s}`} x1={segCx} y1={ccy + segR*0.6} x2={segCx} y2={ccy + segR*1.2}
-                                    stroke="#3f6212" strokeWidth={0.4} />
-                                );
-                              }
-                              // body segments (green), head (red) is the last one
-                              for (let s = 0; s < segs; s++) {
-                                const segCx = startX + s * stepX;
-                                const isHead = s === segs - 1;
-                                cat.push(
-                                  <circle key={`c-${s}`} cx={segCx} cy={ccy - segR*0.15}
-                                    r={isHead ? segR * 1.15 : segR}
-                                    fill={isHead ? '#dc2626' : (s % 2 === 0 ? '#84cc16' : '#65a30d')}
-                                    stroke={isHead ? '#991b1b' : '#3f6212'} strokeWidth={0.4} />
-                                );
-                              }
-                              // eyes + tiny antennae on the red head
-                              const hx = startX + (segs - 1) * stepX;
-                              cat.push(<circle key="eye1" cx={hx + segR*0.35} cy={ccy - segR*0.55} r={segR*0.22} fill="#1a1a1a"/>);
-                              cat.push(<circle key="eye2" cx={hx + segR*0.35} cy={ccy + segR*0.2} r={segR*0.22} fill="#1a1a1a"/>);
-                              cat.push(<line key="ant1" x1={hx + segR*0.6} y1={ccy - segR*0.7} x2={hx + segR*1.1} y2={ccy - segR*1.3} stroke="#991b1b" strokeWidth={0.4}/>);
-                              return (<g>{holes}{cat}</g>);
-                            })()}
-                          </g>
-                        );
-                      })}
-                    </g>
-                    ),
-                  };
+                  if (!parts) return null;
+                  return { key: `link-${i}`, maskDef: null, ...parts };
                   }).filter(Boolean);
-  }, [links, activeRenderNodes, theme, nodeGroupMap, sliderDragging, transform, growingVines, vineBorderParams]);
+    if (newFallenAccum.length > 0) {
+      setFallenLeaves(prev => {
+        const existingIds = new Set(prev.map(fl => fl.id));
+        const trulyNew = newFallenAccum.filter(fl => !existingIds.has(fl.id));
+        return trulyNew.length > 0 ? [...prev, ...trulyNew] : prev;
+      });
+    }
+    return result;
+  }, [links, activeRenderNodes, nodes, theme, nodeGroupMap, sliderDragging, transform, growingVines, vineBorderParams, fallenLeaves]);
   return (
     <>
     <style>{KEYFRAMES_CSS}</style>
@@ -4216,13 +5406,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         const secHead=(label,open,toggle)=>(
           <button onClick={toggle} style={{display:'flex',justifyContent:'space-between',alignItems:'center',width:'100%',background:'none',border:'none',cursor:'pointer',padding:'0 0 6px',color:dm?'#e2e8f0':'#1e293b'}}>
             <span style={{fontSize:12,fontWeight:800}}>{label}</span>
-            <span style={{fontSize:10,color:dm?'#475569':'#94a3b8'}}>{open?'▲':'▼'}</span>
+            <span style={{fontSize:10,color:dm?'#475569':'#475569'}}>{open?'▲':'▼'}</span>
           </button>
         );
         const Slider=({label,value,min,max,step,unit,color,onChange})=>(
           <div style={{marginBottom:7}}>
             <div style={{display:'flex',justifyContent:'space-between',marginBottom:2}}>
-              <span style={{fontSize:11,color:dm?'#94a3b8':'#64748b'}}>{label}</span>
+              <span style={{fontSize:11,color:dm?'#94a3b8':pw.secondText}}>{label}</span>
               <span style={{fontSize:11,fontWeight:700,color:color||'#10b981'}}>{typeof value==='number'&&!Number.isInteger(value)?value.toFixed(2):value}{unit||''}</span>
             </div>
             <input type="range" min={min} max={max} step={step} value={value}
@@ -4234,7 +5424,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         );
         const ColorRow=({label,value,onChange})=>(
           <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
-            <span style={{fontSize:11,color:dm?'#94a3b8':'#64748b'}}>{label}</span>
+            <span style={{fontSize:11,color:dm?'#94a3b8':pw.secondText}}>{label}</span>
             <input type="color" value={value} onChange={e=>onChange(e.target.value)}
               style={{width:28,height:20,border:'none',borderRadius:4,cursor:'pointer',background:'none'}}/>
           </div>
@@ -4260,8 +5450,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
               <span style={{fontSize:13,fontWeight:800,color:dm?'#e2e8f0':'#1e293b'}}>🎛 Design Tuner</span>
               <button onClick={()=>setShowVineTuner(false)}
-                style={{background:'none',border:'none',cursor:'pointer',fontSize:16,color:dm?'#94a3b8':'#64748b',padding:0}}>✕</button>
+                style={{background:'none',border:'none',cursor:'pointer',fontSize:16,color:dm?'#94a3b8':pw.secondText,padding:0}}>✕</button>
             </div>
+
 
             {/* Section 1: Vine Borders */}
             {secHead('🌿 Vine Borders', op.borders, ()=>tog('borders'))}
@@ -4273,6 +5464,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               <Slider label="Inner leaves"    value={vineBorderParams.leavesInner}   min={0.0} max={3.0} step={0.25} unit="×" color="#22c55e" onChange={v=>setP('leavesInner',v)}/>
               <Slider label="Outer leaves"    value={vineBorderParams.leavesOuter}   min={0.0} max={3.0} step={0.25} unit="×" color="#22c55e" onChange={v=>setP('leavesOuter',v)}/>
             </>}
+
 
             {/* Section 2: Flowers */}
             <div style={secStyle}>
@@ -4286,17 +5478,18 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               </>}
             </div>
 
+
             {/* Section 3: Vine Strands */}
             <div style={secStyle}>
               {secHead('🎋 Vine Strands', op.strands, ()=>tog('strands'))}
               {op.strands && <>
-                <div style={{fontSize:10,color:dm?'#475569':'#94a3b8',marginBottom:6,fontWeight:700,textTransform:'uppercase',letterSpacing:1}}>Widths</div>
+                <div style={{fontSize:10,color:dm?'#475569':'#475569',marginBottom:6,fontWeight:700,textTransform:'uppercase',letterSpacing:1}}>Widths</div>
                 <Slider label="Core"    value={strandParams.coreWidth}  min={0.5} max={8} step={0.1} color="#14532d" onChange={v=>setST('coreWidth',v)}/>
                 <Slider label="Wrap 1"  value={strandParams.wrap1Width} min={0.5} max={6} step={0.1} color="#15803d" onChange={v=>setST('wrap1Width',v)}/>
                 <Slider label="Wrap 2"  value={strandParams.wrap2Width} min={0.5} max={6} step={0.1} color="#16a34a" onChange={v=>setST('wrap2Width',v)}/>
                 <Slider label="Wrap 3"  value={strandParams.wrap3Width} min={0.5} max={6} step={0.1} color="#22c55e" onChange={v=>setST('wrap3Width',v)}/>
                 <Slider label="Growing" value={strandParams.growWidth}  min={0.5} max={4} step={0.1} color="#4ade80" onChange={v=>setST('growWidth',v)}/>
-                <div style={{fontSize:10,color:dm?'#475569':'#94a3b8',margin:'8px 0 6px',fontWeight:700,textTransform:'uppercase',letterSpacing:1}}>Strand Colours</div>
+                <div style={{fontSize:10,color:dm?'#475569':'#475569',margin:'8px 0 6px',fontWeight:700,textTransform:'uppercase',letterSpacing:1}}>Strand Colours</div>
                 <ColorRow label="Core (dark)"    value={strandParams.coreColorD}  onChange={v=>setST('coreColorD',v)}/>
                 <ColorRow label="Core (light)"   value={strandParams.coreColorL}  onChange={v=>setST('coreColorL',v)}/>
                 <ColorRow label="Wrap 1 (dark)"  value={strandParams.wrap1ColorD} onChange={v=>setST('wrap1ColorD',v)}/>
@@ -4307,12 +5500,12 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 <ColorRow label="Wrap 3 (light)" value={strandParams.wrap3ColorL} onChange={v=>setST('wrap3ColorL',v)}/>
                 <ColorRow label="Growing (dark)" value={strandParams.growColorD}  onChange={v=>setST('growColorD',v)}/>
                 <ColorRow label="Growing (light)"value={strandParams.growColorL}  onChange={v=>setST('growColorL',v)}/>
-                <div style={{fontSize:10,color:dm?'#475569':'#94a3b8',margin:'8px 0 6px',fontWeight:700,textTransform:'uppercase',letterSpacing:1}}>Leaf Sizes</div>
+                <div style={{fontSize:10,color:dm?'#475569':'#475569',margin:'8px 0 6px',fontWeight:700,textTransform:'uppercase',letterSpacing:1}}>Leaf Sizes</div>
                 <Slider label="Core leaves"    value={strandParams.leafCoreSize} min={4}  max={60} step={1} unit="px" color="#14532d" onChange={v=>setST('leafCoreSize',v)}/>
                 <Slider label="Wrapped leaves" value={strandParams.leafWrapSize} min={2}  max={40} step={1} unit="px" color="#16a34a" onChange={v=>setST('leafWrapSize',v)}/>
                 <Slider label="Growing leaves" value={strandParams.leafGrowSize} min={1}  max={20} step={1} unit="px" color="#4ade80" onChange={v=>setST('leafGrowSize',v)}/>
                 <Slider label="Leaf spacing"   value={strandParams.leafSpacing}  min={10} max={120} step={2} unit="px" color="#22c55e" onChange={v=>setST('leafSpacing',v)}/>
-                <div style={{fontSize:10,color:dm?'#475569':'#94a3b8',margin:'8px 0 6px',fontWeight:700,textTransform:'uppercase',letterSpacing:1}}>Leaf Colours</div>
+                <div style={{fontSize:10,color:dm?'#475569':'#475569',margin:'8px 0 6px',fontWeight:700,textTransform:'uppercase',letterSpacing:1}}>Leaf Colours</div>
                 <ColorRow label="Core (dark)"    value={strandParams.leafCoreDark}  onChange={v=>setST('leafCoreDark',v)}/>
                 <ColorRow label="Core (light)"   value={strandParams.leafCoreLight} onChange={v=>setST('leafCoreLight',v)}/>
                 <ColorRow label="Wrapped (dark)" value={strandParams.leafWrapDark}  onChange={v=>setST('leafWrapDark',v)}/>
@@ -4321,6 +5514,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 <ColorRow label="Growing (light)"value={strandParams.leafGrowLight} onChange={v=>setST('leafGrowLight',v)}/>
               </>}
             </div>
+
 
             {/* Section 4: Group Border */}
             <div style={secStyle}>
@@ -4342,6 +5536,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               </>}
             </div>
 
+
             <button onClick={exportConfig}
               style={{width:'100%',marginTop:12,padding:'8px 0',borderRadius:8,
                 background:'#6366f1',color:'white',border:'none',cursor:'pointer',
@@ -4351,6 +5546,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           </div>
         );
       })()}
+
 
       {/* -- Draggable Edge-Snapping FAB --------------------------------------- */}
       {/* -- FAB -- */}
@@ -4368,6 +5564,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         setMacheteMode={setMacheteMode} setPendingPaths={setPendingPaths} setCurrentStroke={setCurrentStroke}
         rakeActive={rakeActive} setRakeActive={setRakeActive}
         hasFallenLeaves={fallenLeaves.length > 0}
+        simpleMode={simpleMode} setSimpleMode={setSimpleMode} mapStyle={mapStyle} setMapStyle={setMapStyle}
         onTornado={()=>{
           setTornadoActive(true);
           // clear the fallen leaves after they've swirled off-screen
@@ -4377,6 +5574,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         lassoMode={lassoMode} setLassoMode={setLassoMode}
         setLassoPath={setLassoPath} setLassoSelected={setLassoSelected} setLassoMenuOpen={setLassoMenuOpen}
       />}
+
 
       {clearLeavesConfirm && (
         <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:500,background:'rgba(0,0,0,0.6)',display:'flex',alignItems:'center',justifyContent:'center'}}
@@ -4399,6 +5597,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         </div>
       )}
 
+
       {/* -- Rake tool overlay -- */}
       {rakeActive && viewMode === 'canvas' && (()=>{
         const RAKE_R = 36;
@@ -4407,6 +5606,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         const BIN_Y = window.innerHeight - BIN_SIZE - 72;
         const INFLUENCE_R = 120; // ~2 person node radii in map coords
         const BIN_SNAP_R = 60;
+
 
         const onRakePointerDown = (e) => {
           e.stopPropagation();
@@ -4422,6 +5622,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           setRakeDragging(true);
         };
 
+
         const onRakePointerMove = (e) => {
           if (!rakeDragging) return;
           clearTimeout(rakeHoldTimer.current);
@@ -4429,11 +5630,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           const ny = e.clientY - RAKE_R;
           setRakePos({ x: nx, y: ny });
 
+
           // Pick up nearby fallen leaves (in screen coords — need to account for transform)
           const t = transform;
           const mapX = (e.clientX - t.x) / t.scale;
           const mapY = (e.clientY - t.y) / t.scale;
           const influenceMap = INFLUENCE_R; // already in map coords, no scale division needed
+
 
           setFallenLeaves(prev => {
             const picked = [];
@@ -4446,6 +5649,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             return remaining;
           });
 
+
           // Check if near bin — drop collected leaves
           const binCX = BIN_X + BIN_SIZE/2, binCY = BIN_Y + BIN_SIZE/2;
           const dbx = e.clientX - binCX, dby = e.clientY - binCY;
@@ -4454,11 +5658,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           }
         };
 
+
         const onRakePointerUp = () => {
           clearTimeout(rakeHoldTimer.current);
           setRakeDragging(false);
           rakeDragStart.current = null;
         };
+
 
         return (
           <>
@@ -4471,6 +5677,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               transition:'filter 0.2s',
             }}>🗑️</div>
 
+
             {/* Collected leaf count badge */}
             {collectedLeaves.length > 0 && (
               <div style={{position:'fixed', left:BIN_X+BIN_SIZE-10, top:BIN_Y-10, zIndex:351,
@@ -4479,6 +5686,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 fontSize:11, fontWeight:800, pointerEvents:'none',
               }}>{collectedLeaves.length}</div>
             )}
+
 
             {/* Rake icon — draggable */}
             <div
@@ -4495,6 +5703,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               onPointerMove={onRakePointerMove}
               onPointerUp={onRakePointerUp}
             >🧹</div>
+
 
             {/* Trailing collected leaves follow rake loosely */}
             {collectedLeaves.filter((_,idx)=>idx%10===0).map((fl, idx) => {
@@ -4514,6 +5723,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           </>
         );
       })()}
+
 
       {/* Settings panel — full height slide-in from right */}
       {settingsOpen && (
@@ -4546,9 +5756,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               background:theme.darkMode?'#0f172a':'white',
               zIndex:1,
             }}>
-              <span style={{fontWeight:800,fontSize:16,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>⚙️ Settings</span>
+              <span style={{fontWeight:800,fontSize:16,color:theme.darkMode?'#e2e8f0':pw.bodyText}}>⚙️ Settings</span>
               <button onClick={()=>setSettingsOpen(false)}
-                style={{background:'none',border:'none',cursor:'pointer',fontSize:22,lineHeight:1,color:theme.darkMode?'#64748b':'#94a3b8'}}>✕</button>
+                style={{background:'none',border:'none',cursor:'pointer',fontSize:22,lineHeight:1,color:theme.darkMode?'#64748b':'#475569'}}>✕</button>
             </div>
             {/* Scrollable body — fills remaining space */}
             <div style={{
@@ -4562,20 +5772,147 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 {(()=>{
                   const tog=(k)=>setSettingsSections(p=>({...p,[k]:!p[k]}));
                   const SH=({k,label})=>(
-                    <button onClick={()=>tog(k)} style={{display:'flex',alignItems:'center',justifyContent:'space-between',width:'100%',padding:'12px 0',background:'none',border:'none',borderBottom:'1px solid '+(theme.darkMode?'#334155':'#e2e8f0'),cursor:'pointer',color:theme.darkMode?'#e2e8f0':'#1e293b'}}>
+                    <button onClick={()=>tog(k)} style={{display:'flex',alignItems:'center',justifyContent:'space-between',width:'100%',padding:'12px 0',background:'none',border:'none',borderBottom:'1px solid '+(theme.darkMode?'#334155':'#e2e8f0'),cursor:'pointer',color:theme.darkMode?'#e2e8f0':pw.bodyText}}>
                       <span style={{fontSize:13,fontWeight:800}}>{label}</span>
-                      <span style={{fontSize:12,color:theme.darkMode?'#475569':'#94a3b8'}}>{settingsSections[k]?'▲':'▼'}</span>
+                      <span style={{fontSize:12,color:theme.darkMode?'#475569':'#475569'}}>{settingsSections[k]?'▲':'▼'}</span>
                     </button>
                   );
                   return (<>
 
+
                   <SH k="appearance" label="🎨 Appearance"/>
                   {settingsSections.appearance&&<div style={{padding:'8px 0'}}>
                     {[{label:'Weathered Hubs',ctrl:<input type="checkbox" checked={theme.showWeathering} onChange={e=>setTheme(p=>({...p,showWeathering:e.target.checked}))} style={{width:18,height:18,accentColor:'#10b981'}}/>},{label:'🌙 Dark Mode',ctrl:<input type="checkbox" checked={theme.darkMode} onChange={e=>setTheme(p=>({...p,darkMode:e.target.checked}))} style={{width:18,height:18,accentColor:'#10b981'}}/>},{label:'🌿 Group Vine Borders',ctrl:<input type="checkbox" checked={showVineBorders} onChange={e=>setShowVineBorders(e.target.checked)} style={{width:18,height:18,accentColor:'#10b981'}}/>},{label:'🌑 Night Darkness Filter',ctrl:<input type="checkbox" checked={darknessFilter} onChange={e=>setDarknessFilter(e.target.checked)} style={{width:18,height:18,accentColor:'#10b981'}}/>}].map((row,i)=>(
-                      <div key={i} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 0',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}><span style={{fontSize:14,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>{row.label}</span>{row.ctrl}</div>
+                      <div key={i} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 0',borderBottom:`1px solid ${pw.border}`}}><span style={{fontSize:14,color:theme.darkMode?'#e2e8f0':pw.bodyText}}>{row.label}</span>{row.ctrl}</div>
                     ))}
+
+                    {/* ---- Map style picker ---- */}
+                    <div style={{padding:'12px 0',borderBottom:`1px solid ${pw.border}`}}>
+                      <div style={{fontSize:12,fontWeight:700,color:theme.darkMode?'#94a3b8':'#64748b',marginBottom:10,textTransform:'uppercase',letterSpacing:0.5}}>🗺️ Map Style</div>
+                      <div style={{display:'flex',flexDirection:'column',gap:6}}>
+                        {[
+                          {key:'full', emoji:'🌿', name:'Full', desc:'Vines, leaves, fireflies — the decorated canvas'},
+                          {key:'simple', emoji:'⚪', name:'Simple', desc:'Plain circles on the same free-roaming canvas'},
+                          {key:'feed', emoji:'📜', name:'Feed', desc:'Stacked sections by dimension, scroll vertically'},
+                          {key:'feedDetailed', emoji:'🌱', name:'Feed (Detailed)', desc:'Same stacked layout, with vines, leaves & coloured borders'},
+                        ].map(opt => {
+                          const active = mapStyle === opt.key;
+                          return (
+                            <button key={opt.key}
+                              onClick={()=>{ setMapStyle(opt.key); setSimpleMode(opt.key === 'simple'); }}
+                              style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',borderRadius:10,
+                                border:`2px solid ${active?'#10b981':pw.border}`,
+                                background:active?(theme.darkMode?'#0f2d1a':'#ecfdf5'):(theme.darkMode?'#1e293b':'#f8fafc'),
+                                cursor:'pointer',textAlign:'left'}}>
+                              <span style={{fontSize:20}}>{opt.emoji}</span>
+                              <div>
+                                <div style={{fontSize:13,fontWeight:700,color:active?'#10b981':(theme.darkMode?'#e2e8f0':'#1e293b')}}>{opt.name}</div>
+                                <div style={{fontSize:11,color:theme.darkMode?'#94a3b8':'#64748b'}}>{opt.desc}</div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Feed drag mode -- how rearranging works in the Stacked views */}
+                    <div style={{padding:'12px 0',borderBottom:`1px solid ${pw.border}`}}>
+                      <div style={{fontSize:12,fontWeight:700,color:theme.darkMode?'#94a3b8':'#64748b',marginBottom:10,textTransform:'uppercase',letterSpacing:0.5}}>✋ Stacked View Dragging</div>
+                      <div style={{display:'flex',flexDirection:'column',gap:6}}>
+                        {[
+                          {key:'onehand', emoji:'☝️', name:'One Hand', desc:'Hold a person to pick them up, scroll to the new spot, hold again to place them'},
+                          {key:'twohand', emoji:'🤚', name:'Two Hands', desc:'Hold a person with one finger while your other finger scrolls; let go to place them'},
+                        ].map(opt => {
+                          const active = feedDragMode === opt.key;
+                          return (
+                            <button key={opt.key}
+                              onClick={()=>{ setFeedDragMode(opt.key); }}
+                              style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',borderRadius:10,
+                                border:`2px solid ${active?'#10b981':pw.border}`,
+                                background:active?(theme.darkMode?'#0f2d1a':'#ecfdf5'):(theme.darkMode?'#1e293b':'#f8fafc'),
+                                cursor:'pointer',textAlign:'left'}}>
+                              <span style={{fontSize:20}}>{opt.emoji}</span>
+                              <div>
+                                <div style={{fontSize:13,fontWeight:700,color:active?'#10b981':(theme.darkMode?'#e2e8f0':'#1e293b')}}>{opt.name}</div>
+                                <div style={{fontSize:11,color:theme.darkMode?'#94a3b8':'#64748b'}}>{opt.desc}</div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+
+                    {/* ---- Person window theme picker ---- */}
+                    <div style={{padding:'12px 0',borderBottom:`1px solid ${pw.border}`}}>
+                      <div style={{fontSize:12,fontWeight:700,color:theme.darkMode?'#94a3b8':'#64748b',marginBottom:10,textTransform:'uppercase',letterSpacing:0.5}}>🎨 Person Window Theme</div>
+                      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6}}>
+                        {Object.entries(WINDOW_THEMES).map(([key, t]) => {
+                          const active = windowThemeKey === key;
+                          return (
+                            <button key={key} onClick={()=>{ setWindowThemeKey(key); if(key==='custom') setShowThemeMaker(true); }}
+                              style={{display:'flex',alignItems:'center',gap:6,padding:'8px 10px',borderRadius:10,
+                                border:`2px solid ${active?t.accent:t.border}`,
+                                background:active?t.bg:theme.darkMode?'#1e293b':'#f8fafc',
+                                cursor:'pointer',textAlign:'left'}}>
+                              <div style={{width:20,height:20,borderRadius:5,background:t.bg,border:`2px solid ${t.border}`,flexShrink:0,
+                                boxShadow:`inset -6px 0 0 ${t.headerBg}`}}/>
+                              <div>
+                                <div style={{fontSize:11,fontWeight:700,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>{t.emoji} {t.name}</div>
+                                <div style={{display:'flex',gap:3,marginTop:2}}>
+                                  {[t.bg, t.cellBg, t.accent].map((c,i)=>(
+                                    <div key={i} style={{width:8,height:8,borderRadius:'50%',background:c}}/>
+                                  ))}
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+
+                    {/* ---- Custom theme maker ---- */}
+                    {windowThemeKey === 'custom' && (
+                      <div style={{padding:'12px 0',borderBottom:`1px solid ${pw.border}`}}>
+                        <div style={{fontSize:12,fontWeight:700,color:theme.darkMode?'#94a3b8':'#64748b',marginBottom:10,textTransform:'uppercase',letterSpacing:0.5}}>🎨 Customise Theme</div>
+                        {[
+                          {label:'Background',  key:'bg'},
+                          {label:'Header',      key:'headerBg'},
+                          {label:'Buttons',     key:'cellBg'},
+                          {label:'Border',      key:'border'},
+                          {label:'Body text',   key:'bodyText'},
+                          {label:'Faint text',  key:'secondText'},
+                          {label:'Accent',      key:'accent'},
+                        ].map(({label, key}) => (
+                          <div key={key} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'6px 0'}}>
+                            <span style={{fontSize:13,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>{label}</span>
+                            <div style={{display:'flex',alignItems:'center',gap:8}}>
+                              <div style={{width:28,height:28,borderRadius:6,background:customWindowTheme[key]||'#ffffff',
+                                border:'2px solid #94a3b8',overflow:'hidden',position:'relative',cursor:'pointer'}}>
+                                <input type="color" value={customWindowTheme[key]||'#ffffff'}
+                                  onChange={e=>setCustomWindowTheme(p=>({...p,[key]:e.target.value}))}
+                                  style={{position:'absolute',top:-4,left:-4,width:40,height:40,border:'none',
+                                    padding:0,cursor:'pointer',opacity:0}}/>
+                              </div>
+                              <span style={{fontSize:11,fontFamily:'monospace',color:theme.darkMode?'#94a3b8':'#64748b'}}>{customWindowTheme[key]||''}</span>
+                            </div>
+                          </div>
+                        ))}
+                        <button onClick={()=>{
+                          // copy current preset as starting point for custom
+                          const base = WINDOW_THEMES[Object.keys(WINDOW_THEMES).find(k=>k!=='custom')] || WINDOW_THEMES['morning-garden'];
+                          setCustomWindowTheme({...base});
+                        }} style={{marginTop:8,width:'100%',padding:'7px',borderRadius:8,border:'1.5px solid #94a3b8',
+                          background:'transparent',color:theme.darkMode?'#94a3b8':'#64748b',fontSize:11,cursor:'pointer'}}>
+                          Reset to Morning Garden
+                        </button>
+                      </div>
+                    )}
+
+
                     {showVineBorders && (
-                      <div style={{padding:'8px 0',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}>
+                      <div style={{padding:'8px 0',borderBottom:`1px solid ${pw.border}`}}>
                         <button onClick={()=>{setShowVineTuner(p=>!p);setViewMode('canvas');}}
                           style={{width:'100%',padding:'8px',borderRadius:10,border:'1.5px solid #10b981',
                             background:showVineTuner?'#10b981':'transparent',
@@ -4586,15 +5923,15 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       </div>
                     )}
                     {/* Surrounding flowers settings */}
-                    <div style={{padding:'10px 0',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}>
-                      <div style={{fontSize:13,fontWeight:700,color:theme.darkMode?'#94a3b8':'#64748b',marginBottom:8}}>🌸 Person Flowers</div>
+                    <div style={{padding:'10px 0',borderBottom:`1px solid ${pw.border}`}}>
+                      <div style={{fontSize:13,fontWeight:700,color:theme.darkMode?'#94a3b8':pw.secondText,marginBottom:8}}>🌸 Person Flowers</div>
                       {[
                         {label:'Main flower (around photo)', key:'showMain'},
                         {label:'Surrounding flowers (on vines)', key:'showSurround'},
                         {label:'Use tier-calculated count', key:'useCalc'},
                       ].map(row=>(
                         <div key={row.key} style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:6}}>
-                          <span style={{fontSize:12,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>{row.label}</span>
+                          <span style={{fontSize:12,color:theme.darkMode?'#e2e8f0':pw.bodyText}}>{row.label}</span>
                           <input type="checkbox" checked={surroundFlowerSettings[row.key]} onChange={e=>setSurroundFlowerSettings(p=>({...p,[row.key]:e.target.checked}))} style={{width:16,height:16,accentColor:'#f59e0b'}}/>
                         </div>
                       ))}
@@ -4612,7 +5949,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                             {sliders.map(s=>(
                               <div key={s.key} style={{marginBottom:6}}>
                                 <div style={{display:'flex',justifyContent:'space-between',marginBottom:2}}>
-                                  <span style={{fontSize:11,color:dm?'#94a3b8':'#64748b'}}>{s.label}</span>
+                                  <span style={{fontSize:11,color:dm?'#94a3b8':pw.secondText}}>{s.label}</span>
                                   <span style={{fontSize:11,fontWeight:700,color:'#f59e0b'}}>{surroundFlowerSettings[s.key]}{s.unit}</span>
                                 </div>
                                 <input type="range" min={s.min} max={s.max} step={s.step}
@@ -4625,23 +5962,23 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         );
                       })()}
                     </div>
-                    <div style={{padding:'12px 0',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}>
-                      <div style={{fontSize:13,fontWeight:700,color:theme.darkMode?'#94a3b8':'#64748b',marginBottom:8}}>⬡ Grid Style</div>
+                    <div style={{padding:'12px 0',borderBottom:`1px solid ${pw.border}`}}>
+                      <div style={{fontSize:13,fontWeight:700,color:theme.darkMode?'#94a3b8':pw.secondText,marginBottom:8}}>⬡ Grid Style</div>
                       <div style={{display:'flex',gap:6}}>{[{id:'hex',label:'Hex'},{id:'hexSmall',label:'Small Hex'},{id:'square',label:'Square'}].map(g=>(
                         <button key={g.id} onClick={()=>setGridStyle(g.id)} style={{flex:1,padding:'7px 2px',borderRadius:8,border:'2px solid '+(gridStyle===g.id?'#10b981':(theme.darkMode?'#334155':'#e2e8f0')),background:gridStyle===g.id?'#10b981':(theme.darkMode?'#1e293b':'#f8fafc'),color:gridStyle===g.id?'white':(theme.darkMode?'#94a3b8':'#64748b'),fontSize:11,fontWeight:700,cursor:'pointer'}}>{g.label}</button>
                       ))}</div>
                     </div>
-                    <div style={{padding:'12px 0',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}>
-                      <div style={{fontSize:13,fontWeight:700,color:theme.darkMode?'#94a3b8':'#64748b',marginBottom:8}}>✸ Tidy layout</div>
+                    <div style={{padding:'12px 0',borderBottom:`1px solid ${pw.border}`}}>
+                      <div style={{fontSize:13,fontWeight:700,color:theme.darkMode?'#94a3b8':pw.secondText,marginBottom:8}}>✸ Tidy layout</div>
                       <button onClick={()=>{ resolveAllOverlaps(); showToast('✸ Separated overlapping nodes'); }}
-                        style={{width:'100%',padding:'9px',borderRadius:8,border:'1.5px solid '+(theme.darkMode?'#334155':'#e2e8f0'),background:theme.darkMode?'#1e293b':'#f8fafc',color:theme.darkMode?'#e2e8f0':'#334155',fontSize:12,fontWeight:700,cursor:'pointer'}}>
+                        style={{width:'100%',padding:'9px',borderRadius:8,border:`1.5px solid ${pw.border}`,background:pw.cellBg,color:theme.darkMode?'#e2e8f0':pw.bodyText,fontSize:12,fontWeight:700,cursor:'pointer'}}>
                         Separate stacked nodes
                       </button>
                     </div>
-                    <div style={{padding:'10px 0',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}>
+                    <div style={{padding:'10px 0',borderBottom:`1px solid ${pw.border}`}}>
                       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
-                        <span style={{fontSize:14,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>🔤 Text size</span>
-                        <span style={{fontSize:12,color:theme.darkMode?'#64748b':'#94a3b8',fontWeight:600}}>{fontSize===0.85?'Small':fontSize===1?'Default':fontSize===1.15?'Large':'X-Large'}</span>
+                        <span style={{fontSize:14,color:theme.darkMode?'#e2e8f0':pw.bodyText}}>🔤 Text size</span>
+                        <span style={{fontSize:12,color:theme.darkMode?'#64748b':'#475569',fontWeight:600}}>{fontSize===0.85?'Small':fontSize===1?'Default':fontSize===1.15?'Large':'X-Large'}</span>
                       </div>
                       <div style={{display:'flex',gap:6}}>
                         {[{v:0.85,l:'S'},{v:1,l:'M'},{v:1.15,l:'L'},{v:1.3,l:'XL'}].map(({v,l})=>(
@@ -4653,50 +5990,197 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       </div>
                     </div>
                     <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 0'}}>
-                      <span style={{fontSize:14,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>🔔 Notifications</span>
+                      <span style={{fontSize:14,color:theme.darkMode?'#e2e8f0':pw.bodyText}}>🔔 Notifications</span>
                       {notifPermission==='granted'?<span style={{fontSize:12,color:'#10b981',fontWeight:700}}>Enabled ✓</span>:<button onClick={requestNotifications} style={{padding:'5px 14px',borderRadius:99,background:'#10b981',color:'white',border:'none',cursor:'pointer',fontSize:12,fontWeight:700}}>Enable</button>}
                     </div>
                   </div>}
 
+
                   <SH k="toolbar" label="🧰 Toolbar Buttons"/>
                   {settingsSections.toolbar&&<div style={{padding:'8px 0'}}>
-                    <div style={{fontSize:12,color:theme.darkMode?'#94a3b8':'#64748b',paddingBottom:6}}>Choose which tools appear in the floating menu.</div>
+                    <div style={{fontSize:12,color:theme.darkMode?'#94a3b8':pw.secondText,paddingBottom:6}}>Choose which tools appear in the floating menu.</div>
                     {[{id:'search',label:'🔍 Search'},{id:'undo',label:'↩ Undo / Redo'},{id:'vine',label:'🌿 Vine'},{id:'cut',label:'🪓 Cut'},{id:'rake',label:'🧹 Rake'},{id:'lasso',label:'⭕ Select'}].map((row,i)=>(
-                      <div key={row.id} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 0',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}>
-                        <span style={{fontSize:14,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>{row.label}</span>
+                      <div key={row.id} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 0',borderBottom:`1px solid ${pw.border}`}}>
+                        <span style={{fontSize:14,color:theme.darkMode?'#e2e8f0':pw.bodyText}}>{row.label}</span>
                         <input type="checkbox" checked={visibleTools[row.id]!==false}
                           onChange={e=>setVisibleTools(p=>({...p,[row.id]:e.target.checked}))}
                           style={{width:18,height:18,accentColor:'#10b981'}}/>
                       </div>
                     ))}
-                    <div style={{fontSize:11,color:theme.darkMode?'#64748b':'#94a3b8',paddingTop:6}}>Day/Night and Settings are always shown.</div>
+                    <div style={{fontSize:11,color:theme.darkMode?'#64748b':'#475569',paddingTop:6}}>Day/Night and Settings are always shown.</div>
                   </div>}
+
 
                   <SH k="filters" label="🏷 Filters"/>
                   {settingsSections.filters&&<div style={{padding:'8px 0'}}>
                     {activeTags.length>0&&activeTags.length<allTags.length&&<button onClick={()=>setActiveTags([])} style={{fontSize:11,color:'#ef4444',background:'none',border:'none',cursor:'pointer',fontWeight:700,marginBottom:6}}>Show all</button>}
-                    {allTags.length===0?<p style={{fontSize:12,fontStyle:'italic',color:theme.darkMode?'#475569':'#94a3b8',margin:'0 0 8px'}}>No tags yet</p>
+                    {allTags.length===0?<p style={{fontSize:12,fontStyle:'italic',color:theme.darkMode?'#475569':'#475569',margin:'0 0 8px'}}>No tags yet</p>
                     :<div style={{display:'flex',flexDirection:'column',gap:4}}>{allTags.map(tag=>{
                       const hidden=activeTags.length>0&&!activeTags.includes(tag);
                       const count=nodes.filter(n=>(n.tags||[]).includes(tag)).length;
                       return(<label key={tag} style={{display:'flex',alignItems:'center',gap:10,cursor:'pointer',padding:'3px 0'}}>
                         <input type="checkbox" checked={!hidden} onChange={()=>{if(activeTags.length===0){setActiveTags(allTags.filter(t=>t!==tag));}else if(activeTags.includes(tag)){const nx=activeTags.filter(t=>t!==tag);setActiveTags(nx.length===allTags.length?[]:nx);}else{const nx=[...activeTags,tag];setActiveTags(nx.length===allTags.length?[]:nx);}}} style={{width:16,height:16,accentColor:'#10b981',cursor:'pointer',flexShrink:0}}/>
-                        <span style={{flex:1,fontSize:13,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>{tag}</span>
-                        <span style={{fontSize:11,color:theme.darkMode?'#475569':'#94a3b8'}}>{count}p</span>
+                        <span style={{flex:1,fontSize:13,color:theme.darkMode?'#e2e8f0':pw.bodyText}}>{tag}</span>
+                        <span style={{fontSize:11,color:theme.darkMode?'#475569':'#475569'}}>{count}p</span>
                       </label>);
                     })}</div>}
                   </div>}
 
+
                   <SH k="data" label="💾 Data"/>
                   {settingsSections.data&&<div style={{padding:'8px 0'}}>
+                    {/* Backup / restore row */}
+                    <div style={{padding:'10px 0',borderBottom:`1px solid ${pw.border}`}}>
+                      <div style={{fontSize:13,fontWeight:700,color:theme.darkMode?'#94a3b8':'#64748b',marginBottom:6}}>Backup &amp; Restore</div>
+                      <div style={{display:'flex',gap:8}}>
+                        <button onClick={()=>{ exportData(); }}
+                          style={{flex:1,padding:'8px 0',borderRadius:10,background:'#3b82f6',color:'white',border:'none',cursor:'pointer',fontSize:12,fontWeight:700}}>
+                          📤 Export &amp; Share
+                        </button>
+                        <label style={{flex:1,padding:'8px 0',borderRadius:10,background:theme.darkMode?'#334155':'#f1f5f9',color:theme.darkMode?'#e2e8f0':pw.bodyText,border:`1px solid ${pw.border}`,cursor:'pointer',fontSize:12,fontWeight:700,textAlign:'center',display:'flex',alignItems:'center',justifyContent:'center',gap:4}}>
+                          📥 Import File
+                          <input type="file" accept=".json" style={{display:'none'}} onChange={e=>{ if(e.target.files[0]) importData(e.target.files[0]); }}/>
+                        </label>
+                      </div>
+                      <div style={{fontSize:11,color:theme.darkMode?'#64748b':'#94a3b8',marginTop:5,lineHeight:1.4}}>
+                        Export saves all people, groups &amp; full-quality photos into one file. Share to Google Drive, WhatsApp, email etc. Import to restore on any device.
+                      </div>
+                    </div>
                     {[{label:'🌱 Start Blank',btnLabel:'Reset',btnBg:'#64748b',onClick:()=>{setSettingsOpen(false);const doReset=()=>{clearTimeout(saveTimer.current);setNodes(INITIAL_NODES);setLinks(INITIAL_LINKS);setDimensions(DEFAULT_DIMENSIONS);try{localStorage.removeItem('ft_nodes');localStorage.removeItem('ft_links');localStorage.removeItem('ft_dimensions');}catch(e) {}clearPhotoDB();showToast('🌱 Fresh start!');};const run=()=>localStorage.getItem('ft_pin')?openPinModal('clear','Confirm Reset',doReset):doReset();setConfirmModal({title:'Start Blank?',message:'Removes all people, groups, photos and history.',danger:true,onConfirm:run});}},
                       {label:'✨ Demo Data',btnLabel:'Load',btnBg:'#10b981',onClick:()=>{setSettingsOpen(false);setConfirmModal({title:'Load Demo Data?',message:'Replaces your current tree with example data.',danger:false,onConfirm:()=>loadDemoData()});}},
+                      {label:'🧹 True Factory Reset',btnLabel:'Wipe Everything',btnBg:'#dc2626',onClick:()=>{setSettingsOpen(false);
+                        const doFullReset=()=>{
+                          clearTimeout(saveTimer.current);
+                          // Clear every single ft_ key this app writes, not just nodes/links/dimensions
+                          const allKeys=['ft_nodes','ft_links','ft_dimensions','ft_settings','ft_pin','ft_lockTimer',
+                            'ft_ideas','ft_flower_presets','ft_fallenLeaves','ft_fontSize','ft_viewMode','ft_mole_pos',
+                            'ft_ai_keys','ft_ai_provider'];
+                          allKeys.forEach(k=>{ try{ localStorage.removeItem(k); }catch(e){} });
+                          clearPhotoDB();
+                          showToast('🧹 Factory reset complete — reloading…');
+                          // Full reload so every piece of in-memory state (not just the cleared keys)
+                          // re-initialises fresh from scratch -- safer than trying to reset 30+ useState calls by hand.
+                          setTimeout(()=>{ window.location.reload(); }, 600);
+                        };
+                        const run=()=>localStorage.getItem('ft_pin')?openPinModal('clear','Confirm Factory Reset',doFullReset):doFullReset();
+                        setConfirmModal({title:'True Factory Reset?',
+                          message:'Wipes absolutely everything: people, groups, photos, history, settings, theme, PIN, AI keys, mole position — every saved value. The app reloads fresh, as if newly installed. This cannot be undone.',
+                          danger:true,onConfirm:run});
+                      }},
                     ].map((row,i)=>(
-                      <div key={i} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 0',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}>
-                        <span style={{fontSize:14,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>{row.label}</span>
+                      <div key={i} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 0',borderBottom:`1px solid ${pw.border}`}}>
+                        <span style={{fontSize:14,color:theme.darkMode?'#e2e8f0':pw.bodyText}}>{row.label}</span>
                         <button onClick={row.onClick} style={{padding:'5px 14px',borderRadius:99,background:row.btnBg,color:'white',border:'none',cursor:'pointer',fontSize:12,fontWeight:700}}>{row.btnLabel}</button>
                       </div>
                     ))}
+                  </div>}
+
+
+                  {/* Assistant section */}
+                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',
+                    padding:'10px 0',borderBottom:`1px solid ${pw.border}`,cursor:'pointer'}}
+                    onClick={()=>setSettingsSections(p=>({...p,assistant:!p.assistant}))}>
+                    <span style={{fontSize:14,fontWeight:700,color:theme.darkMode?'#e2e8f0':pw.bodyText}}>🦔 Garden Assistant</span>
+                    <span style={{fontSize:12,color:theme.darkMode?'#475569':'#475569'}}>{settingsSections.assistant?'▲':'▼'}</span>
+                  </div>
+                  {settingsSections.assistant&&<div style={{padding:'8px 0'}}>
+
+                    {/* Animal picker */}
+                    <div style={{fontSize:12,fontWeight:700,color:theme.darkMode?'#94a3b8':'#64748b',marginBottom:8}}>Assistant character</div>
+                    <div style={{display:'flex',flexWrap:'wrap',gap:10,marginBottom:16}}>
+                      {[
+                        {id:'diglett',       label:'Diglett',         svg:(size)=>(
+                          <svg viewBox="0 0 100 100" width={size} height={size} style={{overflow:'visible'}}>
+                            <path d="M 16,74 Q 22,54 36,54 Q 50,48 64,54 Q 78,54 84,74 Q 50,82 16,74 Z" fill="#795333" stroke="#3D2513" strokeWidth="1.5"/>
+                            <path d="M 38,70 L 38,42 A 12,12 0 0,1 62,42 L 62,70 Z" fill="#A06A42" stroke="#4A2E1B" strokeWidth="1.5"/>
+                            <circle cx="45" cy="40" r="2" fill="#222"/><circle cx="55" cy="40" r="2" fill="#222"/>
+                            <ellipse cx="50" cy="47" rx="4.5" ry="3" fill="#E28492" stroke="#4A2E1B"/>
+                          </svg>
+                        )},
+                        {id:'dugtrio',       label:'Dugtrio',         svg:(size)=>(
+                          <svg viewBox="0 0 100 100" width={size} height={size} style={{overflow:'visible'}}>
+                            <path d="M 12,76 Q 20,50 35,50 Q 50,44 65,50 Q 80,50 88,76 Q 50,84 12,76 Z" fill="#795333" stroke="#3D2513" strokeWidth="1.5"/>
+                            <path d="M 38,58 L 38,34 A 12,12 0 0,1 62,34 L 62,58 Z" fill="#A06A42" stroke="#4A2E1B" strokeWidth="1.5"/>
+                            <circle cx="45" cy="32" r="1.75" fill="#222"/><circle cx="55" cy="32" r="1.75" fill="#222"/>
+                            <ellipse cx="50" cy="39" rx="4" ry="2.5" fill="#E28492" stroke="#4A2E1B"/>
+                            <path d="M 22,68 L 22,44 A 11,11 0 0,1 44,44 L 44,68 Z" fill="#A06A42" stroke="#4A2E1B" strokeWidth="1.5"/>
+                            <path d="M 56,72 L 56,48 A 11,11 0 0,1 78,48 L 78,72 Z" fill="#A06A42" stroke="#4A2E1B" strokeWidth="1.5"/>
+                          </svg>
+                        )},
+                        {id:'galarian-diglett', label:'G. Diglett',   svg:(size)=>(
+                          <svg viewBox="0 0 100 100" width={size} height={size} style={{overflow:'visible'}}>
+                            <path d="M 16,74 Q 22,54 36,54 Q 50,48 64,54 Q 78,54 84,74 Q 50,82 16,74 Z" fill="#795333" stroke="#3D2513" strokeWidth="1.5"/>
+                            <path d="M 48,32 Q 42,20 45,14 Q 49,18 50,28 Q 52,16 55,15 Q 54,22 52,30 Q 58,22 61,24 Q 55,29 52,32" fill="#ECE5C1" stroke="#4A2E1B" strokeWidth="1"/>
+                            <path d="M 38,70 L 38,42 A 12,12 0 0,1 62,42 L 62,70 Z" fill="#A06A42" stroke="#4A2E1B" strokeWidth="1.5"/>
+                            <circle cx="45" cy="40" r="2" fill="#222"/><circle cx="55" cy="40" r="2" fill="#222"/>
+                            <ellipse cx="50" cy="47" rx="4.5" ry="3" fill="#E28492" stroke="#4A2E1B"/>
+                          </svg>
+                        )},
+                        {id:'galarian-dugtrio', label:'G. Dugtrio',   svg:(size)=>(
+                          <svg viewBox="0 0 100 100" width={size} height={size} style={{overflow:'visible'}}>
+                            <path d="M 12,76 Q 20,50 35,50 Q 50,44 65,50 Q 80,50 88,76 Q 50,84 12,76 Z" fill="#795333" stroke="#3D2513" strokeWidth="1.5"/>
+                            <path d="M 36,26 Q 50,14 64,26 Q 72,44 76,54 L 62,58 L 38,58 Q 30,40 36,26 Z" fill="#EFE6A5" stroke="#4A2E1B" strokeWidth="1"/>
+                            <path d="M 38,58 L 38,34 A 12,12 0 0,1 62,34 L 62,58 Z" fill="#A06A42" stroke="#4A2E1B" strokeWidth="1.5"/>
+                            <path d="M 16,44 Q 12,34 22,32 Q 32,24 44,34 Q 48,44 42,54 L 24,54 Z" fill="#EFE6A5" stroke="#4A2E1B" strokeWidth="1"/>
+                            <path d="M 22,68 L 22,44 A 11,11 0 0,1 44,44 L 44,68 Z" fill="#A06A42" stroke="#4A2E1B" strokeWidth="1.5"/>
+                            <path d="M 52,44 Q 54,34 66,34 Q 78,34 80,46 L 56,66 Z" fill="#EFE6A5" stroke="#4A2E1B" strokeWidth="1"/>
+                            <path d="M 56,72 L 56,48 A 11,11 0 0,1 78,48 L 78,72 Z" fill="#A06A42" stroke="#4A2E1B" strokeWidth="1.5"/>
+                          </svg>
+                        )},
+                      ].map(a=>(
+                        <div key={a.id}
+                          onClick={()=>{ setAssistantCharacter(a.id); }}
+                          style={{display:'flex',flexDirection:'column',alignItems:'center',gap:4,cursor:'pointer',
+                            padding:'6px 8px',borderRadius:10,
+                            background:assistantCharacter===a.id?(theme.darkMode?'#1e3a5f':'#dbeafe'):'transparent',
+                            border:`2px solid ${assistantCharacter===a.id?'#3b82f6':'transparent'}`,
+                            transition:'all 0.15s'}}>
+                          {a.svg(36)}
+                          <div style={{fontSize:9,fontWeight:700,color:assistantCharacter===a.id?'#3b82f6':(theme.darkMode?'#94a3b8':'#64748b')}}>{a.label}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* AI provider picker */}
+                    <div style={{fontSize:12,fontWeight:700,color:theme.darkMode?'#94a3b8':'#64748b',marginBottom:8}}>AI provider</div>
+                    <div style={{display:'flex',gap:8,marginBottom:12}}>
+                      {[{id:'gemini',label:'Gemini',color:'#4285f4'},{id:'openai',label:'GPT-4o',color:'#10a37f'},{id:'claude',label:'Claude',color:'#d97706'}].map(p=>(
+                        <button key={p.id} onClick={()=>{ setAiProvider(p.id); localStorage.setItem('ft_ai_provider',p.id); }}
+                          style={{flex:1,padding:'5px 0',borderRadius:8,fontSize:10,fontWeight:700,cursor:'pointer',border:'none',
+                            background:aiProvider===p.id?p.color:'rgba(255,255,255,0.06)',
+                            color:aiProvider===p.id?'white':theme.darkMode?'#64748b':'#94a3b8'}}>
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* API key fields */}
+                    <div style={{fontSize:12,fontWeight:700,color:theme.darkMode?'#94a3b8':'#64748b',marginBottom:8}}>API keys</div>
+                    <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                      {[{id:'gemini',label:'Gemini',color:'#4285f4'},{id:'openai',label:'GPT-4o',color:'#10a37f'},{id:'claude',label:'Claude',color:'#d97706'}].map(p=>(
+                        <div key={p.id}>
+                          <div style={{fontSize:10,fontWeight:700,color:aiKeys[p.id]?p.color:theme.darkMode?'#475569':'#94a3b8',marginBottom:3,display:'flex',justifyContent:'space-between'}}>
+                            <span>{p.label}</span>
+                            {aiKeys[p.id]&&<span style={{fontSize:9,color:'#10b981'}}>✓ {aiKeys[p.id].length} chars</span>}
+                          </div>
+                          <input type='password'
+                            placeholder={`Paste ${p.label} API key`}
+                            value={aiKeys[p.id]||''}
+                            onChange={e=>{
+                              const next={...aiKeys,[p.id]:e.target.value};
+                              setAiKeys(next);
+                              localStorage.setItem('ft_ai_keys',JSON.stringify(next));
+                            }}
+                            style={{width:'100%',fontSize:11,padding:'6px 8px',borderRadius:8,
+                              background:theme.darkMode?'#0f172a':'#f8fafc',
+                              border:`1px solid ${aiKeys[p.id]?p.color:pw.border}`,
+                              color:theme.darkMode?'#e2e8f0':'#1e293b',boxSizing:'border-box'}}/>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{fontSize:10,color:theme.darkMode?'#475569':'#94a3b8',marginTop:8,lineHeight:1.4}}>
+                      Keys are stored on-device only and never shared.
+                    </div>
                   </div>}
 
                   <SH k="reset" label="🗑️ Reset"/>
@@ -4712,17 +6196,17 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         showToast('📋 Logs cleared');
                       }},
                       {label:'📓 Diary entries',desc:'Clears all diary entries',title:'Clear Diaries?',msg:'Removes diary entries from all people.',onConfirm:()=>{setNodes(prev=>prev.map(n=>({...n,diaryEntries:[]})));showToast('📓 Diaries cleared');}},
-                      {label:'⭐ Friendship scores',desc:"Reset scores — pick each person's tier on map",title:'Reset Scores?',msg:'Resets all scores. Each person shows tier picker on return.',onConfirm:()=>{setNodes(prev=>prev.map(n=>n.type==='friend'||n.id==='me'?{...n,interactionScore:0,prevScore:0}:n));setTierPickMode(true);showToast('⭐ Tap each person to set their level');}},
+                      {label:'⭐ Friendship scores',desc:"Resets everyone to halfway through Acquaintance — pick a different tier on map if needed",title:'Reset Scores?',msg:'Resets all scores to a fresh starting point. Tap anyone on the map to set a different tier if needed.',onConfirm:()=>{setNodes(prev=>prev.map(n=>n.type==='friend'||n.id==='me'?{...n,interactionScore:STARTING_SCORE,prevScore:STARTING_SCORE,scoreHistory:[],isFamily:false,tierPicked:false}:n));setTierPickMode(true);showToast('⭐ Everyone reset — tap to adjust a tier');}},
                       {label:'🔗 Connections',desc:'Removes all vines & groups, keeps people',title:'Remove Connections?',msg:'Removes all vines and groups. People and photos stay.',onConfirm:()=>{setNodes(prev=>prev.filter(n=>n.type!=='hub'));setLinks(INITIAL_LINKS);setArchivedLinks([]);try{localStorage.removeItem('ft_links');}catch(e) {}showToast('🔗 Done');}},
                       {label:'👥 People',desc:'Removes all people, keeps Me',title:'Remove People?',msg:'Deletes all person nodes except Me.',onConfirm:()=>{setNodes(prev=>prev.filter(n=>n.type==='hub'||n.type==='flower'||n.id==='me'));setLinks(prev=>prev.filter(l=>{const sn=nodes.find(n=>n.id===l.source);const tn=nodes.find(n=>n.id===l.target);return(sn?.type==='hub'||sn?.type==='flower'||sn?.id==='me')&&(tn?.type==='hub'||tn?.type==='flower'||tn?.id==='me');}));clearPhotoDB();showToast('👥 Done');}},
-                      {label:'📸 Photos',desc:'Replaces photos with blank avatars',title:'Remove Photos?',msg:'Replaces uploaded photos with default avatars.',onConfirm:()=>{clearPhotoDB();const ak=Object.keys(AVATARS);setNodes(prev=>prev.map(n=>n.type==='friend'||n.id==='me'?{...n,img:AVATARS[ak[Math.floor(Math.random()*ak.length)]]}:n));showToast('📸 Done');}},
+                      {label:'📸 Photos',desc:'Replaces photos with blank avatars',title:'Remove Photos?',msg:'Replaces uploaded photos with default avatars.',onConfirm:()=>{clearPhotoDB();setNodes(prev=>prev.map(n=>n.type==='friend'||n.id==='me'?{...n,img:makeBlankAvatar()}:n));showToast('📸 Done');}},
                       {label:'🌳 Groups',desc:'Removes group hubs, keeps people',title:'Remove Groups?',msg:'Deletes all group hubs. People remain.',onConfirm:()=>{setNodes(prev=>prev.filter(n=>n.type!=='hub'));setLinks(prev=>prev.filter(l=>{const sn=nodes.find(n=>n.id===l.source);const tn=nodes.find(n=>n.id===l.target);return sn?.type!=='hub'&&tn?.type!=='hub';}));showToast('🌳 Done');}},
                     ].map((row,i)=>(
-                      <div key={i} style={{padding:'10px 0',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}>
+                      <div key={i} style={{padding:'10px 0',borderBottom:`1px solid ${pw.border}`}}>
                         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8}}>
                           <div>
-                            <div style={{fontSize:13,fontWeight:600,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>{row.label}</div>
-                            <div style={{fontSize:11,color:theme.darkMode?'#475569':'#94a3b8',marginTop:1}}>{row.desc}</div>
+                            <div style={{fontSize:13,fontWeight:600,color:theme.darkMode?'#e2e8f0':pw.bodyText}}>{row.label}</div>
+                            <div style={{fontSize:11,color:theme.darkMode?'#475569':'#475569',marginTop:1}}>{row.desc}</div>
                           </div>
                           <button onClick={()=>{setSettingsOpen(false);setConfirmModal({title:row.title,message:row.msg,danger:true,onConfirm:row.onConfirm});}} style={{flexShrink:0,padding:'4px 12px',borderRadius:99,background:'#ef4444',color:'white',border:'none',cursor:'pointer',fontSize:11,fontWeight:700}}>Reset</button>
                         </div>
@@ -4730,17 +6214,19 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     ))}
                   </div>}
 
+
                   </>);
                 })()}
                 {/* Security */}
-                <button onClick={()=>setSettingsSections(p=>({...p,security:!p.security}))} style={{display:'flex',alignItems:'center',justifyContent:'space-between',width:'100%',padding:'12px 0',background:'none',border:'none',borderBottom:'1px solid '+(theme.darkMode?'#334155':'#e2e8f0'),cursor:'pointer',color:theme.darkMode?'#e2e8f0':'#1e293b'}}>
+                <button onClick={()=>setSettingsSections(p=>({...p,security:!p.security}))} style={{display:'flex',alignItems:'center',justifyContent:'space-between',width:'100%',padding:'12px 0',background:'none',border:'none',borderBottom:'1px solid '+(theme.darkMode?'#334155':'#e2e8f0'),cursor:'pointer',color:theme.darkMode?'#e2e8f0':pw.bodyText}}>
                   <span style={{fontSize:13,fontWeight:800}}>🔒 Security</span>
-                  <span style={{fontSize:12,color:theme.darkMode?'#475569':'#94a3b8'}}>{settingsSections.security?'▲':'▼'}</span>
+                  <span style={{fontSize:12,color:theme.darkMode?'#475569':'#475569'}}>{settingsSections.security?'▲':'▼'}</span>
                 </button>
                 {settingsSections.security&&<div style={{padding:'8px 0'}}>
 
-                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 0',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}>
-                  <span style={{fontSize:14,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>🔒 App PIN</span>
+
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 0',borderBottom:`1px solid ${pw.border}`}}>
+                  <span style={{fontSize:14,color:theme.darkMode?'#e2e8f0':pw.bodyText}}>🔒 App PIN</span>
                   {localStorage.getItem('ft_pin')?(
                     <div style={{display:'flex',gap:6}}>
                       <button onClick={()=>{setSettingsOpen(false);openPinModal('verify','Current PIN',()=>openPinModal('set','New PIN'));}} style={{padding:'5px 10px',borderRadius:99,background:'#10b981',color:'white',border:'none',cursor:'pointer',fontSize:11,fontWeight:700}}>Change</button>
@@ -4751,11 +6237,12 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   )}
                 </div>
 
+
                 {localStorage.getItem('ft_pin')&&(
-                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 0',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}>
-                    <span style={{fontSize:13,color:theme.darkMode?'#94a3b8':'#64748b'}}>Lock after</span>
+                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 0',borderBottom:`1px solid ${pw.border}`}}>
+                    <span style={{fontSize:13,color:theme.darkMode?'#94a3b8':pw.secondText}}>Lock after</span>
                     <select value={lockTimer} onChange={e=>{setLockTimerVal(e.target.value);localStorage.setItem('ft_lockTimer',e.target.value);}}
-                      style={{fontSize:12,padding:'5px 8px',borderRadius:8,border:'1px solid '+(theme.darkMode?'#334155':'#e2e8f0'),background:theme.darkMode?'#1e293b':'white',color:theme.darkMode?'#e2e8f0':'#1e293b',outline:'none'}}>
+                      style={{fontSize:12,padding:'5px 8px',borderRadius:8,border:`1px solid ${pw.border}`,background:theme.darkMode?'#1e293b':'white',color:theme.darkMode?'#e2e8f0':pw.bodyText,outline:'none'}}>
                       <option value="close">App close</option>
                       <option value="5min">5 minutes</option>
                       <option value="1hour">1 hour</option>
@@ -4765,15 +6252,17 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 )}
                 </div>}
 
+
                 {/* Version */}
                 <div style={{textAlign:'center',paddingTop:16,paddingBottom:4}}>
                   <span style={{fontSize:11,color:theme.darkMode?'#334155':'#cbd5e1'}}>🌳 FriendshipTree v{APP_VERSION}</span>
                 </div>
 
+
                 {/* Future Updates */}
-                <button onClick={()=>setSettingsSections(p=>({...p,future:!p.future}))} style={{display:'flex',alignItems:'center',justifyContent:'space-between',width:'100%',padding:'12px 0',background:'none',border:'none',borderBottom:'1px solid '+(theme.darkMode?'#334155':'#e2e8f0'),cursor:'pointer',color:theme.darkMode?'#e2e8f0':'#1e293b'}}>
+                <button onClick={()=>setSettingsSections(p=>({...p,future:!p.future}))} style={{display:'flex',alignItems:'center',justifyContent:'space-between',width:'100%',padding:'12px 0',background:'none',border:'none',borderBottom:'1px solid '+(theme.darkMode?'#334155':'#e2e8f0'),cursor:'pointer',color:theme.darkMode?'#e2e8f0':pw.bodyText}}>
                   <span style={{fontSize:13,fontWeight:800}}>🚀 Future Updates</span>
-                  <span style={{fontSize:12,color:theme.darkMode?'#475569':'#94a3b8'}}>{settingsSections.future?'▲':'▼'}</span>
+                  <span style={{fontSize:12,color:theme.darkMode?'#475569':'#475569'}}>{settingsSections.future?'▲':'▼'}</span>
                 </button>
                 {settingsSections.future&&<div style={{padding:'8px 0'}}>
                 {(() => {
@@ -4789,6 +6278,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     'Search across notes and diary entries',
                   ];
 
+
                   const saveIdea = () => {
                     const trimmed = newIdea.trim();
                     if (!trimmed) return;
@@ -4798,18 +6288,20 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     setNewIdea('');
                   };
 
+
                   const removeIdea = (i) => {
                     const updated = userIdeas.filter((_,idx)=>idx!==i);
                     setUserIdeas(updated);
                     localStorage.setItem('ft_ideas', JSON.stringify(updated));
                   };
 
+
                   return (
                     <div>
                       <button onClick={()=>setFutureOpen(p=>!p)} style={{
                         width:'100%',padding:'8px 12px',borderRadius:10,border:'none',cursor:'pointer',
-                        background:theme.darkMode?'#1e293b':'#f1f5f9',
-                        color:theme.darkMode?'#94a3b8':'#64748b',
+                        background:pw.cellBg,
+                        color:theme.darkMode?'#94a3b8':pw.secondText,
                         fontSize:12,fontWeight:600,textAlign:'left',
                         display:'flex',justifyContent:'space-between',alignItems:'center',
                       }}>
@@ -4817,9 +6309,10 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         <span>{futureOpen?'▲':'▼'}</span>
                       </button>
 
+
                       {futureOpen && (
                         <div style={{marginTop:8,padding:'12px',borderRadius:10,background:theme.darkMode?'#0f172a':'#f8fafc',border:'1px solid '+(theme.darkMode?'#1e293b':'#e2e8f0')}}>
-                          <div style={{fontSize:11,fontWeight:700,color:theme.darkMode?'#475569':'#94a3b8',marginBottom:8,textTransform:'uppercase',letterSpacing:0.5}}>Planned</div>
+                          <div style={{fontSize:11,fontWeight:700,color:theme.darkMode?'#475569':'#475569',marginBottom:8,textTransform:'uppercase',letterSpacing:0.5}}>Planned</div>
                           {plannedItems.map((item,i)=>(
                             <div key={i} style={{display:'flex',gap:8,alignItems:'flex-start',marginBottom:5}}>
                               <span style={{color:'#10b981',flexShrink:0,marginTop:1}}>•</span>
@@ -4828,7 +6321,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           ))}
                           {userIdeas.length>0&&(
                             <>
-                              <div style={{fontSize:11,fontWeight:700,color:theme.darkMode?'#475569':'#94a3b8',margin:'12px 0 8px',textTransform:'uppercase',letterSpacing:0.5}}>Your Ideas</div>
+                              <div style={{fontSize:11,fontWeight:700,color:theme.darkMode?'#475569':'#475569',margin:'12px 0 8px',textTransform:'uppercase',letterSpacing:0.5}}>Your Ideas</div>
                               {userIdeas.map((idea,i)=>(
                                 <div key={i} style={{display:'flex',gap:8,alignItems:'flex-start',marginBottom:5}}>
                                   <span style={{color:'#6366f1',flexShrink:0,marginTop:1}}>•</span>
@@ -4843,9 +6336,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                               onKeyDown={e=>{if(e.key==='Enter')saveIdea();}}
                               placeholder="Add your idea…"
                               style={{flex:1,padding:'6px 10px',borderRadius:8,fontSize:12,outline:'none',
-                                border:'1px solid '+(theme.darkMode?'#334155':'#e2e8f0'),
+                                border:`1px solid ${pw.border}`,
                                 background:theme.darkMode?'#1e293b':'white',
-                                color:theme.darkMode?'#e2e8f0':'#1e293b'}}
+                                color:theme.darkMode?'#e2e8f0':pw.bodyText}}
                             />
                             <button onClick={saveIdea} style={{padding:'6px 12px',borderRadius:8,background:'#6366f1',color:'white',border:'none',cursor:'pointer',fontSize:12,fontWeight:700}}>Add</button>
                           </div>
@@ -4856,76 +6349,134 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 })()}
                 </div>}
 
+
               </div>
             </div>
           </div>
         </div>
       )}
 
+
       {/* Add menu — triggered from bottom tab */}
       {showAddMenu && (
         <>
           <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:199}} onClick={()=>setShowAddMenu(false)}/>
           <div style={{
-            position:'fixed', bottom:68, right:8, zIndex:200,
-            background:theme.darkMode?'#1e293b':'white',
-            borderRadius:16, overflow:'hidden',
-            boxShadow:'0 -4px 32px rgba(0,0,0,0.35)',
-            border:'1px solid '+(theme.darkMode?'#334155':'#e2e8f0'),
-            minWidth:190, width:'auto',
+            position:'fixed', bottom:76, right:16, zIndex:200,
+            display:'flex', flexDirection:'column', alignItems:'center', gap:14,
           }}>
             {[
-              {icon:'👤', label:'Add Friend', onClick:()=>{ setAddFriendForms(prev=>[...prev,{id:`form_${Date.now()}`,name:'',parentId:null}]); setShowAddMenu(false); }},
-              {icon:'🌳', label:'Add Group', onClick:()=>{addNewHub();setShowAddMenu(false);}},
-              {icon:'📤', label:'Export Tree', onClick:()=>{exportData();setShowAddMenu(false);}},
-            ].map((item,i,arr)=>(
-              <React.Fragment key={item.label}>
-                <button onClick={item.onClick}
-                  style={{display:'flex',alignItems:'center',gap:12,width:'100%',padding:'13px 18px',background:'none',border:'none',cursor:'pointer',fontSize:14,fontWeight:600,color:theme.darkMode?'#e2e8f0':'#1e293b',textAlign:'left',whiteSpace:'nowrap'}}>
-                  <span style={{fontSize:18,width:24,textAlign:'center'}}>{item.icon}</span>{item.label}
+              {kind:'person', bg:'#16a34a', label:'Person'},
+              {kind:'group',  bg:'#92400e', label:'Group'},
+            ].map(opt => (
+              <div key={opt.kind} style={{display:'flex',flexDirection:'column',alignItems:'center',gap:4}}>
+                <button
+                  onPointerDown={e=>{
+                    e.currentTarget.setPointerCapture(e.pointerId);
+                    addCircleDragStart.current = { kind:opt.kind, moved:false, startX:e.clientX, startY:e.clientY };
+                    setAddCircleDrag({ kind:opt.kind, x:e.clientX, y:e.clientY });
+                  }}
+                  onPointerMove={e=>{
+                    const d = addCircleDragStart.current; if (!d || d.kind !== opt.kind) return;
+                    const dx = e.clientX - d.startX, dy = e.clientY - d.startY;
+                    if (Math.sqrt(dx*dx + dy*dy) > 8) d.moved = true;
+                    setAddCircleDrag({ kind:opt.kind, x:e.clientX, y:e.clientY });
+                  }}
+                  onPointerUp={e=>{
+                    const d = addCircleDragStart.current;
+                    if (d && d.kind === opt.kind) {
+                      if (viewMode !== 'canvas') setViewMode('canvas');
+                      spawnTypedNodeAtScreenPoint(e.clientX, e.clientY, opt.kind === 'group' ? 'group' : 'friend');
+                    }
+                    addCircleDragStart.current = null;
+                    setAddCircleDrag(null);
+                    setShowAddMenu(false);
+                  }}
+                  style={{width:56,height:56,borderRadius:'50%',border:'2px solid white',
+                    background:opt.bg,cursor:'grab',touchAction:'none',
+                    display:'flex',alignItems:'center',justifyContent:'center',
+                    boxShadow:'0 4px 16px rgba(0,0,0,0.35)'}}>
+                  {opt.kind === 'person' ? (
+                    <svg width="26" height="26" viewBox="0 0 100 100">
+                      <circle cx="50" cy="38" r="20" fill="white"/>
+                      <path d="M14 92 Q14 60 50 60 Q86 60 86 92 Z" fill="white"/>
+                    </svg>
+                  ) : (
+                    <svg width="26" height="26" viewBox="0 0 100 100">
+                      <rect x="46" y="20" width="6" height="68" fill="white"/>
+                      <path d="M52 26 L88 36 L52 46 Z" fill="white"/>
+                    </svg>
+                  )}
                 </button>
-                <div style={{height:1,background:theme.darkMode?'#334155':'#f1f5f9',marginLeft:54}}/>
-              </React.Fragment>
+                <span style={{fontSize:11,fontWeight:700,color:'white',
+                  background:'rgba(0,0,0,0.55)',padding:'2px 8px',borderRadius:8}}>
+                  {opt.label}
+                </span>
+              </div>
             ))}
-            {/* Group photo tagger — needs label for file input */}
-            <label style={{display:'flex',alignItems:'center',gap:12,width:'100%',padding:'13px 18px',cursor:'pointer',fontSize:14,fontWeight:600,color:theme.darkMode?'#e2e8f0':'#1e293b',whiteSpace:'nowrap'}}>
-              <span style={{fontSize:18,width:24,textAlign:'center'}}>👥</span>
-              Tag Group Photo
-              <input type="file" accept="image/*" style={{display:'none'}} onChange={e=>{
-                const file=e.target.files[0]; if(!file)return;
-                const reader=new FileReader();
-                reader.onload=ev=>{
-                  const nr=320*0.18;
-                  setGroupPhotoSrc(ev.target.result);
-                  setGroupPhotoOriginNode(null);
-                  setFaceRings([{id:Date.now(),x:160,y:160,r:nr,name:'',assignedNodeId:null}]);
-                  setTagStep('place'); setTagCurrent(0); setTagNameInput('');
-                  setShowAddMenu(false);
-                };
-                reader.readAsDataURL(file);
-              }}/>
-            </label>
-            <div style={{height:1,background:theme.darkMode?'#334155':'#f1f5f9',marginLeft:54}}/>
-            <label style={{display:'flex',alignItems:'center',gap:12,width:'100%',padding:'13px 18px',cursor:'pointer',fontSize:14,fontWeight:600,color:theme.darkMode?'#e2e8f0':'#1e293b',whiteSpace:'nowrap'}}>
-              <span style={{fontSize:18,width:24,textAlign:'center'}}>📦</span>Import Tree
-              <input type="file" accept=".json" style={{display:'none'}} onChange={e=>{ if(e.target.files[0]) importData(e.target.files[0]); setShowAddMenu(false); }}/>
-            </label>
+
+            {/* Tap (not drag) to bulk-import several people at once from the
+                device's contacts -- on native Android this brings in up to 25
+                contacts in one go; on web it opens the browser's multi-select
+                contact picker if supported. */}
+            <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:4}}>
+              <button
+                onClick={() => { setShowAddMenu(false); addFriendsFromContacts(); }}
+                style={{width:56,height:56,borderRadius:'50%',border:'2px solid white',
+                  background:'#6366f1',cursor:'pointer',
+                  display:'flex',alignItems:'center',justifyContent:'center',
+                  boxShadow:'0 4px 16px rgba(0,0,0,0.35)'}}>
+                <svg width="26" height="26" viewBox="0 0 100 100">
+                  <circle cx="32" cy="34" r="16" fill="white"/>
+                  <path d="M6 86 Q6 60 32 60 Q58 60 58 86 Z" fill="white"/>
+                  <circle cx="68" cy="30" r="13" fill="white" opacity="0.7"/>
+                  <path d="M48 86 Q48 64 68 64 Q88 64 88 86 Z" fill="white" opacity="0.7"/>
+                </svg>
+              </button>
+              <span style={{fontSize:11,fontWeight:700,color:'white',
+                background:'rgba(0,0,0,0.55)',padding:'2px 8px',borderRadius:8}}>
+                Contacts
+              </span>
+            </div>
           </div>
         </>
       )}
 
+      {/* Ghost circle following the finger while dragging a person/group circle from the Add menu */}
+      {addCircleDrag && (
+        <div style={{position:'fixed',left:addCircleDrag.x-28,top:addCircleDrag.y-28,width:56,height:56,
+          borderRadius:'50%',background:addCircleDrag.kind==='group'?'#92400e':'#16a34a',opacity:0.9,
+          zIndex:300,pointerEvents:'none',display:'flex',alignItems:'center',justifyContent:'center',
+          boxShadow:'0 6px 20px rgba(0,0,0,0.4)',border:'2px solid white'}}>
+          {addCircleDrag.kind === 'person' ? (
+            <svg width="26" height="26" viewBox="0 0 100 100">
+              <circle cx="50" cy="38" r="20" fill="white"/>
+              <path d="M14 92 Q14 60 50 60 Q86 60 86 92 Z" fill="white"/>
+            </svg>
+          ) : (
+            <svg width="26" height="26" viewBox="0 0 100 100">
+              <rect x="46" y="20" width="6" height="68" fill="white"/>
+              <path d="M52 26 L88 36 L52 46 Z" fill="white"/>
+            </svg>
+          )}
+        </div>
+      )}
+
+
       {/* Sidebar — fixed overlay, slides in from left */}
-      <div className={`border-r shadow-2xl flex flex-col z-40 transition-all duration-300 ${sidebarBg}`}
+      <div className={`border-r shadow-2xl flex flex-col z-40 transition-all duration-300`}
         style={{
           position: 'fixed',
           top: 0, left: 0, bottom: 0,
           width: '20rem',
+          background: pw.bg,
+          borderRight: `1px solid ${pw.border}`,
           transform: selectedNode || addFriendForms.length > 0 ? 'translateX(0)' : 'translateX(-100%)',
           paddingTop: 'env(safe-area-inset-top,0px)',
           paddingBottom: 'calc(56px + env(safe-area-inset-bottom,0px))',
         }}>
-        <div className={`border-b flex justify-between items-center ${theme.darkMode ? 'border-slate-700 bg-slate-800' : 'border-slate-100 bg-slate-50'}`}
-          style={{padding:'8px 16px',minHeight:0}}>
+        <div style={{padding:'8px 16px',minHeight:0,borderBottom:`1px solid ${pw.border}`,
+          background:pw.headerBg,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
           {/* Name input in header — for people and groups alike */}
           {selectedNode && (
             <input
@@ -4937,16 +6488,18 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   updateSelectedNode('label', e.target.value || (selectedNode.type === 'hub' ? 'New Group' : 'New Friend'));
                 }
               }}
-              style={{fontSize:15,fontWeight:700,color:theme.darkMode?'#e2e8f0':'#1e293b',background:'none',border:'none',outline:'none',flex:1,minWidth:0}}
+              style={{fontSize:15,fontWeight:700,color:pw.bodyText,background:'none',border:'none',outline:'none',flex:1,minWidth:0}}
             />
           )}
                   {!selectedNode && <div style={{flex:1}}/>}
           {selectedNode && <button onClick={() => { setSelectedNodeId(null); setAddFriendForms([]); setShowPhotoOptions(false); }} className={`p-1.5 rounded-full flex-shrink-0 ${theme.darkMode ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-200 hover:bg-slate-300'}`}><X className="w-3.5 h-3.5" /></button>}
         </div>
 
+
         <div className="flex-1 overflow-y-auto p-6">
           {selectedNode ? (
             <div className="space-y-6">
+
 
               {/* -- Me Profile Panel ------------------------------------ */}
               {selectedNode.id === 'me' && (
@@ -4959,24 +6512,25 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       <img src={selectedNode.img} alt="Me" className="w-full h-full object-cover"/>
                     </button>
                     <div className="flex-1">
-                      <div className="text-xs font-semibold uppercase tracking-wider mb-1" style={{color:theme.darkMode?'#94a3b8':'#64748b'}}>Your name</div>
+                      <div className="text-xs font-semibold uppercase tracking-wider mb-1" style={{color:theme.darkMode?'#94a3b8':pw.secondText}}>Your name</div>
                       <input type="text" value={selectedNode.label || ''}
                         onChange={e => updateSelectedNode('label', e.target.value)}
                         placeholder="Your name"
-                        className={`w-full px-3 py-2 border rounded-lg text-sm font-semibold focus:ring-2 focus:ring-indigo-500 outline-none ${theme.darkMode?'bg-slate-700 border-slate-600 text-white':'bg-white border-slate-200'}`}
+                        className="w-full px-3 py-2 rounded-lg text-sm font-semibold outline-none" style={{background:pw.cellBg,border:`1px solid ${pw.border}`,color:pw.bodyText}}
                       />
                       {selectedNode.contactName && selectedNode.contactName !== selectedNode.label && (
-                        <div style={{fontSize:10,color:theme.darkMode?'#64748b':'#94a3b8',fontStyle:'italic',marginTop:2}}>
+                        <div style={{fontSize:10,color:theme.darkMode?'#64748b':'#475569',fontStyle:'italic',marginTop:2}}>
                           aka {selectedNode.contactName}
                         </div>
                       )}
                     </div>
                   </div>
 
+
                   {/* Photo picker */}
                   {showPhotoOptions && (
-                    <div className={`rounded-xl border overflow-hidden ${theme.darkMode?'bg-slate-800 border-slate-700':'bg-white border-slate-200'}`}>
-                      <label className={`flex items-center gap-3 px-4 py-3 cursor-pointer text-sm font-medium ${theme.darkMode?'hover:bg-slate-700 text-slate-200':'hover:bg-slate-50 text-slate-700'}`}>
+                    <div className="rounded-xl overflow-hidden" style={{background:pw.cellBg,border:`1px solid ${pw.border}`}}>
+                      <label className="flex items-center gap-3 px-4 py-3 cursor-pointer text-sm font-medium" style={{color:pw.bodyText}}>
                         📷 Upload Photo
                         <input type="file" accept="image/*" className="hidden" onChange={e => {
                           const file = e.target.files[0]; if (!file) return;
@@ -4987,11 +6541,12 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       </label>
                       <div className={`border-t ${theme.darkMode?'border-slate-700':'border-slate-100'}`}/>
                       <button onClick={() => { setAvatarBuilder({ nodeId: 'me' }); setShowPhotoOptions(false); }}
-                        className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-left ${theme.darkMode?'hover:bg-slate-700 text-slate-200':'hover:bg-slate-50 text-slate-700'}`}>
+                        className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-left ${theme.darkMode?'hover:bg-slate-700 text-slate-200':'hover:bg-stone-100 text-slate-700'}`}>
                         🎨 Build Avatar
                       </button>
                     </div>
                   )}
+
 
                   {/* Sync from contacts */}
                   {'contacts' in navigator && (
@@ -5019,13 +6574,15 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     </button>
                   )}
 
+
                   {/* Birthday */}
                   <div className="flex flex-col gap-1">
                     <label className={`text-xs font-semibold uppercase tracking-wider ${theme.darkMode?'text-slate-400':'text-slate-500'}`}>🎂 Your Birthday</label>
                     <input type="text" value={selectedNode.birthday || ''} onChange={e => updateSelectedNode('birthday', e.target.value)}
                       placeholder="e.g. 15 March 1993"
-                      className={`px-3 py-2 border rounded-lg text-sm focus:ring-1 focus:ring-indigo-500 outline-none ${theme.darkMode?'bg-slate-700 border-slate-600 text-white':'bg-white border-slate-200'}`}/>
+                      className="px-3 py-2 rounded-lg text-sm outline-none" style={{background:pw.cellBg,border:`1px solid ${pw.border}`,color:pw.bodyText}}/>
                   </div>
+
 
                   {/* Notes */}
                   <div className="flex flex-col gap-1">
@@ -5033,10 +6590,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     <textarea value={selectedNode.notes || ''} onChange={e => updateSelectedNode('notes', e.target.value)}
                       placeholder="A few words about yourself..."
                       rows={3}
-                      className={`px-3 py-2 border rounded-lg text-sm focus:ring-1 focus:ring-indigo-500 outline-none resize-none ${theme.darkMode?'bg-slate-700 border-slate-600 text-white':'bg-white border-slate-200'}`}/>
+                      className="px-3 py-2 rounded-lg text-sm outline-none resize-none" style={{background:pw.cellBg,border:`1px solid ${pw.border}`,color:pw.bodyText}}/>
                   </div>
                 </div>
               )}
+
 
               {selectedNode.type !== 'hub' && selectedNode.id !== 'me' && (
                 <>
@@ -5056,6 +6614,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     return (
                       <div style={{display:'flex',gap:12,alignItems:'center',marginBottom:12,padding:'4px 0'}}>
 
+
                         {/* Main photo — circle with tier colour border */}
                         <div style={{flexShrink:0,position:'relative',cursor:'pointer',
                           width:132,height:132,
@@ -5068,33 +6627,18 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                             style={{width:'100%',height:'100%',borderRadius:'50%',objectFit:'cover'}}/>
                         </div>
 
+
                         {/* Right: 2×2 grid */}
-                        <div style={{flex:1,display:'grid',gridTemplateColumns:'1fr 1fr',gridTemplateRows:'1fr 1fr',gap:4,minWidth:0}}>
-
-                          {/* Top-left: Minimise / maximise this person + their group */}
-                          {(()=>{
-                            const isMin = minimisedNodes.includes(selectedNodeId);
-                            return (
-                              <button
-                                onClick={()=>{ setMinimisedNodes(prev => prev.includes(selectedNodeId) ? prev.filter(id=>id!==selectedNodeId) : [...prev, selectedNodeId]); }}
-                                style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:3,cursor:'pointer',borderRadius:8,aspectRatio:'1',
-                                  background:isMin?(theme.darkMode?'#1e293b':'#f1f5f9'):(theme.darkMode?'#14532d':'#dcfce7'),
-                                  border:'1.5px solid '+(theme.darkMode?'#334155':'#cbd5e1')}}>
-                                <span style={{fontSize:18,lineHeight:1}}>{isMin?'📂':'📁'}</span>
-                                <span style={{fontSize:8,fontWeight:700,color:theme.darkMode?'#94a3b8':'#64748b'}}>{isMin?'Expand':'Minimise'}</span>
-                              </button>
-                            );
-                          })()}
-
-                          {/* Top-right: Birthday */}
-                          <label style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:2,background:theme.darkMode?'#1e293b':'#f8fafc',cursor:'pointer',borderRadius:8,position:'relative',border:'1.5px solid '+(theme.darkMode?'#334155':'#e2e8f0')}}>
+                        <div style={{flex:1,display:'grid',gridTemplateColumns:'1fr',gap:4,minWidth:0}}>
+                          {/* Birthday */}
+                          <label style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:2,background:pw.cellBg,cursor:'pointer',borderRadius:8,position:'relative',border:`1.5px solid ${pw.border}`}}>
                             {bd ? (
                               <>
-                                <span style={{fontSize:10,fontWeight:700,color:theme.darkMode?'#e2e8f0':'#334155',textAlign:'center',lineHeight:1.2,maxWidth:'90%',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{bd}</span>
+                                <span style={{fontSize:10,fontWeight:700,color:theme.darkMode?'#e2e8f0':pw.bodyText,textAlign:'center',lineHeight:1.2,maxWidth:'90%',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{bd}</span>
                                 {daysUntil!==null&&<span style={{fontSize:9,fontWeight:700,color:daysUntil===0?'#f43f5e':daysUntil<=7?'#f59e0b':'#94a3b8'}}>{daysUntil===0?'Today!':daysUntil===1?'Tmrw!':daysUntil+'d'}</span>}
                               </>
                             ) : (
-                              <span style={{fontSize:9,color:theme.darkMode?'#64748b':'#94a3b8',fontWeight:600}}>Birthday</span>
+                              <span style={{fontSize:9,color:theme.darkMode?'#64748b':'#475569',fontWeight:600}}>Birthday</span>
                             )}
                             <input type="text" defaultValue={bd}
                               onBlur={e=>updateSelectedNode('birthday',normaliseBirthday(e.target.value))}
@@ -5103,6 +6647,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                               style={{position:'absolute',top:0,left:0,right:0,bottom:0,opacity:0,cursor:'pointer',width:'100%',border:'none',background:'none'}}
                               onClick={e=>e.stopPropagation()}/>
                           </label>
+
 
                           {/* Bottom: Tier badge — spans both columns, rounded, shorter */}
                           <div onClick={()=>{setShowLevelPanel(p=>!p);if(!showLevelPanel)setShowLevelSetter(false);}}
@@ -5128,12 +6673,14 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     );
                   })()}
 
+
                   {/* AKA bar */}
                   {selectedNode.contactName && selectedNode.contactName !== selectedNode.label && (
-                    <div style={{fontSize:10,color:theme.darkMode?'#64748b':'#94a3b8',fontStyle:'italic',marginBottom:4}}>
+                    <div style={{fontSize:10,color:theme.darkMode?'#64748b':'#475569',fontStyle:'italic',marginBottom:4}}>
                       aka {selectedNode.contactName}
                     </div>
                   )}
+
 
                   {/* Sync banner — shown at top until dismissed or synced */}
                   {!selectedNode.syncDismissed && !selectedNode.phone && (
@@ -5158,6 +6705,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     </div>
                   )}
 
+
                   {/* Level panel: interaction log + set level */}
                   {showLevelPanel && (() => {
                     const score = selectedNode.interactionScore || 0;
@@ -5165,7 +6713,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     const currentTier = currentLvl.tier;
                     const interactions = selectedNode.interactionLog || [];
                     return (
-                      <div className={`rounded-xl border overflow-hidden ${theme.darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'}`}>
+                      <div className="rounded-xl overflow-hidden" style={{background:pw.cellBg,border:`1px solid ${pw.border}`}}>
                         {/* Level summary */}
                         <div className="p-3" style={{ background: currentLvl.color + '22' }}>
                           <div className="flex items-center space-x-2 mb-1">
@@ -5175,6 +6723,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           </div>
                           <p className={`text-xs leading-relaxed ${theme.darkMode ? 'text-slate-400' : 'text-slate-600'}`}>{currentLvl.desc}</p>
                         </div>
+
 
                         {/* Score bar */}
                         <div className={`px-3 py-2 border-b ${theme.darkMode ? 'border-slate-700' : 'border-slate-100'}`}>
@@ -5193,6 +6742,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           </div>
                         </div>
 
+
                         {/* Interaction log */}
                         <div className="px-3 py-2">
                           <p className="text-[10px] font-semibold uppercase tracking-wider opacity-50 mb-2">Interaction History</p>
@@ -5200,7 +6750,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                             ? <p className="text-xs opacity-40 italic">No interactions logged yet.</p>
                             : <div className="space-y-1 max-h-28 overflow-y-auto">
                                 {[...interactions].reverse().map((entry, ei) => (
-                                  <div key={ei} className={`flex justify-between text-xs px-2 py-1 rounded ${theme.darkMode ? 'bg-slate-800' : 'bg-slate-50'}`}>
+                                  <div key={ei} className="flex justify-between text-xs px-2 py-1 rounded" style={{background:pw.bg}}>
                                     <span>{entry.label}</span>
                                     <span className="opacity-50">{entry.date}</span>
                                     <span className="font-bold" style={{ color: currentLvl.color }}>+{entry.pts}</span>
@@ -5210,21 +6760,23 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           }
                         </div>
 
+
                         {/* Set level button */}
                         <div className={`px-3 pb-3 border-t pt-2 ${theme.darkMode ? 'border-slate-700' : 'border-slate-100'}`}>
                           <button
                             onClick={() => setShowLevelSetter(p => !p)}
-                            className={`w-full text-xs font-semibold py-1.5 rounded-lg transition-colors ${theme.darkMode ? 'bg-slate-700 hover:bg-slate-600 text-slate-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'}`}
+                            className="w-full text-xs font-semibold py-1.5 rounded-lg" style={{background:pw.cellBg,color:pw.secondText}}
                           >
                             {showLevelSetter ? 'Hide levels ▲' : 'Set friendship level ▼'}
                           </button>
+
 
                           {showLevelSetter && (
                             <div className="mt-2">
                               {/* Key toggle */}
                               <div style={{display:'flex',justifyContent:'flex-end',marginBottom:6}}>
                                 <button onClick={()=>setShowMapKey(p=>!p)}
-                                  style={{padding:'2px 8px',borderRadius:99,fontSize:10,fontWeight:700,border:'1px solid '+(showMapKey?(theme.darkMode?'#4b5563':'#cbd5e1'):'transparent'),background:'transparent',color:theme.darkMode?'#64748b':'#94a3b8',cursor:'pointer',display:'flex',alignItems:'center',gap:3}}>
+                                  style={{padding:'2px 8px',borderRadius:99,fontSize:10,fontWeight:700,border:'1px solid '+(showMapKey?(theme.darkMode?'#4b5563':'#cbd5e1'):'transparent'),background:'transparent',color:theme.darkMode?'#64748b':'#475569',cursor:'pointer',display:'flex',alignItems:'center',gap:3}}>
                                   🔑 {showMapKey?'Hide descriptions':'Show descriptions'}
                                 </button>
                               </div>
@@ -5235,7 +6787,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                   {lvl.tier === 'family' && (
                                     <div style={{display:'flex',alignItems:'center',gap:6,margin:'6px 0 4px',opacity:0.5}}>
                                       <div style={{flex:1,height:1,background:theme.darkMode?'#334155':'#e2e8f0'}}/>
-                                      <span style={{fontSize:9,fontWeight:700,letterSpacing:1,color:theme.darkMode?'#64748b':'#94a3b8',textTransform:'uppercase'}}>Relationship</span>
+                                      <span style={{fontSize:9,fontWeight:700,letterSpacing:1,color:theme.darkMode?'#64748b':'#475569',textTransform:'uppercase'}}>Relationship</span>
                                       <div style={{flex:1,height:1,background:theme.darkMode?'#334155':'#e2e8f0'}}/>
                                     </div>
                                   )}
@@ -5282,6 +6834,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 </>
               )}
 
+
               {/* Messaging row — open a conversation with this person */}
               {selectedNode.type !== 'hub' && selectedNode.id !== 'me' && (()=>{
                 const dm = theme.darkMode;
@@ -5325,13 +6878,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   }} title={label}
                     style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',gap:3,padding:'7px 4px',borderRadius:10,cursor:'pointer',
                       background:active?(dm?'#1e293b':'#f1f5f9'):(dm?'#0f172a':'#f8fafc'),
-                      border:'1px solid '+(dm?'#334155':'#e2e8f0'),opacity:active?1:0.4}}>
+                      border:`1px solid ${pw.border}`,opacity:active?1:0.4}}>
                     {circleColor ? (
                       <span style={{width:22,height:22,borderRadius:'50%',background:circleColor,display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:800,color:'white'}}>{glyph}</span>
                     ) : (
                       <span style={{fontSize:18,lineHeight:1}}>{glyph}</span>
                     )}
-                    <span style={{fontSize:8,fontWeight:600,color:dm?'#94a3b8':'#64748b'}}>{label}</span>
+                    <span style={{fontSize:8,fontWeight:600,color:dm?'#94a3b8':pw.secondText}}>{label}</span>
                   </button>
                 );
                 return (
@@ -5343,7 +6896,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       {btn('instagram','Instagram',igIcon,!!handles.instagram,'#e1306c')}
                     </div>
                     {socialInputFor && (
-                      <div style={{marginTop:8,display:'flex',alignItems:'center',gap:6,background:dm?'#0f172a':'#f1f5f9',border:'1px solid '+(dm?'#334155':'#e2e8f0'),borderRadius:10,padding:'6px 8px'}}>
+                      <div style={{marginTop:8,display:'flex',alignItems:'center',gap:6,background:dm?'#0f172a':'#f1f5f9',border:`1px solid ${pw.border}`,borderRadius:10,padding:'6px 8px'}}>
                         <span style={{fontSize:11,fontWeight:700,color:socialInputFor==='instagram'?'#e1306c':'#0084ff',whiteSpace:'nowrap'}}>
                           {socialInputFor==='instagram'?'Instagram':'Messenger'} link
                         </span>
@@ -5372,6 +6925,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 );
               })()}
 
+
               {selectedNode.type !== 'hub' && selectedNode.id !== 'me' && (
                 <div className={`pt-4 border-t ${theme.darkMode ? 'border-slate-700' : 'border-slate-200'}`}>
                   <h3 className="text-xs font-semibold uppercase tracking-wider mb-3 flex items-center text-emerald-600"><Activity className="w-4 h-4 mr-1" /> Log Interaction</h3>
@@ -5399,6 +6953,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   </div>
                 </div>
               )}
+
 
               {/* Flower / Tags / Contact — icon button row with dropdowns below */}
               {selectedNode.type !== 'hub' && selectedNode.type !== 'flower' && (
@@ -5431,7 +6986,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     {/* Tags button */}
                     <button onClick={()=>{setTagsMenuOpen(o=>!o);setFlowerMenuOpen(false);setShowContactDetails(false);}}
                       style={{width:48,height:48,borderRadius:'50%',border:'2px solid '+(theme.darkMode?'#334155':'#e2e8f0'),background:theme.darkMode?'#1e293b':'white',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',padding:0,position:'relative',flexShrink:0}} title="Tags">
-                      <span style={{fontSize:22,fontWeight:800,color:theme.darkMode?'#94a3b8':'#64748b',lineHeight:1}}>#</span>
+                      <span style={{fontSize:22,fontWeight:800,color:theme.darkMode?'#94a3b8':pw.secondText,lineHeight:1}}>#</span>
                       {(selectedNode.tags||[]).length>0 && (
                         <span style={{position:'absolute',top:-2,right:-2,minWidth:16,height:16,padding:'0 4px',borderRadius:8,background:'#10b981',color:'white',fontSize:10,fontWeight:700,display:'flex',alignItems:'center',justifyContent:'center'}}>{(selectedNode.tags||[]).length}</span>
                       )}
@@ -5448,34 +7003,36 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     )}
                   </div>
 
+
                   {/* Flower dropdown */}
                   {flowerMenuOpen && (
                     <div style={{marginTop:8,borderRadius:10,overflow:'hidden',border:'1px solid '+(theme.darkMode?'#1e293b':'#e2e8f0')}}>
                       {/* Edit designs */}
                       <button
                         onClick={()=>{setPfSelectedPart('main');setPfColorPickerFor(null);setPfTab('design');setPfFlowerType('main');setPartnerFlowerEditor(selectedNodeId);setFlowerMenuOpen(false);}}
-                        style={{width:'100%',display:'flex',alignItems:'center',gap:8,padding:'10px 14px',background:'none',border:'none',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#e2e8f0'),cursor:'pointer',color:theme.darkMode?'#e2e8f0':'#1e293b',fontSize:12,fontWeight:600}}>
+                        style={{width:'100%',display:'flex',alignItems:'center',gap:8,padding:'10px 14px',background:'none',border:'none',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#e2e8f0'),cursor:'pointer',color:theme.darkMode?'#e2e8f0':pw.bodyText,fontSize:12,fontWeight:600}}>
                         <span>✏️</span><span>{selectedNode.partnerFlower ? 'Edit designs' : 'Add flower'}</span>
                       </button>
                       {selectedNode.partnerFlower && (<>
                         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'8px 14px'}}>
-                          <span style={{fontSize:12,color:theme.darkMode?'#94a3b8':'#64748b',fontWeight:600}}>🌸 Show main flower</span>
+                          <span style={{fontSize:12,color:theme.darkMode?'#94a3b8':pw.secondText,fontWeight:600}}>🌸 Show main flower</span>
                           <input type="checkbox" checked={selectedNode.showMainFlower !== false} onChange={e=>updateSelectedNode('showMainFlower', e.target.checked)} style={{width:16,height:16,accentColor:'#f43f5e',cursor:'pointer'}}/>
                         </div>
                         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'8px 14px'}}>
-                          <span style={{fontSize:12,color:theme.darkMode?'#94a3b8':'#64748b',fontWeight:600}}>🌼 Show border flowers</span>
+                          <span style={{fontSize:12,color:theme.darkMode?'#94a3b8':pw.secondText,fontWeight:600}}>🌼 Show border flowers</span>
                           <input type="checkbox" checked={selectedNode.showBorderFlowers !== false} onChange={e=>updateSelectedNode('showBorderFlowers', e.target.checked)} style={{width:16,height:16,accentColor:'#f59e0b',cursor:'pointer'}}/>
                         </div>
                       </>)}
                     </div>
                   )}
 
+
                   {/* Tags dropdown */}
                   {tagsMenuOpen && (
                     <div style={{marginTop:8}}>
                   {/* Header row: add input + colour dot */}
                   <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:6}}>
-                    <span style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:1,color:theme.darkMode?'#64748b':'#94a3b8',flex:1}}>Tags</span>
+                    <span style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:1,color:theme.darkMode?'#64748b':'#475569',flex:1}}>Tags</span>
                     <input type="text" value={tagInput}
                       onChange={e=>setTagInput(e.target.value)}
                       onKeyDown={e=>{
@@ -5486,20 +7043,20 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         }
                       }}
                       placeholder="Add tag…"
-                      style={{width:80,padding:'3px 8px',borderRadius:8,border:'1px solid '+(theme.darkMode?'#334155':'#e2e8f0'),background:theme.darkMode?'#1e293b':'#f8fafc',color:theme.darkMode?'#e2e8f0':'#1e293b',fontSize:11,outline:'none'}}
+                      style={{width:80,padding:'3px 8px',borderRadius:8,border:`1px solid ${pw.border}`,background:pw.cellBg,color:theme.darkMode?'#e2e8f0':pw.bodyText,fontSize:11,outline:'none'}}
                     />
                     {/* Personal colour dot */}
                     <div style={{position:'relative',flexShrink:0}}>
                       <button onClick={()=>setShowPersonalColorPicker(p=>!p)}
                         style={{width:20,height:20,borderRadius:'50%',background:selectedNode.personalColor||'transparent',border:'2px solid '+(selectedNode.personalColor?selectedNode.personalColor:'#94a3b8'),cursor:'pointer',backgroundImage:selectedNode.personalColor?undefined:'repeating-linear-gradient(45deg,#ccc 0,#ccc 2px,transparent 0,transparent 50%)',backgroundSize:'6px 6px'}}/>
                       {showPersonalColorPicker&&(
-                        <div style={{position:'absolute',right:0,top:'110%',zIndex:50,background:theme.darkMode?'#1e293b':'white',borderRadius:12,padding:8,boxShadow:'0 8px 24px rgba(0,0,0,0.3)',border:'1px solid '+(theme.darkMode?'#334155':'#e2e8f0'),display:'flex',flexWrap:'wrap',gap:5,width:150}}>
+                        <div style={{position:'absolute',right:0,top:'110%',zIndex:50,background:theme.darkMode?'#1e293b':'white',borderRadius:12,padding:8,boxShadow:'0 8px 24px rgba(0,0,0,0.3)',border:`1px solid ${pw.border}`,display:'flex',flexWrap:'wrap',gap:5,width:150}}>
                           {[...PRIMARY_GROUP_COLORS,'#f43f5e','#f97316','#eab308','#84cc16','#a855f7','#06b6d4'].map(c=>(
                             <button key={c} onClick={()=>{updateSelectedNode('personalColor',selectedNode.personalColor===c?null:c);setShowPersonalColorPicker(false);}}
                               style={{width:22,height:22,borderRadius:'50%',background:c,border:'2.5px solid '+(selectedNode.personalColor===c?'white':'transparent'),boxShadow:selectedNode.personalColor===c?'0 0 0 2px '+c:'none',cursor:'pointer'}}/>
                           ))}
                           <button onClick={()=>{updateSelectedNode('personalColor',null);setShowPersonalColorPicker(false);}}
-                            style={{width:22,height:22,borderRadius:'50%',background:'none',border:'1.5px dashed #94a3b8',cursor:'pointer',fontSize:10,color:'#94a3b8',display:'flex',alignItems:'center',justifyContent:'center'}}>✕</button>
+                            style={{width:22,height:22,borderRadius:'50%',background:'none',border:'1.5px dashed #94a3b8',cursor:'pointer',fontSize:10,color:'#475569',display:'flex',alignItems:'center',justifyContent:'center'}}>✕</button>
                         </div>
                       )}
                     </div>
@@ -5521,7 +7078,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     <div style={{display:'flex',flexWrap:'wrap',gap:4}}>
                       {allTags.filter(t=>!(selectedNode.tags||[]).includes(t)).map(t=>(
                         <button key={t} onClick={()=>updateSelectedNode('tags',[...(selectedNode.tags||[]),t])}
-                          style={{padding:'2px 8px',borderRadius:99,fontSize:10,border:'1px dashed '+(theme.darkMode?'#475569':'#cbd5e1'),background:'transparent',cursor:'pointer',color:theme.darkMode?'#94a3b8':'#64748b'}}>
+                          style={{padding:'2px 8px',borderRadius:99,fontSize:10,border:'1px dashed '+(theme.darkMode?'#475569':'#cbd5e1'),background:'transparent',cursor:'pointer',color:theme.darkMode?'#94a3b8':pw.secondText}}>
                           +{t}
                         </button>
                       ))}
@@ -5530,23 +7087,24 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     </div>
                   )}
 
+
                   {/* Contact dropdown */}
                   {showContactDetails && selectedNode.id !== 'me' && (
                     <div style={{marginTop:8}}>
-                    <div style={{borderRadius:12,border:'1px solid '+(theme.darkMode?'#334155':'#e2e8f0'),overflow:'hidden',marginBottom:8}}>
-                      <div style={{display:'flex',alignItems:'center',gap:8,padding:'8px 12px',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}>
+                    <div style={{borderRadius:12,border:`1px solid ${pw.border}`,overflow:'hidden',marginBottom:8}}>
+                      <div style={{display:'flex',alignItems:'center',gap:8,padding:'8px 12px',borderBottom:`1px solid ${pw.border}`}}>
                         <input type="tel" value={selectedNode.phone||''}
                           onChange={e=>updateSelectedNode('phone',e.target.value)}
                           placeholder="Phone number"
-                          style={{flex:1,background:'none',border:'none',outline:'none',fontSize:13,color:theme.darkMode?'#e2e8f0':'#1e293b',fontWeight:selectedNode.phone?600:400}}
+                          style={{flex:1,background:'none',border:'none',outline:'none',fontSize:13,color:theme.darkMode?'#e2e8f0':pw.bodyText,fontWeight:selectedNode.phone?600:400}}
                         />
                         {selectedNode.phone&&<a href={'tel:'+selectedNode.phone} style={{fontSize:11,color:'#3b82f6',textDecoration:'none',flexShrink:0,fontWeight:600}}>Call</a>}
                       </div>
-                      <div style={{display:'flex',alignItems:'center',gap:8,padding:'8px 12px',borderBottom:'1px solid '+(theme.darkMode?'#1e293b':'#f1f5f9')}}>
+                      <div style={{display:'flex',alignItems:'center',gap:8,padding:'8px 12px',borderBottom:`1px solid ${pw.border}`}}>
                         <input type="email" value={selectedNode.email||''}
                           onChange={e=>updateSelectedNode('email',e.target.value)}
                           placeholder="Email address"
-                          style={{flex:1,background:'none',border:'none',outline:'none',fontSize:13,color:theme.darkMode?'#e2e8f0':'#1e293b',fontWeight:selectedNode.email?600:400}}
+                          style={{flex:1,background:'none',border:'none',outline:'none',fontSize:13,color:theme.darkMode?'#e2e8f0':pw.bodyText,fontWeight:selectedNode.email?600:400}}
                         />
                         {selectedNode.email&&<a href={'mailto:'+selectedNode.email} style={{fontSize:11,color:'#3b82f6',textDecoration:'none',flexShrink:0,fontWeight:600}}>Mail</a>}
                       </div>
@@ -5555,7 +7113,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           onChange={e=>updateSelectedNode('address',e.target.value)}
                           placeholder="Address"
                           rows={selectedNode.address?2:1}
-                          style={{flex:1,background:'none',border:'none',outline:'none',fontSize:13,color:theme.darkMode?'#e2e8f0':'#1e293b',fontWeight:selectedNode.address?600:400,resize:'none',fontFamily:'inherit',lineHeight:1.4}}
+                          style={{flex:1,background:'none',border:'none',outline:'none',fontSize:13,color:theme.darkMode?'#e2e8f0':pw.bodyText,fontWeight:selectedNode.address?600:400,resize:'none',fontFamily:'inherit',lineHeight:1.4}}
                         />
                         {selectedNode.address&&<a href={'https://maps.google.com/?q='+encodeURIComponent(selectedNode.address)} target="_blank" rel="noopener noreferrer" style={{fontSize:11,color:'#3b82f6',textDecoration:'none',flexShrink:0,fontWeight:600,marginTop:1}}>Map</a>}
                       </div>
@@ -5565,7 +7123,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         <input type="text" value={(selectedNode.socialHandles||{}).messenger||''}
                           onChange={e=>updateSelectedNode('socialHandles',{...(selectedNode.socialHandles||{}),messenger:e.target.value.trim()})}
                           placeholder="Messenger username"
-                          style={{flex:1,background:'none',border:'none',outline:'none',fontSize:13,color:theme.darkMode?'#e2e8f0':'#1e293b',fontWeight:(selectedNode.socialHandles||{}).messenger?600:400}}
+                          style={{flex:1,background:'none',border:'none',outline:'none',fontSize:13,color:theme.darkMode?'#e2e8f0':pw.bodyText,fontWeight:(selectedNode.socialHandles||{}).messenger?600:400}}
                         />
                       </div>
                       {/* Instagram username */}
@@ -5576,7 +7134,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         <input type="text" value={(selectedNode.socialHandles||{}).instagram||''}
                           onChange={e=>updateSelectedNode('socialHandles',{...(selectedNode.socialHandles||{}),instagram:e.target.value.trim()})}
                           placeholder="Instagram username"
-                          style={{flex:1,background:'none',border:'none',outline:'none',fontSize:13,color:theme.darkMode?'#e2e8f0':'#1e293b',fontWeight:(selectedNode.socialHandles||{}).instagram?600:400}}
+                          style={{flex:1,background:'none',border:'none',outline:'none',fontSize:13,color:theme.darkMode?'#e2e8f0':pw.bodyText,fontWeight:(selectedNode.socialHandles||{}).instagram?600:400}}
                         />
                       </div>
                       {/* Paste-a-link: extracts username/number and fills the right field */}
@@ -5585,21 +7143,21 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         <input type="text" placeholder="Paste a profile link…" ref={pasteLinkRef}
                           onPaste={e=>{ setTimeout(()=>{ const v=e.target.value; const r=parseSocialLink(v); if(r){ if(r.field==='phone'){updateSelectedNode('phone',r.value);} else {updateSelectedNode('socialHandles',{...(selectedNode.socialHandles||{}),[r.field]:r.value});} showToast(`✓ ${r.label} added`); e.target.value=''; } else { showToast('Link not recognised'); } },50); }}
                           onKeyDown={e=>{ if(e.key==='Enter'){ const v=e.target.value; const r=parseSocialLink(v); if(r){ if(r.field==='phone'){updateSelectedNode('phone',r.value);} else {updateSelectedNode('socialHandles',{...(selectedNode.socialHandles||{}),[r.field]:r.value});} showToast(`✓ ${r.label} added`); e.target.value=''; } else { showToast('Link not recognised'); } e.preventDefault(); } }}
-                          style={{flex:1,background:'none',border:'none',outline:'none',fontSize:13,color:theme.darkMode?'#e2e8f0':'#1e293b'}}
+                          style={{flex:1,background:'none',border:'none',outline:'none',fontSize:13,color:theme.darkMode?'#e2e8f0':pw.bodyText}}
                         />
                       </div>
                     </div>
                      {/* Sync with Contacts — greyed but pressable */}
                      <button onClick={handleImportContact}
                        style={{width:'100%',marginTop:8,display:'flex',alignItems:'center',justifyContent:'center',gap:6,padding:'7px 12px',borderRadius:10,fontSize:12,fontWeight:600,cursor:'pointer',
-                         background:theme.darkMode?'#1e293b':'#f8fafc',border:'1px solid '+(theme.darkMode?'#334155':'#e2e8f0'),color:theme.darkMode?'#64748b':'#94a3b8'}}>
+                         background:pw.cellBg,border:`1px solid ${pw.border}`,color:theme.darkMode?'#64748b':'#475569'}}>
                        <BookUser className="w-3.5 h-3.5"/><span>{selectedNode.phone ? 'Re-sync with Contacts' : 'Sync with Contacts'}</span>
                      </button>
                      {/* Open this contact in the phone's Contacts app to edit manually */}
                      {selectedNode.contactId && (
                        <button onClick={()=>openContactInPhone(selectedNode)}
                          style={{width:'100%',marginTop:6,display:'flex',alignItems:'center',justifyContent:'center',gap:6,padding:'7px 12px',borderRadius:10,fontSize:12,fontWeight:600,cursor:'pointer',
-                           background:theme.darkMode?'#1e293b':'#f8fafc',border:'1px solid '+(theme.darkMode?'#334155':'#e2e8f0'),color:theme.darkMode?'#64748b':'#94a3b8'}}>
+                           background:pw.cellBg,border:`1px solid ${pw.border}`,color:theme.darkMode?'#64748b':'#475569'}}>
                          <BookUser className="w-3.5 h-3.5"/><span>Update in Contacts app</span>
                        </button>
                      )}
@@ -5608,12 +7166,14 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 </div>
               )}
 
+
               {selectedNode.type === 'hub' && (()=>{
                 const dm = theme.darkMode;
                 const sub = dm?'#94a3b8':'#64748b';
                 const bd = dm?'#334155':'#e2e8f0';
                 const bg2 = dm?'#1e293b':'#f8fafc';
                 const hubId = selectedNode.id;
+
 
                 // Members of this group. For a hidden hub, include the whole tree
                 // branching off the linked person (e.g. Hayley + Hendrix + others).
@@ -5641,6 +7201,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   members = nodes.filter(n=>memberIds.has(n.id)&&n.type!=='flower');
                 }
 
+
                 return (
                   <>
                   {/* Group header — main photo left, members right, vine border around all */}
@@ -5652,7 +7213,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           style={{padding:'4px 10px',borderRadius:99,fontSize:11,fontWeight:700,cursor:'pointer',
                             background:groupPhotoLayout===opt.k?(theme.darkMode?'#15803d':'#15803d'):(theme.darkMode?'#1e293b':'#f1f5f9'),
                             color:groupPhotoLayout===opt.k?'white':(theme.darkMode?'#94a3b8':'#64748b'),
-                            border:'1px solid '+(theme.darkMode?'#334155':'#e2e8f0')}}>
+                            border:`1px solid ${pw.border}`}}>
                           {opt.label}
                         </button>
                       ))}
@@ -5664,15 +7225,26 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       const filterId = 'prev-' + hubId.replace(/[^a-z0-9]/gi,'');
                       const groupColor = groupColors[hubId] || '#10b981';
 
+
                       const mainR = 56;
                       const memberR = mainR / 2;   // members are 1/2 of the main photo
 
 
-                      // Sort members by friendship score — strongest nearest the main photo
-                      const sortedMembers = [...members].sort((a,b)=>(b.interactionScore||0)-(a.interactionScore||0));
+
+
+                      // Sort members by friendship score — strongest nearest the main photo.
+                      // Cap how many actually get a photo slot in the cluster so large groups
+                      // stay readable; the rest are represented by a single '+N' circle and
+                      // remain fully visible in the scrollable member list below.
+                      const CLUSTER_CAP = 11;
+                      const allSortedMembers = [...members].sort((a,b)=>(b.interactionScore||0)-(a.interactionScore||0));
+                      const overflowCount = Math.max(0, allSortedMembers.length - CLUSTER_CAP);
+                      const sortedMembers = overflowCount > 0 ? allSortedMembers.slice(0, CLUSTER_CAP) : allSortedMembers;
+
 
                       let mainX, mainY;
                       const memberPositions = []; // each: {x, y, r}
+
 
                       if (groupPhotoLayout === 'mandala') {
                         // Centred mandala: main in the middle, full concentric rings,
@@ -5723,10 +7295,25 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         }
                       }
 
+
+                      // If members were capped, add one more slot right after the last
+                      // member position for a '+N' overflow badge -- same size/style as a
+                      // normal member circle, just placed one step further along the pattern.
+                      if (overflowCount > 0 && memberPositions.length > 0) {
+                        const last = memberPositions[memberPositions.length - 1];
+                        const prev = memberPositions.length > 1 ? memberPositions[memberPositions.length - 2] : { x: mainX, y: mainY };
+                        const dx = last.x - prev.x, dy = last.y - prev.y;
+                        const dlen = Math.sqrt(dx*dx + dy*dy) || 1;
+                        const step = last.r * 2.1;
+                        memberPositions.push({ x: last.x + (dx/dlen)*step, y: last.y + (dy/dlen)*step, r: last.r, isOverflow: true });
+                      }
+
                       const maxM = memberPositions.length;
                       const allNodes = [
                         {x:mainX,y:mainY,r:mainR,photo:selectedNode.img,color:groupColor,isHub:true},
-                        ...memberPositions.map((pos,i)=>({x:pos.x,y:pos.y,r:pos.r,photo:sortedMembers[i]?.img,color:groupColor,node:sortedMembers[i]})),
+                        ...memberPositions.map((pos,i)=>pos.isOverflow
+                          ? {x:pos.x,y:pos.y,r:pos.r,color:groupColor,isOverflow:true,overflowCount}
+                          : {x:pos.x,y:pos.y,r:pos.r,photo:sortedMembers[i]?.img,color:groupColor,node:sortedMembers[i]}),
                       ];
                       const N=allNodes.length;
                       const blobArcR=n=>n.r*(vineBorderParams.blobArcRadius||1.05);
@@ -5735,6 +7322,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       const hcx=allNodes.reduce((s,n)=>s+n.x,0)/N;
                       const hcy=allNodes.reduce((s,n)=>s+n.y,0)/N;
 
+
                       const crossFn=(O,A,B)=>(A.x-O.x)*(B.y-O.y)-(A.y-O.y)*(B.x-O.x);
                       const sorted=[...allNodes].sort((a,b)=>a.x-b.x||a.y-b.y);
                       const lo=[],up=[];
@@ -5742,6 +7330,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       for(const p of [...sorted].reverse()){while(up.length>=2&&crossFn(up[up.length-2],up[up.length-1],p)<=0)up.pop();up.push(p);}
                       const hull=[...lo.slice(0,-1),...up.slice(0,-1)];
                       const hn=hull.length;
+
 
                       const allPts=[];
                       for(let i=0;i<hn;i++){
@@ -5764,9 +7353,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       const totalPts=allPts.length;
                       const perim=allPts.reduce((s,p,i)=>{const n=allPts[(i+1)%totalPts];return s+Math.sqrt((n.x-p.x)**2+(n.y-p.y)**2);},0);
 
+
                       // Use groupBorderParams for the group window preview
                       const gbp = groupBorderParams;
                       const coreR = 5.0;
+
 
                       const STRAND_DEFS=[
                         {width:gbp.coreWidth,  colorDark:'#14532d', colorLight:'#15803d', role:'core',   wrapFreq:0,  wrapAmp:0},
@@ -5808,6 +7399,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         return {...def,d:'M '+pts.map(p=>p.x.toFixed(1)+','+p.y.toFixed(1)).join(' L ')+' Z'};
                       });
 
+
                       const pf=selectedNode.partnerFlower;
                       const fr=mainR*0.3,fvR=vineArcR({r:mainR});
                       const fx=mainX+Math.cos(-Math.PI*0.5)*fvR,fy=mainY+Math.sin(-Math.PI*0.5)*fvR;
@@ -5818,6 +7410,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       }).join(' ');
                       const isActive=pf&&selectedNode.groupFlowerActive!==false;
 
+
                       // Tight bounding box of all nodes so the SVG has no wasted space
                       const _pad = 10;
                       const _minX = Math.min(...allNodes.map(n=>n.x-n.r)) - _pad;
@@ -5827,8 +7420,15 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       const _vbW = _maxX - _minX, _vbH = _maxY - _minY;
                       const groupViewBox = `${_minX} ${_minY} ${_vbW} ${_vbH}`;
 
+
                       return (
                         <div style={{display:'inline-block',position:'relative'}}>
+                          {/* Tap the preview to open group gallery */}
+                          <button onClick={()=>{
+                            setHubGalleryOpen(hubId);
+                            setHubGalleryLoading(true);
+                            loadGallery(hubId).then(items => { setHubGalleryItems(items); setHubGalleryLoading(false); }).catch(()=>setHubGalleryLoading(false));
+                          }} style={{display:'block',padding:0,border:'none',background:'none',cursor:'pointer',width:'100%'}}>
                           <svg width={Math.min(PREVIEW_W, _vbW)} height={Math.min(PREVIEW_W, _vbW) * (_vbH/_vbW)} viewBox={groupViewBox} style={{display:'block',margin:'0 auto'}}>
                             <defs>
                               {showVineBorders&&(<filter id={filterId} x="-20%" y="-20%" width="140%" height="140%" filterUnits="userSpaceOnUse" colorInterpolationFilters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation={7} result="blur"/><feColorMatrix in="blur" type="matrix" result="shaped" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 32 -14"/><feFlood result="col" floodColor={blobColor} floodOpacity={blobOp}/><feComposite in="col" in2="shaped" operator="in"/></filter>)}
@@ -5838,7 +7438,10 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                               const blobs=allNodes.map(n=>({x:n.x,y:n.y,r:blobArcR(n)}));
                               const bridges=[];
                               blobs.forEach((a,ai)=>blobs.slice(ai+1).forEach(b=>{const dx=b.x-a.x,dy=b.y-a.y,dist=Math.sqrt(dx*dx+dy*dy),avg=(a.r+b.r)/2;if(dist<avg*4){const steps=Math.ceil(dist/12);for(let s=1;s<steps;s++){const t=s/steps;bridges.push({x:a.x+dx*t,y:a.y+dy*t,r:avg*0.28*Math.sin(t*Math.PI)+3});}}}));
-                              return <g filter={`url(#${filterId})`}>{blobs.map((b,bi)=><circle key={bi} cx={b.x} cy={b.y} r={b.r} fill="white"/>)}{bridges.map((br,bi)=><circle key={'b'+bi} cx={br.x} cy={br.y} r={Math.max(2,br.r)} fill="white"/>)}</g>;
+                              // interior fill: centroid + radial circles between nodes and centre
+                              const cen={x:blobs.reduce((s,b)=>s+b.x,0)/Math.max(1,blobs.length),y:blobs.reduce((s,b)=>s+b.y,0)/Math.max(1,blobs.length)};
+                              const interiorFills=blobs.flatMap((b,i)=>Array.from({length:4},(_,s)=>{const t=(s+1)/5;return {x:b.x+(cen.x-b.x)*t,y:b.y+(cen.y-b.y)*t,r:Math.max(b.r*0.7,20)};}));
+                              return <g filter={`url(#${filterId})`}>{blobs.map((b,bi)=><circle key={bi} cx={b.x} cy={b.y} r={b.r} fill={blobColor}/>)}{bridges.map((br,bi)=><circle key={'b'+bi} cx={br.x} cy={br.y} r={Math.max(2,br.r)} fill={blobColor}/>)}{interiorFills.map((f,fi)=><circle key={'if'+fi} cx={f.x} cy={f.y} r={f.r} fill={blobColor}/>)}<circle cx={cen.x} cy={cen.y} r={30} fill={blobColor}/></g>;
                             })()}
                             {showVineBorders&&strandPaths.map((s,si)=><path key={si} d={s.d} fill="none" stroke={dm?s.colorDark:s.colorLight} strokeWidth={s.width} strokeLinecap="round" strokeLinejoin="round" opacity={s.role==='core'?1:s.role==='growing'?0.75:0.88}/>)}
                             {showVineBorders&&allLeaves.map((lf,li)=>{
@@ -5846,12 +7449,14 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                               return <g key={li} transform={`translate(${lf.x},${lf.y}) rotate(${lf.angle})`} opacity={lf.op}><path d={d} fill={lf.fill} stroke={lf.stroke} strokeWidth={0.4}/>{!lf.bud&&<line x1={lf.lw*0.05} y1={0} x2={lf.lw*0.82} y2={0} stroke={lf.stroke} strokeWidth={0.3} opacity={0.5}/>}</g>;
                             })}
                             {allNodes.map((n,i)=>(
-                              <g key={i}>
+                              <g key={i} style={n.isOverflow?{cursor:'pointer'}:undefined}
+                                onClick={n.isOverflow?()=>showToast(`👇 Scroll down to see all ${overflowCount} more`):undefined}>
                                 <circle cx={n.x} cy={n.y} r={n.r+3} fill="none" stroke={blobColor} strokeWidth={2.5}/>
                                 <circle cx={n.x} cy={n.y} r={n.r+0.5} fill="none" stroke={n.color} strokeWidth={2.5}/>
-                                <circle cx={n.x} cy={n.y} r={n.r-1} fill={n.isHub?groupColor:(dm?'#1e293b':'#e2e8f0')}/>
+                                <circle cx={n.x} cy={n.y} r={n.r-1} fill={n.isOverflow?'#475569':n.isHub?groupColor:(dm?'#1e293b':'#e2e8f0')}/>
                                 {n.photo&&<image href={n.photo} x={n.x-n.r+1} y={n.y-n.r+1} width={(n.r-1)*2} height={(n.r-1)*2} clipPath={`url(#${filterId}p${i})`} preserveAspectRatio="xMidYMid slice"/>}
                                 {n.isHub&&!n.photo&&<text x={n.x} y={n.y+1} textAnchor="middle" dominantBaseline="middle" fontSize={n.r*0.75} style={{userSelect:'none'}}>🌳</text>}
+                                {n.isOverflow&&<text x={n.x} y={n.y+1} textAnchor="middle" dominantBaseline="middle" fontSize={n.r*0.6} fontWeight="800" fill="white" style={{userSelect:'none'}}>+{n.overflowCount}</text>}
                               </g>
                             ))}
                             {/* Mini flowers for each member along the vine border */}
@@ -5889,6 +7494,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                               );
                             })}
 
+
                             {/* Vine colour button — sits on the top-right of the vine border */}
                             {showVineBorders && (
                               <g transform={`translate(${PREVIEW_W-22},${22})`}
@@ -5900,19 +7506,23 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                               </g>
                             )}
 
+
                             {/* Hub flower button */}
                             <g transform={`translate(${fx},${fy})`} onClick={()=>setHubFlowerMenuOpen(p=>!p)} style={{cursor:'pointer'}}>
                               {hubFlowerMenuOpen&&<circle r={fr+4} fill="rgba(255,255,255,0.2)" stroke="white" strokeWidth={1.5} opacity={0.7}/>}
                               {pf?(<><path d={fpPath} fill={isActive?pf.petalColor:'#94a3b8'} opacity={isActive?1:0.6}/><circle r={fr*0.28} fill={isActive?(pf.centerColor||'#fef08a'):'#e2e8f0'} stroke={isActive?pf.petalColor:'#94a3b8'} strokeWidth={1}/></>):(<><circle r={fr} fill="none" stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="4 3" opacity={0.7}/><text textAnchor="middle" dominantBaseline="middle" fontSize={fr*0.9} style={{userSelect:'none'}}>🌸</text></>)}
                             </g>
                           </svg>
+                          </button>
+                          {/* 'Tap to open gallery' hint */}
+                          <div style={{textAlign:'center',fontSize:10,color:'rgba(255,255,255,0.5)',marginTop:2,pointerEvents:'none'}}>Tap to open group gallery</div>
                           {hubFlowerMenuOpen&&(
                             <div style={{position:'absolute',top:'50%',left:'50%',transform:'translate(-50%,-50%)',zIndex:50,borderRadius:12,overflow:'hidden',boxShadow:'0 4px 24px rgba(0,0,0,0.4)',border:`1px solid ${bd}`,background:dm?'#1e293b':'white',minWidth:190}}>
                               <button onClick={()=>{setHubFlowerMenuOpen(false);setPfSelectedPart('main');setPfColorPickerFor(null);setPfTab('design');setPfFlowerType('mini');setPartnerFlowerEditor(hubId);}} style={{width:'100%',padding:'11px 16px',background:'none',border:'none',cursor:'pointer',textAlign:'left',fontSize:13,fontWeight:700,color:dm?'#e2e8f0':'#1e293b',display:'flex',alignItems:'center',gap:8}}>
                                 ✏️ Design
                               </button>
                               <div style={{padding:'8px 16px 4px',borderTop:`1px solid ${bd}`}}>
-                                <span style={{fontSize:10,fontWeight:800,color:dm?'#475569':'#94a3b8',textTransform:'uppercase',letterSpacing:1}}>Mini flower mode</span>
+                                <span style={{fontSize:10,fontWeight:800,color:dm?'#475569':'#475569',textTransform:'uppercase',letterSpacing:1}}>Mini flower mode</span>
                               </div>
                               {[
                                 {mode:'shared',   icon:'❤️', label:'Group only'},
@@ -5954,7 +7564,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                 cursor:'pointer',flexShrink:0}}/>
                           ))}
                           <button onClick={()=>{updateSelectedNode('vineBlobColor',null);setShowVineColorPicker(false);}}
-                            style={{width:18,height:18,borderRadius:'50%',background:'transparent',border:'1.5px dashed #94a3b8',cursor:'pointer',fontSize:8,color:'#94a3b8',display:'flex',alignItems:'center',justifyContent:'center'}}>✕</button>
+                            style={{width:18,height:18,borderRadius:'50%',background:'transparent',border:'1.5px dashed #94a3b8',cursor:'pointer',fontSize:8,color:'#475569',display:'flex',alignItems:'center',justifyContent:'center'}}>✕</button>
                         </div>
                         <div style={{display:'flex',alignItems:'center',gap:6}}>
                           <span style={{fontSize:10,color:sub,flexShrink:0}}>Opacity</span>
@@ -5968,6 +7578,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       </div>
                     </div>
                   )}
+
 
                   {/* Members panel — collapsible */}
                   {(()=>{
@@ -6023,6 +7634,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     );
                   })()}
 
+
                   {/* Severed members */}
                   {(()=>{
                     const severed = archivedLinks.filter(l => l.source === hubId || l.target === hubId);
@@ -6049,6 +7661,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 );
               })()}
 
+
               {/* Connections section */}
               {selectedNode.type !== 'hub' && selectedNode.id !== 'me' && (() => {
                 const dm = theme.darkMode;
@@ -6062,10 +7675,12 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   links.some(l => (l.source === selectedNode.id && l.target === n.id) || (l.target === selectedNode.id && l.source === n.id)));
                 const severed = archivedLinks.filter(l => l.source === selectedNode.id || l.target === selectedNode.id);
 
+
                 const ownHubExists = nodes.some(n => n.id === 'hidden_hub_' + selectedNode.id && n.hidden);
                 // Always show for a real person so they can start a group; only hide
                 // for hubs / me where none of this applies.
                 if (selectedNode.type === 'hub' || selectedNode.id === 'me') return null;
+
 
                 const headerBtn = (key, label, count) => (
                   <button onClick={() => setConnSections(p => ({ ...p, [key]: !p[key] }))}
@@ -6075,16 +7690,19 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   </button>
                 );
 
+
                 return (
                   <div className={`pt-4 border-t ${dm ? 'border-slate-700' : 'border-slate-200'}`}>
                     <h3 className="text-xs font-semibold uppercase tracking-wider mb-1 flex items-center text-emerald-600">
                       <HeartHandshake className="w-4 h-4 mr-1" /> Connections
                     </h3>
 
+
                     {/* This person's own group + sub-groups, each with expand arrow */}
                     {(() => {
                       const dotColor1 = selectedNode.partnerFlower?.petalColor || '#f9a8d4';
                       const dotColor2 = selectedNode.partnerFlower?.centerColor || selectedNode.partnerFlower?.borderColor || '#fde047';
+
 
                       // Gather a hub's full member tree (for hidden hubs) or direct members (visible)
                       const gatherMembers = (hub) => {
@@ -6098,6 +7716,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         return nodes.filter(n=>collected.has(n.id)&&n.type!=='flower');
                       };
 
+
                       const daysToBday = (m) => {
                         if(!m.birthday) return null;
                         const MONTHS={Jan:1,Feb:2,Mar:3,Apr:4,May:5,Jun:6,Jul:7,Aug:8,Sep:9,Oct:10,Nov:11,Dec:12};
@@ -6107,15 +7726,19 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         return null;
                       };
 
+
                       const memberList = (members, parentId, addLabel) => (
                         <div className="space-y-1 mt-1 mb-1 pl-2">
                           {members.map(m => {
                             const md = daysToBday(m);
+                            const excl = (selectedNode.excludeFromBorder||[]).includes(m.id);
                             return (
-                              <div key={m.id} onClick={()=>setSelectedNodeId(m.id)}
-                                className={`flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer ${dm?'bg-slate-800 hover:bg-slate-700':'bg-slate-50 hover:bg-slate-100'}`}>
-                                {m.img && <img src={m.img} className="w-7 h-7 rounded-full object-cover flex-shrink-0"/>}
-                                <span className="text-xs font-semibold truncate flex-1">{m.label}</span>
+                              <div key={m.id}
+                                className={`flex items-center gap-2 px-2 py-1.5 rounded-lg ${dm?'bg-slate-800 hover:bg-slate-700':'bg-slate-50 hover:bg-stone-100'}`}>
+                                <div className='cursor-pointer flex items-center gap-2 flex-1 truncate' onClick={()=>setSelectedNodeId(m.id)}>
+                                  {m.img && <img src={m.img} className="w-7 h-7 rounded-full object-cover flex-shrink-0"/>}
+                                  <span className="text-xs font-semibold truncate">{m.label}</span>
+                                </div>
                                 {md!==null && (
                                   <span style={{flexShrink:0,fontSize:10,fontWeight:700,padding:'2px 6px',borderRadius:6,
                                     color:md===0?'white':md<=7?'#f59e0b':(dm?'#94a3b8':'#64748b'),
@@ -6123,6 +7746,19 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                     {md===0?'🎂':md+'d'}
                                   </span>
                                 )}
+                                {/* Vine border toggle */}
+                                <button title={excl?'Excluded from vine border':'In vine border'}
+                                  onClick={e=>{ e.stopPropagation();
+                                    setNodes(prev=>prev.map(n=>{
+                                      if(n.id!==selectedNode.id) return n;
+                                      const cur=n.excludeFromBorder||[];
+                                      return {...n, excludeFromBorder: excl?cur.filter(id=>id!==m.id):[...cur,m.id]};
+                                    }));
+                                  }}
+                                  style={{flexShrink:0,background:'none',border:'none',cursor:'pointer',
+                                    fontSize:14,opacity:excl?0.25:0.85,padding:'0 2px'}}>
+                                  🌿
+                                </button>
                               </div>
                             );
                           })}
@@ -6131,7 +7767,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                               setAddFriendForms(prev => [...prev, { id: `form_${Date.now()}`, name: '', parentId }]);
                               setTimeout(()=>document.querySelector('.add-friend-form-input')?.focus(),100);
                             }}
-                              className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer border border-dashed ${dm?'border-slate-600 text-slate-400 hover:bg-slate-800':'border-slate-300 text-slate-500 hover:bg-slate-50'}`}>
+                              className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer border border-dashed ${dm?'border-slate-600 text-slate-400 hover:bg-slate-800':'border-stone-300 text-slate-500 hover:bg-stone-50'}`}>
                               <Plus className="w-4 h-4"/>
                               <span className="text-xs font-semibold">{addLabel}</span>
                             </button>
@@ -6139,8 +7775,10 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         </div>
                       );
 
+
                       const ownHub = nodes.find(n => n.id === 'hidden_hub_' + selectedNode.id && n.hidden);
                       const expKey = (id) => 'eg_' + id;
+
 
                       return (<>
                         {/* No group yet — transparent "Add a group" button */}
@@ -6155,6 +7793,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                             <span>Start {selectedNode.label}'s group</span>
                           </button>
                         )}
+
 
                         {/* Own group — green */}
                         {ownHub && (() => {
@@ -6211,6 +7850,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           );
                         })()}
 
+
                         {/* Sub-groups — brown signposts */}
                         {subGroups.map(h => {
                           const open = expandedGroupMembers[expKey(h.id)];
@@ -6236,6 +7876,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       </>);
                     })()}
 
+
                     {/* Severed connections */}
                     {severed.length > 0 && (<>
                       <div className="flex items-center justify-between">
@@ -6252,7 +7893,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                             const other = nodes.find(n => n.id === otherId);
                             const cutDate = l.cutAt ? new Date(l.cutAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '';
                             return (
-                              <div key={i} className={`flex items-center justify-between px-3 py-2 rounded-lg border ${dm ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                              <div key={i} className={`flex items-center justify-between px-3 py-2 rounded-lg border ${dm ? 'bg-slate-800 border-slate-700' : 'bg-stone-50 border-stone-200'}`}>
                                 <div className="flex items-center space-x-2 min-w-0">
                                   {other?.img && <img src={other.img} className="w-6 h-6 rounded-full object-cover flex-shrink-0" />}
                                   <div className="min-w-0">
@@ -6273,6 +7914,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   </div>
                 );
               })()}
+
 
               {selectedNode.id !== 'me' && (
                 <div className={`pt-4 border-t space-y-2 ${theme.darkMode ? 'border-slate-700' : 'border-slate-100'}`}>
@@ -6304,7 +7946,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   <div style={{height:4}}/>
                   {/* Add group photo — only for hubs */}
                   {selectedNode.type === 'hub' && (
-                    <label style={{display:'flex',alignItems:'center',justifyContent:'center',gap:8,width:'100%',padding:'9px',borderRadius:10,background:theme.darkMode?'#1e293b':'#f1f5f9',color:theme.darkMode?'#94a3b8':'#64748b',border:'1.5px dashed '+(theme.darkMode?'#334155':'#cbd5e1'),cursor:'pointer',fontSize:13,fontWeight:700}}>
+                    <label style={{display:'flex',alignItems:'center',justifyContent:'center',gap:8,width:'100%',padding:'9px',borderRadius:10,background:pw.cellBg,color:theme.darkMode?'#94a3b8':pw.secondText,border:'1.5px dashed '+(theme.darkMode?'#334155':'#cbd5e1'),cursor:'pointer',fontSize:13,fontWeight:700}}>
                       👥 Tag Group Photo
                       <input type="file" accept="image/*" style={{display:'none'}} onChange={e=>{
                         const file=e.target.files[0]; if(!file)return;
@@ -6337,10 +7979,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           ) : null}
         </div>
 
-        <div className={`p-4 border-t space-y-2 ${theme.darkMode ? 'border-slate-700 bg-slate-800' : 'border-slate-200 bg-slate-50'}`}>
+
+        <div className="p-4 space-y-2" style={{background:pw.headerBg,borderTop:`1px solid ${pw.border}`}}>
           {/* Queued add-friend forms */}
           {addFriendForms.map((form, fi) => (
-            <div key={form.id} className={`rounded-xl border p-2.5 space-y-1.5 ${theme.darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'}`}>
+            <div key={form.id} className="rounded-xl p-2.5 space-y-1.5" style={{background:pw.cellBg,border:`1px solid ${pw.border}`}}>
               <input
                 autoFocus={fi === addFriendForms.length - 1}
                 type="text"
@@ -6355,7 +7998,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 }}
                 placeholder="Name…"
                 autoCapitalize="words"
-                className={`w-full px-3 py-1.5 rounded-lg border text-sm font-medium outline-none focus:ring-2 focus:ring-emerald-500 ${theme.darkMode ? 'bg-slate-800 border-slate-600 text-slate-100 placeholder-slate-500' : 'bg-slate-50 border-slate-200 text-slate-900 placeholder-slate-400'}`}
+                className={`w-full px-3 py-1.5 rounded-lg border text-sm font-medium outline-none focus:ring-2 focus:ring-emerald-500 ${theme.darkMode ? 'bg-slate-800 border-slate-600 text-slate-100 placeholder-slate-500' : 'bg-slate-50 border-stone-200 text-slate-900 placeholder-slate-400'}`}
               />
               {/* Friendship level selector */}
               <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
@@ -6402,16 +8045,17 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     }
                   } catch(e) {}
                   createFriendFromForm(form.id, null);
-                }} className={`flex items-center gap-1 px-2 py-1.5 rounded-lg border text-xs font-semibold ${theme.darkMode ? 'bg-slate-800 border-slate-600 text-slate-300 hover:bg-slate-700' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+                }} className={`flex items-center gap-1 px-2 py-1.5 rounded-lg border text-xs font-semibold ${theme.darkMode ? 'bg-slate-800 border-slate-600 text-slate-300 hover:bg-slate-700' : 'bg-white border-slate-200 text-slate-600 hover:bg-stone-50'}`}>
                   <BookUser className="w-3 h-3" /> Sync
                 </button>
                 <button onClick={() => setAddFriendForms(prev => prev.filter(f => f.id !== form.id))}
-                  className={`px-2 py-1.5 rounded-lg border text-xs ${theme.darkMode ? 'bg-slate-800 border-slate-600 text-slate-400' : 'bg-white border-slate-200 text-slate-400'}`}>
+                  className={`px-2 py-1.5 rounded-lg border text-xs ${theme.darkMode ? 'bg-slate-800 border-slate-600 text-slate-400' : 'bg-white border-stone-200 text-slate-400'}`}>
                   ✕
                 </button>
               </div>
             </div>
           ))}
+
 
           {selectedNodeId === 'me' && (
             <button onClick={()=>{setPfSelectedPart('main');setPfColorPickerFor(null);setPfTab('design');setPartnerFlowerEditor('me');}}
@@ -6422,7 +8066,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         </div>
       </div>
 
+
       {/* Canvas */}
+      {!(viewMode === 'canvas' && (mapStyle === 'feed' || mapStyle === 'feedDetailed')) && (
       <div
         style={{
           position: 'absolute',
@@ -6526,15 +8172,84 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           </defs>
           <rect width="100%" height="100%" fill="url(#bg-grid)" />
 
+
           <g ref={svgGroupRef} transform={`translate(${transform.x}, ${transform.y}) scale(${transform.scale})`}>
             {/* Background fill — green in light mode (grass texture shows from the Canvas div behind) */}
             <rect x="-50000" y="-50000" width="100000" height="100000"
               fill={theme.darkMode ? '#0f172a' : '#19432a'} fillOpacity={theme.darkMode ? 1 : 0.55} />
 
+
             {/* Connection vines — rendered low so group borders/leaves sit above them */}
-            {viewMode === 'canvas' && !sliderDragging && (
+            {viewMode === 'canvas' && !sliderDragging && !simpleMode && (
               <g className="vines-layer">{linkParts.map(p => p && p.vine)}</g>
             )}
+
+            {/* Simple mode: faint grid overlay across the visible viewport, matching
+                the same hex/square style used for node snapping. Purely decorative
+                background -- sits behind everything, no pointer events. */}
+            {viewMode === 'canvas' && simpleMode && (() => {
+              const sw = window.innerWidth, sh = window.innerHeight;
+              // Visible canvas-space bounds, with one extra cell of padding all round
+              const vx1 = (-transform.x - HEX_SIZE * 2) / transform.scale;
+              const vy1 = (-transform.y - HEX_SIZE * 2) / transform.scale;
+              const vx2 = (sw - transform.x + HEX_SIZE * 2) / transform.scale;
+              const vy2 = (sh - transform.y + HEX_SIZE * 2) / transform.scale;
+              const gridColor = theme.darkMode ? 'rgba(148,163,184,0.12)' : 'rgba(100,116,139,0.15)';
+              if (gridStyle === 'square') {
+                const lines = [];
+                const startX = Math.floor(vx1 / HEX_SIZE) * HEX_SIZE;
+                const startY = Math.floor(vy1 / HEX_SIZE) * HEX_SIZE;
+                for (let x = startX; x <= vx2; x += HEX_SIZE) {
+                  lines.push(<line key={`gv-${x}`} x1={x} y1={vy1} x2={x} y2={vy2} stroke={gridColor} strokeWidth={1}/>);
+                }
+                for (let y = startY; y <= vy2; y += HEX_SIZE) {
+                  lines.push(<line key={`gh-${y}`} x1={vx1} y1={y} x2={vx2} y2={y} stroke={gridColor} strokeWidth={1}/>);
+                }
+                return <g style={{pointerEvents:'none'}}>{lines}</g>;
+              }
+              // Hex grid: tile flat-top hexagons across the visible bounds
+              const cells = [];
+              const colStep = HEX_SIZE * 1.5;
+              const rowStep = HEX_SIZE * Math.sqrt(3);
+              const qStart = Math.floor(vx1 / colStep) - 1, qEnd = Math.ceil(vx2 / colStep) + 1;
+              const rStart = Math.floor(vy1 / rowStep) - 1, rEnd = Math.ceil(vy2 / rowStep) + 1;
+              for (let q = qStart; q <= qEnd; q++) {
+                for (let r = rStart; r <= rEnd; r++) {
+                  const cx = HEX_SIZE * 1.5 * q;
+                  const cy = HEX_SIZE * (Math.sqrt(3) * r + (Math.sqrt(3)/2) * q);
+                  if (cx < vx1 - HEX_SIZE || cx > vx2 + HEX_SIZE || cy < vy1 - HEX_SIZE || cy > vy2 + HEX_SIZE) continue;
+                  const corners = hexCorners(cx, cy);
+                  const d = 'M ' + corners.map(c => c.join(',')).join(' L ') + ' Z';
+                  cells.push(<path key={`gh-${q}-${r}`} d={d} fill="none" stroke={gridColor} strokeWidth={1}/>);
+                }
+              }
+              return <g style={{pointerEvents:'none'}}>{cells}</g>;
+            })()}
+
+            {/* Simple mode: plain straight lines instead of decorative vines.
+                Lines touching a dimension flower (Social/Health/etc) pick up that
+                flower's colour, e.g. health connections render red. */}
+            {viewMode === 'canvas' && simpleMode && (
+              <g className="simple-links-layer">
+                {links.map((link, i) => {
+                  const src = activeRenderNodes.find(n => n.id === link.source);
+                  const tgt = activeRenderNodes.find(n => n.id === link.target);
+                  if (!src || !tgt || src.hidden || tgt.hidden) return null;
+                  const flowerEnd = src.type === 'flower' ? src : (tgt.type === 'flower' ? tgt : null);
+                  const lineColor = flowerEnd
+                    ? (dimensions[flowerEnd.dimKey]?.color || (theme.darkMode ? '#475569' : '#cbd5e1'))
+                    : (theme.darkMode ? '#475569' : '#cbd5e1');
+                  return (
+                    <line key={`simple-link-${i}`}
+                      x1={src.renderX} y1={src.renderY} x2={tgt.renderX} y2={tgt.renderY}
+                      stroke={lineColor} strokeWidth={flowerEnd ? 2.5 : 2}
+                      opacity={flowerEnd ? 0.85 : 1}
+                      style={{pointerEvents:'none'}}/>
+                  );
+                })}
+              </g>
+            )}
+
 
             {/* Minimised-bundle connecting vines — gentle wriggly lines from social
                 to overflow bundles, drawn HERE so they sit under the social node,
@@ -6566,6 +8281,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               );
             })}
 
+
             {/* Group vine borders — parametric arch system */}
             {/* Always compute border flower positions, even when vine borders hidden */}
             {viewMode === 'canvas' && nodes.filter(n=>n.type==='hub').map((hub)=>{
@@ -6594,8 +8310,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 const memberIds=new Set(links.filter(l=>l.source===hub.id||l.target===hub.id).map(l=>l.source===hub.id?l.target:l.source));
                 hubMembers=nodes.filter(n=>memberIds.has(n.id)&&n.type!=='flower');
               }
-              // Exclude minimised members so the border only spans visible nodes.
-              hubMembers = hubMembers.filter(m => !collapseInfo.hidden.has(m.id) && !minimisedNodes.includes(m.id));
+              // Exclude minimised members and any manually excluded from this border.
+              const excluded = new Set(hub.excludeFromBorder || []);
+              hubMembers = hubMembers.filter(m => !collapseInfo.hidden.has(m.id) && !minimisedNodes.includes(m.id) && !excluded.has(m.id));
               if (hubMembers.length === 0) return null;
               const VINE_NODE_RADIUS_MULT=1.35,VINE_NODE_RADIUS_ADD=18;
               const vineNodes=hubMembers.map(n=>({x:n.x,y:n.y,r:getNodeRadius(n)*VINE_NODE_RADIUS_MULT+VINE_NODE_RADIUS_ADD}));
@@ -6664,7 +8381,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               return null;
             })}
 
-            {viewMode === 'canvas' && nodes.filter(n=>n.type==='hub').map((hub, hubIdx) => {
+
+            {viewMode === 'canvas' && !simpleMode && nodes.filter(n=>n.type==='hub').map((hub, hubIdx) => {
               // Gather members. For hidden hubs, include the whole tree branching
               // off the linked person (e.g. James + Ken who branches off James).
               let members;
@@ -6704,8 +8422,10 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               if (members.length <= 0) return null;
               if (members.length <= 1 && !hub.hidden) return null;
 
+
               // Single member handled separately below (direct circle render)
               const isSingleMember = members.length === 1;
+
 
               // -- Tuning constants — driven by Appearance settings --------------
               const BLOB_NODE_RADIUS_MULT = vineBorderParams.blobArcRadius;
@@ -6723,14 +8443,17 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               const VINE_ARC_STEPS        = 20;
               // -----------------------------------------------------------------
 
+
               const avgScore = members.reduce((s,n)=>s+(n.interactionScore||0),0)/members.length;
               const maxScore = Math.max(...members.map(n=>n.interactionScore||0));
               const effectiveScore = avgScore + (maxScore-avgScore)*0.7;
               const tier = effectiveScore<100?1:effectiveScore<300?2:effectiveScore<600?3:effectiveScore<1000?4:5;
 
+
               // Node positions with tunable radii
               const blobNodes = members.map(n=>({x:n.x, y:n.y, r:getNodeRadius(n)*BLOB_NODE_RADIUS_MULT+BLOB_NODE_RADIUS_ADD}));
               const vineNodes = members.map(n=>({x:n.x, y:n.y, r:getNodeRadius(n)*VINE_NODE_RADIUS_MULT+VINE_NODE_RADIUS_ADD}));
+
 
               // Only include hub if close to centroid
               const cx0=members.reduce((s,n)=>s+(n.x||0),0)/members.length;
@@ -6741,6 +8464,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 blobNodes.push({x:hub.x, y:hub.y, r:getNodeRadius(hub)*BLOB_NODE_RADIUS_MULT+BLOB_NODE_RADIUS_ADD});
                 vineNodes.push({x:hub.x, y:hub.y, r:getNodeRadius(hub)*VINE_NODE_RADIUS_MULT+VINE_NODE_RADIUS_ADD});
               }
+
 
               // Convex hull
               const crossFn=(O,A,B)=>(A.x-O.x)*(B.y-O.y)-(A.y-O.y)*(B.x-O.x);
@@ -6756,8 +8480,10 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               const bhn=blobHull.length, vhn=vineHull.length;
               if(!isSingleMember && (bhn<2||vhn<2)) return null;
 
+
               const centroid=(hull)=>({x:hull.reduce((s,p)=>s+p.x,0)/hull.length, y:hull.reduce((s,p)=>s+p.y,0)/hull.length});
               const bCen=centroid(blobHull), vCen=centroid(vineHull);
+
 
               // -- Arch path builder ---------------------------------------------
               // For each hull edge: arc CCW around node A (outer), then inward sag to node B
@@ -6792,6 +8518,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   return res;
                 };
 
+
                 for(let i=0;i<hn;i++){
                   const A=hull[i], B=hull[(i+1)%hn], P=hull[(i+hn-1)%hn];
                   const angAtoB=Math.atan2(B.y-A.y, B.x-A.x);
@@ -6800,9 +8527,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   // = angPtoA + π (opposite to the P→A direction)
                   const arrivalAng = angPtoA + Math.PI;
 
+
                   // Arc around A from arrival point to departure point (always outer/long arc)
                   const arcPts=arcOuter(A, arrivalAng, angAtoB);
                   pts.push(...arcPts);
+
 
                   // Sag: inward bezier from A surface to B surface
                   const leaveX=A.x+Math.cos(angAtoB)*A.r, leaveY=A.y+Math.sin(angAtoB)*A.r;
@@ -6819,8 +8548,10 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 return pts;
               };
 
+
               const blobPts=buildArchPath(blobHull,bhn,bCen,BLOB_SAG_DEPTH,BLOB_ARC_STEPS,BLOB_SAG_STEPS);
               const vinePts=buildArchPath(vineHull,vhn,vCen,VINE_SAG_DEPTH,VINE_ARC_STEPS,VINE_SAG_STEPS);
+
 
               // Store inner-side border points for this hub — used to place member flowers
               const vCenX=vCen.x, vCenY=vCen.y;
@@ -6834,19 +8565,23 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 return {x:p.x, y:p.y, inX, inY, section:p.section, sectionT:p.sectionT};
               });
 
+
               // -- Blob filter ---------------------------------------------------
               const blobCol=hub.vineBlobColor||'#15803d';
               const blobOp=hub.vineBlobOpacity??0.85;
               const filterId='mbf'+hub.id.replace(/[^a-z0-9]/gi,'');
 
+
               const xs=blobPts.map(p=>p.x), ys=blobPts.map(p=>p.y);
               const x1=Math.min(...xs)-60, y1=Math.min(...ys)-60;
               const x2=Math.max(...xs)+60, y2=Math.max(...ys)+60;
+
 
               // -- Vine strands --------------------------------------------------
               const totalVinePts=vinePts.length;
               let perim=0;
               for(let i=0;i<totalVinePts;i++){const a=vinePts[i],b=vinePts[(i+1)%totalVinePts];perim+=Math.sqrt((b.x-a.x)**2+(b.y-a.y)**2);}
+
 
               const coreWidthScale=[0,1,1.4,1.9,2.5,3.2][tier];
               const STRAND_DEFS=[
@@ -6857,6 +8592,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               const TIER_STRAND_SETS=[[],[0,1],[0,2,1],[0,2,1],[0,2,1],[0,2,1]];
               const strandDefs=TIER_STRAND_SETS[tier].map(si=>STRAND_DEFS[si]).filter(Boolean);
               const coreRadius=1.5+tier*0.8;
+
 
               const activeStrands=strandDefs.map((def,renderIdx)=>{
                 const phaseBase=(renderIdx/strandDefs.length)*Math.PI*2+hubIdx*1.3;
@@ -6872,6 +8608,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 return {...def,pts,renderIdx};
               });
 
+
               // -- Leaves --------------------------------------------------------
               const LEAF_CHARS={
                 core:   {sizeBase:27,sizeVar:4.5,colorDark:'#14532d',colorLight:'#15803d',aspectW:0.32,bud:false},
@@ -6881,10 +8618,12 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               const leafTierScale=0.7+5*0.18; // fixed T5
               const leafSpacing=Math.max(24,76-5*8); // fixed T5
 
+
               // Seeded PRNG — deterministic per hub, different for each group
               const hubSeed=hub.id.split('').reduce((a,c)=>((a<<5)-a+c.charCodeAt(0))|0,0);
               let rngState=Math.abs(hubSeed)||1;
               const seededRng=()=>{ rngState=(rngState*1664525+1013904223)&0xffffffff; return (rngState>>>0)/0xffffffff; };
+
 
               const allLeaves=[];
               activeStrands.forEach(({pts,role,renderIdx})=>{
@@ -6934,6 +8673,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 });
               });
 
+
               return (
                 <g key={hub.id} style={{pointerEvents:'none'}}>
                   <defs>
@@ -6947,15 +8687,29 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     </filter>
                   </defs>
 
+
                   {/* Blob — circles at each arch point, sized to match blob radius at node, thinning at sag */}
                   <g filter={`url(#${filterId})`}>
                     {blobPts.filter((_,i)=>i%2===0).map((p,pi)=>(
-                      <circle key={pi} cx={p.x} cy={p.y} r={16} fill="white"/>
+                      <circle key={pi} cx={p.x} cy={p.y} r={16} fill={blobCol}/>
                     ))}
                     {blobHull.map((A,i)=>(
-                      <circle key={'n'+i} cx={A.x} cy={A.y} r={A.r*1.1} fill="white"/>
+                      <circle key={'n'+i} cx={A.x} cy={A.y} r={A.r*1.1} fill={blobCol}/>
                     ))}
+                    {/* Interior fill: circles between each hull node and centroid */}
+                    {blobHull.map((A,i)=>{
+                      const steps=4;
+                      return Array.from({length:steps},(_,s)=>{
+                        const t=(s+1)/(steps+1);
+                        return <circle key={'f'+i+'_'+s}
+                          cx={A.x+(bCen.x-A.x)*t} cy={A.y+(bCen.y-A.y)*t}
+                          r={Math.max(A.r*0.7, 20)} fill={blobCol}/>;
+                      });
+                    })}
+                    {/* Centroid fill circle */}
+                    <circle cx={bCen.x} cy={bCen.y} r={30} fill={blobCol}/>
                   </g>
+
 
                   {/* Vine strands */}
                   {activeStrands.map(({pts,width,colorDark,colorLight,role},si)=>{
@@ -6965,6 +8719,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       strokeLinecap="round" strokeLinejoin="round"
                       opacity={role==='core'?0.95:role==='growing'?0.75:0.85}/>;
                   })}
+
 
                   {/* Leaves — rendered to offscreen canvas then inserted as single <image> element */}
                   {(()=>{
@@ -6977,6 +8732,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       ? allLeaves.filter((_,i)=>i%2===0)  // 50% at medium zoom
                       : allLeaves;                          // 100% when zoomed in
 
+
                     // Bounding box for canvas
                     const pad=60;
                     const lx1=Math.min(...visibleLeaves.map(l=>l.x))-pad;
@@ -6986,16 +8742,19 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     const cw=Math.ceil(lx2-lx1), ch=Math.ceil(ly2-ly1);
                     if(cw<1||ch<1) return null;
 
+
                     // Draw all leaves to offscreen canvas
                     const cvs=document.createElement('canvas');
                     cvs.width=cw; cvs.height=ch;
                     const ctx=cvs.getContext('2d');
+
 
                     visibleLeaves.forEach(lf=>{
                       ctx.save();
                       ctx.translate(lf.x-lx1, lf.y-ly1);
                       ctx.rotate(lf.angle*Math.PI/180);
                       ctx.globalAlpha=lf.opacity;
+
 
                       // Draw leaf shape
                       ctx.beginPath();
@@ -7015,6 +8774,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       ctx.lineWidth=0.5;
                       ctx.stroke();
 
+
                       // Midrib
                       if(!lf.bud){
                         ctx.beginPath();
@@ -7027,6 +8787,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       }
                       ctx.restore();
                     });
+
 
                     return (
                       <image
@@ -7045,6 +8806,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               const dm = theme.darkMode;
               const strokeCol = dm ? 'rgba(16,185,129,0.35)' : 'rgba(16,185,129,0.3)';
               const heldCol   = dm ? 'rgba(16,185,129,0.15)' : 'rgba(16,185,129,0.12)';
+
 
               if (gridStyle === 'square') {
                 // Square grid
@@ -7067,6 +8829,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   </g>
                 );
               }
+
 
               const hexes = [
                 { ...hexSnapPos, held: true },
@@ -7097,6 +8860,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   stroke={theme.darkMode ? "rgba(0,0,0,0.4)" : "rgba(0,0,0,0.12)"}
                   strokeWidth="140" strokeLinecap="round" />
 
+
                 {(calendarStrandSegments || []).map((seg, mi) => {
                   const { tStart, tEnd, strands } = seg;
                   const todayT = calendarTodayT;
@@ -7109,21 +8873,26 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   const BROWN_MID   = '#7c3500';
                   const BROWN_AMB   = '#c47a1e';
 
+
                   return (strands || []).map((strand, si) => {
                     if (!strand || !strand.pts || strand.pts.length < 2) return null;
                     const pts = strand.pts;
+
 
                     // Split pts into grown (t <= todayT) and ungrown (t >= todayT)
                     const grownPts   = pts.filter(p => p.t <= todayT + 0.001);
                     const ungrownPts = pts.filter(p => p.t >= todayT - 0.001);
 
+
                     const toD = (arr) => arr.length > 1
                       ? `M ${arr.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' L ')}`
                       : '';
 
+
                     const dGrown   = toD(grownPts);
                     const dUngrown = toD(ungrownPts);
                     const baseGreen = theme.darkMode ? GREEN_DARK[si] : GREEN_LIGHT[si];
+
 
                     return (
                       <g key={`seg-${mi}-${si}`}>
@@ -7150,6 +8919,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     );
                   });
                 })}
+
 
                 {/* Leaves along vine up to today */}
                 {(calendarLeaves || []).map((leaf, i) => {
@@ -7184,6 +8954,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   );
                 })}
 
+
                 {/* Flower month markers — same rounded petal style as map page flowers */}
                 {(calendarMonthMarkers || []).map((m, mi) => {
                   const PETALS = 6;
@@ -7193,6 +8964,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   const petalL  = flowerR * 0.72;
                   const petalW  = petalL  * 0.68;
                   const centreR = flowerR * 0.44;
+
 
                   const buildPetals = (scale = 1) => Array.from({length: PETALS}, (_, pi) => {
                     const pa = (pi / PETALS) * Math.PI * 2;
@@ -7209,6 +8981,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     const cp4y = Math.sin(pa)*L*0.35 - Math.sin(perpA)*W*0.6;
                     return `M 0,0 C ${cp1x},${cp1y} ${cp2x},${cp2y} ${tx},${ty} C ${cp3x},${cp3y} ${cp4x},${cp4y} 0,0`;
                   }).join(' ');
+
 
                   return (
                     <g key={`month-${mi}`} transform={`translate(${m.x}, ${m.y})`}>
@@ -7239,10 +9012,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               </g>
             )}
 
+
             {viewMode === 'canvas' && (
               <g>
                 {/* -- Surrounding flowers — background layer, pointerEvents none -- */}
-                {surroundFlowerSettings.showSurround && activeRenderNodes.filter(n=>n.type==='friend'||(!n.type&&n.id!=='me')).map(node=>{
+                {!simpleMode && surroundFlowerSettings.showSurround && activeRenderNodes.filter(n=>n.type==='friend'||(!n.type&&n.id!=='me')).map(node=>{
                   // Find this node's hub — prefer its own hidden hub if it has one
                   const ownHiddenHub = nodes.find(n => n.id === 'hidden_hub_' + node.id && n.hidden);
                   const nodeHubId = ownHiddenHub ? ownHiddenHub.id : (links.find(l=>l.source===node.id||l.target===node.id)
@@ -7252,11 +9026,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   const mode = hubNode?.groupMiniFlowerMode || 'blend';
                   const groupMiniFlower = hubNode?.groupMiniFlower;
 
+
                   // Determine which flower to use based on mode
                   let pf = null;
                   if (mode === 'shared') pf = groupMiniFlower || null;
                   else if (mode === 'blend') pf = node.miniFlower || node.partnerFlower || groupMiniFlower || null;
                   else if (mode === 'personal') pf = node.miniFlower || node.partnerFlower || null;
+
 
                   if (!pf) return null;
                   if (node.showBorderFlowers === false) return null;
@@ -7277,11 +9053,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   const flowerColor=degraded?'#ca8a04':(pf.petalColor||'#f59e0b');
                   const flowerOpacity=degraded?0.6:0.85;
 
+
                   // Find which hub this person belongs to
                   const hubId = nodeHubId;
                   // Don't use border points from a minimised group (they're stale,
                   // pointing at collapsed members) — fall back to node-centred flowers.
                   const borderPts = (hubId && !collapseInfo.hidden.has(hubId)) ? borderFlowerPositionsRef.current[hubId] : null;
+
 
                   return (
                     <g key={'sf-'+node.id} style={{pointerEvents:'none'}}>
@@ -7300,13 +9078,16 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           return `M 0,0 C ${Math.cos(pa)*fpr*_bL+Math.cos(pp)*fpw*0.6},${Math.sin(pa)*fpr*_bL+Math.sin(pp)*fpw*0.6} ${Math.cos(pa)*fpr*_tL+Math.cos(pp)*fpw*0.5},${Math.sin(pa)*fpr*_tL+Math.sin(pp)*fpw*0.5} ${tx},${ty} C ${Math.cos(pa)*fpr*_tL-Math.cos(pp)*fpw*0.5},${Math.sin(pa)*fpr*_tL-Math.sin(pp)*fpw*0.5} ${Math.cos(pa)*fpr*_bL-Math.cos(pp)*fpw*0.6},${Math.sin(pa)*fpr*_bL-Math.sin(pp)*fpw*0.6} 0,0`;
                         }).join(' ');
 
+
                         // Seeded random for border placement — consistent per node+flower
                         let rngB = Math.abs(node.id.split('').reduce((a,c)=>((a<<5)-a+c.charCodeAt(0))|0, fi*31+7)) || 1;
                         const seededRngBorder = () => { rngB=(rngB*1664525+1013904223)&0xffffffff; return (rngB>>>0)/0xffffffff; };
 
+
                         // Only border flowers render in the background layer
                         // Orbit flowers are rendered inside the node group (after photo) for overlap
                         const positions = [];
+
 
                         // 1. Orbit around photo node edge — biased toward the OUTER
                         // side (away from the group centre) so the main person keeps
@@ -7340,10 +9121,12 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           });
                         }
 
+
                         // Follow the vine border closely — mostly inside, ~10% just outside
                         if (borderPts && borderPts.length > 0) {
                           const ptIdx = Math.floor(((fi / count) + (node.id.length * 0.07 % 1)) * borderPts.length) % borderPts.length;
                           const bp = borderPts[ptIdx];
+
 
                           // Skip border-hugging flower if closer to a neighbour
                           const distToOwner = (bp.x - node.renderX)**2 + (bp.y - node.renderY)**2;
@@ -7363,6 +9146,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                               y: bp.y + bp.inY * insetDist,
                             });
 
+
                             // Always add inward spread flower toward other members
                             const blend = 0.45 + sv * 0.1;
                             const bx = bp.x + bp.inX * 4;
@@ -7373,6 +9157,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                             });
                           }
                         }
+
 
                         return positions.map((pos, pi) => (
                           <g key={fi+'-'+pi} transform={`translate(${pos.x},${pos.y})`} opacity={flowerOpacity}>
@@ -7396,7 +9181,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   );
                 })}
                 {/* -- Hub stakes — drawn BEFORE links so vines appear in front -- */}
-                {activeRenderNodes.filter(n=>n.type==='hub'&&!n.hidden).map(node=>{
+                {!simpleMode && activeRenderNodes.filter(n=>n.type==='hub'&&!n.hidden).map(node=>{
                   const scaleRatio = node.radius ? node.radius / 40 : 1;
                   return (
                     <g key={'stake-'+node.id} transform={`translate(${node.renderX}, ${node.renderY}) scale(${scaleRatio})`} style={{pointerEvents:'none'}}>
@@ -7414,13 +9199,16 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               </g>
             )}
 
-            {viewMode === 'canvas' && !sliderDragging && (
+
+            {viewMode === 'canvas' && !sliderDragging && !simpleMode && (
               <g className="foliage-layer">{linkParts.map(p => p && p.foliage)}</g>
             )}
 
 
+
+
             {/* Fallen leaves — persist until raked */}
-            {fallenLeaves.length > 0 && (
+            {!simpleMode && fallenLeaves.length > 0 && (
               <g className="fallen-leaves-layer" style={{pointerEvents:'none'}}>
                 {fallenLeaves.map((fl, idx) => {
                   const leafD = `M 0,0 C ${fl.lw*0.25},${-fl.lh} ${fl.lw*0.75},${-fl.lh} ${fl.lw},0 C ${fl.lw*0.75},${fl.lh} ${fl.lw*0.25},${fl.lh} 0,0 Z`;
@@ -7440,12 +9228,327 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               </g>
             )}
 
+
             <g className="nodes-layer">
-              {activeRenderNodes.flatMap(node => {
+              {/* Mole node -- Diglett-style hill with 3 states: empty / emerging / smiling */}
+              {viewMode === 'canvas' && !simpleMode && (()=>{
+                const mx = molePos.x, my = molePos.y;
+                const isLifted = liftedNodeId === 'mole' || liftedIdRef.current === 'mole';
+                const R = 38; // node radius for label/flower placement, matches old design's footprint
+                const SCALE = R / 38; // svg art is authored at ~38 radius already, keep 1:1
+                const showSmiling = moleOut && moleBubbleStage === 'full';
+                const showEmerging = moleOut && moleBubbleStage !== 'full';
+                // Derive state string for the character renderer
+                const charState = !moleOut ? 'empty' : showSmiling ? 'talking' : 'idle';
+
+                // Per-character SVG content (empty/idle/talking states).
+                // All characters are authored in a 0..100 viewBox centred on (50,50).
+                // The hill/mound is always rendered. Bodies are clipped to the hole opening.
+                const renderCharacterContent = () => {
+                  const bobStyle = { animation:'moleBob 2.2s ease-in-out infinite' };
+                  const clipId = `moleClip_${assistantCharacter}`;
+                  const clipId2 = `moleClip2_${assistantCharacter}`;
+
+                  // Shared hill paths per character
+                  const HILL = {
+                    single: <path d='M 16,74 Q 22,54 36,54 Q 50,48 64,54 Q 78,54 84,74 Q 50,82 16,74 Z' fill='#795333' stroke='#3D2513' strokeWidth='1.5' strokeLinejoin='round'/>,
+                    trio:   <path d='M 12,76 Q 20,50 35,50 Q 50,44 65,50 Q 80,50 88,76 Q 50,84 12,76 Z' fill='#795333' stroke='#3D2513' strokeWidth='1.5' strokeLinejoin='round'/>,
+                    crack:  <path d='M 50,54 L 46,62 L 53,69' fill='none' stroke='#3D2513' strokeWidth='1.5' strokeLinecap='round'/>,
+                  };
+
+                  if (assistantCharacter === 'diglett') {
+                    return (<>
+                      {charState === 'empty' && (<g>
+                        {HILL.single}
+                        <ellipse cx='50' cy='56' rx='14' ry='5' fill='#4A2E1B'/>
+                      </g>)}
+                      {charState !== 'empty' && (<g>
+                        <defs><clipPath id={clipId}><rect x='0' y='0' width='100' height='56'/></clipPath></defs>
+                        <g clipPath={`url(#${clipId})`} style={bobStyle}>
+                          <path d='M 38,68 L 38,30 A 12,12 0 0,1 62,30 L 62,68 Z' fill='#A06A42' stroke='#4A2E1B' strokeWidth='1.5'/>
+                          <g className='mole-blink'>
+                            {charState==='talking' ? (<>
+                              <path d='M 42,33 Q 45,29 48,33' fill='none' stroke='#222' strokeWidth='1.75' strokeLinecap='round'/>
+                              <path d='M 52,33 Q 55,29 58,33' fill='none' stroke='#222' strokeWidth='1.75' strokeLinecap='round'/>
+                            </>) : (<>
+                              <circle cx='45' cy='34' r='2' fill='#222'/>
+                              <circle cx='55' cy='34' r='2' fill='#222'/>
+                            </>)}
+                          </g>
+                          <ellipse cx='50' cy='41' rx='4.5' ry='3' fill='#E28492' stroke='#4A2E1B' strokeWidth='1'/>
+                        </g>
+                        <g>{HILL.single}{HILL.crack}</g>
+                      </g>)}
+                    </>);
+                  }
+
+                  if (assistantCharacter === 'dugtrio') {
+                    return (<>
+                      {charState === 'empty' && (<g>
+                        {HILL.trio}
+                        <ellipse cx='50' cy='54' rx='10' ry='4' fill='#4A2E1B'/>
+                        <ellipse cx='34' cy='60' rx='9' ry='3' fill='#4A2E1B'/>
+                        <ellipse cx='66' cy='62' rx='9' ry='3' fill='#4A2E1B'/>
+                      </g>)}
+                      {charState !== 'empty' && (<g >
+                        <defs><clipPath id={clipId}><rect x='0' y='0' width='100' height='56'/></clipPath></defs>
+                        {/* Centre (back) mole -- rendered FIRST so it sits behind left and right */}
+                        <g clipPath={`url(#${clipId})`}>
+                          <g style={bobStyle}>
+                          <g transform={charState==='talking'?'translate(0,-6)':'translate(0,4)'}>
+                            <path d='M 38,94 L 38,18 A 12,12 0 0,1 62,18 L 62,94 Z' fill='#A06A42' stroke='#4A2E1B' strokeWidth='1.5'/>
+                            <g className='mole-blink'>
+                              {charState==='talking' ? (<>
+                                <path d='M 43,16 Q 45,13 47,16' fill='none' stroke='#222' strokeWidth='1.5' strokeLinecap='round'/>
+                                <path d='M 53,16 Q 55,13 57,16' fill='none' stroke='#222' strokeWidth='1.5' strokeLinecap='round'/>
+                              </>) : (<>
+                                <circle cx='45' cy='17' r='1.75' fill='#222'/><circle cx='55' cy='17' r='1.75' fill='#222'/>
+                              </>)}
+                            </g>
+                            <ellipse cx='50' cy='23' rx='4' ry='2.5' fill='#E28492' stroke='#4A2E1B'/>
+                          </g>
+                          </g>
+                        </g>
+                        {/* Left mole */}
+                        <g clipPath={`url(#${clipId})`}>
+                          <g style={bobStyle}>
+                          <g transform={charState==='talking'?'translate(0,-6)':'translate(0,0)'}>
+                            <path d='M 22,76 L 22,34 A 11,11 0 0,1 44,34 L 44,76 Z' fill='#A06A42' stroke='#4A2E1B' strokeWidth='1.5'/>
+                            <g className='mole-blink'>
+                              <circle cx='29' cy='32' r='1.75' fill='#222'/><circle cx='37' cy='32' r='1.75' fill='#222'/>
+                            </g>
+                            <ellipse cx='33' cy='39' rx='3.5' ry='2.2' fill='#E28492' stroke='#4A2E1B'/>
+                          </g>
+                          </g>
+                        </g>
+                        {/* Right mole */}
+                        <g clipPath={`url(#${clipId})`}>
+                          <g style={bobStyle}>
+                          <g transform={charState==='talking'?'translate(0,-8)':'translate(0,0)'}>
+                            <path d='M 56,80 L 56,38 A 11,11 0 0,1 78,38 L 78,80 Z' fill='#A06A42' stroke='#4A2E1B' strokeWidth='1.5'/>
+                            <g className='mole-blink'>
+                              <circle cx='63' cy='36' r='1.75' fill='#222'/><circle cx='71' cy='36' r='1.75' fill='#222'/>
+                            </g>
+                            <ellipse cx='67' cy='43' rx='3.5' ry='2.2' fill='#E28492' stroke='#4A2E1B'/>
+                          </g>
+                          </g>
+                        </g>
+                        {HILL.trio}
+                      </g>)}
+                    </>);
+                  }
+
+                  if (assistantCharacter === 'galarian-diglett') {
+                    return (<>
+                      {charState === 'empty' && (<g>
+                        {HILL.single}
+                        <ellipse cx='50' cy='56' rx='14' ry='5' fill='#4A2E1B'/>
+                      </g>)}
+                      {charState !== 'empty' && (<g>
+                        <defs><clipPath id={clipId}><rect x='0' y='0' width='100' height='56'/></clipPath></defs>
+                        <g clipPath={`url(#${clipId})`} style={bobStyle}>
+                          {/* Galarian 3-sprout hair */}
+                          <path d='M 48,20 Q 42,8 45,2 Q 49,6 50,16 Q 52,4 55,3 Q 54,10 52,18 Q 58,10 61,12 Q 55,17 52,20' fill='#ECE5C1' stroke='#4A2E1B' strokeWidth='1'/>
+                          <path d='M 38,68 L 38,30 A 12,12 0 0,1 62,30 L 62,68 Z' fill='#A06A42' stroke='#4A2E1B' strokeWidth='1.5'/>
+                          <g className='mole-blink'>
+                            {charState==='talking' ? (<>
+                              <path d='M 42,33 Q 45,29 48,33' fill='none' stroke='#222' strokeWidth='1.75' strokeLinecap='round'/>
+                              <path d='M 52,33 Q 55,29 58,33' fill='none' stroke='#222' strokeWidth='1.75' strokeLinecap='round'/>
+                            </>) : (<>
+                              <circle cx='45' cy='34' r='2' fill='#222'/>
+                              <circle cx='55' cy='34' r='2' fill='#222'/>
+                            </>)}
+                          </g>
+                          <ellipse cx='50' cy='41' rx='4.5' ry='3' fill='#E28492' stroke='#4A2E1B' strokeWidth='1'/>
+                        </g>
+                        <g>{HILL.single}{HILL.crack}</g>
+                      </g>)}
+                    </>);
+                  }
+
+                  if (assistantCharacter === 'galarian-dugtrio') {
+                    return (<>
+                      {charState === 'empty' && (<g>
+                        {HILL.trio}
+                        <ellipse cx='50' cy='54' rx='10' ry='4' fill='#4A2E1B'/>
+                        <ellipse cx='34' cy='60' rx='9' ry='3' fill='#4A2E1B'/>
+                        <ellipse cx='66' cy='62' rx='9' ry='3' fill='#4A2E1B'/>
+                      </g>)}
+                      {charState !== 'empty' && (<g >
+                        <defs><clipPath id={clipId}><rect x='0' y='0' width='100' height='56'/></clipPath></defs>
+                        {/* Centre mole — long straight hair, rendered FIRST so it sits behind left and right */}
+                        <g clipPath={`url(#${clipId})`}>
+                          <g style={bobStyle}>
+                          <g transform={charState==='talking'?'translate(0,-6)':'translate(0,4)'}>
+                            <path d='M 36,10 Q 50,-2 64,10 Q 72,26 76,40 L 62,44 L 38,44 Q 30,24 36,10 Z' fill='#EFE6A5' stroke='#4A2E1B' strokeWidth='1'/>
+                            <path d='M 38,80 L 38,18 A 12,12 0 0,1 62,18 L 62,80 Z' fill='#A06A42' stroke='#4A2E1B' strokeWidth='1.5'/>
+                            <path d='M 38,16 Q 50,6 62,16 L 60,10 Q 50,2 40,10 Z' fill='#EFE6A5' stroke='#4A2E1B' strokeWidth='1'/>
+                            <g style={{animation:`moleBlink 4s ${dugtrioBlinks[0]} infinite ease-in-out`}}>
+                              {charState==='talking' ? (<>
+                                <path d='M 43,16 Q 45,13 47,16' fill='none' stroke='#222' strokeWidth='1.5' strokeLinecap='round'/>
+                                <path d='M 53,16 Q 55,13 57,16' fill='none' stroke='#222' strokeWidth='1.5' strokeLinecap='round'/>
+                              </>) : (<>
+                                <circle cx='45' cy='17' r='1.75' fill='#222'/><circle cx='55' cy='17' r='1.75' fill='#222'/>
+                              </>)}
+                            </g>
+                            <ellipse cx='50' cy='23' rx='4' ry='2.5' fill='#E28492' stroke='#4A2E1B'/>
+                          </g>
+                          </g>
+                        </g>
+                        {/* Left mole — wavy hair */}
+                        <g clipPath={`url(#${clipId})`}>
+                          <g style={bobStyle}>
+                          <g transform={charState==='talking'?'translate(0,-6)':'translate(0,0)'}>
+                            <path d='M 16,34 Q 12,24 22,22 Q 32,14 44,24 Q 48,34 42,44 Q 30,42 24,44 Q 16,40 16,34 Z' fill='#EFE6A5' stroke='#4A2E1B' strokeWidth='1'/>
+                            <path d='M 22,76 L 22,34 A 11,11 0 0,1 44,34 L 44,76 Z' fill='#A06A42' stroke='#4A2E1B' strokeWidth='1.5'/>
+                            <g style={{animation:`moleBlink 4s ${dugtrioBlinks[1]} infinite ease-in-out`}}>
+                              <circle cx='29' cy='32' r='1.75' fill='#222'/><circle cx='37' cy='32' r='1.75' fill='#222'/>
+                            </g>
+                            <ellipse cx='33' cy='39' rx='3.5' ry='2.2' fill='#E28492' stroke='#4A2E1B'/>
+                          </g>
+                          </g>
+                        </g>
+                        {/* Right mole — bob cut */}
+                        <g clipPath={`url(#${clipId})`}>
+                          <g style={bobStyle}>
+                          <g transform={charState==='talking'?'translate(0,-8)':'translate(0,0)'}>
+                            <path d='M 56,80 L 56,38 A 11,11 0 0,1 78,38 L 78,80 Z' fill='#A06A42' stroke='#4A2E1B' strokeWidth='1.5'/>
+                            <path d='M 54,42 Q 52,38 54,36 Q 56,34 58,36 Q 58,40 56,42 Z' fill='#EFE6A5' stroke='#4A2E1B' strokeWidth='1'/>
+                            <path d='M 80,42 Q 82,38 80,36 Q 78,34 76,36 Q 76,40 78,42 Z' fill='#EFE6A5' stroke='#4A2E1B' strokeWidth='1'/>
+                            <g style={{animation:`moleBlink 4s ${dugtrioBlinks[2]} infinite ease-in-out`}}>
+                              <circle cx='63' cy='36' r='1.75' fill='#222'/><circle cx='71' cy='36' r='1.75' fill='#222'/>
+                            </g>
+                            <ellipse cx='67' cy='43' rx='3.5' ry='2.2' fill='#E28492' stroke='#4A2E1B'/>
+                          </g>
+                          </g>
+                        </g>
+                        {HILL.trio}
+                      </g>)}
+                    </>);
+                  }
+                  return null;
+                };
+                return (
+                  <g key='mole-node'
+                    transform={`translate(${mx},${my}) scale(${(isLifted?1.12:1)*SCALE})`}
+                    style={{cursor:'grab',transition:isLifted?'none':'transform 0.18s ease',opacity:isLifted?0.85:1}}
+                    onPointerDown={e => handlePointerDown(e, 'mole')}>
+
+                    {/* Oval vine border around the hill base. Drawn as two half-ellipses so the
+                        far side tucks behind the hill and the near side sits in front of it,
+                        the same illusion used for group photo borders. Leaves dotted along
+                        the border at level 4 density (out of 5), using the same pointed
+                        leaf-with-midrib shape as the main connection vines (not the simple
+                        oval leaves used on the minimised/group blob border). */}
+                    {(() => {
+                      const OVAL_RX = 38, OVAL_RY = 15, OVAL_CY = 16; // snug fit, nudged down slightly from original
+                      const MOLE_LEAF_LEVEL = 4; // 1 (sparse) .. 5 (dense)
+                      const leafFill = theme.darkMode ? '#15803d' : '#4ade80';
+                      const leafStroke = theme.darkMode ? '#0f2d1a' : '#14532d';
+                      const backHalf = `M ${-OVAL_RX},${OVAL_CY} A ${OVAL_RX},${OVAL_RY} 0 0,1 ${OVAL_RX},${OVAL_CY}`;
+                      const leafCount = MOLE_LEAF_LEVEL * 2;
+                      const lw = 19.5, lh = 7.8; // leaf length/width, 3x main-vine leaf proportions
+                      const leafD = `M 0,0 C ${lw*0.25},${-lh} ${lw*0.75},${-lh} ${lw},0 C ${lw*0.75},${lh} ${lw*0.25},${lh} 0,0 Z`;
+                      const midrib = `M ${lw*0.05},0 L ${lw*0.82},0`;
+                      const leaves = Array.from({length: leafCount}, (_, i) => {
+                        const t = Math.PI + (i / (leafCount - 1)) * Math.PI; // 180°..360° (back half)
+                        const px = Math.cos(t) * OVAL_RX, py = OVAL_CY + Math.sin(t) * OVAL_RY;
+                        const outwardDeg = (t * 180 / Math.PI) + 90 + (i % 2 === 0 ? -18 : 18);
+                        return { px, py, rot: outwardDeg, key: `back-${i}` };
+                      });
+                      return (
+                        <g style={{pointerEvents:'none'}}>
+                          <path d={backHalf} fill='none' stroke='#16a34a' strokeWidth='4' strokeLinecap='round' opacity='0.85'/>
+                          <path d={backHalf} fill='none' stroke='#4ade80' strokeWidth='1.5' strokeLinecap='round' opacity='0.6'/>
+                          {leaves.map(lf => (
+                            <g key={lf.key} transform={`translate(${lf.px},${lf.py}) rotate(${lf.rot})`} opacity={0.88}>
+                              <path d={leafD} fill={leafFill} stroke={leafStroke} strokeWidth={0.5}/>
+                              <path d={midrib} fill="none" stroke={leafStroke} strokeWidth={0.35} opacity={0.5}/>
+                            </g>
+                          ))}
+                        </g>
+                      );
+                    })()}
+
+                    {/* Art is authored in a 0..100 box centred on (50,50) with radius ~38 -- recentre to (0,0).
+                        Rumble animates an INNER group so it doesn't fight with this static translate
+                        (animating 'transform' on an element that also has a static transform attribute
+                        replaces it entirely for the animation's duration, which was making the whole
+                        hill jump to the wrong place and snap back). */}
+                    <g transform='translate(-50,-50)'>
+                    <g style={{animation:moleRumble?'moleRumble 0.8s ease-in-out':'none'}}>
+                      {renderCharacterContent()}
+                    </g>
+                    </g>
+
+                    {/* Front half of the oval vine border -- on top of the hill, with its own leaves */}
+                    {(() => {
+                      const OVAL_RX = 38, OVAL_RY = 15, OVAL_CY = 16;
+                      const MOLE_LEAF_LEVEL = 4;
+                      const leafFill = theme.darkMode ? '#15803d' : '#4ade80';
+                      const leafStroke = theme.darkMode ? '#0f2d1a' : '#14532d';
+                      const frontHalf = `M ${-OVAL_RX},${OVAL_CY} A ${OVAL_RX},${OVAL_RY} 0 0,0 ${OVAL_RX},${OVAL_CY}`;
+                      const leafCount = MOLE_LEAF_LEVEL * 2;
+                      const lw = 19.5, lh = 7.8;
+                      const leafD = `M 0,0 C ${lw*0.25},${-lh} ${lw*0.75},${-lh} ${lw},0 C ${lw*0.75},${lh} ${lw*0.25},${lh} 0,0 Z`;
+                      const midrib = `M ${lw*0.05},0 L ${lw*0.82},0`;
+                      const leaves = Array.from({length: leafCount}, (_, i) => {
+                        const t = (i / (leafCount - 1)) * Math.PI; // 0°..180° (front half)
+                        const px = Math.cos(t) * OVAL_RX, py = OVAL_CY + Math.sin(t) * OVAL_RY;
+                        const outwardDeg = (t * 180 / Math.PI) - 90 + (i % 2 === 0 ? -18 : 18);
+                        return { px, py, rot: outwardDeg, key: `front-${i}` };
+                      });
+                      return (
+                        <g style={{pointerEvents:'none'}}>
+                          <path d={frontHalf} fill='none' stroke='#16a34a' strokeWidth='4' strokeLinecap='round' opacity='0.85'/>
+                          <path d={frontHalf} fill='none' stroke='#4ade80' strokeWidth='1.5' strokeLinecap='round' opacity='0.6'/>
+                          {leaves.map(lf => (
+                            <g key={lf.key} transform={`translate(${lf.px},${lf.py}) rotate(${lf.rot})`} opacity={0.88}>
+                              <path d={leafD} fill={leafFill} stroke={leafStroke} strokeWidth={0.5}/>
+                              <path d={midrib} fill="none" stroke={leafStroke} strokeWidth={0.35} opacity={0.5}/>
+                            </g>
+                          ))}
+                        </g>
+                      );
+                    })()}
+
+                    {/* Just 1-2 small flowers by the hill base, ~40% of a normal mini-flower size */}
+                    {[{x:-28,y:18,r:6,pc:'#f472b6',cc:'#fde68a'},{x:27,y:20,r:5.5,pc:'#a3e635',cc:'#fde68a'},
+                    ].map((fl,fi)=>{
+                      return (<g key={fi} transform={`translate(${fl.x},${fl.y})`}>
+                        {Array.from({length:5},(_,pi)=>{
+                          const pa=(pi/5)*Math.PI*2, pr=fl.r, hw=pr*0.38, ppa=pa+Math.PI/2;
+                          return <path key={pi} fill={fl.pc} opacity='0.9'
+                            d={`M0,0 C${Math.cos(pa)*pr*0.3+Math.cos(ppa)*hw},${Math.sin(pa)*pr*0.3+Math.sin(ppa)*hw} ${Math.cos(pa)*pr*0.8+Math.cos(ppa)*hw*0.8},${Math.sin(pa)*pr*0.8+Math.sin(ppa)*hw*0.8} ${Math.cos(pa)*pr},${Math.sin(pa)*pr} C${Math.cos(pa)*pr*0.8-Math.cos(ppa)*hw*0.8},${Math.sin(pa)*pr*0.8-Math.sin(ppa)*hw*0.8} ${Math.cos(pa)*pr*0.3-Math.cos(ppa)*hw},${Math.sin(pa)*pr*0.3-Math.sin(ppa)*hw} 0,0Z`}/>;
+                        })}
+                        <circle r={fl.r*0.38} fill={fl.cc}/>
+                      </g>);
+                    })}
+
+                    <text y={R+16} textAnchor='middle' fontSize='11' fill={theme.darkMode?'#94a3b8':'#9ca3af'}
+                      fontWeight='600' style={{pointerEvents:'none',userSelect:'none'}}>Mole</text>
+
+                    {/* '!' notification -- shown while he's idle in the hill with something to share.
+                        Sits top-right of the hill. Tapping it (or the hill) summons him fully. */}
+                    {!moleOut && moleHasNews && (
+                      <g transform='translate(26,-12)' style={{cursor:'pointer',animation:'molePop 0.35s cubic-bezier(0.34,1.56,0.64,1) forwards'}}
+                        onPointerDown={e=>{ e.stopPropagation(); openMole(); }}>
+                        <circle r='13' fill='#1e293b' stroke='#3b82f6' strokeWidth='2'/>
+                        <text y='5' textAnchor='middle' fontSize='16' fontWeight='800' fill='#3b82f6'
+                          style={{pointerEvents:'none',userSelect:'none'}}>!</text>
+                      </g>
+                    )}
+                  </g>
+                );
+              })()}
+
+              {!simpleMode && activeRenderNodes.filter(n => n.type !== 'mole').flatMap(node => {
+
                 const isLifted = liftedNodeId === node.id && viewMode === 'canvas';
                 const scaleRatio = node.radius / 45;
                 const plateWidth = Math.max(100, node.radius * 2.2);
                 const baseScale = viewMode === 'calendar' ? CALENDAR_NODE_SCALE : 1;
+
 
                 // Hide members of collapsed groups
                 if (viewMode === 'canvas' && node.type !== 'hub' && node.type !== 'flower' && node.id !== 'me') {
@@ -7460,6 +9563,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 if (node.type === 'flower' && viewMode === 'calendar') return [];
                 // Hidden hub nodes are never rendered on the map
                 if (node.type === 'hub' && node.hidden) return [];
+
 
                 if (viewMode !== 'canvas' || node.type === 'hub' || node.type === 'flower' || node.id === 'me') {
                   // Hub / Me / flower / calendar: render once normally
@@ -7616,6 +9720,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           {isSelected && <rect x="-60" y="-80" width="120" height="100" fill="none" stroke="#10B981" strokeWidth="2" strokeDasharray="4 4" rx="8" />}
                           {isHoverTarget && <rect x="-65" y="-85" width="130" height="110" fill="none" stroke="#3B82F6" strokeWidth="4" strokeDasharray="8 4" rx="10" />}
 
+
                           {/* -- SIGN — on top -- */}
                           <rect x="-55" y="-50" width="110" height="32" fill="#A0522D" rx="4" />
                           <rect x="-55" y="-50" width="110" height="32" fill="none" stroke="#5C3A21" strokeWidth="2" rx="4" />
@@ -7627,6 +9732,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           <text y="-28" textAnchor="middle" fontSize="13" fontWeight="bold" fill="white">
                             {node.label.length > 12 ? node.label.substring(0, 11) + '...' : node.label}
                           </text>
+
 
                           {/* Collapsed badge */}
                           {collapsedGroups.includes(node.id) && (() => {
@@ -7641,6 +9747,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         <g>
                           {isSelected && !isHoverTarget && !isLifted && <circle r={node.radius + 6} fill="none" stroke="#10B981" strokeWidth="3" />}
                           {isHoverTarget && <circle r={node.radius + 10} fill="none" stroke="#3B82F6" strokeWidth="6" strokeDasharray="6 4" />}
+
 
                           {/* Me flower — behind image */}
                           {node.id === 'me' && node.partnerFlower && (() => {
@@ -7686,6 +9793,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                             );
                           })()}
 
+
                           <circle r={node.radius} fill={theme.darkMode ? "#1e293b" : "white"} stroke={viewMode === 'calendar' ? node.monthColor : "none"} strokeWidth={viewMode === 'calendar' ? 8 : 0} />
                           <clipPath id={`clip-${node.id}`}><circle r={node.radius - (viewMode === 'calendar' ? 8 : 4)} /></clipPath>
                           <image href={node.img} x={-node.radius} y={-node.radius} width={node.radius * 2} height={node.radius * 2} clipPath={`url(#clip-${node.id})`} preserveAspectRatio="xMidYMid slice" />
@@ -7697,6 +9805,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           {photoBorderMode !== 'none' && node.type !== 'hub' && node.type !== 'flower' && node.id !== 'me' && getPhotoBorderColor(node) && (
                             <circle r={node.radius + 3} fill="none" stroke={getPhotoBorderColor(node)} strokeWidth="4" opacity="0.95"/>
                           )}
+
 
                           {/* Diary + button — bottom-left of Me photo */}
                           {node.id === 'me' && viewMode === 'canvas' && (
@@ -7710,6 +9819,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                 style={{userSelect:'none', pointerEvents:'none'}}>+</text>
                             </g>
                           )}
+
 
                           {viewMode === 'canvas' && (
                             <>
@@ -7789,9 +9899,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   )];
                 }
 
+
                 // -- Canvas person node: render one copy per group membership --
                 const gv = node.groupVisibility || {};
                 const groupEntries = Object.entries(gv).filter(([, vis]) => vis >= 2); // vis 2=small, 3=full
+
 
                 if (groupEntries.length === 0) {
                   // No group memberships set — render once at own position (unaffiliated)
@@ -7809,6 +9921,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     >
                       {isSelected && !isHoverTarget && !isLifted && <circle r={r + 6} fill="none" stroke="#10B981" strokeWidth="3" />}
                       {isHoverTarget && <circle r={r + 10} fill="none" stroke="#3B82F6" strokeWidth="6" strokeDasharray="6 4" />}
+
 
                       {/* Partner flower — drawn BEFORE image so it's behind the photo */}
                       {/* Flower — personal or group override */}
@@ -7858,11 +9971,14 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         );
                       })()}
 
+
                       <circle r={r} fill={theme.darkMode ? "#1e293b" : "white"} />
                       <clipPath id={`clip-${node.id}`}><circle r={r - 4} /></clipPath>
                       <image href={node.img} x={-r} y={-r} width={r * 2} height={r * 2} clipPath={`url(#clip-${node.id})`} preserveAspectRatio="xMidYMid slice" />
 
+
                       {/* Mini orbit flowers now handled in background layer */}
+
 
                       {/* Centre border ring — drawn after image, on top */}
                       {node.isPartner && (
@@ -7872,13 +9988,26 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         <circle r={r + 3} fill="none" stroke={getPhotoBorderColor(node)} strokeWidth="4" opacity="0.95"/>
                       )}
 
-                      {/* SNAIL — high-urgency pest. Sits ON the photo border edge,
-                          angled to follow the curve. Brown swirl shell that pulses
-                          red slowly every 5 seconds. */}
+
+                      {/* SNAIL — high-urgency pest. Appears only for a SEVERE negative trend:
+                          the friendship has been actively declining over the last week AND
+                          has drifted down near the bottom of its current tier band — not just
+                          "low score" in general (a brand-new friend starting mid-tier with no
+                          history yet should never get a snail). Sits ON the photo border edge,
+                          angled to follow the curve. Brown swirl shell that pulses red slowly
+                          every 5 seconds. */}
                       {node.type !== 'hub' && node.id !== 'me' && (() => {
                         const sc = node.interactionScore || 0;
-                        if (sc >= 12) return null; // only very neglected friends
-                        const severe = sc < 5;
+                        const weeklyDelta = getWeeklyDelta(node);
+                        const [tierLo, tierHi] = getTierBounds(sc);
+                        const tierSpan = Math.max(1, tierHi - tierLo);
+                        const posInTier = (sc - tierLo) / tierSpan; // 0 = bottom of tier, 1 = top
+                        // Severe = dropped meaningfully this week AND sitting in the lower
+                        // third of the current tier band as a result.
+                        const droppingHard = weeklyDelta <= -30;
+                        const nearTierFloor = posInTier <= 0.33;
+                        if (!(droppingHard && nearTierFloor)) return null;
+                        const severe = weeklyDelta <= -60 || posInTier <= 0.12;
                         // position on the border ring at ~ -35° (upper right)
                         const a = -Math.PI * 0.2;
                         const sx = Math.cos(a) * (r + 1);
@@ -7911,7 +10040,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       })()}
                       {/* Tier picker in tierPickMode */}
                       {tierPickMode && (() => {
-                        const scored = node.interactionScore > 0 || node.isFamily || node.isPartner;
+                        const scored = node.tierPicked || node.isFamily || node.isPartner;
                         const tiers = [
                           {label:'Acquaint.',score:50,color:'#84cc16'},
                           {label:'Friendly',score:200,color:'#22c55e'},
@@ -7921,7 +10050,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           {label:'Family',score:1500,color:'#f59e0b'},
                         ];
                         if (scored) {
-                          // Already picked — show single pill with reset tap
+                          // Already picked — show single pill, tap to re-open the picker
                           const picked = tiers.reduce((best,t) => Math.abs(t.score-(node.interactionScore||0)) < Math.abs(best.score-(node.interactionScore||0)) ? t : best, tiers[0]);
                           const bw=r*1.4, bh=r*0.5;
                           return (
@@ -7929,13 +10058,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                               style={{cursor:'pointer',pointerEvents:'all'}}
                               onPointerDown={e=>{
                                 e.stopPropagation();
-                                setNodes(prev=>{
-                                  const updated = prev.map(n=>n.id===node.id?{...n,interactionScore:0,isFamily:false}:n);
-                                  // Check if all people are now scored — if so exit tier mode
-                                  const remaining = updated.filter(n=>n.type==='friend'&&!(n.interactionScore>0||n.isFamily||n.isPartner));
-                                  if (remaining.length===0) setTierPickMode(false);
-                                  return updated;
-                                });
+                                setNodes(prev=>prev.map(n=>n.id===node.id?{...n,tierPicked:false}:n));
                               }}>
                               <rect width={bw} height={bh} rx={4} fill={picked.color} opacity={0.95}/>
                               <text x={bw/2} y={bh*0.68} textAnchor="middle"
@@ -7958,9 +10081,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                     e.stopPropagation();
                                     setNodes(prev=>{
                                       const isFamily = t.score===1500;
-                                      const updated = prev.map(n=>n.id===node.id?{...n,interactionScore:isFamily?0:t.score,isFamily}:n);
-                                      // Auto-exit if all people are now scored
-                                      const remaining = updated.filter(n=>n.type==='friend'&&!(n.interactionScore>0||n.isFamily||n.isPartner));
+                                      const updated = prev.map(n=>n.id===node.id?{...n,interactionScore:isFamily?(n.interactionScore||STARTING_SCORE):t.score,isFamily,tierPicked:true}:n);
+                                      // Auto-exit if all people have been explicitly confirmed
+                                      const remaining = updated.filter(n=>n.type==='friend'&&!(n.tierPicked||n.isFamily||n.isPartner));
                                       if (remaining.length===0) setTierPickMode(false);
                                       return updated;
                                     });
@@ -7989,14 +10112,17 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   )];
                 }
 
+
                 // One copy per group
                 return groupEntries.map(([hubId, vis]) => {
                   const hub = nodes.find(n => n.id === hubId);
                   if (!hub) return null;
 
+
                   const isSmall = vis === 2;
                   const copyScale = isSmall ? 0.35 : 1;
                   const isSelected = selectedNodeId === node.id;
+
 
                   // Position this copy near the hub — offset slightly so multiple people don't stack
                   // Use a deterministic angle based on node+hub ids
@@ -8006,9 +10132,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   const rx = hub.x + Math.cos(angle) * dist;
                   const ry = hub.y + Math.sin(angle) * dist;
 
+
                   const r = node.radius;
                   const pw = Math.max(80, r * 2);
                   const copyKey = `${node.id}-copy-${hubId}`;
+
 
                   return (
                     <g key={copyKey}
@@ -8040,7 +10168,90 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   );
                 }).filter(Boolean);
               })}
+
+              {/* Simple mode: a plain mole icon instead of the decorative hill, using the
+                  exact same pointer handler so double-tap-to-summon / single-tap-to-reopen
+                  still work identically. */}
+              {viewMode === 'canvas' && simpleMode && (
+                <g transform={`translate(${molePos.x},${molePos.y})`}
+                  style={{cursor:'grab'}}
+                  onPointerDown={e => handlePointerDown(e, 'mole')}>
+                  <circle r={24} fill={theme.darkMode ? '#1e293b' : '#e2e8f0'}
+                    stroke={theme.darkMode ? '#475569' : '#94a3b8'} strokeWidth={2}/>
+                  <text y={9} textAnchor="middle" fontSize={22} style={{pointerEvents:'none', userSelect:'none'}}>🦔</text>
+                  <text y={38} textAnchor="middle" fontSize={12} fontWeight={600}
+                    fill={theme.darkMode?'#e2e8f0':'#334155'} style={{pointerEvents:'none', userSelect:'none'}}>
+                    Mole
+                  </text>
+                  {!moleOut && moleHasNews && (
+                    <g transform="translate(16,-16)" style={{pointerEvents:'none'}}>
+                      <circle r="8" fill="#1e293b" stroke="#3b82f6" strokeWidth="2"/>
+                      <text y="3" textAnchor="middle" fontSize="10" fontWeight="800" fill="#3b82f6">!</text>
+                    </g>
+                  )}
+                </g>
+              )}
+
+              {/* Simple mode: plain circular avatar + name label per node, no decoration.
+                  Flowers (Social/Health/etc) render at the same size as a Good Friend
+                  (80px radius), filled solid in their own dimension colour, with a black
+                  ring around the icon itself so it stands out against the colour fill.
+                  Names sit INSIDE each circle as a bottom band, matching the main map's style.
+                  The ring colour for friends matches the person's group (if any), so
+                  group membership is still visible at a glance without a full vine border.
+                  Reuses the exact same handlePointerDown/Up handlers as the full render,
+                  so dragging, selecting, and double-tap-to-minimise all still work. */}
+              {simpleMode && activeRenderNodes.filter(n => n.type !== 'mole' && !(n.type === 'hub' && n.hidden)).map(node => {
+                const isLifted = liftedNodeId === node.id && viewMode === 'canvas';
+                const isFlower = node.type === 'flower';
+                const dim = isFlower ? dimensions[node.dimKey] : null;
+                const flowerColor = dim ? dim.color : '#22c55e';
+                // Flowers reduced another tier down, from Friendly (~67px) to Acquaintance (~47px).
+                const r = isFlower ? 47 : (node.radius || (node.type === 'hub' ? 40 : (node.id === 'me' ? 80 : 40)));
+                const initials = getInitials(node.label);
+                const isHub = node.type === 'hub';
+                const hubColor = isHub ? resolveHubColor(node.id) : null;
+                const myGroupId = nodeGroupMap[node.id];
+                const groupColor = node.personalColor || (myGroupId ? resolveHubColor(myGroupId) : null);
+                const ringColor = isHub ? hubColor : isFlower ? flowerColor : (groupColor || (theme.darkMode ? '#475569' : '#94a3b8'));
+                const shortLabel = node.label.length > 12 ? node.label.substring(0, 11) + '…' : node.label;
+                const labelY = r * 0.55;
+                const bandH = r * 0.48;
+                const fs = Math.max(8, r * 0.26);
+                return (
+                  <g key={`simple-${node.id}`}
+                    transform={`translate(${node.renderX},${node.renderY}) scale(${isLifted ? 1.12 : 1})`}
+                    style={{cursor:'grab', transition:isLifted?'none':'transform 0.15s ease', opacity:node.hidden?0:1}}
+                    onPointerDown={e => handlePointerDown(e, node.id)}>
+                    <defs>
+                      <clipPath id={`simpleClip-${node.id}`}><circle r={r-2}/></clipPath>
+                    </defs>
+                    <circle r={r} fill={isHub ? hubColor : isFlower ? flowerColor : (theme.darkMode ? '#1e293b' : '#e2e8f0')}
+                      stroke={ringColor} strokeWidth={isFlower ? 2 : (groupColor && !isHub ? 3 : 2)}/>
+                    {isHub ? (
+                      <text y={r*0.32} textAnchor="middle" fontSize={r*0.9} style={{pointerEvents:'none', userSelect:'none'}}>🌳</text>
+                    ) : isFlower ? (
+                      <text y={r*0.32} textAnchor="middle" fontSize={r*0.85} style={{pointerEvents:'none', userSelect:'none'}}>{dim?.emoji || '🌸'}</text>
+                    ) : node.img ? (
+                      <image href={node.img} x={-r+2} y={-r+2} width={(r-2)*2} height={(r-2)*2}
+                        clipPath={`url(#simpleClip-${node.id})`} preserveAspectRatio="xMidYMid slice"/>
+                    ) : (
+                      <text y={r*0.32} textAnchor="middle" fontSize={r*0.7} fontWeight="700"
+                        fill={theme.darkMode?'#e2e8f0':'#475569'} style={{pointerEvents:'none', userSelect:'none'}}>{initials}</text>
+                    )}
+                    {/* Name label -- inside the circle as a bottom band, matching the main map's style */}
+                    <g clipPath={`url(#simpleClip-${node.id})`} style={{pointerEvents:'none'}}>
+                      <rect x={-r} y={labelY} width={r * 2} height={bandH} fill="rgba(0,0,0,0.55)"/>
+                      <text y={labelY + bandH * 0.62} textAnchor="middle"
+                        fontSize={fs} fontWeight="700" fill="white" style={{userSelect:'none'}}>
+                        {shortLabel}
+                      </text>
+                    </g>
+                  </g>
+                );
+              })}
             </g>
+
 
             {/* Vine draw: ghost of all pending paths while mode is active */}
             {vineDrawMode && pendingPaths.map((p, pi) => p.pts.length > 1 && (
@@ -8068,6 +10279,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               </g>
             )}
 
+
             {/* Pending vine connection — dotted preview line */}
             {vineConnectPrompt && (() => {
               const src = nodes.find(n => n.id === vineConnectPrompt.srcId);
@@ -8083,10 +10295,12 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               );
             })()}
 
+
             {/* Spawn popup — dotted circle at loop end with Friend / Group options */}
             {spawnPopup && (() => {
-              // Use the actual drawn loop radius — buttons fill the circle
-              const R = spawnPopup.r;
+              // Use the actual drawn loop radius — buttons fill the circle.
+              // Scaled 3x so the Friend/Group choice is easy to tap and read.
+              const R = spawnPopup.r * 3;
               // Buttons fill ~70% of the circle width, stacked vertically with a small gap
               const btnW = R * 1.3;
               const btnH = R * 0.55;
@@ -8116,13 +10330,12 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     className="cursor-pointer"
                     onClick={() => {
                       const newId = `node_${Date.now()}`;
-                      const avatarKeys = Object.keys(AVATARS);
                       snapshot();
                       setNodes(prev => [...prev, {
-                        id: newId, label: 'New Friend',
-                        img: AVATARS[avatarKeys[Math.floor(Math.random() * avatarKeys.length)]],
+                        id: newId, label: '',
+                        img: makeBlankAvatar(),
                         x: spawnPopup.x, y: spawnPopup.y,
-                        interactionScore: 0, pinned: false, type: 'friend',
+                        interactionScore: STARTING_SCORE, pinned: false, type: 'friend',
                       }]);
                       if (spawnPopup.sourceNodeId) {
                         setLinks(prev => [...prev, { source: spawnPopup.sourceNodeId, target: newId }]);
@@ -8184,211 +10397,10 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               />
             )}
 
+
             {/* ---- Minimise flower bundles (collapsed branches) ---- */}
-            {collapseInfo.bundles.map(b => {
-              const rootFlower = b.rootFlower;
-              const rootChildPeople = b.rootChildPeople || [];
-              const subGroups = b.subGroups || [];
-              const total = 1 + rootChildPeople.length + subGroups.reduce((s,g)=>s+1+g.people.length,0);
-              const FR = 13;
-              const meNode = nodes.find(n => n.id === 'me');
-              const myFlower = (meNode && (meNode.miniFlower || meNode.partnerFlower)) || {};
-              const myPetalColor = '#ffffff';
-              const myCenterColor = '#fde68a';
-              const makeFlowerPath = (petals, len, scale=1) => {
-                const P = petals || 6;
-                const fpr = FR * scale * (1 + (len ?? 0.45));
-                const fpw = fpr * 0.5;
-                return Array.from({length:P},(_,pi)=>{
-                  const pa=(pi/P)*Math.PI*2;
-                  const tx=Math.cos(pa)*fpr,ty=Math.sin(pa)*fpr,pp=pa+Math.PI*0.5;
-                  return `M 0,0 C ${Math.cos(pa)*fpr*0.35+Math.cos(pp)*fpw*0.6},${Math.sin(pa)*fpr*0.35+Math.sin(pp)*fpw*0.6} ${Math.cos(pa)*fpr*0.85+Math.cos(pp)*fpw*0.5},${Math.sin(pa)*fpr*0.85+Math.sin(pp)*fpw*0.5} ${tx},${ty} C ${Math.cos(pa)*fpr*0.85-Math.cos(pp)*fpw*0.5},${Math.sin(pa)*fpr*0.85-Math.sin(pp)*fpw*0.5} ${Math.cos(pa)*fpr*0.35-Math.cos(pp)*fpw*0.6},${Math.sin(pa)*fpr*0.35-Math.sin(pp)*fpw*0.6} 0,0`;
-                }).join(' ');
-              };
-              // trend → colour (green up / amber steady / red down), like live creatures
-              const trendColor = (trend) => {
-                const lerp = (a,b,t)=>a+(b-a)*t;
-                const hx = (r,g,b)=>'#'+[r,g,b].map(v=>Math.max(0,Math.min(255,Math.round(v))).toString(16).padStart(2,'0')).join('');
-                if (trend >= 0) { const t=trend; return hx(lerp(255,34,t),lerp(190,255,t),lerp(30,90,t)); }
-                const t=-trend; return hx(lerp(255,255,t),lerp(190,40,t),lerp(30,40,t));
-              };
-              // a static resting creature on a flower — no animation (saves redraws).
-              // Colour reflects friendship score (trend). Randomly placed/rotated
-              // on the flower using a stable per-person seed.
-              const restingButterfly = (key, trend, seed, scale=1) => {
-                const tint = trendColor(trend ?? 0);
-                const ang = (seed ?? 0.5) * Math.PI * 2;
-                const rad = FR * 0.35 * scale * (0.4 + (seed ?? 0.5) * 0.6);
-                const ox = Math.cos(ang) * rad, oy = Math.sin(ang) * rad - FR*0.3*scale;
-                const rot = ((seed ?? 0.5) * 140) - 70;
-                // species palette from trend, matching the big butterflies
-                const pal = (trend ?? 0) > 0
-                  ? { up:'#3f8f3a', low:'#6fbf4a', band:'#2f6b2a', spot:'#fef9c3' }
-                  : (trend ?? 0) < 0
-                  ? { up:'#b3261e', low:'#e0432f', band:'#7f1d1d', spot:'#fde68a' }
-                  : { up:'#d98a1f', low:'#f0b54a', band:'#9a5b12', spot:'#fff7d6' };
-                const trim = pal.band;
-                if (theme.darkMode) {
-                  // static lit firefly
-                  const s = 2.5 * scale;
-                  return (
-                    <g key={key} transform={`translate(${ox},${oy})`} style={{pointerEvents:'none'}}>
-                      <circle r={s*1.8} fill={tint} opacity={0.22}/>
-                      <circle r={s*1.0} fill={tint} opacity={0.5}/>
-                      <circle r={s*0.55} fill="#fffbe6" stroke="#1f2937" strokeWidth={0.4}/>
-                    </g>
-                  );
-                }
-                // EXACT same butterfly as the big one, static (wings open), 1/3 size
-                const miniScale = (scale) * 0.33; // a third of the size
-                return (
-                  <g key={key} transform={`translate(${ox},${oy}) rotate(${rot}) scale(${miniScale})`} style={{pointerEvents:'none'}}>
-                    {/* wings open (static) */}
-                    <g transform="scale(2, 1.75)">
-                      <path d="M0,-1 C -10,-10 -11,-2 -8,3 C -6,6 -2,5 0,2 Z" fill={pal.up} opacity={0.95} stroke={pal.band} strokeWidth={0.4}/>
-                      <path d="M0,-1 C 10,-10 11,-2 8,3 C 6,6 2,5 0,2 Z" fill={pal.up} opacity={0.95} stroke={pal.band} strokeWidth={0.4}/>
-                      <path d="M0,2 C -8,4 -8,11 -4,12 C -1,12 0,7 0,4 Z" fill={pal.low} opacity={0.95} stroke={pal.band} strokeWidth={0.35}/>
-                      <path d="M0,2 C 8,4 8,11 4,12 C 1,12 0,7 0,4 Z" fill={pal.low} opacity={0.95} stroke={pal.band} strokeWidth={0.35}/>
-                      <circle cx={-6} cy={-2} r={1.1} fill={pal.spot}/>
-                      <circle cx={6} cy={-2} r={1.1} fill={pal.spot}/>
-                    </g>
-                    {/* body: abdomen, thorax, head */}
-                    <path d={`M ${-1.1},-2 Q ${-1.4},6 0,11 Q ${1.4},6 ${1.1},-2 Z`} fill="#2b1a0a"/>
-                    <ellipse cx={0} cy={-3.5} rx={1.9} ry={3.2} fill="#3a2410"/>
-                    <circle cx={0} cy={-7.6} r={1.6} fill="#2b1a0a"/>
-                    <circle cx={-0.7} cy={-7.9} r={0.45} fill="#0a0a0a"/>
-                    <circle cx={0.7} cy={-7.9} r={0.45} fill="#0a0a0a"/>
-                    {/* antennae */}
-                    <line x1={-0.4} y1={-8.6} x2={-6.7} y2={-18.8} stroke={trim} strokeWidth={0.6}/>
-                    <line x1={0.4} y1={-8.6} x2={6.7} y2={-18.8} stroke={trim} strokeWidth={0.6}/>
-                    <circle cx={-6.7} cy={-18.8} r={0.9} fill={trim}/>
-                    <circle cx={6.7} cy={-18.8} r={0.9} fill={trim}/>
-                    {/* legs */}
-                    {[-1,1].map(side=>([[-3.5,3.6,-2.0],[-2,4.0,0],[-0.5,3.6,2.0]].map((lg,li)=>(
-                      <g key={`ml${side}-${li}`}>
-                        <line x1={side*0.7} y1={lg[0]} x2={side*(0.7+lg[1])} y2={lg[0]+lg[2]} stroke={trim} strokeWidth={0.5}/>
-                        <circle cx={side*(0.7+lg[1])} cy={lg[0]+lg[2]} r={0.7} fill={trim}/>
-                      </g>
-                    ))))}
-                  </g>
-                );
-              };
-              const flower = (key, petalC, centerC, petals, len, scale, butterfly=null) => (
-                <g key={key}>
-                  <path d={makeFlowerPath(petals, len, scale)} fill={petalC} opacity={0.95}/>
-                  <circle r={FR*0.24*(scale||1)} fill={centerC} stroke={petalC} strokeWidth={0.5}/>
-                  {butterfly && restingButterfly('bf'+key, butterfly.trend, butterfly.seed, scale)}
-                </g>
-              );
-              // cluster a list of people flowers around a local centre
-              const peopleCluster = (people, keyPrefix) => {
-                const n = people.length;
-                const ring = n <= 1 ? 0 : (n <= 7 ? 17 : 24);
-                return people.map((p, i) => {
-                  const ang = (i / Math.max(1,n)) * Math.PI*2 - Math.PI/2;
-                  const fx = (i===0 && n>1) ? 0 : Math.cos(ang)*ring;
-                  const fy = (i===0 && n>1) ? 0 : Math.sin(ang)*ring;
-                  return (
-                    <g key={keyPrefix+p.id} transform={`translate(${fx},${fy})`}>
-                      {flower('f'+p.id, p.petalColor||myPetalColor, p.centerColor||myCenterColor, p.petals, p.petalLength, 0.9, {trend:p.trend, seed:p.seed})}
-                    </g>
-                  );
-                });
-              };
-              const childGap = 46;   // distance from root to the children bundle (left)
-              const groupGap = 50;   // distance from root to each sub-group (right)
-              return (
-                <g key={`bundle-${b.anchorId}`}>
-                  <g transform={`translate(${b.cx},${b.cy})`}
-                   style={{cursor:'pointer'}}
-                   onClick={(e)=>{ e.stopPropagation(); setMinimisedNodes(prev => prev.filter(id=>id!==b.anchorId)); }}>
+            {collapseInfo.bundles.map(b => renderMinimisedBundle(b, theme.darkMode, (anchorId) => setMinimisedNodes(prev => prev.filter(id=>id!==anchorId))))}
 
-                    {/* soft green border framing the whole bundle (lighter than a full vine) */}
-                    {(() => {
-                      const hasChildren = rootChildPeople.length > 0;
-                      const hasGroups = subGroups.length > 0;
-                      // extent: bundle reaches left for children, right for sub-groups
-                      const left = hasChildren ? (childGap + 36) : 32;
-                      const right = hasGroups ? (groupGap + (subGroups.some(g=>g.people.length)?70:30)) : 32;
-                      const halfH = (hasGroups && subGroups.length>1) ? (subGroups.length*26 + 30) : 38;
-                      const cxMid = (right - left) / 2;
-                      const rx = (left + right) / 2 + 8;
-                      const ry = halfH + 6;
-                      // a few leaves spaced around the ellipse
-                      const leaves = 7;
-                      const leafEls = Array.from({length:leaves},(_,i)=>{
-                        const a = (i/leaves)*Math.PI*2 - Math.PI/2;
-                        const lx = cxMid + Math.cos(a)*rx;
-                        const ly = Math.sin(a)*ry;
-                        const rot = (a*180/Math.PI) + 90;
-                        return (
-                          <g key={'bl'+i} transform={`translate(${lx},${ly}) rotate(${rot})`}>
-                            <path d="M0,0 C 4,-5 4,-9 0,-12 C -4,-9 -4,-5 0,0 Z"
-                              fill={theme.darkMode?'#15803d':'#4ade80'} opacity={0.8}/>
-                          </g>
-                        );
-                      });
-                      return (
-                        <g style={{pointerEvents:'none'}}>
-                          <ellipse cx={cxMid} cy={0} rx={rx} ry={ry} fill="none"
-                            stroke={theme.darkMode?'#22c55e':'#4ade80'} strokeWidth={2}
-                            strokeDasharray="1 0" opacity={0.55}/>
-                          {leafEls}
-                        </g>
-                      );
-                    })()}
-
-                    {/* internal connectors: root → children (left), root → each sub-group (right) */}
-                    {rootChildPeople.length > 0 && (
-                      <line x1={0} y1={0} x2={-childGap} y2={0} stroke={theme.darkMode?'#2f5d3a':'#a7d8b4'} strokeWidth={2.5} opacity={0.7}/>
-                    )}
-                    {subGroups.map((g, gi) => {
-                      const gy = subGroups.length===1 ? 0 : (gi - (subGroups.length-1)/2) * 46;
-                      return <line key={'gl'+g.id} x1={0} y1={0} x2={groupGap} y2={gy} stroke={theme.darkMode?'#2f5d3a':'#a7d8b4'} strokeWidth={2.5} opacity={0.7}/>;
-                    })}
-
-                    {/* ROOT person flower — centre, slightly larger */}
-                    {flower('root'+b.anchorId, rootFlower.petalColor||myPetalColor, rootFlower.centerColor||myCenterColor, rootFlower.petals, rootFlower.petalLength, 1.35, {trend:rootFlower.trend, seed:rootFlower.seed})}
-
-                    {/* CHILD PEOPLE bundle — to the LEFT of the root */}
-                    {rootChildPeople.length > 0 && (
-                      <g transform={`translate(${-childGap - 8},0)`}>
-                        <circle r={ (rootChildPeople.length<=1?14:30) } fill={theme.darkMode?'rgba(20,83,45,0.4)':'rgba(220,252,231,0.55)'} stroke={theme.darkMode?'#22c55e':'#86efac'} strokeWidth={1.2}/>
-                        {peopleCluster(rootChildPeople, 'cp')}
-                      </g>
-                    )}
-
-                    {/* SUB-GROUPS — to the RIGHT: each a brown flower with its people beside it */}
-                    {subGroups.map((g, gi) => {
-                      const gy = subGroups.length===1 ? 0 : (gi - (subGroups.length-1)/2) * 46;
-                      return (
-                        <g key={'sg'+g.id} transform={`translate(${groupGap + 8},${gy})`}>
-                          {/* the group's people, just past the brown flower */}
-                          {g.people.length > 0 && (
-                            <g transform={`translate(${(g.people.length<=1?22:34)},0)`}>
-                              <circle r={ (g.people.length<=1?13:26) } fill={theme.darkMode?'rgba(20,83,45,0.4)':'rgba(220,252,231,0.5)'} stroke={theme.darkMode?'#22c55e':'#86efac'} strokeWidth={1.1}/>
-                              {peopleCluster(g.people, 'gp'+g.id)}
-                            </g>
-                          )}
-                          {/* connector group → its people */}
-                          {g.people.length > 0 && (
-                            <line x1={0} y1={0} x2={(g.people.length<=1?22:34)} y2={0} stroke={theme.darkMode?'#2f5d3a':'#a7d8b4'} strokeWidth={2} opacity={0.6}/>
-                          )}
-                          {/* the brown GROUP flower */}
-                          {flower('bf'+g.id, g.color, '#f5e6c8', 6, 0.55, 1.4, null)}
-                        </g>
-                      );
-                    })}
-
-                    {/* count badge — top area */}
-                    <g transform={`translate(0,${-46})`}>
-                      <circle r={9} fill={theme.darkMode?'#16a34a':'#15803d'}/>
-                      <text textAnchor="middle" dy="3" fontSize="10" fontWeight="800" fill="white">{total}</text>
-                    </g>
-                  </g>
-                </g>
-              );
-            })}
 
             {/* ---- Dark-mode darkness overlay: fireflies reveal light through it ---- */}
             {theme.darkMode && darknessFilter && (() => {
@@ -8408,7 +10420,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       <rect x={-BIG/2} y={-BIG/2} width={BIG} height={BIG} fill="#ffffff"/>
                       {/* black holes at each firefly = overlay becomes transparent (light),
                           flashing in sync with that firefly's glow */}
-                      {!creaturesAway && !creaturesReturning && creatures.map(c => {
+                      {!simpleMode && !creaturesAway && !creaturesReturning && creatures.map(c => {
                         const WAVE_SWEEP = 2.6;
                         const FF_CYCLE = WAVE_SWEEP * 1.4;
                         const ffDelay = -(((c.x + c.y) % 800) / 800) * WAVE_SWEEP;
@@ -8456,8 +10468,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               );
             })()}
 
+
             {/* ---- Butterflies (day) / Fireflies (night) ---- */}
-            {creatures.map(c => {
+            {!simpleMode && creatures.map(c => {
               // WAVE: fixed cycle for ALL butterflies so waves never drift/clash.
               // The delay (0..WAVE_SWEEP) is set purely by diagonal position, so
               // the wave ripples across; everyone flaps with the SAME duration and
@@ -8483,6 +10496,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               }
               const col = hex(cr,cg,cb);
               const jit = c.jitter ?? 0.5;
+
 
               if (theme.darkMode) {
                 // ---- FIREFLY ----
@@ -8553,6 +10567,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   </g>
                 );
               }
+
 
               // ---- BUTTERFLY (day) ----
               // sized ~large leaf; three British species by trend colour.
@@ -8683,6 +10698,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           </g>
         </svg>
 
+
         {/* -- Lasso selection popup ------------------------------------------------ */}
         {lassoMenuOpen && lassoSelected.length > 0 && (()=>{
           const dm = theme.darkMode;
@@ -8691,6 +10707,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           const TIER_LABELS = ['Budding','Growing','Established','Deep','Family'];
           const TIER_SCORES = [0, 100, 300, 600, 1000];
 
+
           const applyTier = (tier) => {
             const score = TIER_SCORES[tier-1];
             setNodes(prev=>prev.map(n=>
@@ -8698,6 +10715,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             ));
             showToast(`✅ Set ${lassoSelected.length} people to tier ${tier}`);
           };
+
 
           const applyGroup = (hubId) => {
             setNodes(prev=>prev.map(n=>lassoSelected.find(s=>s.id===n.id)?{...n,groupId:hubId}:n));
@@ -8708,6 +10726,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             if (newLinks.length > 0) setLinks(prev=>[...prev, ...newLinks]);
             showToast(`✅ Added ${lassoSelected.length} people to group`);
           };
+
 
           return (
             <div style={{position:'fixed',bottom:80,left:'50%',transform:'translateX(-50%)',
@@ -8720,14 +10739,14 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     ⭕ {lassoSelected.length} selected
                   </span>
                   <button onClick={()=>{setLassoMenuOpen(false);setLassoSelected([]);}}
-                    style={{background:'none',border:'none',cursor:'pointer',fontSize:18,color:dm?'#94a3b8':'#64748b'}}>✕</button>
+                    style={{background:'none',border:'none',cursor:'pointer',fontSize:18,color:dm?'#94a3b8':pw.secondText}}>✕</button>
                 </div>
-                <div style={{fontSize:11,color:dm?'#64748b':'#94a3b8',marginTop:2}}>
+                <div style={{fontSize:11,color:dm?'#64748b':'#475569',marginTop:2}}>
                   {lassoSelected.map(n=>n.label||n.id).join(', ')}
                 </div>
               </div>
               <div style={{padding:'12px 16px',borderBottom:`1px solid ${dm?'#334155':'#f1f5f9'}`}}>
-                <div style={{fontSize:11,fontWeight:700,color:dm?'#94a3b8':'#64748b',marginBottom:8,textTransform:'uppercase',letterSpacing:1}}>Set Tier</div>
+                <div style={{fontSize:11,fontWeight:700,color:dm?'#94a3b8':pw.secondText,marginBottom:8,textTransform:'uppercase',letterSpacing:1}}>Set Tier</div>
                 <div style={{display:'flex',gap:6}}>
                   {TIERS.map(t=>(
                     <button key={t} onClick={()=>applyTier(t)}
@@ -8740,7 +10759,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 </div>
               </div>
               <div style={{padding:'12px 16px'}}>
-                <div style={{fontSize:11,fontWeight:700,color:dm?'#94a3b8':'#64748b',marginBottom:8,textTransform:'uppercase',letterSpacing:1}}>Add to Group</div>
+                <div style={{fontSize:11,fontWeight:700,color:dm?'#94a3b8':pw.secondText,marginBottom:8,textTransform:'uppercase',letterSpacing:1}}>Add to Group</div>
                 <div style={{display:'flex',flexDirection:'column',gap:4,maxHeight:140,overflowY:'auto'}}>
                   {hubs.map(hub=>(
                     <button key={hub.id} onClick={()=>applyGroup(hub.id)}
@@ -8757,6 +10776,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             </div>
           );
         })()}
+
 
         {/* -- Lasso capture overlay — sits above everything when active -- */}
         {lassoMode && (
@@ -8817,6 +10837,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           </svg>
         )}
 
+
         {/* -- Restore banner after reset ------------------------------------------ */}
       {dataSnapshot && (
         <div style={{position:'fixed',bottom:68,left:8,right:8,zIndex:450,
@@ -8828,14 +10849,15 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             <button onClick={restoreSnapshot}
               style={{padding:'6px 14px',borderRadius:8,background:'#3b82f6',color:'white',border:'none',cursor:'pointer',fontSize:13,fontWeight:700}}>Restore</button>
             <button onClick={()=>{snapshotRef.current=null;setDataSnapshot(null);}}
-              style={{padding:'6px 10px',borderRadius:8,background:'rgba(255,255,255,0.1)',color:'#94a3b8',border:'none',cursor:'pointer',fontSize:13}}>Dismiss</button>
+              style={{padding:'6px 10px',borderRadius:8,background:'rgba(255,255,255,0.1)',color:'#475569',border:'none',cursor:'pointer',fontSize:13}}>Dismiss</button>
           </div>
         </div>
       )}
 
+
       {/* -- Tier Pick Mode overlay --------------------------------------------- */}
       {tierPickMode && (() => {
-        const remaining = nodes.filter(n=>n.type==='friend'&&!(n.interactionScore>0||n.isFamily||n.isPartner)).length;
+        const remaining = nodes.filter(n=>n.type==='friend'&&!(n.tierPicked||n.isFamily||n.isPartner)).length;
         return (
           <div style={{position:'fixed',top:'env(safe-area-inset-top,0px)',left:0,right:0,zIndex:300,
             padding:'10px 16px',background:'#1e3a5f',borderBottom:'3px solid #3b82f6',
@@ -8922,16 +10944,17 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
               <span style={{fontWeight:800,fontSize:14,color:'#10b981'}}>🌳 Welcome!</span>
               <button onClick={()=>setShowTutorial(false)}
-                style={{background:'none',border:'none',cursor:'pointer',color:theme.darkMode?'#94a3b8':'#64748b',fontSize:16}}>✕</button>
+                style={{background:'none',border:'none',cursor:'pointer',color:theme.darkMode?'#94a3b8':pw.secondText,fontSize:16}}>✕</button>
             </div>
-            <ul style={{margin:0,padding:'0 0 0 16px',fontSize:12,color:theme.darkMode?'#94a3b8':'#64748b',lineHeight:1.8}}>
-              <li><strong style={{color:theme.darkMode?'#e2e8f0':'#1e293b'}}>Double-tap</strong> a face to open profile</li>
-              <li><strong style={{color:theme.darkMode?'#e2e8f0':'#1e293b'}}>Hold</strong> to drag and reposition</li>
-              <li><strong style={{color:theme.darkMode?'#e2e8f0':'#1e293b'}}>➕</strong> to add friends or groups</li>
-              <li><strong style={{color:theme.darkMode?'#e2e8f0':'#1e293b'}}>✨ Demo</strong> to see it in action</li>
+            <ul style={{margin:0,padding:'0 0 0 16px',fontSize:12,color:theme.darkMode?'#94a3b8':pw.secondText,lineHeight:1.8}}>
+              <li><strong style={{color:theme.darkMode?'#e2e8f0':pw.bodyText}}>Double-tap</strong> a face to open profile</li>
+              <li><strong style={{color:theme.darkMode?'#e2e8f0':pw.bodyText}}>Hold</strong> to drag and reposition</li>
+              <li><strong style={{color:theme.darkMode?'#e2e8f0':pw.bodyText}}>➕</strong> to add friends or groups</li>
+              <li><strong style={{color:theme.darkMode?'#e2e8f0':pw.bodyText}}>✨ Demo</strong> to see it in action</li>
             </ul>
           </div>
         )}
+
 
         {/* Active tag filter indicator — only shown when filters are on */}
         {viewMode === 'canvas' && activeTags.length > 0 && (
@@ -8979,11 +11002,271 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             ))}
           </div>
         )}
-        <div className={`absolute bottom-6 right-6 flex items-center space-x-2 p-2 rounded-xl shadow-lg border ${theme.darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
+        <div className={`absolute bottom-6 right-6 flex items-center space-x-2 p-2 rounded-xl shadow-lg border ${theme.darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`} style={{zIndex:120}}>
           <button onClick={() => setTransform(p => ({ ...p, scale: Math.max(0.01, p.scale / 1.3) }))} className={`p-2 rounded-lg transition-colors ${theme.darkMode ? 'hover:bg-slate-700 text-slate-300' : 'hover:bg-slate-100 text-slate-600'}`}><ZoomOut className="w-5 h-5" /></button>
           <button onClick={() => { const rect = svgRef.current ? svgRef.current.getBoundingClientRect() : { width: window.innerWidth, height: window.innerHeight }; setTransform({ x: rect.width/2, y: rect.height/2, scale: 0.5 }); }} title="Recenter" className={`p-2 rounded-lg transition-colors ${theme.darkMode ? 'hover:bg-slate-700 text-slate-300' : 'hover:bg-slate-100 text-slate-600'}`}><Home className="w-5 h-5" /></button>
           <button onClick={() => setTransform(p => ({ ...p, scale: Math.min(3, p.scale * 1.3) }))} className={`p-2 rounded-lg transition-colors ${theme.darkMode ? 'hover:bg-slate-700 text-slate-300' : 'hover:bg-slate-100 text-slate-600'}`}><ZoomIn className="w-5 h-5" /></button>
         </div>
+
+
+        {/* Mole keyframe styles */}
+        <style>{`
+          @keyframes moleRumble { 0%,100%{transform:translateX(0)} 15%{transform:translateX(-4px)} 30%{transform:translateX(4px)} 45%{transform:translateX(-3px)} 60%{transform:translateX(3px)} 75%{transform:translateX(-2px)} 90%{transform:translateX(2px)} }
+          @keyframes molePop { 0%{transform:translateY(100%)} 60%{transform:translateY(-12%)} 80%{transform:translateY(4%)} 100%{transform:translateY(0)} }
+          @keyframes moleBob { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-5px)} }
+          @keyframes moleBlink { 0%,88%,100%{opacity:1} 93%{opacity:0} 96%{opacity:1} }
+          .mole-blink { animation: moleBlink 4s infinite ease-in-out; }
+        `}</style>
+
+        {/* Brief welcome greeting -- shown for ~1.4s right after popping, before the full cards */}
+        {moleOut && moleBubbleStage === 'welcome' && (()=>{
+          const screenX = molePos.x * transform.scale + transform.x;
+          const screenY = molePos.y * transform.scale + transform.y;
+          const moleScreenR = 38 * transform.scale;
+          return (
+            <div onClick={()=>setMoleBubbleStage('full')}
+              style={{position:'fixed',
+              left: Math.min(screenX + moleScreenR + 14, window.innerWidth - 150),
+              top: Math.max(40, screenY - moleScreenR - 60),
+              zIndex:151,background:'#1e293b',borderRadius:14,padding:'10px 16px',
+              boxShadow:'0 6px 24px rgba(0,0,0,0.55)',border:'1.5px solid #334155',
+              fontSize:16,fontWeight:600,color:'#e2e8f0',cursor:'pointer',
+              animation:'molePop 0.3s cubic-bezier(0.34,1.56,0.64,1) forwards',pointerEvents:'all'}}>
+              👋 Hi there!
+            </div>
+          );
+        })()}
+
+        {/* Mole swipeable cards */}
+        {moleOut && moleSummary && moleBubbleStage === 'full' && (()=>{
+          const screenX = molePos.x * transform.scale + transform.x;
+          const screenY = molePos.y * transform.scale + transform.y;
+          // Big bubble spans the full screen width and maxes out its height -- top of
+          // screen down to just before the mole's head, leaving only enough room for
+          // its own tail. The small title pill moves out from underneath it entirely,
+          // sitting beside the mole (to his right) so it doesn't eat into the big
+          // bubble's writing space at all.
+          const sw = window.innerWidth, sh = window.innerHeight;
+          const SIDE_MARGIN = 10;
+          const CARD_W = sw - SIDE_MARGIN * 2;
+          const moleScreenR = 38 * transform.scale;
+          const GAP = 14;
+          const top  = 12; // pinned right at the top of the screen (safe-area handled via CSS env() below)
+          const TAIL_CLEARANCE = 35; // room for the tail (22px) plus a small gap above the mole's head
+          const CARD_H = Math.max(120, (screenY - moleScreenR - TAIL_CLEARANCE) - top);
+          const left = SIDE_MARGIN;
+          // Pill sits to the mole's right, just under where the big bubble ends
+          const PILL_W = 170; // must match the pill's own maxWidth so the right edge locks correctly
+          const pillLeft = sw - PILL_W - SIDE_MARGIN; // right edge sits just inside the screen edge
+          const pillTop = top + CARD_H + 10; // sits below the big bubble entirely, near where the mole is
+          const s = moleSummary;
+          const hasAnyKey = Object.values(aiKeys).some(v => v && v.length > 10);
+
+          // ---- Derived data for slides ----
+          const allPeople = nodes.filter(n => n.type !== 'hub' && n.type !== 'flower' && n.type !== 'mole' && n.id !== 'me');
+          const isAcquaintance = n => (n.interactionScore || 0) < 100 && !n.isFamily && !n.isPartner;
+          const nonAcquaintances = allPeople.filter(n => !isAcquaintance(n));
+
+          // Recent activity: log entries in last 7 days
+          const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+          const recentLogs = allPeople.flatMap(n =>
+            (n.interactionLog || []).slice(-10).filter(e => {
+              try { const d = new Date(e.date + ' ' + new Date().getFullYear()); return d.getTime() > sevenDaysAgo; } catch(_){ return false; }
+            }).map(e => ({ ...e, personLabel: n.label, personId: n.id }))
+          ).sort((a,b) => b.pts - a.pts);
+          const autoDetectedToday = allPeople.filter(n => (n.dailyMessages || 0) > 0);
+          const totalLogsThisWeek = recentLogs.length;
+
+          // Most improved (score gain since prevScore)
+          const improved = [...nonAcquaintances]
+            .map(n => ({ n, gain: (n.interactionScore||0) - (n.prevScore||0) }))
+            .filter(x => x.gain > 0)
+            .sort((a,b) => b.gain - a.gain)
+            .slice(0, 5);
+
+          // Maintaining well: non-acquaintances with score stable or growing and above 200
+          const maintaining = [...nonAcquaintances]
+            .filter(n => (n.interactionScore||0) >= 200 && (n.interactionScore||0) >= (n.prevScore||0))
+            .sort((a,b) => (b.interactionScore||0) - (a.interactionScore||0))
+            .slice(0, 6);
+
+          // Concern: non-acquaintances dropping or low and not family/partner
+          const concern = [...nonAcquaintances]
+            .filter(n => (n.interactionScore||0) < (n.prevScore||0) || ((n.interactionScore||0) < 150 && !n.isFamily && !n.isPartner))
+            .sort((a,b) => ((a.interactionScore||0)-(a.prevScore||0)) - ((b.interactionScore||0)-(b.prevScore||0)))
+            .slice(0, 5);
+
+          // Build rich Gemini prompt
+          const buildPrompt = () => [
+            `You are a warm, practical relationship coach using principles from 'How to Win Friends and Influence People', 'The Friendship Formula', and Dunbar's social brain research.`,
+            `My FriendshipTree data (last ${s.daysSince} day${s.daysSince!==1?'s':''}):`,
+            `Total friends tracked: ${allPeople.length}. Avg score: ${s.avgScore}pts.`,
+            improved.length ? `Improving: ${improved.map(x=>`${x.n.label}(+${x.gain}pts)`).join(', ')}` : '',
+            maintaining.length ? `Maintaining well: ${maintaining.map(n=>n.label).join(', ')}` : '',
+            concern.length ? `Needs attention: ${concern.map(n=>`${n.label}(${(n.interactionScore||0)-(n.prevScore||0)}pts)`).join(', ')}` : '',
+            autoDetectedToday.length ? `Auto-detected contact today: ${autoDetectedToday.map(n=>n.label).join(', ')}` : '',
+            `Give me 3 specific, actionable suggestions for TODAY based on this data and relationship maintenance research. Be warm, brief, and personal. Reference the specific people above.`
+          ].filter(Boolean).join(' ');
+
+          const FS = 18; // base font size for all content
+
+          const slides = [
+
+            // --- Slide 1: Recent activity ---
+            { label:'📋 Activity', color:'#60a5fa', content: (
+              <div>
+                <div style={{fontSize:FS,color:'#64748b',marginBottom:8}}>
+                  {totalLogsThisWeek > 0
+                    ? `${totalLogsThisWeek} interaction${totalLogsThisWeek!==1?'s':''} logged this week`
+                    : 'No interactions logged this week'}
+                </div>
+                {autoDetectedToday.length > 0 && (
+                  <div style={{fontSize:FS,color:'#10b981',marginBottom:6}}>
+                    📱 Auto-detected today: {autoDetectedToday.map(n=>n.label).join(', ')}
+                  </div>
+                )}
+                {recentLogs.slice(0,5).map((e,i) => (
+                  <div key={i} style={{fontSize:FS,color:'#94a3b8',display:'flex',justifyContent:'space-between',marginBottom:3}}>
+                    <span>{e.personLabel} — {e.label}</span>
+                    <span style={{color:'#10b981',flexShrink:0,marginLeft:6}}>+{e.pts}</span>
+                  </div>
+                ))}
+                {totalLogsThisWeek === 0 && autoDetectedToday.length === 0 && (
+                  <div style={{fontSize:FS,color:'#475569',lineHeight:1.4}}>
+                    Tap a friend node and log an interaction to keep your garden growing.
+                  </div>
+                )}
+              </div>
+            )},
+
+            // --- Slide 2: Most improved ---
+            { label:'🌱 Improving', color:'#10b981', content: (
+              <div>
+                {improved.length > 0 ? (
+                  <>
+                    <MoleLineChart people={improved.map(x=>x.n)} color='#10b981' height={100}/>
+                    {improved.map(({n, gain}) => (
+                      <div key={n.id} style={{fontSize:FS-2,color:'#94a3b8',display:'flex',justifyContent:'space-between',marginTop:4}}>
+                        <span>{n.label}</span><span style={{color:'#10b981'}}>+{gain}pts</span>
+                      </div>
+                    ))}
+                  </>
+                ) : (
+                  <div style={{fontSize:FS,color:'#475569'}}>No improvements recorded yet — log some interactions!</div>
+                )}
+              </div>
+            )},
+
+            // --- Slide 3: Maintaining well ---
+            { label:'🌳 Steady', color:'#4ade80', content: (
+              <div>
+                <div style={{fontSize:FS-2,color:'#64748b',marginBottom:6}}>Close friends & family holding strong</div>
+                {maintaining.length > 0 ? (
+                  <>
+                    <MoleLineChart people={maintaining} color='#4ade80' height={100}/>
+                    {maintaining.map(n => (
+                      <div key={n.id} style={{fontSize:FS-2,color:'#94a3b8',display:'flex',justifyContent:'space-between',marginTop:4}}>
+                        <span>{n.isFamily?'🏠':n.isPartner?'❤️':'🌲'} {n.label}</span>
+                        <span style={{color:'#4ade80'}}>{n.interactionScore||0}pts</span>
+                      </div>
+                    ))}
+                  </>
+                ) : (
+                  <div style={{fontSize:FS,color:'#475569'}}>Keep logging to build steady friendships.</div>
+                )}
+              </div>
+            )},
+
+            // --- Slide 4: Concern ---
+            { label:'🍂 Concern', color:'#f59e0b', content: (
+              <div>
+                <div style={{fontSize:FS-2,color:'#64748b',marginBottom:6}}>Friendships that need attention</div>
+                {concern.length > 0 ? (
+                  <>
+                    <MoleLineChart people={concern} color='#f59e0b' height={100}/>
+                    {concern.map(n => {
+                      const drop = (n.interactionScore||0) - (n.prevScore||0);
+                      return (
+                        <div key={n.id} style={{marginTop:4}}>
+                          <div style={{fontSize:FS-2,color:'#e2e8f0',fontWeight:600}}>{n.label}</div>
+                          <div style={{fontSize:FS-4,color:drop<0?'#f87171':'#94a3b8'}}>
+                            {drop < 0 ? `↓ ${drop}pts since last visit` : `Low score: ${n.interactionScore||0}pts`}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </>
+                ) : (
+                  <div style={{fontSize:FS,color:'#10b981'}}>🌿 No friendships in the danger zone!</div>
+                )}
+              </div>
+            )},
+
+            // --- Slide 5: AI next step (keys first-time if needed) ---
+            ...(!hasAnyKey ? [{ label:'🔑 Keys', color:'#a78bfa', content: (
+                <div style={{display:'flex',flexDirection:'column',gap:7}}>
+                  <div style={{fontSize:FS,color:'#94a3b8',lineHeight:1.4}}>Paste your API key to get AI advice inside the app.</div>
+                  {[{id:'gemini',label:'Gemini',color:'#4285f4'},{id:'openai',label:'GPT-4o',color:'#10a37f'},{id:'claude',label:'Claude',color:'#d97706'}].map(p=>(
+                    <div key={p.id}>
+                      <div style={{fontSize:FS,fontWeight:700,color:aiProvider===p.id?p.color:'#64748b',marginBottom:2,display:'flex',alignItems:'center',gap:5}}>
+                        <button onClick={()=>{ setAiProvider(p.id); localStorage.setItem('ft_ai_provider',p.id); }}
+                          style={{width:12,height:12,borderRadius:'50%',border:`2px solid ${p.color}`,
+                            background:aiProvider===p.id?p.color:'transparent',cursor:'pointer',padding:0,flexShrink:0}}/>
+                        {p.label}
+                      </div>
+                      <input type='password' placeholder={`${p.label} API key`}
+                        value={aiKeys[p.id]||''}
+                        onChange={e=>{ const next={...aiKeys,[p.id]:e.target.value}; setAiKeys(next); localStorage.setItem('ft_ai_keys',JSON.stringify(next)); }}
+                        style={{width:'100%',fontSize:FS,padding:'6px 8px',borderRadius:6,
+                          background:'#0f172a',border:'1px solid #334155',color:'#e2e8f0',boxSizing:'border-box'}}/>
+                    </div>
+                  ))}
+                  <div style={{fontSize:FS-4,color:'#475569'}}>Keys stored on-device only.</div>
+                </div>
+            )}] : []),
+            { label:'☀️ Next Step', color:'#fbbf24', content: (
+                <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                  {!aiResponse && !aiLoading && (
+                    <div style={{fontSize:FS,color:'#64748b',lineHeight:1.4}}>
+                      Get personalised suggestions from {aiProvider==='gemini'?'Gemini':aiProvider==='openai'?'GPT-4o':'Claude'} based on your garden data and relationship research.
+                    </div>
+                  )}
+                  {aiLoading && (
+                    <div style={{fontSize:FS,color:'#94a3b8',textAlign:'center',padding:'10px 0'}}>
+                      ⟐ Thinking…
+                    </div>
+                  )}
+                  {aiResponse && (
+                    <div style={{fontSize:FS,color:'#cbd5e1',lineHeight:1.5,maxHeight:200,overflowY:'auto'}}>
+                      {aiResponse}
+                    </div>
+                  )}
+                  <button onClick={()=>askAI(buildPrompt())} disabled={aiLoading}
+                    style={{padding:'8px 0',borderRadius:8,width:'100%',
+                      background:aiProvider==='gemini'?'linear-gradient(135deg,#1a73e8,#4285f4)'
+                               :aiProvider==='openai'?'linear-gradient(135deg,#059669,#10a37f)'
+                               :'linear-gradient(135deg,#b45309,#d97706)',
+                      border:'none',color:'white',fontSize:FS,fontWeight:700,
+                      cursor:aiLoading?'default':'pointer',opacity:aiLoading?0.6:1}}>
+                    {aiLoading?'⟐ Thinking…':`Get next step from ${aiProvider==='gemini'?'Gemini':aiProvider==='openai'?'GPT-4o':'Claude'}`}
+                  </button>
+                  {aiResponse && (
+                    <button onClick={()=>setAiResponse('')}
+                      style={{fontSize:FS-2,color:'#475569',background:'none',border:'none',cursor:'pointer',padding:0}}>
+                      Clear
+                    </button>
+                  )}
+                  {hasAnyKey && (
+                    <div style={{fontSize:FS-4,color:'#334155',textAlign:'right',marginTop:2}}>
+                      ⚙ Keys in Settings → Garden Assistant
+                    </div>
+                  )}
+                </div>
+            )},
+          ];
+          return <MoleCards slides={slides} left={left} top={top} cardWidth={CARD_W} cardHeight={CARD_H} pillLeft={pillLeft} pillTop={pillTop} onClose={()=>{setAiResponse('');setMoleBubbleStage('hint');}}/>;
+        })()}
+
 
         {/* Toast */}
         {toastMessage && (
@@ -8992,6 +11275,849 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           </div>
         )}
       </div>
+      )}
+
+      {/* ============ FEED VIEW: dimension band + sideways tree, on the SAME fixed
+          6-column grid as before, with the same drag-to-place / swap mechanics.
+          ============================================================
+          Replaces the free-roaming canvas entirely when mapStyle === 'feed'.
+          Each dimension gets its own stacked, vertically-scrollable section.
+          The flower itself is a band on the left. Everyone reachable from that
+          flower (direct people, hubs, and people nested inside hubs) is laid
+          out on a grid locked to 6 columns wide with unlimited rows -- same
+          grid/drag system as the original flat Feed, just applied to the full
+          tree instead of only directly-linked people. Connecting lines are
+          drawn between every parent and child so the branching structure (the
+          same relationships as the main canvas) stays visible, just sideways. */}
+      {viewMode === 'canvas' && (mapStyle === 'feed' || mapStyle === 'feedDetailed') && (() => {
+        const detailed = mapStyle === 'feedDetailed';
+        const dm = theme.darkMode;
+        const bg = dm ? '#0f172a' : '#f8fafc';
+        const COLS = 6; // locked horizontal width
+        const BAND_W = 60; // width of the flower band itself, sits left of column 0
+        // Size hexes so 6 columns always fit within the actual screen width --
+        // previously a fixed 56px hex made the strip wider than the viewport,
+        // pushing the last couple of columns off-screen with no way to scroll
+        // to them. stripW = (COLS-1)*hex*1.5 + hex*2, solved for hex given the
+        // available width after the band.
+        const availW = window.innerWidth - BAND_W - 16; // small side margin
+        const FEED_HEX = Math.max(28, Math.min(56, availW / ((COLS - 1) * 1.5 + 2)));
+        const sectionDefs = [
+          { dimKey: 'social',     flowerId: 'flower_social' },
+          { dimKey: 'creativity', flowerId: 'flower_creativity' },
+          { dimKey: 'knowledge',  flowerId: 'flower_knowledge' },
+          { dimKey: 'health',     flowerId: 'flower_health' },
+          { dimKey: 'growth',     flowerId: 'flower_growth' },
+        ];
+        const colOffsets = Array.from({length: COLS}, (_, i) => i * FEED_HEX * 1.5);
+        // True flat-top hex lattice: given the column step is 1.5*FEED_HEX, the
+        // matching row step (so cells tile with no gaps or overlaps on any side)
+        // is col_step / sqrt(3) = (1.5/sqrt(3)) * FEED_HEX -- NOT 1.6, which was an
+        // arbitrary number that didn't correspond to the same hexagon size as the
+        // column spacing at all.
+        const ROW_STEP = 0.75 * Math.sqrt(3) * FEED_HEX;
+        // The true 6 neighbours of a cell in THIS specific offset-column hex layout
+        // (odd rows shifted right by half a column step). A flat 8-direction
+        // approximation does NOT match this geometry and produces corner points
+        // that land on top of unrelated cells -- this is the real neighbour set.
+        const hexNeighbourDeltas = (row) => (row % 2 === 0)
+          ? [[1,0],[-1,0],[-1,-1],[0,-1],[-1,1],[0,1]]
+          : [[1,0],[-1,0],[0,-1],[1,-1],[0,1],[1,1]];
+        const stripW = (COLS - 1) * FEED_HEX * 1.5 + FEED_HEX * 2;
+
+        // Walk outward from the flower exactly like the main canvas does: direct
+        // people AND hubs are children of the flower; a hub's own direct links
+        // are its members (people or nested sub-hubs), recursively.
+        const buildMembers = (flowerId) => {
+          const visited = new Set([flowerId]);
+          const out = [];
+          const parentOf = {};
+          const minimisedHere = []; // nodes hit during the walk that are minimised
+          const childrenOf = (nodeId) => links
+            .filter(l => l.source === nodeId || l.target === nodeId)
+            .map(l => l.source === nodeId ? l.target : l.source)
+            .map(id => nodes.find(n => n.id === id))
+            .filter(n => n && !n.hidden && n.type !== 'flower' && n.id !== 'me' && !visited.has(n.id));
+          const walk = (nodeId) => {
+            const kids = childrenOf(nodeId);
+            kids.forEach(k => {
+              // Re-check visited here, not just when the `kids` snapshot was built --
+              // a deeper recursive call (e.g. Mum linking directly to Sam) can add a
+              // node to `visited` WHILE this very `forEach` is still iterating its own
+              // now-stale snapshot, letting the same node slip through twice.
+              if (visited.has(k.id)) return;
+              visited.add(k.id);
+              out.push(k);
+              parentOf[k.id] = nodeId;
+              if (minimisedNodes.includes(k.id)) {
+                // Minimised: this node still shows (as a flower bundle), but its
+                // own downstream branch is folded away -- don't walk past it.
+                minimisedHere.push(k.id);
+                return;
+              }
+              // Recurse through ANY node type -- people can have other people or
+              // groups branching off them too, not just hubs. The walk only ever
+              // stops because `visited` prevents revisiting, not because of type.
+              walk(k.id);
+            });
+          };
+          walk(flowerId);
+          return { members: out, parentOf, minimisedHere };
+        };
+
+        // Build the same {rootFlower, rootChildPeople, subGroups} bundle shape the
+        // main canvas uses, but rooted in THIS dimension's own tree, walking
+        // outward from the minimised node itself (its own children were never
+        // added to buildMembers' output, since that walk correctly stops at a
+        // minimised node -- this does its own short, unrestricted walk just for
+        // the bundle's contents).
+        const buildFeedBundle = (rootId) => {
+          const rootNode = nodes.find(n => n.id === rootId);
+          if (!rootNode) return null;
+          const flowerOf = (nd) => {
+            const f = nd.miniFlower || nd.partnerFlower || {};
+            const s = nd.interactionScore || 0;
+            const delta = s - (nd.prevScore || s);
+            let trend = 0;
+            if (delta > 20 || s >= 600) trend = 1;
+            else if (delta < -20 || s < 200) trend = -1;
+            return {
+              id: nd.id, petalColor: f.petalColor || null, centerColor: f.centerColor || null,
+              petals: f.petals || 6, petalLength: f.petalLength || 0.45, trend,
+              seed: (nd.id.split('').reduce((a,c)=>a+c.charCodeAt(0),0) % 100) / 100,
+            };
+          };
+          const childrenOf = (nodeId, exclude) => links
+            .filter(l => l.source === nodeId || l.target === nodeId)
+            .map(l => l.source === nodeId ? l.target : l.source)
+            .map(id => nodes.find(n => n.id === id))
+            .filter(n => n && !n.hidden && n.type !== 'flower' && n.id !== 'me' && n.id !== exclude);
+          const directChildren = childrenOf(rootId, null);
+          const rootChildPeople = [];
+          const subGroups = [];
+          directChildren.forEach(child => {
+            if (child.type === 'hub') {
+              const ppl = childrenOf(child.id, rootId).filter(c => c.type !== 'hub').map(flowerOf);
+              subGroups.push({ id: child.id, color: resolveHubColor(child.id), people: ppl });
+            } else {
+              rootChildPeople.push(flowerOf(child));
+            }
+          });
+          return { anchorId: rootId, rootFlower: flowerOf(rootNode), rootChildPeople, subGroups };
+        };
+
+        // Same fixed 6-column grid resolver as the original Feed: explicit
+        // feedPositions entry if dragged before, otherwise auto-fill the next
+        // free slot in reading order.
+        const resolvePositions = (dimKey, members, excludedNodesStillReserved) => {
+          const occupied = new Set();
+          const placed = {};
+          const pending = [];
+          // Reserve the saved cell of anyone currently minimised/excluded from the
+          // grid (but who still HAS a saved position from before), so nobody else
+          // can be auto-placed into their spot while they're folded away -- this is
+          // what stops them landing somewhere completely different (often higher up
+          // the page) the moment they're expanded again.
+          (excludedNodesStillReserved || []).forEach(n => {
+            const key = `${dimKey}:${n.id}`;
+            const saved = feedPositions[key];
+            if (saved && saved.col >= 0 && saved.col < COLS) {
+              occupied.add(`${saved.col},${saved.row}`);
+              if (n.type === 'hub' && saved.col + 1 < COLS) occupied.add(`${saved.col+1},${saved.row}`);
+            }
+          });
+          members.forEach(n => {
+            const key = `${dimKey}:${n.id}`;
+            const saved = feedPositions[key];
+            if (saved && saved.col >= 0 && saved.col < COLS) {
+              placed[n.id] = saved;
+              occupied.add(`${saved.col},${saved.row}`);
+              // Hubs render as a wide pill spanning roughly two columns -- reserve
+              // the neighbouring cell too so newly auto-placed people don't land
+              // directly beside one and overlap it.
+              if (n.type === 'hub' && saved.col + 1 < COLS) occupied.add(`${saved.col+1},${saved.row}`);
+            } else {
+              pending.push(n);
+            }
+          });
+          let row = 0, col = 0;
+          const newlyPlaced = {};
+          pending.forEach(n => {
+            while (occupied.has(`${col},${row}`)) {
+              col++; if (col >= COLS) { col = 0; row++; }
+            }
+            placed[n.id] = { col, row };
+            newlyPlaced[`${dimKey}:${n.id}`] = { col, row };
+            occupied.add(`${col},${row}`);
+            if (n.type === 'hub' && col + 1 < COLS) occupied.add(`${col+1},${row}`);
+            col++; if (col >= COLS) { col = 0; row++; }
+          });
+          if (Object.keys(newlyPlaced).length > 0) {
+            // Commit these immediately so they become "saved" -- without this,
+            // auto-placement recomputes fresh every render purely from current
+            // iteration order, which means minimising/expanding ANYONE reshuffles
+            // every not-yet-saved node that comes after them. Once committed here,
+            // a node's position only ever changes when it's actually dragged.
+            setTimeout(() => {
+              setFeedPositions(prev => {
+                const next = { ...prev };
+                let changed = false;
+                Object.entries(newlyPlaced).forEach(([k, v]) => {
+                  if (!prev[k]) { next[k] = v; changed = true; }
+                });
+                return changed ? next : prev;
+              });
+            }, 0);
+          }
+          return placed;
+        };
+
+        // Drop the currently-carried node (and its branch, if any) at a screen
+        // point. Resolves the target grid cell from the drop point, finds the
+        // nearest free cell if it's taken, applies the same delta to every
+        // branch member, and clears the carry state. Used by both one-hand
+        // (tap-to-place) and two-hand (release-to-place) modes.
+        const placeCarriedNode = (stripEl, screenX, screenY) => {
+          if (!feedCarrying) return;
+          const { dimKey: cDimKey, nodeId, branchIds } = feedCarrying;
+          const draggedNode = nodes.find(n => n.id === nodeId);
+
+          // Check whether the drop point lands ON another node's circle (not
+          // just an empty grid cell) -- if so, create a connection instead of
+          // repositioning, same behaviour as dropping onto a target on the
+          // main canvas: person dropped on a hub joins that group; person
+          // dropped on another person opens the connect/merge prompt; groups
+          // dropped on groups open the group-merge prompt.
+          const stripRect = stripEl.getBoundingClientRect();
+          const elementsUnder = document.elementsFromPoint(screenX, screenY);
+          const targetEl = elementsUnder.find(el => el.dataset && el.dataset.feedNodeId && el.dataset.feedNodeId !== nodeId);
+          const targetId = targetEl ? targetEl.dataset.feedNodeId : null;
+          const targetNode = targetId ? nodes.find(n => n.id === targetId) : null;
+
+          if (targetNode && draggedNode) {
+            const alreadyLinked = links.some(l =>
+              (l.source === nodeId && l.target === targetId) || (l.source === targetId && l.target === nodeId));
+            setFeedCarrying(null);
+            if (draggedNode.type === 'hub' && targetNode.type === 'hub') {
+              setMergePrompt({ type: 'group', a: nodeId, b: targetId });
+            } else if (targetNode.type === 'hub') {
+              if (!alreadyLinked) {
+                setLinks(prev => [...prev, { source: targetId, target: nodeId }]);
+                showLinkUndo(targetId, nodeId);
+                showToast('🌱 Added to ' + targetNode.label);
+              } else {
+                showToast('Already connected');
+              }
+            } else if (draggedNode.type === 'hub') {
+              if (!alreadyLinked) {
+                setLinks(prev => [...prev, { source: nodeId, target: targetId }]);
+                showLinkUndo(nodeId, targetId);
+                showToast('🌱 Added ' + targetNode.label + ' to ' + draggedNode.label);
+              } else {
+                showToast('Already connected');
+              }
+            } else {
+              if (!alreadyLinked) {
+                setMergePrompt({ type: 'friend', a: nodeId, b: targetId });
+              } else {
+                showToast('Already connected');
+              }
+            }
+            return;
+          }
+
+          const localX = screenX - stripRect.left, localY = screenY - stripRect.top;
+          let col = Math.round((localX - FEED_HEX) / (FEED_HEX * 1.5));
+          let row = Math.round((localY - FEED_HEX) / (ROW_STEP));
+          col = Math.max(0, Math.min(COLS - 1, col));
+          row = Math.max(0, row);
+          setFeedPositions(prev => {
+            const myKey = `${cDimKey}:${nodeId}`;
+            const isFree = (c, r, excludeKeys) => !Object.entries(prev).some(([k, v]) =>
+              k.startsWith(`${cDimKey}:`) && !excludeKeys.has(k) && v.col === c && v.row === r);
+            const findNearestFree = (targetCol, targetRow, excludeKeys) => {
+              if (isFree(targetCol, targetRow, excludeKeys)) return { col: targetCol, row: targetRow };
+              for (let ring = 1; ring <= 20; ring++) {
+                for (let dc = -ring; dc <= ring; dc++) {
+                  for (let dr = -ring; dr <= ring; dr++) {
+                    if (Math.max(Math.abs(dc), Math.abs(dr)) !== ring) continue;
+                    const c = targetCol + dc, r = targetRow + dr;
+                    if (c < 0 || c >= COLS || r < 0) continue;
+                    if (isFree(c, r, excludeKeys)) return { col: c, row: r };
+                  }
+                }
+              }
+              return { col: targetCol, row: targetRow };
+            };
+            if (!branchIds || branchIds.size <= 1) {
+              return { ...prev, [myKey]: findNearestFree(col, row, new Set([myKey])) };
+            }
+            const myPrevPos = prev[myKey];
+            if (!myPrevPos) {
+              return { ...prev, [myKey]: findNearestFree(col, row, new Set([myKey])) };
+            }
+            const dCol = col - myPrevPos.col, dRow = row - myPrevPos.row;
+            const branchKeys = new Set([...branchIds].map(id => `${cDimKey}:${id}`));
+            const next = { ...prev };
+            branchIds.forEach(id => {
+              const key = `${cDimKey}:${id}`;
+              const p = prev[key];
+              if (!p) return;
+              const targetCol = Math.max(0, Math.min(COLS - 1, p.col + dCol));
+              const targetRow = Math.max(0, p.row + dRow);
+              next[key] = findNearestFree(targetCol, targetRow, branchKeys);
+            });
+            return next;
+          });
+          setFeedCarrying(null);
+          const justPlacedIds = branchIds && branchIds.size > 0 ? branchIds : new Set([nodeId]);
+          justPlacedIds.forEach(id => feedJustPlaced.current.add(id));
+          setTimeout(() => { justPlacedIds.forEach(id => feedJustPlaced.current.delete(id)); }, 500);
+        };
+
+        return (
+          <div ref={feedScrollRef} style={{position:'absolute', top:0, left:0, right:0, bottom:56,
+            overflowY: feedCarrying ? 'hidden' : 'auto',
+            touchAction: feedCarrying ? 'none' : 'auto',
+            userSelect:'none', WebkitUserSelect:'none', WebkitTouchCallout:'none',
+            background:bg}}
+            onScroll={e => setFeedScrollTop(e.currentTarget.scrollTop)}
+            onPointerMove={e => {
+              // Page is frozen while carrying -- the carried node follows the
+              // finger directly instead of riding along with a scroll. Throttled
+              // to once per repaint (via requestAnimationFrame) rather than once
+              // per raw pointer event -- every update re-renders the whole Feed
+              // view (including re-walking the connection tree for all 5
+              // dimensions), which was slow enough on a phone to drop events and
+              // make the drag freeze partway through.
+              if (!feedCarrying) return;
+              if (feedCarrying.dropMode === 'twohand' && feedCarrying.holdPointerId !== e.pointerId) return; // a second, independent finger -- ignore for positioning
+              const x = e.clientX, y = e.clientY;
+              if (feedDragRAF.current) cancelAnimationFrame(feedDragRAF.current);
+              feedDragRAF.current = requestAnimationFrame(() => {
+                setFeedCarrying(d => d ? { ...d, screenX: x, screenY: y } : d);
+                feedDragRAF.current = null;
+              });
+            }}
+            onPointerUp={e => {
+              // Two-hand mode: releasing the FINGER THAT'S HOLDING the carried node
+              // places it wherever it's currently showing on screen. A second finger
+              // would have been ignored for positioning above, and never reaches
+              // this check either, since its pointerId won't match.
+              if (feedCarrying && feedCarrying.dropMode === 'twohand' && feedCarrying.holdPointerId === e.pointerId) {
+                const sectionEl = document.querySelector(`[data-feed-section="${feedCarrying.dimKey}"]`);
+                const stripEl = sectionEl && sectionEl.querySelector('[data-feed-strip]');
+                if (stripEl) placeCarriedNode(stripEl, e.clientX, e.clientY);
+                else setFeedCarrying(null);
+              }
+            }}>
+            {sectionDefs.map(({dimKey, flowerId}) => {
+              const dim = dimensions[dimKey];
+              const flowerNode = nodes.find(n => n.id === flowerId);
+              if (!dim || !flowerNode) return null;
+              const { members: allMembers, parentOf, minimisedHere } = buildMembers(flowerId);
+              const minimisedSet = new Set(minimisedHere);
+              // In Detailed mode, a group's direct people-members move off the grid
+              // entirely too -- they cluster as small flowers around the group's
+              // berry shape instead of taking their own grid slot. (Nested
+              // sub-groups still get their own grid slot, same as before.)
+              // Minimised nodes no longer claim their own grid slot at all -- they
+              // render as a small marker beside whichever parent (group or person)
+              // they're connected through, not on the grid. (Group members are no
+              // longer auto-clustered into flowers just for being in a group --
+              // that was conflating "in a group" with "minimised". They now stay
+              // full-size on the grid like anyone else unless actually minimised.)
+              const members = allMembers.filter(n => !minimisedSet.has(n.id));
+              const minimisedNodeObjs = allMembers.filter(n => minimisedSet.has(n.id));
+              const positions = resolvePositions(dimKey, members, minimisedNodeObjs);
+              // Section height must account for minimised/hidden nodes' reserved
+              // rows too -- using only visible `members` here would shrink the
+              // section the moment someone's minimised, which pulls every section
+              // BELOW this one upward on the page even though nothing in THIS
+              // section actually moved. Keeping height stable regardless of who's
+              // currently folded away is what stops that page-wide jump.
+              const reservedRows = minimisedNodeObjs
+                .map(n => feedPositions[`${dimKey}:${n.id}`])
+                .filter(p => p && p.col >= 0 && p.col < COLS)
+                .map(p => p.row);
+              const allRows = [...members.map(n => positions[n.id].row), ...reservedRows];
+              const maxRow = allRows.length ? Math.max(...allRows) : 0;
+              const sectionH = Math.max(160, (maxRow + 1) * ROW_STEP + 80);
+
+              // Anchor point for each member (centre of its circle) plus the flower
+              // band's own anchor, so we can draw a line from every node back to
+              // its real parent (hub or flower) -- same relationships as the main
+              // canvas, just laid out on the fixed grid instead of free positions.
+              const anchorOf = {};
+              members.forEach(n => {
+                const { col, row } = positions[n.id];
+                const rowShift = (row % 2 === 1) ? FEED_HEX * 0.75 : 0;
+                anchorOf[n.id] = {
+                  x: BAND_W + colOffsets[col] + rowShift + FEED_HEX,
+                  y: row * ROW_STEP + 50,
+                };
+              });
+              anchorOf[flowerId] = { x: BAND_W / 2, y: sectionH / 2 };
+
+              return (
+                <div key={dimKey} data-feed-section={dimKey} style={{borderBottom:`1px solid ${dm?'#1e293b':'#e2e8f0'}`, padding:'0'}}>
+                  <div style={{position:'relative', height:sectionH}}>
+                    {/* Flower band, full height of the section */}
+                    <div style={{position:'absolute', left:0, top:0, bottom:0, width:BAND_W,
+                      background:dim.color, display:'flex', flexDirection:'column', alignItems:'center',
+                      justifyContent:'center', gap:6, borderRight:'3px solid #000000'}}>
+                      <div style={{fontSize:22}}>{dim.emoji}</div>
+                      <div style={{fontSize:11, fontWeight:800, color:'white', writingMode:'vertical-rl',
+                        textOrientation:'mixed', letterSpacing:0.5}}>{dim.label}</div>
+                      <div style={{fontSize:10, color:'rgba(255,255,255,0.8)'}}>{members.length}</div>
+                    </div>
+
+                    {/* Connecting lines -- drawn first so circles sit on top.
+                        Lines leaving the flower band exit straight out horizontally
+                        at the same height as their destination, rather than all
+                        converging to one point in the middle of the band. In
+                        Detailed mode these use the SAME strand-braiding, leaf-
+                        lifecycle, and under-node fade system as the main canvas
+                        (via the shared renderVineLink function), just fed this
+                        layout's grid coordinates instead of free canvas positions. */}
+                    <svg style={{position:'absolute', left:0, top:0, width:'100%', height:sectionH, pointerEvents:'none'}}>
+                      {!detailed ? members.map(n => {
+                        const to = anchorOf[n.id];
+                        const parentId = parentOf[n.id];
+                        const from = parentId === flowerId
+                          ? { x: BAND_W, y: to.y }
+                          : anchorOf[parentId];
+                        if (!to || !from) return null;
+                        return (
+                          <line key={`line-${n.id}`} x1={from.x} y1={from.y} x2={to.x} y2={to.y}
+                            stroke={dim.color} strokeWidth={2} opacity={0.5}/>
+                        );
+                      }) : members.map((n, ni) => {
+                        const to = anchorOf[n.id];
+                        const parentId = parentOf[n.id];
+                        const from = parentId === flowerId
+                          ? { x: BAND_W, y: to.y }
+                          : anchorOf[parentId];
+                        if (!to || !from) return null;
+                        // Every OTHER circle in this section can occlude this connection,
+                        // same idea as blockerCircles on the main canvas.
+                        const blockerNodes = members
+                          .filter(m => m.id !== n.id && m.id !== parentId)
+                          .map(m => {
+                            const pos = anchorOf[m.id];
+                            const mr = m.type === 'hub' ? 26 : Math.min(30, (m.radius || 40) * 0.5);
+                            return pos ? { id: m.id, x: pos.x, y: pos.y, r: mr } : null;
+                          })
+                          .filter(Boolean);
+                        const parts = renderVineLink({
+                          key: `feed-${dimKey}-${n.id}`, srcX: from.x, srcY: from.y,
+                          tgtX: to.x, tgtY: to.y, i: ni,
+                          score: n.interactionScore || 0, scoreHistory: n.scoreHistory || [],
+                          blockerNodes, darkMode: dm, dashOffset: null, growingProgress: null,
+                          fallenLeafIds: null, onNewFallenLeaves: null, scale: 0.35,
+                        });
+                        if (!parts) return null;
+                        return <g key={`feedvine-${n.id}`}>{parts.vine}{parts.foliage}</g>;
+                      })}
+                    </svg>
+
+                    {/* Real group cluster border -- same convex-hull + sagging-arch +
+                        gooey blob-fill system as the main canvas's group vine border,
+                        just wrapped around each group's grid-positioned members instead
+                        of free-floating ones. Detailed mode only. */}
+                    {detailed && (() => {
+                      const groupsHere = {};
+                      members.forEach(n => {
+                        if (n.type === 'hub') return;
+                        const gid = nodeGroupMap[n.id];
+                        if (!gid) return;
+                        const pos = anchorOf[n.id];
+                        if (!pos) return;
+                        const rr = Math.min(30, (n.radius || 40) * 0.5);
+                        (groupsHere[gid] = groupsHere[gid] || []).push({ x: pos.x, y: pos.y, r: rr + 3 });
+                      });
+                      return Object.entries(groupsHere).map(([gid, pts]) => {
+                        if (pts.length === 0) return null;
+                        const gColor = resolveHubColor(gid);
+                        const hull = buildClusterHull(pts);
+                        const archPts = buildArchPath(hull, 0.32, 14, 16);
+                        if (archPts.length < 2) return null;
+                        const d = 'M ' + archPts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' L ') + ' Z';
+                        const filterId = `feedBlob-${dimKey}-${gid}`.replace(/[^a-zA-Z0-9-]/g, '');
+                        // A few small leaves along the sag sections only, so the border
+                        // reads as a vine rather than a plain outline.
+                        const sagPts = archPts.filter(p => p.section === 'sag');
+                        const leafEvery = Math.max(1, Math.floor(sagPts.length / 6));
+                        return (
+                          <svg key={gid} style={{position:'absolute', left:0, top:0, width:'100%', height:sectionH, pointerEvents:'none', overflow:'visible'}}>
+                            <defs>
+                              <filter id={filterId} x="-30%" y="-30%" width="160%" height="160%" filterUnits="objectBoundingBox" colorInterpolationFilters="sRGB">
+                                <feGaussianBlur in="SourceGraphic" stdDeviation="6" result="blur"/>
+                                <feColorMatrix in="blur" type="matrix" result="shaped" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 28 -12"/>
+                                <feFlood result="col" floodColor={gColor} floodOpacity="0.16"/>
+                                <feComposite in="col" in2="shaped" operator="in"/>
+                              </filter>
+                            </defs>
+                            <path d={d} fill={gColor} filter={`url(#${filterId})`}/>
+                            <path d={d} fill="none" stroke={gColor} strokeWidth="2.5" opacity="0.8"/>
+                            <path d={d} fill="none" stroke={dm ? '#15803d' : '#4ade80'} strokeWidth="1" opacity="0.5"/>
+                            {sagPts.filter((_, i) => i % leafEvery === 0).map((p, li) => {
+                              const lw = 5, lh = 2;
+                              const leafD = `M 0,0 C ${lw*0.25},${-lh} ${lw*0.75},${-lh} ${lw},0 C ${lw*0.75},${lh} ${lw*0.25},${lh} 0,0 Z`;
+                              return (
+                                <path key={li} d={leafD} fill={dm ? '#15803d' : '#4ade80'}
+                                  stroke={dm ? '#0f2d1a' : '#14532d'} strokeWidth="0.4" opacity="0.85"
+                                  transform={`translate(${p.x},${p.y}) rotate(${li * 47})`}/>
+                              );
+                            })}
+                          </svg>
+                        );
+                      });
+                    })()}
+
+                    {/* Fixed 6-column hex strip (offset right of the band), unlimited rows */}
+                    <div data-feed-strip
+                      onPointerUp={e=>{
+                        if (!feedCarrying || feedCarrying.dimKey !== dimKey) return;
+                        if (feedCarrying.dropMode === 'twohand') return; // placement is via releasing the holding finger, handled elsewhere
+                        // One-hand mode: releasing the finger anywhere on this strip
+                        // places the carried node here -- a natural "drop" gesture,
+                        // not a second hold (which was being cancelled by the very act
+                        // of lifting the finger to drop, so placement could never fire).
+                        placeCarriedNode(e.currentTarget, e.clientX, e.clientY);
+                      }}
+                      style={{position:'absolute', left:BAND_W, top:0, height:sectionH, width:stripW}}>
+
+                      {/* Faint grid preview while dragging within this section -- same idea as
+                          the original map's local hex cluster shown around a lifted node. */}
+                      {feedCarrying && feedCarrying.dimKey === dimKey && (() => {
+                        const strokeCol = dm ? 'rgba(16,185,129,0.35)' : 'rgba(16,185,129,0.3)';
+                        const cells = [];
+                        for (let c = 0; c < COLS; c++) {
+                          for (let rr = 0; rr <= maxRow + 1; rr++) {
+                            const rowShift = (rr % 2 === 1) ? FEED_HEX * 0.75 : 0;
+                            const cx = colOffsets[c] + rowShift + FEED_HEX;
+                            const cy = rr * ROW_STEP + 50;
+                            cells.push({ cx, cy });
+                          }
+                        }
+                        return (
+                          <svg style={{position:'absolute', left:0, top:0, width:stripW, height:sectionH, pointerEvents:'none'}}>
+                            {cells.map((cell, ci) => (
+                              <circle key={ci} cx={cell.cx} cy={cell.cy} r={FEED_HEX*0.5}
+                                fill="none" stroke={strokeCol} strokeWidth={1} strokeDasharray="6 4"/>
+                            ))}
+                          </svg>
+                        );
+                      })()}
+                      {members.length === 0 ? (
+                        <div style={{textAlign:'center', fontSize:13, color:dm?'#475569':'#94a3b8', paddingTop:30}}>
+                          Nobody connected here yet
+                        </div>
+                      ) : members.map((node) => {
+                        const { col, row } = positions[node.id];
+                        const rowShift = (row % 2 === 1) ? FEED_HEX * 0.75 : 0;
+                        const px = colOffsets[col] + rowShift + FEED_HEX;
+                        const py = row * ROW_STEP + 50;
+                        const isHub = node.type === 'hub';
+                        const r = isHub ? Math.min(30, FEED_HEX*0.5) : Math.min(30, (node.radius || 40) * 0.5);
+                        // Hubs render as a rounded "pill" bar in Simple Stacked, or a
+                        // solid-coloured "berry" circle in Detailed mode. Their members
+                        // stay full-size on the grid like anyone else, same as Simple
+                        // Stacked -- minimising is the only way to shrink them now.
+                        const pillW = detailed ? r * 2.4 : FEED_HEX * 1.7;
+                        const pillH = detailed ? pillW : r * 1.1;
+                        const initials = getInitials(node.label);
+                        const hubColor = isHub ? resolveHubColor(node.id) : null;
+                        const myGroupId = nodeGroupMap[node.id];
+                        const groupColor = node.personalColor || (myGroupId ? resolveHubColor(myGroupId) : null);
+                        const ringColor = isHub ? hubColor : (groupColor || dim.color);
+                        const isCarried = feedCarrying && (feedCarrying.nodeId === node.id || (feedCarrying.branchIds && feedCarrying.branchIds.has(node.id))) && feedCarrying.dimKey === dimKey;
+                        const boxW = isHub ? pillW : r * 2;
+                        const boxH = isHub ? pillH : r * 2;
+                        return (
+                          <div key={node.id}
+                            onPointerDown={e=>{
+                              if (feedCarrying) return; // already carrying something -- this tap is for placement, handled by the strip itself
+                              const pointerId = e.pointerId;
+                              const targetEl = e.currentTarget;
+                              const startX = e.clientX, startY = e.clientY;
+                              // Track the live position continuously from the moment of
+                              // touch-down, in a ref (not state, so it never triggers a
+                              // render) -- this is what the lift below reads from, instead
+                              // of a single snapshot taken at touch-down that goes stale
+                              // over the 350ms wait.
+                              feedLiveTouchRef.current = { x: startX, y: startY, pointerId };
+                              // Hold still briefly to pick the node up. No movement threshold
+                              // races here -- the page is always free to scroll normally up
+                              // until the moment this timer actually fires.
+                              feedLiftTimer.current = setTimeout(() => {
+                                const branchIds = new Set([node.id]);
+                                const stack = [node.id];
+                                while (stack.length) {
+                                  const cur = stack.pop();
+                                  members.forEach(m => {
+                                    if (parentOf[m.id] === cur && !branchIds.has(m.id)) {
+                                      branchIds.add(m.id);
+                                      stack.push(m.id);
+                                    }
+                                  });
+                                }
+                                try { targetEl.setPointerCapture(pointerId); } catch(err) {}
+                                // Use the LATEST known live position, not the original
+                                // touch-down snapshot -- the finger has likely drifted
+                                // somewhat during the 350ms hold, and starting the carry
+                                // from a stale point was contributing to the "stuck until
+                                // re-grabbed" feeling.
+                                const live = feedLiveTouchRef.current;
+                                const liveX = (live && live.pointerId === pointerId) ? live.x : startX;
+                                const liveY = (live && live.pointerId === pointerId) ? live.y : startY;
+                                setFeedCarrying({ dimKey, nodeId: node.id, branchIds, screenX: liveX, screenY: liveY,
+                                  dropMode: feedDragMode, holdPointerId: feedDragMode === 'twohand' ? pointerId : null });
+                              }, 350);
+                            }}
+                            onPointerUp={e=>{
+                              clearTimeout(feedLiftTimer.current);
+                              feedLiveTouchRef.current = null;
+                              try { e.currentTarget.releasePointerCapture(e.pointerId); } catch(err) {}
+                            }}
+                            onPointerMove={e=>{
+                              // Always update the live-position ref first, regardless of
+                              // whether the carry has actually started yet -- this is what
+                              // lets the lift (above) start from a fresh position rather
+                              // than a stale one.
+                              if (feedLiveTouchRef.current && feedLiveTouchRef.current.pointerId === e.pointerId) {
+                                feedLiveTouchRef.current.x = e.clientX;
+                                feedLiveTouchRef.current.y = e.clientY;
+                              }
+                              // Move events for a touch-derived pointer often stay
+                              // targeted at whatever element the gesture started on,
+                              // rather than reliably bubbling to the container -- so
+                              // track the drag here directly too, not just on the
+                              // scroll container's own onPointerMove. Throttled to once
+                              // per repaint, same reasoning as the container's handler.
+                              if (!feedCarrying || feedCarrying.nodeId !== node.id) return;
+                              if (feedCarrying.dropMode === 'twohand' && feedCarrying.holdPointerId !== e.pointerId) return;
+                              const x = e.clientX, y = e.clientY;
+                              if (feedDragRAF.current) cancelAnimationFrame(feedDragRAF.current);
+                              feedDragRAF.current = requestAnimationFrame(() => {
+                                setFeedCarrying(d => d ? { ...d, screenX: x, screenY: y } : d);
+                                feedDragRAF.current = null;
+                              });
+                            }}
+                            onPointerLeave={()=>{ clearTimeout(feedLiftTimer.current); }}
+                            onClick={() => {
+                              if (feedCarrying || feedJustPlaced.current.has(node.id)) return;
+                              const now = Date.now();
+                              const lastTap = feedLastTapRef.current.get(node.id) || 0;
+                              if (now - lastTap < 500) {
+                                // Double-tap on THIS specific node: cancel only ITS own
+                                // pending single-tap timer (not some other node's, which
+                                // was the actual bug before) and minimise/expand its
+                                // branch -- same shared state as the main canvas.
+                                const myTimer = feedSingleTapTimersRef.current.get(node.id);
+                                if (myTimer) { clearTimeout(myTimer); feedSingleTapTimersRef.current.delete(node.id); }
+                                feedLastTapRef.current.delete(node.id);
+                                const willMin = !minimisedNodes.includes(node.id);
+                                setMinimisedNodes(prev => prev.includes(node.id) ? prev.filter(id => id !== node.id) : [...prev, node.id]);
+                                showToast(willMin ? '📁 Minimised' : '📂 Expanded');
+                              } else {
+                                feedLastTapRef.current.set(node.id, now);
+                                // Wait briefly before actually opening the panel, in case a
+                                // second tap on THIS node arrives and turns this into a
+                                // double-tap instead. Keyed by node id so tapping a
+                                // different node in the meantime can't interfere.
+                                const timer = setTimeout(() => {
+                                  setSelectedNodeId(node.id);
+                                  feedSingleTapTimersRef.current.delete(node.id);
+                                }, 280);
+                                feedSingleTapTimersRef.current.set(node.id, timer);
+                              }
+                            }}
+                            data-feed-node-id={node.id}
+                            style={{position:'absolute', left:px-boxW/2, top:py-boxH/2, width:boxW, height:boxH+(isHub?0:18),
+                              cursor:'grab', display:'flex', flexDirection:'column', alignItems:'center',
+                              opacity: isCarried ? 0.25 : 1, transition:'opacity 0.1s', zIndex: isHub ? 2 : 1,
+                              userSelect:'none', WebkitUserSelect:'none', WebkitTouchCallout:'none'}}>
+                            <svg width={boxW} height={boxH} style={{overflow:'visible'}}>
+                              {isHub ? (
+                                <>
+                                  <rect x={1} y={1} width={pillW-2} height={pillH-2} rx={(pillH-2)/2} ry={(pillH-2)/2}
+                                    fill={hubColor} stroke={ringColor} strokeWidth={3}/>
+                                  {/* Group name inside the pill -- white fill with a black
+                                      outline, built via stroke-then-fill text layering since
+                                      SVG text doesn't support a true outlined fill directly. */}
+                                  <text x={pillW/2} y={pillH/2+5} textAnchor="middle" fontSize={13} fontWeight="800"
+                                    stroke="#000000" strokeWidth={3} paintOrder="stroke" fill="white" style={{userSelect:'none'}}>
+                                    {node.label}
+                                  </text>
+                                </>
+                              ) : node.img ? (
+                                <>
+                                  <circle cx={r} cy={r} r={r} fill={dm?'#1e293b':'#e2e8f0'} stroke={ringColor} strokeWidth={groupColor ? 3 : 2}/>
+                                  <defs><clipPath id={`feedClip-${node.id}`}><circle cx={r} cy={r} r={r-2}/></clipPath></defs>
+                                  <image href={node.img} x={2} y={2} width={(r-2)*2} height={(r-2)*2}
+                                    clipPath={`url(#feedClip-${node.id})`} preserveAspectRatio="xMidYMid slice"/>
+                                </>
+                              ) : (
+                                <>
+                                  <circle cx={r} cy={r} r={r} fill={dm?'#1e293b':'#e2e8f0'} stroke={ringColor} strokeWidth={groupColor ? 3 : 2}/>
+                                  <text x={r} y={r+r*0.32} textAnchor="middle" fontSize={r*0.7} fontWeight="700"
+                                    fill={dm?'#e2e8f0':'#475569'} style={{userSelect:'none'}}>{initials}</text>
+                                </>
+                              )}
+                            </svg>
+                            {!isHub && (
+                              <div style={{fontSize:10,fontWeight:600,color:dm?'#cbd5e1':'#334155',
+                                marginTop:2, whiteSpace:'nowrap', maxWidth:r*2+20, overflow:'hidden', textOverflow:'ellipsis'}}>
+                                {node.label}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+
+                      {/* Minimised people/groups -- no longer claim their own grid
+                          slot. Each renders as a small flower-coloured marker beside
+                          whichever parent (group or person) they're connected
+                          through. Colour: the group's colour if minimised under a
+                          hub, the person's own personalColor if set, else white. */}
+                      {minimisedHere.map((id, mi) => {
+                        const mNode = nodes.find(n => n.id === id);
+                        if (!mNode) return null;
+                        const parentId = parentOf[id];
+                        // If the parent is the flower band itself, don't use its
+                        // section-wide vertical-midpoint anchor -- that ignores where
+                        // THIS person actually sits and could be far away (e.g. someone
+                        // near the bottom of a tall section anchoring to the middle).
+                        // Use their own saved row instead, near the band, at their own
+                        // height.
+                        let parentAnchor;
+                        if (parentId === flowerId) {
+                          const ownSaved = feedPositions[`${dimKey}:${id}`];
+                          const ownRow = ownSaved ? ownSaved.row : 0;
+                          parentAnchor = { x: BAND_W / 2, y: ownRow * ROW_STEP + 50 };
+                        } else {
+                          parentAnchor = anchorOf[parentId];
+                        }
+                        if (!parentAnchor) return null;
+                        const parentNode = nodes.find(n => n.id === parentId);
+                        const markerColor = parentNode && parentNode.type === 'hub'
+                          ? resolveHubColor(parentNode.id)
+                          : (mNode.personalColor || 'white');
+                        const mr = detailed ? 9 * 1.8 : 9;
+                        // Use the same SIX DIRECTIONS as the parent's real hexagon
+                        // vertices, but pulled noticeably closer than the true vertex
+                        // distance -- a full vertex sits as far away as the next cell
+                        // over, which let a marker visually wander into a neighbouring
+                        // group's space even though it was technically a valid corner.
+                        // This keeps the same natural, slightly-randomised feel while
+                        // staying clearly "attached" to its actual parent.
+                        const hexR = ((1.5 * FEED_HEX) / (0.75 * Math.sqrt(3))) * 0.55;
+                        let candidateCorners = Array.from({length: 6}, (_, i) => {
+                          const a = (Math.PI/180) * (30 + 60*i);
+                          return { x: parentAnchor.x + hexR*Math.cos(a), y: parentAnchor.y + hexR*Math.sin(a) };
+                        });
+                        // Keep corners clear of the flower band on the left.
+                        candidateCorners = candidateCorners.filter(c => c.x > mr + 4);
+                        // Keep corners clear of any OTHER member's actual circle too --
+                        // a vertex sits right where a neighbouring cell's circle could be,
+                        // so skip any that land too close to someone who's actually there.
+                        const clearMargin = mr + 18;
+                        candidateCorners = candidateCorners.filter(c => {
+                          return !members.some(m => {
+                            if (m.id === parentId) return false;
+                            const mPos = anchorOf[m.id];
+                            if (!mPos) return false;
+                            const dx = c.x - mPos.x, dy = c.y - mPos.y;
+                            return Math.sqrt(dx*dx + dy*dy) < clearMargin;
+                          });
+                        });
+                        if (candidateCorners.length === 0) candidateCorners = [{ x: parentAnchor.x + hexR, y: parentAnchor.y }];
+                        // Pick semi-randomly among whichever vertices are actually clear,
+                        // stable per node id so it doesn't reshuffle every render -- this
+                        // is what gives the natural, non-uniform feel across different
+                        // groupings rather than always picking the same slot first.
+                        const seed = id.split('').reduce((s,c)=>s+c.charCodeAt(0),0);
+                        const corner = candidateCorners[seed % candidateCorners.length];
+                        const mx = corner.x, my = corner.y;
+                        return (
+                          <div key={`min-${id}`}
+                            onClick={(e) => { e.stopPropagation(); setMinimisedNodes(prev => prev.filter(x => x !== id)); }}
+                            style={{position:'absolute', left:mx-mr, top:my-mr, width:mr*2, height:mr*2+14,
+                              cursor:'pointer', display:'flex', flexDirection:'column', alignItems:'center', zIndex:5}}>
+                            <svg width={mr*2} height={mr*2} style={{overflow:'visible'}}>
+                              {/* Dashed ring -- the one clear visual difference between
+                                  "minimised" (this) and "always clustered around its
+                                  group" (the other flower style), which otherwise look
+                                  identical and made toggling look like nothing happened. */}
+                              <circle cx={mr} cy={mr} r={mr*1.25} fill="none" stroke={dm?'#475569':'#94a3b8'} strokeWidth={1} strokeDasharray="2.5 2.5"/>
+                              {Array.from({length:6}, (_, pi) => {
+                                const pa = (pi/6) * Math.PI * 2;
+                                return (
+                                  <ellipse key={pi} cx={mr+Math.cos(pa)*mr*0.55} cy={mr+Math.sin(pa)*mr*0.55}
+                                    rx={mr*0.4} ry={mr*0.22} fill={markerColor} stroke={dm?'#0f172a':'#94a3b8'} strokeWidth={0.5}
+                                    transform={`rotate(${pa*180/Math.PI},${mr+Math.cos(pa)*mr*0.55},${mr+Math.sin(pa)*mr*0.55})`}/>
+                                );
+                              })}
+                              <circle cx={mr} cy={mr} r={mr*0.32} fill={dm?'#fde68a':'#fbbf24'} stroke={dm?'#92400e':'#b45309'} strokeWidth={0.5}/>
+                            </svg>
+                            <div style={{fontSize:8,fontWeight:600,color:dm?'#94a3b8':'#64748b',
+                              marginTop:1, whiteSpace:'nowrap', maxWidth:40, overflow:'hidden', textOverflow:'ellipsis'}}>
+                              {mNode.label}
+                            </div>
+                          </div>
+                        );
+                      })}
+
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+            <div style={{height:24}}/>
+
+            {/* Carry overlay -- the lifted node, shown as a fixed circle that follows
+                the finger directly. The page is frozen (scroll locked) for the
+                duration of the carry, so there's no scroll offset to account for --
+                screenX/screenY are just the live pointer position. */}
+            {feedCarrying && (() => {
+              const draggedNode = nodes.find(n => n.id === feedCarrying.nodeId);
+              if (!draggedNode) return null;
+              const r = Math.min(30, (draggedNode.radius || 40) * 0.5);
+              const initials = getInitials(draggedNode.label);
+              const screenX = feedCarrying.screenX, screenY = feedCarrying.screenY;
+              return (
+                <div style={{position:'fixed', left:screenX-r, top:screenY-r, width:r*2, height:r*2+18,
+                  zIndex:300, pointerEvents:'none', display:'flex', flexDirection:'column', alignItems:'center'}}>
+                  <svg width={r*2} height={r*2} style={{overflow:'visible'}}>
+                    <circle cx={r} cy={r} r={r} fill={dm?'#1e293b':'#e2e8f0'} stroke="#10b981" strokeWidth={3} opacity={0.95}/>
+                    {draggedNode.img ? (
+                      <>
+                        <defs><clipPath id="feedGhostClip"><circle cx={r} cy={r} r={r-2}/></clipPath></defs>
+                        <image href={draggedNode.img} x={2} y={2} width={(r-2)*2} height={(r-2)*2}
+                          clipPath="url(#feedGhostClip)" preserveAspectRatio="xMidYMid slice"/>
+                      </>
+                    ) : (
+                      <text x={r} y={r+r*0.32} textAnchor="middle" fontSize={r*0.7} fontWeight="700"
+                        fill={dm?'#e2e8f0':'#475569'}>{initials}</text>
+                    )}
+                  </svg>
+                  {feedCarrying.dropMode === 'onehand' && (
+                    <div style={{fontSize:9,fontWeight:700,color:'#10b981',background:'rgba(0,0,0,0.6)',
+                      padding:'2px 6px',borderRadius:6,marginTop:2,whiteSpace:'nowrap'}}>
+                      release to place
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
+        );
+      })()}
+
+
+
 
       {/* -- Quick undo X button for new links --------------------------------- */}
       {lastCreatedLink && (() => {
@@ -9033,11 +12159,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         const tgt = nodes.find(n => n.id === vineConnectPrompt.tgtId);
         if (!src || !tgt) return null;
 
+
         // Convert SVG coords to screen coords for the popup
         const midSvgX = (src.x + tgt.x) / 2;
         const midSvgY = (src.y + tgt.y) / 2;
         const screenX = midSvgX * transform.scale + transform.x;
         const screenY = midSvgY * transform.scale + transform.y;
+
 
         const tiers = [
           {label:'New',    score:0,   color:'#bef264'},
@@ -9047,6 +12175,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           {label:'Family', score:800, color:'#9333ea'},
           {label:'💑 Partner', score:1500, color:'#f43f5e'},
         ];
+
 
         const confirmConnection = (score) => {
           setLinks(prev => [...prev, { source: vineConnectPrompt.srcId, target: vineConnectPrompt.tgtId }]);
@@ -9061,6 +12190,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           setVineConnectPrompt(null);
         };
 
+
         return (
           <div style={{
             position:'fixed',
@@ -9074,10 +12204,10 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             border:'2px solid #10b981',
             width:200,
           }}>
-            <div style={{fontSize:12,fontWeight:700,color:theme.darkMode?'#e2e8f0':'#1e293b',marginBottom:4,textAlign:'center'}}>
+            <div style={{fontSize:12,fontWeight:700,color:theme.darkMode?'#e2e8f0':pw.bodyText,marginBottom:4,textAlign:'center'}}>
               {src.label} ↔ {tgt.label}
             </div>
-            <div style={{fontSize:11,color:theme.darkMode?'#64748b':'#94a3b8',marginBottom:10,textAlign:'center'}}>
+            <div style={{fontSize:11,color:theme.darkMode?'#64748b':'#475569',marginBottom:10,textAlign:'center'}}>
               What's their friendship?
             </div>
             <div style={{display:'flex',flexDirection:'column',gap:6}}>
@@ -9093,7 +12223,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             </div>
             <button onClick={()=>setVineConnectPrompt(null)}
               style={{marginTop:10,width:'100%',padding:'6px',borderRadius:8,border:'none',
-                background:'none',color:theme.darkMode?'#475569':'#94a3b8',
+                background:'none',color:theme.darkMode?'#475569':'#475569',
                 cursor:'pointer',fontSize:12}}>Cancel</button>
           </div>
         );
@@ -9103,8 +12233,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           background:theme.darkMode?'#0f172a':'#f8fafc',
           display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:20}}>
           <div style={{fontSize:48}}>🔒</div>
-          <div style={{fontSize:20,fontWeight:800,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>FriendshipTree</div>
-          <div style={{fontSize:14,color:theme.darkMode?'#94a3b8':'#64748b'}}>Enter PIN to unlock</div>
+          <div style={{fontSize:20,fontWeight:800,color:theme.darkMode?'#e2e8f0':pw.bodyText}}>FriendshipTree</div>
+          <div style={{fontSize:14,color:theme.darkMode?'#94a3b8':pw.secondText}}>Enter PIN to unlock</div>
           {/* PIN dots */}
           <div style={{display:'flex',gap:12,margin:'8px 0'}}>
             {Array.from({length:6}).map((_,i)=>(
@@ -9133,13 +12263,14 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               style={{height:64,borderRadius:12,border:'none',cursor:d===''?'default':'pointer',
                 background:d===''?'transparent':(theme.darkMode?'#1e293b':'white'),
                 fontSize:d==='⌫'?20:22,fontWeight:600,
-                color:theme.darkMode?'#e2e8f0':'#1e293b',
+                color:theme.darkMode?'#e2e8f0':pw.bodyText,
                 boxShadow:d===''?'none':'0 2px 8px rgba(0,0,0,0.15)',
               }}>{d}</button>
             ))}
           </div>
         </div>
       )}
+
 
       {/* -- Confirm Modal ----------------------------------------------------- */}
       {/* Shared-link picker — choose which friend a shared profile link is for */}
@@ -9164,7 +12295,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             <div onClick={e=>e.stopPropagation()} style={{background:dm?'#0f172a':'white',borderRadius:18,width:'min(92vw,400px)',maxHeight:'80vh',display:'flex',flexDirection:'column',overflow:'hidden',boxShadow:'0 25px 60px rgba(0,0,0,0.5)'}}>
               <div style={{padding:'16px 18px',borderBottom:'1px solid '+(dm?'#334155':'#e2e8f0')}}>
                 <div style={{fontWeight:800,fontSize:15,color:dm?'#e2e8f0':'#1e293b'}}>Add link to a friend</div>
-                <div style={{fontSize:11,color:dm?'#94a3b8':'#64748b',marginTop:3}}>
+                <div style={{fontSize:11,color:dm?'#94a3b8':pw.secondText,marginTop:3}}>
                   {parsed ? `Detected ${parsed.label}: ${parsed.value}` : 'Link not recognised — tap a friend to save it as a note'}
                 </div>
               </div>
@@ -9178,23 +12309,24 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 ))}
               </div>
               <div style={{padding:10,borderTop:'1px solid '+(dm?'#334155':'#e2e8f0')}}>
-                <button onClick={()=>setSharedLink(null)} style={{width:'100%',padding:'9px',borderRadius:10,border:'1px solid '+(dm?'#334155':'#e2e8f0'),background:'none',color:dm?'#94a3b8':'#64748b',fontWeight:600,fontSize:13,cursor:'pointer'}}>Cancel</button>
+                <button onClick={()=>setSharedLink(null)} style={{width:'100%',padding:'9px',borderRadius:10,border:`1px solid ${pw.border}`,background:'none',color:dm?'#94a3b8':pw.secondText,fontWeight:600,fontSize:13,cursor:'pointer'}}>Cancel</button>
               </div>
             </div>
           </div>
         );
       })()}
 
+
       {confirmModal && (
         <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:900,background:'rgba(0,0,0,0.6)',display:'flex',alignItems:'center',justifyContent:'center'}}
           onClick={e=>{if(e.target===e.currentTarget)setConfirmModal(null);}}>
           <div style={{background:theme.darkMode?'#0f172a':'white',borderRadius:20,padding:28,width:'min(90vw,300px)',textAlign:'center',boxShadow:'0 25px 60px rgba(0,0,0,0.4)'}}>
             <div style={{fontSize:36,marginBottom:10}}>{confirmModal.danger?'⚠️':'❓'}</div>
-            <div style={{fontSize:17,fontWeight:800,color:theme.darkMode?'#e2e8f0':'#1e293b',marginBottom:8}}>{confirmModal.title}</div>
-            <div style={{fontSize:13,color:theme.darkMode?'#94a3b8':'#64748b',marginBottom:22,lineHeight:1.5}}>{confirmModal.message}</div>
+            <div style={{fontSize:17,fontWeight:800,color:theme.darkMode?'#e2e8f0':pw.bodyText,marginBottom:8}}>{confirmModal.title}</div>
+            <div style={{fontSize:13,color:theme.darkMode?'#94a3b8':pw.secondText,marginBottom:22,lineHeight:1.5}}>{confirmModal.message}</div>
             <div style={{display:'flex',gap:10}}>
               <button onClick={()=>setConfirmModal(null)}
-                style={{flex:1,padding:'11px',borderRadius:12,border:'none',cursor:'pointer',background:theme.darkMode?'#1e293b':'#f1f5f9',color:theme.darkMode?'#94a3b8':'#64748b',fontSize:14,fontWeight:700}}>
+                style={{flex:1,padding:'11px',borderRadius:12,border:'none',cursor:'pointer',background:pw.cellBg,color:theme.darkMode?'#94a3b8':pw.secondText,fontSize:14,fontWeight:700}}>
                 Cancel
               </button>
               <button onClick={()=>{saveSnapshot();confirmModal.onConfirm();setConfirmModal(null);}}
@@ -9206,6 +12338,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         </div>
       )}
 
+
       {/* -- PIN Modal --------------------------------------------------------- */}
       {pinModal && (
         <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:800,background:'rgba(0,0,0,0.6)',
@@ -9214,8 +12347,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           <div style={{background:theme.darkMode?'#0f172a':'white',borderRadius:20,padding:28,
             width:'min(90vw,320px)',textAlign:'center',boxShadow:'0 25px 60px rgba(0,0,0,0.4)'}}>
             <div style={{fontSize:32,marginBottom:8}}>{pinModal.mode==='set'?'🔐':'🔒'}</div>
-            <div style={{fontSize:16,fontWeight:800,color:theme.darkMode?'#e2e8f0':'#1e293b',marginBottom:4}}>{pinModal.title}</div>
-            <div style={{fontSize:12,color:theme.darkMode?'#64748b':'#94a3b8',marginBottom:16}}>
+            <div style={{fontSize:16,fontWeight:800,color:theme.darkMode?'#e2e8f0':pw.bodyText,marginBottom:4}}>{pinModal.title}</div>
+            <div style={{fontSize:12,color:theme.darkMode?'#64748b':'#475569',marginBottom:16}}>
               {pinModal.mode==='set'?'Choose a 4–6 digit PIN':'Enter your PIN to continue'}
             </div>
             {/* PIN dots */}
@@ -9237,14 +12370,14 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   style={{padding:'14px 0',borderRadius:10,border:'none',cursor:d===''?'default':'pointer',
                     background:d===''?'transparent':(theme.darkMode?'#1e293b':'#f8fafc'),
                     fontSize:d==='⌫'?18:20,fontWeight:600,
-                    color:theme.darkMode?'#e2e8f0':'#1e293b',
+                    color:theme.darkMode?'#e2e8f0':pw.bodyText,
                     boxShadow:d===''?'none':'0 1px 4px rgba(0,0,0,0.1)',
                   }}>{d}</button>
               ))}
             </div>
             <button onClick={()=>{setPinModal(null);setPinInput('');}}
               style={{marginTop:16,padding:'8px 24px',borderRadius:99,border:'none',cursor:'pointer',
-                background:'transparent',color:theme.darkMode?'#64748b':'#94a3b8',fontSize:13}}>Cancel</button>
+                background:'transparent',color:theme.darkMode?'#64748b':'#475569',fontSize:13}}>Cancel</button>
           </div>
         </div>
       )}
@@ -9262,7 +12395,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               <h3 style={{textAlign:'center',fontWeight:800,fontSize:16,color:dm?'#e2e8f0':'#1e293b',marginBottom:6}}>
                 {isGroup ? 'Merge Groups?' : 'Connect Friends?'}
               </h3>
-              <p style={{textAlign:'center',fontSize:13,color:dm?'#94a3b8':'#64748b',marginBottom:20}}>
+              <p style={{textAlign:'center',fontSize:13,color:dm?'#94a3b8':pw.secondText,marginBottom:20}}>
                 {isGroup
                   ? `Merge "${nodeA.label}" into "${nodeB.label}"? All members will move to ${nodeB.label}.`
                   : `Add a connection between ${nodeA.label} and ${nodeB.label}?`}
@@ -9299,6 +12432,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         );
       })()}
 
+
       {/* -- Search Overlay ----------------------------------------------------- */}
       {searchOpen && (() => {
         const dm = theme.darkMode;
@@ -9322,7 +12456,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   style={{flex:1,background:'none',border:'none',outline:'none',fontSize:15,color:dm?'#e2e8f0':'#1e293b'}}
                   onKeyDown={e=>e.key==='Escape'&&(setSearchOpen(false),setSearchQuery(''))} />
                 <button onClick={()=>{setSearchOpen(false);setSearchQuery('');}}
-                  style={{background:'none',border:'none',cursor:'pointer',fontSize:18,color:dm?'#94a3b8':'#64748b'}}>✕</button>
+                  style={{background:'none',border:'none',cursor:'pointer',fontSize:18,color:dm?'#94a3b8':pw.secondText}}>✕</button>
               </div>
               {results.length > 0 && (
                 <div style={{maxHeight:320,overflowY:'auto'}}>
@@ -9344,7 +12478,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           <div style={{fontSize:11,color:lvl.color}}>{lvl.emoji} {lvl.label}</div>
                         </div>
                         {(n.tags||[]).map(t=>(
-                          <span key={t} style={{fontSize:10,padding:'2px 6px',borderRadius:99,background:dm?'#334155':'#e2e8f0',color:dm?'#94a3b8':'#64748b'}}>{t}</span>
+                          <span key={t} style={{fontSize:10,padding:'2px 6px',borderRadius:99,background:dm?'#334155':'#e2e8f0',color:dm?'#94a3b8':pw.secondText}}>{t}</span>
                         ))}
                       </div>
                     );
@@ -9352,12 +12486,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 </div>
               )}
               {q.length > 0 && results.length === 0 && (
-                <div style={{padding:'20px 16px',textAlign:'center',color:dm?'#475569':'#94a3b8',fontSize:13}}>No results for "{searchQuery}"</div>
+                <div style={{padding:'20px 16px',textAlign:'center',color:dm?'#475569':'#475569',fontSize:13}}>No results for "{searchQuery}"</div>
               )}
             </div>
           </div>
         );
       })()}
+
 
       {/* -- Partner Flower Customiser ------------------------------------------- */}
       {partnerFlowerEditor && (() => {
@@ -9365,6 +12500,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         if (!pn) return null;
         const DEFAULT_PF = {petals:6,subPetals:6,petalColor:'#f43f5e',subPetalColor:'#fda4af',petalBorderColor:'#9f1239',subPetalBorderColor:'#fecdd3',borderColor:'#9f1239',pattern:'solid',petalLength:0.55,subPetalLength:0.47};
         const DEFAULT_MF = {petals:6,subPetals:0,petalColor:'#f43f5e',subPetalColor:'#fda4af',petalBorderColor:'#9f1239',subPetalBorderColor:'#fecdd3',borderColor:'#9f1239',pattern:'solid',petalLength:0.45,subPetalLength:0.35};
+
 
         // Which flower are we editing
         const isMini = pfFlowerType === 'mini';
@@ -9375,11 +12511,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             : {...DEFAULT_MF,...(pn.miniFlower||{})}
           : {...DEFAULT_PF,...(pn.partnerFlower||{})};
 
+
         const dm = theme.darkMode;
         const bg = dm?'#0f172a':'#fafafa';
         const brd = dm?'#334155':'#e2e8f0';
         const sub = dm?'#94a3b8':'#64748b';
         const txt = dm?'#e2e8f0':'#1e293b';
+
 
         const update = (key,val) => setNodes(prev=>prev.map(n=>{
           if(n.id!==partnerFlowerEditor) return n;
@@ -9387,6 +12525,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           if(isMini) return {...n, miniFlower:{...DEFAULT_MF,...(n.miniFlower||{}),[key]:val}};
           return {...n, partnerFlower:{...DEFAULT_PF,...(n.partnerFlower||{}),[key]:val}};
         }));
+
 
         const copyParentToMini = () => {
           const mainFlower = {...DEFAULT_PF,...(pn.partnerFlower||{})};
@@ -9398,8 +12537,10 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           }));
         };
 
+
         const COLORS = ['#f43f5e','#ec4899','#a855f7','#8b5cf6','#3b82f6','#06b6d4','#10b981','#84cc16','#f59e0b','#ef4444','#ffffff','#000000'];
         const PATTERNS = [{id:'solid',label:'Solid'},{id:'dots',label:'Dots'},{id:'radial',label:'Radial'}];
+
 
         const PRESETS = [
           {name:'Rose',     petals:5,  subPetals:5,  petalLength:0.65, subPetalLength:0.38, petalColor:'#f43f5e', subPetalColor:'#fda4af', borderColor:'#9f1239', pattern:'solid', radialColor2:'#fda4af'},
@@ -9414,7 +12555,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           {name:'Magnolia', petals:8,  subPetals:4,  petalLength:0.70, subPetalLength:0.38, petalColor:'#f5f0ff', subPetalColor:'#e9d5ff', borderColor:'#a855f7', pattern:'solid', radialColor2:'#ddd6fe'},
         ];
 
+
         const isLight = hex => { if(!hex||hex.length<7)return true; const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16); return (r*299+g*587+b*114)/1000>128; };
+
 
         // Build SVG petal path
         const buildPath = (count, len, radius) => {
@@ -9432,6 +12575,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           }).join(' ');
         };
 
+
         // selectedPart: 'main' | 'sub' | 'centre' | null
         const selectedPart = pfSelectedPart;
         const setSelectedPart = setPfSelectedPart;
@@ -9440,12 +12584,15 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         const tab = pfTab;
         const setTab = setPfTab;
 
+
         const PREVIEW_R = 38;
         const mainPath = buildPath(pf.petals, pf.petalLength, PREVIEW_R);
         const subPath = pf.subPetals>0 ? buildPath(pf.subPetals, pf.subPetalLength, PREVIEW_R) : null;
 
+
         const patId = 'pfp';
         const mainFill = pf.pattern==='radial'?`url(#${patId}-radial)`:pf.petalColor;
+
 
         // Part option rows
         const partOptions = {
@@ -9466,6 +12613,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           ],
         };
 
+
         const EXTENDED_COLORS = [
           // Reds/pinks
           '#ff0000','#ef4444','#f43f5e','#ec4899','#fb7185','#fda4af','#fecdd3',
@@ -9480,6 +12628,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           // Neutrals
           '#ffffff','#f1f5f9','#94a3b8','#475569','#1e293b','#000000',
         ];
+
 
         const ColorPicker = ({forKey}) => {
           const current = pf[forKey]||'#f43f5e';
@@ -9517,11 +12666,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           );
         };
 
+
         const orig = origFlowerRef.current || {};
         const hasChanges = JSON.stringify(pn.partnerFlower) !== JSON.stringify(orig.partnerFlower) ||
           JSON.stringify(pn.miniFlower) !== JSON.stringify(orig.miniFlower) ||
           JSON.stringify(pn.groupMiniFlower) !== JSON.stringify(orig.groupMiniFlower) ||
           pn.groupFlowerActive !== orig.groupFlowerActive;
+
 
         const handleClose = (save) => {
           if (!save && hasChanges) {
@@ -9539,10 +12690,12 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           setPartnerFlowerEditor(null); setColorPickerFor(null);
         };
 
+
         return (
           <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:600,background:'rgba(0,0,0,0.75)',display:'flex',alignItems:'flex-end',justifyContent:'center'}}
             onClick={e=>{if(e.target===e.currentTarget) handleClose(false);}}>
             <div onClick={e=>e.stopPropagation()} style={{background:bg,borderRadius:'24px 24px 0 0',width:'100%',maxWidth:520,maxHeight:'92vh',display:'flex',flexDirection:'column',boxShadow:'0 -8px 48px rgba(0,0,0,0.4)'}}>
+
 
               {/* Header */}
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'16px 20px 8px',flexShrink:0}}>
@@ -9565,6 +12718,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 </div>
               </div>
 
+
               {/* Main / Mini switcher */}
               <div style={{display:'flex',gap:6,padding:'0 20px 4px',flexShrink:0}}>
                 {[{id:'main',label:'🌸 Main'},{id:'mini',label:'🌼 Mini'}].map(t=>(
@@ -9583,6 +12737,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 )}
               </div>
 
+
               {/* Show main flower toggle — only for hub nodes on Mini tab */}
               {pfFlowerType==='mini' && isHub && (
                 <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'8px 20px',borderBottom:`1px solid ${dm?'#334155':'#f1f5f9'}`}}>
@@ -9593,6 +12748,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   </div>
                 </div>
               )}
+
 
               {/* Design / Presets tabs */}
               <div style={{display:'flex',gap:4,padding:'0 20px 8px',flexShrink:0}}>
@@ -9606,11 +12762,14 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 ))}
               </div>
 
+
               <div style={{overflowY:'auto',flex:1,padding:'0 20px 40px'}}>
+
 
                 {tab==='presets' ? (
                   /* -- Presets grid -- */
                   <div style={{paddingTop:4}}>
+
 
                     {/* Edit mode toggle + save current */}
                     <div style={{display:'flex',gap:6,marginBottom:10,alignItems:'center'}}>
@@ -9627,16 +12786,18 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         setCustomPresets(updated);
                         localStorage.setItem('ft_flower_presets', JSON.stringify(updated));
                         showToast('🌸 Saved: '+name.trim());
-                      }} style={{flex:1,padding:'7px 8px',borderRadius:99,fontSize:12,fontWeight:700,cursor:'pointer',border:'none',background:dm?'#1e293b':'#f1f5f9',color:sub}}>
+                      }} style={{flex:1,padding:'7px 8px',borderRadius:99,fontSize:12,fontWeight:700,cursor:'pointer',border:'none',background:pw.cellBg,color:sub}}>
                         + Save current
                       </button>
                     </div>
+
 
                     {pfEditingPresetIdx!=null&&(
                       <div style={{padding:'8px 10px',borderRadius:10,background:pf.petalColor+'22',border:'1px solid '+pf.petalColor+'66',marginBottom:10,fontSize:12,color:txt}}>
                         Tap a preset to select it, then go to Design tab to adjust it. Come back here to save changes over it.
                       </div>
                     )}
+
 
                     <div style={{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:10}}>
                       {[...PRESETS, ...customPresets].map((preset, pi)=>{
@@ -9673,6 +12834,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                               <span style={{fontSize:11,fontWeight:700,color:txt}}>{preset.name}</span>
                               {isCustom&&<span style={{fontSize:9,color:sub,marginTop:-2}}>custom</span>}
                             </button>
+
 
                             {/* Edit actions when selected in edit mode */}
                             {pfEditingPresetIdx===pi&&(
@@ -9722,11 +12884,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     </div>
                   </div>
 
+
                 ) : (
                   /* -- Design tab -- */
                   <>
                     {/* Top row: flower left + options right */}
                     <div style={{display:'flex',gap:12,alignItems:'flex-start',margin:'8px 0 12px'}}>
+
 
                       {/* Flower preview — left, fixed size */}
                       <div style={{flexShrink:0,display:'flex',flexDirection:'column',alignItems:'center',gap:6}}>
@@ -9743,6 +12907,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                             </radialGradient>
                           </defs>
 
+
                           {subPath&&(
                             <g transform={`rotate(${360/(pf.subPetals||6)/2})`} opacity={selectedPart==='sub'?1:1}
                               style={{cursor:'pointer'}} onClick={()=>setSelectedPart(selectedPart==='sub'?null:'sub')}>
@@ -9752,6 +12917,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                 strokeDasharray={selectedPart==='sub'?'4 2':(pf.subPetalBorderStyle==='dashed'?'6 3':pf.subPetalBorderStyle==='dotted'?'2 3':undefined)}/>
                             </g>
                           )}
+
 
                           {/* Layer 3 */}
                           {(pf.layer3Petals||0)>0&&(()=>{
@@ -9767,6 +12933,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                             );
                           })()}
 
+
                           <g opacity={selectedPart==='main'?1:0.88}
                             style={{cursor:'pointer'}} onClick={()=>setSelectedPart(selectedPart==='main'?null:'main')}>
                             <path d={mainPath} fill={mainFill}
@@ -9777,6 +12944,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                               <path d={mainPath} fill={`url(#${patId}-${pf.pattern})`} opacity={0.4}/>
                             )}
                           </g>
+
 
                           <g style={{cursor:'pointer'}} onClick={()=>setSelectedPart(selectedPart==='centre'?null:'centre')}>
                             <circle r={PREVIEW_R*0.52} fill={dm?'#1e293b':'white'}
@@ -9796,13 +12964,16 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                             <text textAnchor="middle" dominantBaseline="middle" fontSize="20">{partnerFlowerEditor==='me'?'🌸':'💗'}</text>
                           </g>
 
+
                           {selectedPart&&<circle r={PREVIEW_R*1.85} fill="none" stroke={pf.petalColor} strokeWidth="1" opacity="0.15"/>}
                         </svg>
                         <span style={{fontSize:10,color:sub,textAlign:'center'}}>Tap to select</span>
                       </div>
 
+
                       {/* Options panel — right, scrollable */}
                       <div style={{flex:1,minWidth:0,display:'flex',flexDirection:'column',gap:8}}>
+
 
                         {/* Part selector buttons */}
                         <div style={{display:'flex',gap:4}}>
@@ -9819,12 +12990,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           ))}
                         </div>
 
+
                         {/* Options for selected part */}
                         {selectedPart ? (
                           <div style={{display:'flex',flexDirection:'column',gap:6}}>
                             {/* Fill colour */}
                             {selectedPart!=='centre'&&(
-                              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'6px 8px',background:dm?'#1e293b':'#f8fafc',borderRadius:10}}>
+                              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'6px 8px',background:pw.cellBg,borderRadius:10}}>
                                 <span style={{fontSize:12,fontWeight:600,color:txt}}>Fill</span>
                                 <div style={{position:'relative'}}>
                                   <button onClick={()=>setColorPickerFor(colorPickerFor===(selectedPart==='main'?'petalColor':'subPetalColor')?null:(selectedPart==='main'?'petalColor':'subPetalColor'))}
@@ -9835,7 +13007,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                               </div>
                             )}
                             {/* Border colour — always on, transparent = no border */}
-                            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'6px 8px',background:dm?'#1e293b':'#f8fafc',borderRadius:10}}>
+                            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'6px 8px',background:pw.cellBg,borderRadius:10}}>
                               <span style={{fontSize:12,fontWeight:600,color:txt}}>Border</span>
                               <div style={{display:'flex',gap:5,alignItems:'center'}}>
                                 {/* Border style */}
@@ -9890,7 +13062,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                             </div>
                             {/* Radial centre colour */}
                             {selectedPart==='main'&&pf.pattern==='radial'&&(
-                              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'6px 8px',background:dm?'#1e293b':'#f8fafc',borderRadius:10}}>
+                              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'6px 8px',background:pw.cellBg,borderRadius:10}}>
                                 <span style={{fontSize:12,fontWeight:600,color:txt}}>Centre colour</span>
                                 <div style={{position:'relative'}}>
                                   <button onClick={()=>setColorPickerFor(colorPickerFor==='radialColor2'?null:'radialColor2')}
@@ -9901,7 +13073,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                             )}
                             {/* Pattern colour for tiger/dots */}
                             {selectedPart==='main'&&pf.pattern==='dots'&&(
-                              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'6px 8px',background:dm?'#1e293b':'#f8fafc',borderRadius:10}}>
+                              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'6px 8px',background:pw.cellBg,borderRadius:10}}>
                                 <span style={{fontSize:12,fontWeight:600,color:txt}}>Pattern colour</span>
                                 <div style={{position:'relative'}}>
                                   <button onClick={()=>setColorPickerFor(colorPickerFor==='patternColor'?null:'patternColor')}
@@ -9917,8 +13089,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           </div>
                         )}
 
+
                         {/* Pattern */}
-                        <div style={{background:dm?'#1e293b':'#f8fafc',borderRadius:10,padding:'8px'}}>
+                        <div style={{background:pw.cellBg,borderRadius:10,padding:'8px'}}>
                           <div style={{fontSize:10,fontWeight:800,textTransform:'uppercase',letterSpacing:0.8,color:sub,marginBottom:6}}>Pattern</div>
                           <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
                             {PATTERNS.map(p=>(
@@ -9932,8 +13105,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       </div>
                     </div>
 
+
                     {/* Shape controls below — full width */}
-                    <div style={{background:dm?'#1e293b':'#f8fafc',borderRadius:14,padding:12,marginBottom:10}}>
+                    <div style={{background:pw.cellBg,borderRadius:14,padding:12,marginBottom:10}}>
                       <div style={{fontSize:11,fontWeight:800,textTransform:'uppercase',letterSpacing:1,color:sub,marginBottom:8}}>Shape</div>
                       <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8}}>
                         <span style={{fontSize:12,fontWeight:600,color:txt,minWidth:80}}>Main petals</span>
@@ -9983,6 +13157,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         </div>
                       )}
 
+
                       {/* Third petal layer */}
                       <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8,marginTop:4}}>
                         <span style={{fontSize:12,fontWeight:600,color:txt,minWidth:80}}>3rd layer</span>
@@ -9996,6 +13171,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         {(pf.layer3Petals||0)>0&&<span style={{fontSize:11,color:sub,minWidth:28,textAlign:'right'}}>{Math.round((pf.layer3Length??0.35)*100)}%</span>}
                       </div>
 
+
                       {/* Border thickness */}
                       <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
                         <span style={{fontSize:12,fontWeight:600,color:txt,minWidth:80}}>Border width</span>
@@ -10005,6 +13181,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           style={{flex:1,accentColor:pf.petalBorderColor||pf.petalColor}}/>
                         <span style={{fontSize:11,color:sub,minWidth:32,textAlign:'right'}}>{pf.borderWidth??1.5}px</span>
                       </div>
+
 
                       {/* Stamen & Pistil */}
                       <div style={{fontSize:11,fontWeight:700,color:sub,marginTop:8,marginBottom:6,textTransform:'uppercase',letterSpacing:0.8}}>Stamen & Pistil</div>
@@ -10048,6 +13225,168 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         );
       })()}
       {/* -- Photo Slideshow ----------------------------------------------- */}
+      {/* Hub Gallery Modal */}
+      {hubGalleryOpen && (() => {
+        const hub = nodes.find(n => n.id === hubGalleryOpen);
+        if (!hub) { setTimeout(()=>setHubGalleryOpen(null),0); return null; }
+        const dm = theme.darkMode;
+        const hubMembers = nodes.filter(n =>
+          links.some(l => (l.source===hubGalleryOpen&&l.target===n.id)||(l.target===hubGalleryOpen&&l.source===n.id))
+          && n.type !== 'flower' && n.type !== 'hub'
+        );
+        return (
+          <div style={{position:'fixed',inset:0,zIndex:600,background:'rgba(0,0,0,0.95)',display:'flex',flexDirection:'column',overflowY:'auto'}}
+            onClick={()=>setHubGalleryOpen(null)}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'14px 18px',
+              paddingTop:'calc(env(safe-area-inset-top,0px) + 14px)',position:'sticky',top:0,
+              background:'rgba(0,0,0,0.7)',zIndex:2}} onClick={e=>e.stopPropagation()}>
+              <span style={{color:'white',fontSize:16,fontWeight:700}}>{hub.label || 'Group'} — Photos</span>
+              <button onClick={()=>setHubGalleryOpen(null)}
+                style={{background:'rgba(255,255,255,0.1)',border:'none',borderRadius:'50%',width:32,height:32,fontSize:18,cursor:'pointer',color:'white'}}>✕</button>
+            </div>
+            <div style={{padding:'8px 18px 32px'}} onClick={e=>e.stopPropagation()}>
+              <div style={{fontSize:12,fontWeight:700,color:'rgba(255,255,255,0.5)',textTransform:'uppercase',letterSpacing:0.5,margin:'8px 0 10px'}}>Members</div>
+              <div style={{display:'flex',flexWrap:'wrap',gap:10,marginBottom:20}}>
+                {hubMembers.map(m => (
+                  <div key={m.id} style={{display:'flex',flexDirection:'column',alignItems:'center',gap:4}}>
+                    <div style={{width:54,height:54,borderRadius:'50%',overflow:'hidden',
+                      background:dm?'#334155':'#e2e8f0',border:'2px solid rgba(255,255,255,0.2)'}}>
+                      {m.img ? <img src={m.img} style={{width:'100%',height:'100%',objectFit:'cover'}}/>
+                        : <div style={{width:'100%',height:'100%',display:'flex',alignItems:'center',justifyContent:'center',fontSize:20}}>👤</div>}
+                    </div>
+                    <span style={{fontSize:9,color:'rgba(255,255,255,0.6)',maxWidth:54,textAlign:'center',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{m.label}</span>
+                  </div>
+                ))}
+              </div>
+              <div style={{fontSize:12,fontWeight:700,color:'rgba(255,255,255,0.5)',textTransform:'uppercase',letterSpacing:0.5,margin:'0 0 10px'}}>Group Photos</div>
+              {hubGalleryLoading && <div style={{color:'rgba(255,255,255,0.4)',fontSize:13,padding:'12px 0'}}>Loading...</div>}
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:6}}>
+                {hubGalleryItems.map((item, idx) => {
+                  const tagged = (item.taggedNodeIds||[]).map(tid => nodes.find(n=>n.id===tid)).filter(Boolean);
+                  return (
+                    <div key={item.key} style={{position:'relative',aspectRatio:'1',borderRadius:8,overflow:'hidden',cursor:'pointer'}}
+                      onClick={()=>setHubGalleryViewer({items:hubGalleryItems,index:idx})}>
+                      <img src={item.dataUrl} style={{width:'100%',height:'100%',objectFit:'cover',display:'block'}}/>
+                      {tagged.length > 0 && (
+                        <div style={{position:'absolute',bottom:0,left:0,right:0,padding:'2px 4px',
+                          background:'rgba(0,0,0,0.55)',display:'flex',gap:2,flexWrap:'wrap'}}>
+                          {tagged.map(t=>(
+                            <span key={t.id} style={{fontSize:8,color:'white',background:'rgba(16,185,129,0.7)',borderRadius:4,padding:'1px 4px'}}>{t.label}</span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                <label style={{aspectRatio:'1',borderRadius:8,border:'2px dashed rgba(255,255,255,0.35)',
+                  display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',
+                  cursor:'pointer',gap:4,color:'rgba(255,255,255,0.5)'}}>
+                  <span style={{fontSize:24}}>+</span>
+                  <span style={{fontSize:10}}>Add photos</span>
+                  <input type="file" accept="image/*" multiple style={{display:'none'}} onChange={e=>{
+                    const files = Array.from(e.target.files||[]);
+                    if (!files.length) return;
+                    Promise.all(files.map(file => new Promise(res => {
+                      const reader = new FileReader();
+                      reader.onload = ev => saveToGallery(hubGalleryOpen, ev.target.result, {sourceType:'group',date:new Date().toISOString(),taggedNodeIds:[]}).then(res);
+                      reader.onerror = () => res();
+                      reader.readAsDataURL(file);
+                    }))).then(() => loadGallery(hubGalleryOpen).then(u => setHubGalleryItems(u)));
+                    e.target.value = '';
+                  }}/>
+                </label>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+
+      {/* Hub Gallery full-screen viewer with tagging */}
+      {hubGalleryViewer && (() => {
+        const { items, index } = hubGalleryViewer;
+        const item = items[index];
+        if (!item) return null;
+        const hub = nodes.find(n => n.id === hubGalleryOpen);
+        const hubMembers = nodes.filter(n =>
+          links.some(l => (l.source===hubGalleryOpen&&l.target===n.id)||(l.target===hubGalleryOpen&&l.source===n.id))
+          && n.type !== 'flower' && n.type !== 'hub'
+        );
+        const taggedIds = item.taggedNodeIds || [];
+        return (
+          <div style={{position:'fixed',inset:0,zIndex:920,background:'rgba(0,0,0,0.97)',display:'flex',flexDirection:'column'}}
+            onClick={()=>setHubGalleryViewer(null)}>
+            <div style={{position:'absolute',top:0,left:0,right:0,zIndex:2,display:'flex',
+              justifyContent:'space-between',alignItems:'center',
+              padding:'calc(env(safe-area-inset-top,0px) + 14px) 20px 14px',
+              background:'linear-gradient(to bottom,rgba(0,0,0,0.8),transparent)'}}
+              onClick={e=>e.stopPropagation()}>
+              <span style={{color:'white',fontSize:13,fontWeight:700}}>{hub?.label || 'Group'}</span>
+              <button onClick={()=>setHubGalleryViewer(null)}
+                style={{background:'none',border:'none',color:'white',fontSize:26,cursor:'pointer',lineHeight:1}}>✕</button>
+            </div>
+            <div style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',padding:'70px 12px 160px'}}
+              onClick={e=>e.stopPropagation()}>
+              <img src={item.dataUrl} alt=""
+                style={{maxWidth:'100%',maxHeight:'100%',objectFit:'contain',borderRadius:4}}/>
+            </div>
+            {index > 0 && (
+              <button onClick={e=>{e.stopPropagation();setHubGalleryViewer(v=>({...v,index:v.index-1}));}}
+                style={{position:'absolute',left:10,top:'50%',transform:'translateY(-50%)',
+                  background:'rgba(0,0,0,0.5)',border:'none',color:'white',fontSize:26,cursor:'pointer',
+                  borderRadius:'50%',width:44,height:44,display:'flex',alignItems:'center',justifyContent:'center'}}>‹</button>
+            )}
+            {index < items.length-1 && (
+              <button onClick={e=>{e.stopPropagation();setHubGalleryViewer(v=>({...v,index:v.index+1}));}}
+                style={{position:'absolute',right:10,top:'50%',transform:'translateY(-50%)',
+                  background:'rgba(0,0,0,0.5)',border:'none',color:'white',fontSize:26,cursor:'pointer',
+                  borderRadius:'50%',width:44,height:44,display:'flex',alignItems:'center',justifyContent:'center'}}>›</button>
+            )}
+            {/* Tag people panel at bottom */}
+            <div style={{position:'absolute',bottom:0,left:0,right:0,
+              background:'linear-gradient(to top,rgba(0,0,0,0.92) 60%,transparent)',
+              padding:'20px 18px',paddingBottom:'calc(env(safe-area-inset-bottom,0px) + 14px)'}}
+              onClick={e=>e.stopPropagation()}>
+              <div style={{fontSize:11,fontWeight:700,color:'rgba(255,255,255,0.45)',marginBottom:8,textTransform:'uppercase',letterSpacing:0.5}}>Tag people</div>
+              <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                {hubMembers.map(m => {
+                  const isTagged = taggedIds.includes(m.id);
+                  return (
+                    <button key={m.id}
+                      onClick={async ()=>{
+                        const newTags = isTagged ? taggedIds.filter(id=>id!==m.id) : [...taggedIds, m.id];
+                        const updated = await updateGalleryItemTags(item.key, newTags);
+                        if (updated) {
+                          const newItems = items.map((it,i2) => i2===index ? updated : it);
+                          setHubGalleryViewer(v => ({...v, items: newItems}));
+                          setHubGalleryItems(newItems);
+                          showToast(isTagged ? m.label+' untagged' : '✔ '+m.label+' tagged');
+                        }
+                      }}
+                      style={{display:'flex',flexDirection:'column',alignItems:'center',gap:3,
+                        padding:'5px 7px',borderRadius:10,cursor:'pointer',
+                        background:isTagged?'rgba(16,185,129,0.2)':'rgba(255,255,255,0.07)',
+                        border:`1.5px solid ${isTagged?'#10b981':'rgba(255,255,255,0.12)'}`,
+                        minWidth:50}}>
+                      <div style={{width:38,height:38,borderRadius:'50%',overflow:'hidden',
+                        border:`2px solid ${isTagged?'#10b981':'rgba(255,255,255,0.18)'}`}}>
+                        {m.img ? <img src={m.img} style={{width:'100%',height:'100%',objectFit:'cover'}}/>
+                          : <div style={{width:'100%',height:'100%',background:'#334155',display:'flex',alignItems:'center',justifyContent:'center',fontSize:17}}>👤</div>}
+                      </div>
+                      <span style={{fontSize:9,color:isTagged?'#10b981':'rgba(255,255,255,0.55)',
+                        maxWidth:46,textAlign:'center',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',fontWeight:isTagged?700:400}}>
+                        {isTagged ? '✔ ' : ''}{m.label}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+
       {profilePhotosViewer && (() => {
         const sn = nodes.find(n => n.id === profilePhotosViewer);
         if (!sn) { setTimeout(()=>setProfilePhotosViewer(null),0); return null; }
@@ -10071,6 +13410,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     <img src={p.cropped} style={{width:72,height:72,borderRadius:'50%',objectFit:'cover',display:'block'}}/>
                   </button>
                 ))}
+                {/* Tagged group photos shown as circles - tap to use as profile pic */}
+                <TaggedProfilePics nodeId={sn.id} openPhotoDB={openPhotoDB}
+                  currentImg={sn.img}
+                  onSelect={dataUrl => {
+                    setProfilePhotosViewer(null);
+                    setPhotoCrop({nodeId: sn.id, src: dataUrl, originalSrc: dataUrl, crop:{x:0,y:0,scale:1}});
+                  }}/>
                 {/* Add a new profile picture */}
                 <label style={{width:72,height:72,borderRadius:'50%',border:'2px dashed rgba(255,255,255,0.4)',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',fontSize:28,color:'rgba(255,255,255,0.6)'}}>
                   +
@@ -10089,12 +13435,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 </button>
               </div>
 
+
               {/* Full-scale photos attached to this person (gallery) */}
               <div style={{fontSize:12,fontWeight:700,color:'rgba(255,255,255,0.6)',textTransform:'uppercase',letterSpacing:0.5,margin:'20px 0 8px'}}>Photos</div>
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:6}}>
                 {galleryItems.map((item,idx)=>(
                   <div key={item.key} style={{position:'relative',aspectRatio:'1',borderRadius:8,overflow:'hidden',cursor:'pointer'}}
-                    onClick={()=>setGalleryViewer({items:galleryItems,index:idx})}>
+                    onClick={()=>setGalleryViewer({items:galleryItems,index:idx,nodeId:sn.id})}>
                     <img src={item.dataUrl} style={{width:'100%',height:'100%',objectFit:'cover',display:'block'}}/>
                   </div>
                 ))}
@@ -10116,10 +13463,80 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   }}/>
                 </label>
               </div>
+
+              {/* Tagged in group photos */}
+              <TaggedPhotosSection nodeId={sn.id} nodes={nodes} links={links}
+                openPhotoDB={openPhotoDB}
+                setHubGalleryOpen={setHubGalleryOpen}
+                setHubGalleryItems={setHubGalleryItems}
+                setHubGalleryLoading={setHubGalleryLoading}
+                loadGallery={loadGallery}
+                setHubGalleryViewer={setHubGalleryViewer}
+                onUseAsProfilePic={dataUrl => {
+                  setProfilePhotosViewer(null);
+                  setPhotoCrop({nodeId: sn.id, src: dataUrl, originalSrc: dataUrl, crop:{x:0,y:0,scale:1}});
+                }}/>
             </div>
           </div>
         );
       })()}
+
+
+      {/* Full-page gallery viewer — opens when a photo in the grid is tapped */}
+      {galleryViewer && (() => {
+        const { items, index } = galleryViewer;
+        const item = items[index];
+        if (!item) return null;
+        const nodeForGallery = nodes.find(n => n.id === (galleryViewer.nodeId));
+        return (
+          <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:920,
+            background:'rgba(0,0,0,0.97)',display:'flex',flexDirection:'column'}}
+            onClick={()=>setGalleryViewer(null)}>
+            {/* Header */}
+            <div style={{position:'absolute',top:0,left:0,right:0,zIndex:2,display:'flex',
+              justifyContent:'space-between',alignItems:'center',
+              padding:`calc(env(safe-area-inset-top,0px) + 14px) 20px 14px`,
+              background:'linear-gradient(to bottom,rgba(0,0,0,0.8),transparent)'}}
+              onClick={e=>e.stopPropagation()}>
+              <button
+                onClick={()=>{
+                  if (galleryViewer.nodeId && item.dataUrl) {
+                    setPhotoCrop({nodeId: galleryViewer.nodeId, src: item.dataUrl,
+                      originalSrc: item.dataUrl, crop:{x:0,y:0,scale:1}});
+                    setGalleryViewer(null);
+                    showToast('Crop to set as profile picture');
+                  }
+                }}
+                style={{padding:'7px 14px',borderRadius:20,border:'1.5px solid rgba(255,255,255,0.5)',
+                  background:'rgba(255,255,255,0.15)',color:'white',fontSize:12,fontWeight:700,cursor:'pointer'}}>
+                📷 Set as profile pic
+              </button>
+              <button onClick={()=>setGalleryViewer(null)}
+                style={{background:'none',border:'none',color:'white',fontSize:26,cursor:'pointer',lineHeight:1}}>✕</button>
+            </div>
+            {/* Photo */}
+            <div style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',padding:'60px 12px 20px'}}
+              onClick={e=>e.stopPropagation()}>
+              <img src={item.dataUrl} alt=""
+                style={{maxWidth:'100%',maxHeight:'100%',objectFit:'contain',borderRadius:4}}/>
+            </div>
+            {/* Prev / Next */}
+            {index > 0 && (
+              <button onClick={e=>{e.stopPropagation();setGalleryViewer(v=>({...v,index:v.index-1}));}}
+                style={{position:'absolute',left:10,top:'50%',transform:'translateY(-50%)',
+                  background:'rgba(0,0,0,0.5)',border:'none',color:'white',fontSize:26,cursor:'pointer',
+                  borderRadius:'50%',width:44,height:44,display:'flex',alignItems:'center',justifyContent:'center'}}>‹</button>
+            )}
+            {index < items.length-1 && (
+              <button onClick={e=>{e.stopPropagation();setGalleryViewer(v=>({...v,index:v.index+1}));}}
+                style={{position:'absolute',right:10,top:'50%',transform:'translateY(-50%)',
+                  background:'rgba(0,0,0,0.5)',border:'none',color:'white',fontSize:26,cursor:'pointer',
+                  borderRadius:'50%',width:44,height:44,display:'flex',alignItems:'center',justifyContent:'center'}}>›</button>
+            )}
+          </div>
+        );
+      })()}
+
 
       {photoSlideshow && (() => {
         const sn = nodes.find(n=>n.id===photoSlideshow);
@@ -10149,9 +13566,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               </div>
             </div>
 
+
             {/* Main image */}
             <div style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',position:'relative'}} onClick={e=>e.stopPropagation()}>
               <img src={photos[safeIdx].cropped} alt="" style={{maxWidth:'100%',maxHeight:'100%',objectFit:'contain'}}/>
+
 
               {/* Prev/Next */}
               {safeIdx>0&&<button onClick={()=>setSlideIdx(safeIdx-1)}
@@ -10159,6 +13578,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               {safeIdx<photos.length-1&&<button onClick={()=>setSlideIdx(safeIdx+1)}
                 style={{position:'absolute',right:12,top:'50%',transform:'translateY(-50%)',background:'rgba(0,0,0,0.5)',border:'none',color:'white',fontSize:24,cursor:'pointer',borderRadius:'50%',width:40,height:40,display:'flex',alignItems:'center',justifyContent:'center'}}>›</button>}
             </div>
+
 
             {/* Thumbnail strip */}
             <div style={{flexShrink:0,display:'flex',gap:4,padding:'12px 16px',overflowX:'auto',background:'linear-gradient(to top,rgba(0,0,0,0.8),transparent)'}}
@@ -10182,9 +13602,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         );
       })()}
 
+
       {photoCrop && (() => {
         const dm = theme.darkMode;
         const SIZE = 800; // output size px - full quality
+
 
         const applyCrop = () => {
           const img = cropImgRef.current;
@@ -10193,24 +13615,30 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           canvas.width = SIZE; canvas.height = SIZE;
           const ctx = canvas.getContext('2d');
 
+
           // Circle clip
           ctx.beginPath();
           ctx.arc(SIZE/2, SIZE/2, SIZE/2, 0, Math.PI*2);
           ctx.clip();
 
+
           const { x, y, scale } = photoCrop.crop;
+
 
           // The preview div is square (containerW = containerH = container size)
           // The image is displayed with objectFit:'contain' scaled to fit that square
           // We need to map from screen-space drag offsets back to image-space coordinates
 
+
           const iw = img.naturalWidth;
           const ih = img.naturalHeight;
+
 
           // Size of the preview container in CSS pixels (from the rendered element)
           const previewEl = cropImgRef.current?.parentElement;
           const containerW = previewEl ? previewEl.offsetWidth : 300;
           const containerH = previewEl ? previewEl.offsetHeight : 300;
+
 
           // How the image fits in the container with objectFit:contain
           const imgAspect = iw / ih;
@@ -10224,24 +13652,30 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             renderedW = containerH * imgAspect;
           }
 
+
           // Scale factor from CSS pixels to image pixels
           const cssToImg = iw / renderedW;
+
 
           // The visible region in image-space:
           // Center of image + user drag offset (converted to image pixels) / scale
           const imgCenterX = iw / 2 - (x * cssToImg) / scale;
           const imgCenterY = ih / 2 - (y * cssToImg) / scale;
 
+
           // Half-size of the square region to crop from the image, scaled by the
           // circle radius the user set (cr is 0-50 SVG units; 50 = full half-width)
           const crFrac = (photoCrop.crop.cr || 50) / 50;
           const halfSize = (Math.min(renderedW, renderedH) * cssToImg) / (2 * scale) * crFrac;
 
+
           const sx = imgCenterX - halfSize;
           const sy = imgCenterY - halfSize;
           const sSize = halfSize * 2;
 
+
           ctx.drawImage(img, sx, sy, sSize, sSize, 0, 0, SIZE, SIZE);
+
 
           const base64 = canvas.toDataURL('image/png');
           // Store original src for future re-crops
@@ -10261,6 +13695,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           setPhotoCrop(null);
         };
 
+
         return (
           <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:600,background:'rgba(0,0,0,0.85)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center'}}
             onClick={e=>{if(e.target===e.currentTarget)setPhotoCrop(null)}}>
@@ -10268,11 +13703,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               {/* Header */}
               <div style={{flexShrink:0,display:'flex',justifyContent:'space-between',alignItems:'center',padding:'14px 18px',borderBottom:`1px solid ${dm?'#334155':'#e2e8f0'}`}}>
                 <span style={{fontWeight:800,fontSize:15,color:dm?'#e2e8f0':'#1e293b'}}>📷 Crop Photo</span>
-                <button onClick={()=>setPhotoCrop(null)} style={{background:'none',border:'none',cursor:'pointer',fontSize:20,color:dm?'#94a3b8':'#64748b'}}>✕</button>
+                <button onClick={()=>setPhotoCrop(null)} style={{background:'none',border:'none',cursor:'pointer',fontSize:20,color:dm?'#94a3b8':pw.secondText}}>✕</button>
               </div>
+
 
               {/* Scrollable content so everything stays reachable on small screens */}
               <div style={{overflowY:'auto',flex:1}}>
+
 
               {/* Crop area — height capped so the whole modal fits the screen */}
               <div style={{position:'relative',width:'100%',height:'min(90vw,380px,55vh)',background:'#111',overflow:'hidden',cursor:'move'}}
@@ -10345,11 +13782,12 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 })()}
               </div>
 
+
               {/* Controls */}
               <div style={{padding:16}}>
                 {/* Zoom slider */}
                 <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:14}}>
-                  <span style={{fontSize:12,color:dm?'#94a3b8':'#64748b'}}>🔍</span>
+                  <span style={{fontSize:12,color:dm?'#94a3b8':pw.secondText}}>🔍</span>
                   <input type="range" min="0.5" max="10" step="0.05"
                     value={photoCrop.crop.scale}
                     onChange={e=>setPhotoCrop(p=>({...p,crop:{...p.crop,scale:parseFloat(e.target.value)}}))}
@@ -10375,10 +13813,10 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   setTagStep('place');
                   setTagCurrent(0);
                   setPhotoCrop(null);
-                }} style={{width:'100%',padding:'9px',borderRadius:10,background:dm?'#1e293b':'#f1f5f9',color:dm?'#94a3b8':'#64748b',border:'1px dashed '+(dm?'#334155':'#cbd5e1'),cursor:'pointer',fontWeight:700,fontSize:13,marginTop:2}}>
+                }} style={{width:'100%',padding:'9px',borderRadius:10,background:pw.cellBg,color:dm?'#94a3b8':pw.secondText,border:'1px dashed '+(dm?'#334155':'#cbd5e1'),cursor:'pointer',fontWeight:700,fontSize:13,marginTop:2}}>
                   👥 Tag other faces in this photo
                 </button>
-                <p style={{fontSize:10,color:dm?'#475569':'#94a3b8',textAlign:'center',marginTop:8}}>Drag to position · scroll or slider to zoom · centre dot marks the middle</p>
+                <p style={{fontSize:10,color:dm?'#475569':'#475569',textAlign:'center',marginTop:8}}>Drag to position · scroll or slider to zoom · centre dot marks the middle</p>
               </div>
               </div>
             </div>
@@ -10386,11 +13824,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         );
       })()}
 
+
       {/* -- Group Photo Tagger ------------------------------------------------- */}
       {groupPhotoSrc && (() => {
         const dm = theme.darkMode;
         const CANVAS_W = 320;
         const friendNodes = nodes.filter(n => n.type === 'friend' || n.id === 'me');
+
 
         const startDrag = (e, ringId, mode) => {
           e.stopPropagation();
@@ -10401,6 +13841,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           const ring = faceRings.find(r => r.id === ringId);
           dragRingRef.current = {id: ringId, mode, sx, sy, ox: ring.x, oy: ring.y, or: ring.r};
         };
+
 
         const onMove = (e) => {
           if (!dragRingRef.current) return;
@@ -10416,12 +13857,15 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           }));
         };
 
+
         const onUp = () => { dragRingRef.current = null; };
+
 
         const addRing = () => {
           const nr = CANVAS_W * 0.18;
           setFaceRings(prev => [...prev, {id: Date.now(), x: CANVAS_W/2, y: CANVAS_W/2, r: nr, name:'', assignedNodeId:null}]);
         };
+
 
         const cropFace = (ring) => new Promise(resolve => {
           const img = new Image();
@@ -10439,10 +13883,12 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           img.src = groupPhotoSrc;
         });
 
+
         const finishTagging = async () => {
           const toastMessages = [];
           const newNodes = [];
           const photoUpdates = {}; // nodeId -> {img, photos}
+
 
           for (const ring of faceRings) {
             if (ring.assignedNodeId === '__skip__' || (!ring.assignedNodeId && !ring.name.trim())) continue;
@@ -10455,7 +13901,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 img: cropped,
                 x: 200 + Math.random()*400,
                 y: 200 + Math.random()*300,
-                interactionScore: 0,
+                interactionScore: STARTING_SCORE,
                 photos: [{cropped, orig:cropped}],
                 activePhotoIdx: 0,
               });
@@ -10466,6 +13912,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               toastMessages.push('📸 Updated ' + (ring.name||ring.assignedNodeId));
             }
           }
+
 
           // Batch update nodes in one call
           if (newNodes.length > 0 || Object.keys(photoUpdates).length > 0) {
@@ -10491,6 +13938,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             }
           }
 
+
           toastMessages.forEach((msg, i) => setTimeout(()=>showToast(msg), i*400));
           setGroupPhotoSrc(null);
           setFaceRings([]);
@@ -10499,10 +13947,12 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           setTagNameInput('');
         };
 
+
         // Zoom/pan state stored in refs to avoid re-render on every touch
         const viewRef = groupPhotoViewRef;
         const panRef = groupPhotoPanRef;
         const pinchRef = groupPhotoPinchRef;
+
 
         const clampView = (v) => {
           const minS = 1, maxS = 20;
@@ -10511,11 +13961,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           return {scale:s, x:Math.max(-maxX, Math.min(0,v.x)), y:Math.max(-maxY, Math.min(0,v.y))};
         };
 
+
         // Convert screen coords (relative to SVG) -> image coords
         const toImg = (sx, sy) => {
           const v = viewRef.current;
           return {x: (sx - v.x) / v.scale, y: (sy - v.y) / v.scale};
         };
+
 
         const onSvgWheel = (e) => {
           e.preventDefault();
@@ -10530,7 +13982,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           svgRef.current && (svgRef.current.style.transform = `translate(${viewRef.current.x}px,${viewRef.current.y}px) scale(${viewRef.current.scale})`);
         };
 
+
         const svgRef = groupPhotoSvgRef;
+
 
         const onSvgTouchStart = (e) => {
           if (dragRingRef.current) return; // ring drag takes priority
@@ -10544,6 +13998,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               ox: viewRef.current.x, oy: viewRef.current.y};
           }
         };
+
 
         const onSvgTouchMove = (e) => {
           e.preventDefault();
@@ -10568,6 +14023,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         };
 
 
+
+
         // Ring drag start needs to work in image-space, accounting for zoom
         const startDragZoom = (e, ringId, mode) => {
           e.stopPropagation();
@@ -10579,6 +14036,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           const ring = faceRings.find(r => r.id === ringId);
           dragRingRef.current = {id:ringId, mode, sx:img.x, sy:img.y, ox:ring.x, oy:ring.y, or:ring.r};
         };
+
 
         const onMoveZoom = (e) => {
           if (!dragRingRef.current) return;
@@ -10594,7 +14052,10 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           }));
         };
 
+
          // Client-side face detection using skin tone + brightness heatmap
+
+
 
 
         if (tagStep === 'place') return (
@@ -10603,10 +14064,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             <div style={{padding:'14px 20px 8px',display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0,background:dm?'#0f172a':'#1e293b'}}>
               <div>
                 <div style={{fontSize:15,fontWeight:800,color:'white'}}>👥 Tag People</div>
-                <div style={{fontSize:11,color:'#94a3b8',marginTop:1}}>Pinch to zoom · drag rings onto faces</div>
+                <div style={{fontSize:11,color:'#475569',marginTop:1}}>Pinch to zoom · drag rings onto faces</div>
               </div>
               <button onClick={()=>{setGroupPhotoSrc(null);setFaceRings([]);}} style={{background:'rgba(255,255,255,0.1)',border:'none',borderRadius:'50%',width:32,height:32,fontSize:16,cursor:'pointer',color:'white',display:'flex',alignItems:'center',justifyContent:'center'}}>✕</button>
             </div>
+
 
             {/* Zoomable photo canvas */}
             <div className="tagger-wrap" style={{flex:1,overflow:'hidden',position:'relative',background:'#000',cursor:'grab'}}
@@ -10640,6 +14102,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 ))}
               </div>
 
+
               <div ref={svgRef} style={{position:'absolute',top:0,left:0,transformOrigin:'0 0',willChange:'transform'}}>
                 <svg width={CANVAS_W} height={CANVAS_W} style={{display:'block',touchAction:'none',userSelect:'none'}}>
                   <image href={groupPhotoSrc} x="0" y="0" width={CANVAS_W} height={CANVAS_W} preserveAspectRatio="xMidYMid meet"/>
@@ -10661,10 +14124,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               </div>
             </div>
 
+
             {/* Bottom bar */}
             <div style={{padding:'12px 20px 28px',flexShrink:0,display:'flex',flexDirection:'column',gap:8,background:dm?'#0f172a':'#1e293b'}}>
               {/* Auto-detect button */}
-              <button onClick={addRing} style={{width:'100%',padding:'10px',borderRadius:10,background:'rgba(255,255,255,0.08)',color:'#94a3b8',border:'1.5px dashed #475569',cursor:'pointer',fontSize:13,fontWeight:700}}>
+              <button onClick={addRing} style={{width:'100%',padding:'10px',borderRadius:10,background:'rgba(255,255,255,0.08)',color:'#475569',border:'1.5px dashed #475569',cursor:'pointer',fontSize:13,fontWeight:700}}>
                 + Add face manually
               </button>
               <button onClick={()=>{if(faceRings.length>0){setTagStep('identify');setTagCurrent(0);}}} disabled={faceRings.length===0}
@@ -10675,6 +14139,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           </div>
         );
 
+
         // Identify step
         const ring = faceRings[tagCurrent];
         if (!ring) { finishTagging(); return null; }
@@ -10683,8 +14148,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             <div style={{background:dm?'#0f172a':'white',borderRadius:'24px 24px 0 0',width:'100%',maxWidth:480,maxHeight:'92vh',display:'flex',flexDirection:'column',overflow:'hidden'}}>
               <div style={{padding:'16px 20px 8px',flexShrink:0}}>
                 <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-                  <div style={{fontSize:11,color:dm?'#64748b':'#94a3b8'}}>Person {tagCurrent+1} of {faceRings.length}</div>
-                  <button onClick={()=>{setGroupPhotoSrc(null);setFaceRings([]);}} style={{background:'none',border:'none',fontSize:20,cursor:'pointer',color:dm?'#64748b':'#94a3b8'}}>✕</button>
+                  <div style={{fontSize:11,color:dm?'#64748b':'#475569'}}>Person {tagCurrent+1} of {faceRings.length}</div>
+                  <button onClick={()=>{setGroupPhotoSrc(null);setFaceRings([]);}} style={{background:'none',border:'none',fontSize:20,cursor:'pointer',color:dm?'#64748b':'#475569'}}>✕</button>
                 </div>
                 <div style={{fontSize:16,fontWeight:800,color:dm?'#e2e8f0':'#1e293b',marginTop:4}}>Who is this?</div>
               </div>
@@ -10698,20 +14163,20 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               <div style={{padding:'0 20px 8px',flexShrink:0}}>
                 <input type="text" value={tagNameInput} onChange={e=>setTagNameInput(e.target.value)}
                   placeholder="Type name or pick below…"
-                  style={{width:'100%',padding:'10px 12px',borderRadius:10,border:'1.5px solid '+(dm?'#334155':'#e2e8f0'),background:dm?'#1e293b':'#f8fafc',color:dm?'#e2e8f0':'#1e293b',fontSize:14,outline:'none',boxSizing:'border-box'}}/>
+                  style={{width:'100%',padding:'10px 12px',borderRadius:10,border:'1.5px solid '+(dm?'#334155':'#e2e8f0'),background:pw.cellBg,color:dm?'#e2e8f0':'#1e293b',fontSize:14,outline:'none',boxSizing:'border-box'}}/>
               </div>
               <div style={{flex:1,overflowY:'auto',padding:'0 20px'}}>
                 <button onClick={()=>{
                   setFaceRings(prev=>prev.map((r,i)=>i===tagCurrent?{...r,assignedNodeId:'__skip__'}:r));
                   if(tagCurrent+1>=faceRings.length) finishTagging(); else {setTagCurrent(tagCurrent+1);setTagNameInput('');}
-                }} style={{width:'100%',padding:'8px',borderRadius:8,background:'transparent',border:'1px dashed '+(dm?'#334155':'#cbd5e1'),color:dm?'#64748b':'#94a3b8',cursor:'pointer',fontSize:12,fontWeight:600,marginBottom:8}}>
+                }} style={{width:'100%',padding:'8px',borderRadius:8,background:'transparent',border:'1px dashed '+(dm?'#334155':'#cbd5e1'),color:dm?'#64748b':'#475569',cursor:'pointer',fontSize:12,fontWeight:600,marginBottom:8}}>
                   Skip
                 </button>
                 {friendNodes.filter(n=>!tagNameInput||n.label.toLowerCase().includes(tagNameInput.toLowerCase())).map(n=>(
                   <button key={n.id} onClick={()=>{
                     setFaceRings(prev=>prev.map((r,i)=>i===tagCurrent?{...r,assignedNodeId:n.id,name:n.label}:r));
                     if(tagCurrent+1>=faceRings.length) finishTagging(); else {setTagCurrent(tagCurrent+1);setTagNameInput('');}
-                  }} style={{width:'100%',display:'flex',alignItems:'center',gap:10,padding:'8px 10px',borderRadius:10,background:dm?'#1e293b':'#f8fafc',border:'1px solid '+(dm?'#334155':'#e2e8f0'),cursor:'pointer',marginBottom:6}}>
+                  }} style={{width:'100%',display:'flex',alignItems:'center',gap:10,padding:'8px 10px',borderRadius:10,background:pw.cellBg,border:`1px solid ${pw.border}`,cursor:'pointer',marginBottom:6}}>
                     <img src={n.img} style={{width:36,height:36,borderRadius:'50%',objectFit:'cover',flexShrink:0}} alt=""/>
                     <span style={{fontSize:13,fontWeight:600,color:dm?'#e2e8f0':'#1e293b'}}>{n.label}</span>
                   </button>
@@ -10728,7 +14193,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               </div>
               <div style={{padding:'12px 20px 24px',flexShrink:0}}>
                 {tagCurrent>0&&<button onClick={()=>{setTagCurrent(tagCurrent-1);setTagNameInput(faceRings[tagCurrent-1].name||'');}}
-                  style={{width:'100%',padding:'9px',borderRadius:10,background:dm?'#1e293b':'#f1f5f9',color:dm?'#94a3b8':'#64748b',border:'none',cursor:'pointer',fontSize:13,fontWeight:600}}>
+                  style={{width:'100%',padding:'9px',borderRadius:10,background:pw.cellBg,color:dm?'#94a3b8':pw.secondText,border:'none',cursor:'pointer',fontSize:13,fontWeight:600}}>
                   Back
                 </button>}
               </div>
@@ -10737,11 +14202,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         );
       })()}
 
+
       {/* -- Avatar Builder Modal ----------------------------------------------- */}
       {avatarBuilder && (() => {
         const targetNode = nodes.find(n => n.id === avatarBuilder.nodeId);
         if (!targetNode) return null;
         const dm = theme.darkMode;
+
 
         const SKIN_TONES = ['#fde8d8','#f5cba7','#d4956a','#c68642','#8d5524','#4a2912'];
         const HAIR_COLORS = ['#2d1b00','#8B4513','#d4a017','#f5cba7','#e03030','#9333ea','#1d4ed8','#1a1a1a','#6b7280','#ffffff'];
@@ -10749,6 +14216,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           '#ef4444','#f97316','#eab308','#22c55e','#06b6d4','#3b82f6','#8b5cf6','#ec4899', // rainbow
           '#1e293b','#0f172a','#ffffff','#f5f5f0', // neutrals
         ];
+
 
         const HAIR_STYLES = [
           { id: 'buzz',    label: 'Buzz',      path: '<ellipse cx="50" cy="36" rx="26" ry="12" fill="${h}"/>'},
@@ -10777,11 +14245,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           { id: 'surprised', label: '😮', mouth: '<ellipse cx="50" cy="73" rx="5" ry="6" fill="#c0504a"/>' },
         ];
 
+
         const bg    = avBg;    const setBg    = setAvBg;
         const skin  = avSkin;  const setSkin  = setAvSkin;
         const hair  = avHair;  const setHair  = setAvHair;
         const style = avStyle; const setStyle = setAvStyle;
         const face  = avFace;  const setFace  = setAvFace;
+
 
         const buildImg = (bg2, skin2, hair2, style2, face2) => {
           const hStyle = HAIR_STYLES.find(s => s.id === style2) || HAIR_STYLES[0];
@@ -10790,11 +14260,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           return makeAvatar(bg2, skin2, hair2, hairPath + fStyle.mouth);
         };
 
+
         const preview = buildImg(bg, skin, hair, style, face);
         const swatch = (color, cur, setter, size = 28) => (
           <button key={color} onClick={() => setter(color)}
             style={{width:size,height:size,borderRadius:'50%',background:color,border:`3px solid ${color===cur?'white':'transparent'}`,outline:`2px solid ${color===cur?color:'transparent'}`,cursor:'pointer',flexShrink:0}} />
         );
+
 
         const apply = () => {
           const img = buildImg(bg, skin, hair, style, face);
@@ -10805,7 +14277,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           setAvatarBuilder(null);
         };
 
-        const label = (t) => <p style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.06em',color:dm?'#94a3b8':'#64748b',marginBottom:5,marginTop:8}}>{t}</p>;
+
+        const label = (t) => <p style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.06em',color:dm?'#94a3b8':pw.secondText,marginBottom:5,marginTop:8}}>{t}</p>;
+
 
         return (
           <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:400,background:'rgba(0,0,0,0.65)',display:'flex',alignItems:'center',justifyContent:'center'}}
@@ -10814,7 +14288,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               <div style={{padding:'14px 18px',borderBottom:`1px solid ${dm?'#334155':'#e2e8f0'}`,display:'flex',alignItems:'center',gap:10}}>
                 <span style={{fontSize:18}}>🎨</span>
                 <span style={{flex:1,fontWeight:700,fontSize:15,color:dm?'#e2e8f0':'#1e293b'}}>Build Avatar</span>
-                <button onClick={()=>setAvatarBuilder(null)} style={{background:'none',border:'none',cursor:'pointer',fontSize:18,color:dm?'#94a3b8':'#64748b'}}>✕</button>
+                <button onClick={()=>setAvatarBuilder(null)} style={{background:'none',border:'none',cursor:'pointer',fontSize:18,color:dm?'#94a3b8':pw.secondText}}>✕</button>
               </div>
               <div style={{overflowY:'auto',padding:'12px 18px',flex:1}}>
                 {/* Preview */}
@@ -10864,6 +14338,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         );
       })()}
 
+
       {/* -- Flower / Dimension Panel ------------------------------------------- */}
       {flowerPanel && (() => {
         const dim = dimensions[flowerPanel];
@@ -10877,6 +14352,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         const sub     = dm ? '#94a3b8' : '#64748b';
         const acts    = dim.activities || [];
 
+
         const updateActivity = (actId, field, value) => {
           setDimensions(prev => ({
             ...prev,
@@ -10889,6 +14365,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           }));
         };
 
+
         const addActivity = () => {
           const newAct = { id: `act_${Date.now()}`, name: 'New Activity', pts: 2 };
           setDimensions(prev => ({
@@ -10896,6 +14373,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             [flowerPanel]: { ...prev[flowerPanel], activities: [...prev[flowerPanel].activities, newAct] },
           }));
         };
+
 
         const removeActivity = (actId) => {
           setDimensions(prev => ({
@@ -10906,6 +14384,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             },
           }));
         };
+
 
         const logActivity = (act) => {
           setDimensions(prev => {
@@ -10927,13 +14406,16 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           showToast(`${dim.emoji} +${act.pts} pts logged for ${act.name}`);
         };
 
+
         // Drag reorder handlers
         const onDragEnd = () => setDragActivity(null);
+
 
         return (
           <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:310,background:'rgba(0,0,0,0.6)',display:'flex',alignItems:'center',justifyContent:'center'}}
             onClick={e => { if (e.target===e.currentTarget) setFlowerPanel(null); }}>
             <div style={{background:bg,border:`1px solid ${border}`,borderRadius:16,width:'min(94vw,480px)',maxHeight:'86vh',display:'flex',flexDirection:'column',boxShadow:'0 25px 60px rgba(0,0,0,0.5)',overflow:'hidden'}}>
+
 
               {/* Header */}
               <div style={{padding:'16px 20px',borderBottom:`1px solid ${border}`,background:headBg,display:'flex',alignItems:'center',gap:10}}>
@@ -10951,6 +14433,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 </div>
                 <button onClick={()=>setFlowerPanel(null)} style={{background:'none',border:'none',cursor:'pointer',fontSize:18,color:sub}}>✕</button>
               </div>
+
 
               {/* Border mode chooser for this flower */}
               {(() => {
@@ -10988,6 +14471,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   </button>
                 </div>
 
+
                 {acts.map((act, idx) => (
                   <div key={act.id}
                     draggable
@@ -11005,12 +14489,14 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     {/* Drag handle */}
                     <span style={{color:sub,fontSize:14,flexShrink:0,cursor:'grab',userSelect:'none'}}>⠿</span>
 
+
                     {/* Rank badge */}
                     <span style={{
                       flexShrink:0, width:22, height:22, borderRadius:'50%',
                       background:dim.color, color:'white', fontSize:11, fontWeight:700,
                       display:'flex',alignItems:'center',justifyContent:'center',
                     }}>{idx+1}</span>
+
 
                     {/* Editable name */}
                     <input
@@ -11022,6 +14508,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       }}
                     />
 
+
                     {/* Editable points */}
                     <div style={{display:'flex',alignItems:'center',gap:4,flexShrink:0}}>
                       <button onClick={()=>updateActivity(act.id,'pts',Math.max(1,act.pts-1))}
@@ -11032,11 +14519,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       <span style={{fontSize:10,color:sub}}>pts</span>
                     </div>
 
+
                     {/* Log button */}
                     <button onClick={()=>logActivity(act)}
                       style={{flexShrink:0,padding:'4px 10px',borderRadius:8,background:dim.color,color:'white',border:'none',cursor:'pointer',fontSize:12,fontWeight:700}}>
                       Log
                     </button>
+
 
                     {/* Remove */}
                     <button onClick={()=>removeActivity(act.id)}
@@ -11044,6 +14533,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   </div>
                 ))}
               </div>
+
 
               {/* Recent log */}
               {dim.log?.length > 0 && (
@@ -11063,17 +14553,19 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         );
       })()}
 
+
       {/* -- Diary Log Modal ---------------------------------------------------- */}
       {diaryOpen && (
         <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:300,background:'rgba(0,0,0,0.6)',display:'flex',alignItems:'center',justifyContent:'center'}}
           onClick={e => { if(e.target===e.currentTarget) setDiaryOpen(false); }}>
           <div style={{background:theme.darkMode?'#0f172a':'white',border:`1px solid ${theme.darkMode?'#334155':'#e2e8f0'}`,borderRadius:16,width:'min(95vw,600px)',maxHeight:'88vh',display:'flex',flexDirection:'column',boxShadow:'0 25px 60px rgba(0,0,0,0.5)',overflow:'hidden'}}>
             {/* Header */}
-            <div style={{padding:'16px 20px',borderBottom:`1px solid ${theme.darkMode?'#334155':'#e2e8f0'}`,display:'flex',alignItems:'center',gap:10,background:theme.darkMode?'#1e293b':'#f8fafc'}}>
+            <div style={{padding:'16px 20px',borderBottom:`1px solid ${theme.darkMode?'#334155':'#e2e8f0'}`,display:'flex',alignItems:'center',gap:10,background:pw.cellBg}}>
               <span style={{fontSize:20}}>📓</span>
-              <span style={{fontWeight:700,fontSize:16,color:theme.darkMode?'#e2e8f0':'#1e293b',flex:1}}>Daily Log</span>
-              <button onClick={()=>setDiaryOpen(false)} style={{background:'none',border:'none',cursor:'pointer',fontSize:18,color:theme.darkMode?'#94a3b8':'#64748b'}}>✕</button>
+              <span style={{fontWeight:700,fontSize:16,color:theme.darkMode?'#e2e8f0':pw.bodyText,flex:1}}>Daily Log</span>
+              <button onClick={()=>setDiaryOpen(false)} style={{background:'none',border:'none',cursor:'pointer',fontSize:18,color:theme.darkMode?'#94a3b8':pw.secondText}}>✕</button>
             </div>
+
 
             {/* Text input + voice */}
             <div style={{padding:'14px 20px',borderBottom:`1px solid ${theme.darkMode?'#334155':'#e2e8f0'}`}}>
@@ -11082,7 +14574,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   value={diaryText}
                   onChange={e=>setDiaryText(e.target.value)}
                   placeholder="What did you do today? e.g. 'Went climbing with Charlie for 2hrs, read about chemistry, worked on the app'"
-                  style={{width:'100%',minHeight:90,padding:'10px 44px 10px 12px',borderRadius:10,border:`1px solid ${theme.darkMode?'#334155':'#e2e8f0'}`,background:theme.darkMode?'#1e293b':'white',color:theme.darkMode?'#e2e8f0':'#1e293b',fontSize:14,resize:'vertical',outline:'none',boxSizing:'border-box'}}
+                  style={{width:'100%',minHeight:90,padding:'10px 44px 10px 12px',borderRadius:10,border:`1px solid ${theme.darkMode?'#334155':'#e2e8f0'}`,background:theme.darkMode?'#1e293b':'white',color:theme.darkMode?'#e2e8f0':pw.bodyText,fontSize:14,resize:'vertical',outline:'none',boxSizing:'border-box'}}
                 />
                 <button onClick={toggleVoice} title="Voice input"
                   style={{position:'absolute',right:10,top:10,background:isListening?'#ef4444':'#16a34a',border:'none',borderRadius:'50%',width:30,height:30,cursor:'pointer',fontSize:14,display:'flex',alignItems:'center',justifyContent:'center',color:'white'}}>
@@ -11097,11 +14589,12 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               {diaryError && <p style={{fontSize:12,color:'#ef4444',marginTop:6}}>{diaryError}</p>}
             </div>
 
+
             {/* Suggestions */}
             {diarySuggestions.filter(s=>!s.confirmed).length > 0 && (
               <div style={{flex:1,overflowY:'auto',padding:'12px 20px'}}>
                 <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
-                  <span style={{fontWeight:700,fontSize:13,color:theme.darkMode?'#94a3b8':'#64748b'}}>
+                  <span style={{fontWeight:700,fontSize:13,color:theme.darkMode?'#94a3b8':pw.secondText}}>
                     Suggested entries ({diarySuggestions.filter(s=>!s.confirmed).length})
                   </span>
                   <button onClick={confirmAllSuggestions}
@@ -11112,18 +14605,18 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 {diarySuggestions.filter(s=>!s.confirmed).map(sug => {
                   const dim = dimensions[sug.dim];
                   return (
-                    <div key={sug.id} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',marginBottom:8,borderRadius:10,border:`1px solid ${theme.darkMode?'#334155':'#e2e8f0'}`,background:theme.darkMode?'#1e293b':'#f8fafc'}}>
+                    <div key={sug.id} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',marginBottom:8,borderRadius:10,border:`1px solid ${theme.darkMode?'#334155':'#e2e8f0'}`,background:pw.cellBg}}>
                       <span style={{fontSize:20,flexShrink:0}}>{dim?.emoji || '📌'}</span>
                       <div style={{flex:1,minWidth:0}}>
                         <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:2}}>
                           <span style={{fontSize:11,fontWeight:700,padding:'2px 7px',borderRadius:99,background:(dim?.color||'#64748b')+'33',color:dim?.color||'#64748b'}}>{dim?.label}</span>
-                          <span style={{fontSize:11,color:theme.darkMode?'#94a3b8':'#64748b'}}>{sug.category}</span>
+                          <span style={{fontSize:11,color:theme.darkMode?'#94a3b8':pw.secondText}}>{sug.category}</span>
                           {sug.friendId && <span style={{fontSize:11,color:'#22c55e'}}>👤 {sug.friendId}</span>}
                         </div>
                         <input
                           value={sug.note}
                           onChange={e => setDiarySuggestions(prev => prev.map(s => s.id===sug.id ? {...s, note:e.target.value} : s))}
-                          style={{width:'100%',background:'transparent',border:'none',outline:'none',fontSize:13,fontWeight:500,color:theme.darkMode?'#e2e8f0':'#1e293b',cursor:'text'}}
+                          style={{width:'100%',background:'transparent',border:'none',outline:'none',fontSize:13,fontWeight:500,color:theme.darkMode?'#e2e8f0':pw.bodyText,cursor:'text'}}
                         />
                         <div style={{display:'flex',gap:4,marginTop:4}}>
                           {[1,2,3,4,5].map(v => (
@@ -11131,7 +14624,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                               style={{width:20,height:20,borderRadius:'50%',border:`1px solid ${sug.pts>=v?(dim?.color||'#22c55e'):(theme.darkMode?'#334155':'#cbd5e1')}`,background:sug.pts>=v?(dim?.color||'#22c55e'):'transparent',cursor:'pointer',fontSize:8,color:'white'}}>
                             </button>
                           ))}
-                          <span style={{fontSize:10,color:theme.darkMode?'#94a3b8':'#94a3b8',marginLeft:4}}>{sug.pts} pts</span>
+                          <span style={{fontSize:10,color:theme.darkMode?'#94a3b8':'#475569',marginLeft:4}}>{sug.pts} pts</span>
                         </div>
                       </div>
                       <button onClick={()=>confirmSuggestion(sug)}
@@ -11147,6 +14640,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           </div>
         </div>
       )}
+
 
       {/* -- Me Dashboard View -------------------------------------------------- */}
       {viewMode === 'me' && (() => {
@@ -11164,7 +14658,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           { id: 'growth', label: '🌱 Growth' },
         ];
 
+
         // Trend calculation: sum of pts logged in last 3 days vs 3 days before that
+
 
         const TREND_ICONS = {
           levelup: { icon: '▲', color: '#fbbf24', size: 18, bold: true, label: 'Level up!' },
@@ -11175,8 +14671,10 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           down2:   { icon: '▼▼', color: '#ef4444', size: 11, bold: true, label: 'Fading fast' },
         };
 
+
         const people = nodes.filter(n => n.type !== 'hub' && n.type !== 'flower' && n.id !== 'me');
         const visiblePeople = activeTags.length > 0 ? people.filter(n => isTagFiltered(n.id)) : people;
+
 
         return (
           <div style={{position:'absolute',top:0,left:0,right:0,bottom:0,zIndex:50,background:bg,display:'flex',flexDirection:'column',overflow:'hidden',paddingBottom:56}}>
@@ -11201,8 +14699,10 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               </div>
             </div>
 
+
             {/* Tab content */}
             <div style={{flex:1,overflowY:'auto',padding:'16px'}}>
+
 
               {/* -- Social tab -- */}
               {activeTab === 'social' && (
@@ -11237,7 +14737,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   {/* View switcher — 2 levels */}
                   <div style={{display:'flex',flexDirection:'column',gap:6,marginBottom:8}}>
                     {/* Level 1: Grid vs Bar */}
-                    <div style={{display:'flex',gap:4,background:dm?'#1e293b':'#f1f5f9',borderRadius:10,padding:3}}>
+                    <div style={{display:'flex',gap:4,background:pw.cellBg,borderRadius:10,padding:3}}>
                       {[{id:'grid',label:'⬡ Grid'},{id:'bar',label:'▬ Bar'}].map(v=>(
                         <button key={v.id} onClick={()=>setSocialView(
                           v.id==='grid'
@@ -11253,7 +14753,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       ))}
                     </div>
                     {/* Level 2: Score vs Momentum */}
-                    <div style={{display:'flex',gap:4,background:dm?'#1e293b':'#f1f5f9',borderRadius:10,padding:3}}>
+                    <div style={{display:'flex',gap:4,background:pw.cellBg,borderRadius:10,padding:3}}>
                       {[{id:'Score',label:'⭐ Score'},{id:'Momentum',label:'⚡ Momentum'}].map(v=>(
                         <button key={v.id} onClick={()=>setSocialView(
                           (socialView.startsWith('grid')?'grid':'bar')+v.id
@@ -11285,6 +14785,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     </div>
                   )}
 
+
                   {/* GRID VIEW */}
                   {(socialView === 'gridScore' || socialView === 'gridMomentum') && (() => {
                     const R = 28;
@@ -11293,15 +14794,18 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     const COL_W = HEX_W * 0.75;
                     const ROW_H = HEX_H;
 
+
                     const hexToPx = (q, r) => ({
                       x: COL_W * q,
                       y: ROW_H * r + (Math.abs(q) % 2 !== 0 ? ROW_H / 2 : 0),
                     });
 
+
                     const hexPts = Array.from({length:6}, (_, i) => {
                       const a = (Math.PI / 3) * i;
                       return (R * Math.cos(a)).toFixed(2) + ',' + (R * Math.sin(a)).toFixed(2);
                     }).join(' ');
+
 
                     const neighbours = (q, r) => {
                       const odd = Math.abs(q) % 2 !== 0;
@@ -11313,10 +14817,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     };
 
 
+
+
                     const GROUP_COLORS = ['#3b82f6','#ef4444','#f59e0b','#10b981','#8b5cf6','#ec4899','#06b6d4','#f97316'];
                     const hubs = nodes.filter(n => n.type === 'hub');
                     const hubColor = {};
                     hubs.forEach((h,i) => { hubColor[h.id] = GROUP_COLORS[i % GROUP_COLORS.length]; });
+
 
                     const personHub = {};
                     visiblePeople.forEach(n => {
@@ -11325,8 +14832,10 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       if (h) personHub[n.id] = h.id;
                     });
 
+
                     // Grid view: always preserve map position order (sort by map y then x)
                     const mapOrder = (a,b) => (a.y||0)-(b.y||0) || (a.x||0)-(b.x||0);
+
 
                     const clusters = [];
                     const seen = new Set();
@@ -11337,9 +14846,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     const ungrouped = visiblePeople.filter(n=>!seen.has(n.id)).sort(mapOrder);
                     if (ungrouped.length > 0) clusters.push({hubId:null, color:null, members:ungrouped});
 
+
                     if (visiblePeople.length === 0) return (
                       <div style={{textAlign:'center',color:sub,padding:40}}>No people to show</div>
                     );
+
 
                     // Use actual hub positions from the map to place cluster origins
                     // Scale map coords → hex coords
@@ -11355,9 +14866,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       r: Math.round(((y-mapMinY)*SCALE_R)),
                     });
 
+
                     const used = new Set();
                     const assignments = [];
                     const GAP = 1; // exactly 1 hex gap between clusters
+
 
                     // Place each cluster centred at its hub's map position
                     clusters.forEach(({hubId, color, members}) => {
@@ -11382,6 +14895,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       });
                     });
 
+
                     const pxs = assignments.map(a => hexToPx(a.q, a.r));
                     const minX = Math.min(...pxs.map(p=>p.x)) - R;
                     const maxX = Math.max(...pxs.map(p=>p.x)) + R;
@@ -11395,6 +14909,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     const scale = Math.max(1, TARGET_W / rawW);
                     const W = rawW * scale;
                     const H = rawH * scale;
+
 
                     return (
                       <div style={{width:'100%'}}>
@@ -11445,6 +14960,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                             const cy = (px.y - minY + PAD) * scale;
                             const SR = R * scale;
 
+
                             // Score view: size shrinks for lower scores
                             const maxScore = Math.max(...visiblePeople.map(p=>p.interactionScore||0), 1);
                             const scorePct = Math.min(1, (n.interactionScore||0) / maxScore);
@@ -11452,6 +14968,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                               ? 0.45 + scorePct * 0.55  // range: 45%–100% of full size
                               : 1;
                             const IR = SR * sizeScale; // image radius
+
 
                             // Momentum view: desaturate if score declining significantly
                             let desatFilter = '';
@@ -11469,6 +14986,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                 : 1;
                               if (saturation < 1) desatFilter = `saturate(${(saturation*100).toFixed(0)}%) brightness(${(0.6+saturation*0.4).toFixed(2)})`;
                             }
+
 
                             const scaledPts = Array.from({length:6}, (_, i) => {
                               const a = (Math.PI / 3) * i;
@@ -11519,9 +15037,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     );
                   })()}
 
+
                   {/* RANKED LIST — by Score or by Momentum */}
                   {(socialView === 'barScore' || socialView === 'barMomentum') && (() => {
                     const MAX_SCORE = 1000;
+
 
                     // Score 7 days ago — use history if available, else prevScore, else 90% of current
                     const scoreWeekAgo = (n) => {
@@ -11538,7 +15058,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       return n.interactionScore || 0;
                     };
 
+
                     const momentum = (n) => (n.interactionScore || 0) - scoreWeekAgo(n);
+
 
                     const sorted = [...visiblePeople].sort((a, b) =>
                       socialView === 'barScore'
@@ -11546,13 +15068,16 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         : momentum(b) - momentum(a)
                     );
 
+
                     const ROW_H = 64;
                     const PHOTO_W = 48;
                     const BAR_AREA = 220; // total px width for the bar section
 
+
                     // Axis: left = 0 pts, right = MAX_SCORE pts
                     // Current score bar from left. Week-ago marker line.
                     // Green if improved (bar extends right from week-ago), red if declined (bar extends left).
+
 
                     return (
                       <div style={{display:'flex',flexDirection:'column',gap:6}}>
@@ -11582,6 +15107,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         {/* Tier colour axis strip */}
                         <div style={{marginLeft:PHOTO_W+10,height:4,borderRadius:2,background:`linear-gradient(to right, #84cc16, #22c55e, #16a34a, #15803d, #14532d)`,marginBottom:6,opacity:0.6}} />
 
+
                         {sorted.map(n => {
                           const score  = n.interactionScore || 0;
                           const prev   = scoreWeekAgo(n);
@@ -11589,12 +15115,14 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           const tier   = getTier(score, n);
                           const lvl    = FRIENDSHIP_LEVELS.find(l => l.tier === tier) || FRIENDSHIP_LEVELS[0];
 
+
                           // Bar widths as fraction of BAR_AREA
                           const currentPct = score / MAX_SCORE;
                           const prevPct    = prev  / MAX_SCORE;
                           const minPct     = Math.min(currentPct, prevPct);
                           const maxPct     = Math.max(currentPct, prevPct);
                           const improved   = delta >= 0;
+
 
                           return (
                             <div key={n.id} onClick={()=>{setSelectedNodeId(n.id);setViewMode('canvas');}}
@@ -11610,7 +15138,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                   {delta !== 0 && <span style={{marginLeft:6,fontSize:10,color:improved?'#22c55e':'#ef4444',fontWeight:700}}>{improved?'+':''}{delta}</span>}
                                 </div>
                                 {/* Bar track */}
-                                <div style={{position:'relative',height:14,borderRadius:4,background:dm?'#1e293b':'#f1f5f9',overflow:'hidden'}}>
+                                <div style={{position:'relative',height:14,borderRadius:4,background:pw.cellBg,overflow:'hidden'}}>
                                 {/* Tier threshold lines */}
                                   {[
                                     { score: 100,  color: '#bef264' },
@@ -11722,6 +15250,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 </div>
               )}
 
+
               {/* -- Dimension tabs — creativity/knowledge/health/growth only -- */}
               {['creativity','knowledge','health','growth'].includes(activeTab) && (() => {
                 const dim = dimensions[activeTab];
@@ -11789,6 +15318,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               })()}
             </div>
 
+
           </div>
         );
       })()}
@@ -11796,10 +15326,12 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         const hub = nodes.find(n => n.id === groupModal.hubId);
         if (!hub) return null;
 
+
         // All non-hub, non-flower people INCLUDING Me
         const people = nodes.filter(n => n.type !== 'hub' && n.type !== 'flower');
         const visiblePeople = activeTags.length > 0 ? people.filter(n => isTagFiltered(n.id)) : people;
         const hubs = nodes.filter(n => n.type === 'hub');
+
 
         // States:
         // 0 = empty (not in group, no opinion set yet)
@@ -11819,6 +15351,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           return 0;
         };
 
+
         const cycleMembership = (personId, hubId, current) => {
           // Cycle: 0(empty)→1(excluded)→2(small)→3(full)→0
           // But if coming from 0 on a fresh click, go to 2 (yellow) first — skipping excluded
@@ -11828,6 +15361,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           else if (current === 2) next = 3;  // small → full
           else if (current === 3) next = 1;  // full → excluded
           else next = 0;                     // excluded → empty
+
 
           setLinks(prev => {
             const hasLink = prev.some(l =>
@@ -11853,6 +15387,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           }));
         };
 
+
         // Initialise newly-created group: pre-existing people start at state 1 (excluded/red)
         // Do this once when the modal first opens for a brand-new hub
         const initNewGroup = (hubId) => {
@@ -11866,6 +15401,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           }));
         };
 
+
         // Run init once if this is a freshly created hub (no memberships set yet)
         const hasAnyMembership = nodes.some(n =>
           n.groupVisibility && n.groupVisibility[groupModal.hubId] !== undefined
@@ -11875,6 +15411,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           setTimeout(() => initNewGroup(groupModal.hubId), 0);
         }
 
+
         const dm = theme.darkMode;
         const bg      = dm ? '#0f172a' : '#ffffff';
         const border  = dm ? '#334155' : '#e2e8f0';
@@ -11882,6 +15419,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         const rowEven = dm ? '#1e293b' : '#f8fafc';
         const text    = dm ? '#e2e8f0' : '#1e293b';
         const subtext = dm ? '#94a3b8' : '#64748b';
+
 
         // Visual for each state
         const TICK_RENDER = [
@@ -11891,12 +15429,14 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           { label: '😊',  bg: '#16a34a22',          border: '#16a34a',                 color: '#16a34a',      title: 'In group — full photo'         },
         ];
 
+
         return (
           <div
             style={{ position:'fixed', top:0,left:0,right:0,bottom:0, zIndex:200, background:'rgba(0,0,0,0.55)', display:'flex', alignItems:'center', justifyContent:'center' }}
             onClick={e => { if (e.target === e.currentTarget) { setGroupModal(null);setShowGroupTable(false); } }}
           >
             <div style={{ background:bg, border:`1px solid ${border}`, borderRadius:16, width:'min(96vw, 780px)', maxHeight:'85vh', display:'flex', flexDirection:'column', boxShadow:'0 25px 60px rgba(0,0,0,0.5)', overflow:'hidden' }}>
+
 
               {/* Header */}
               <div style={{ padding:'14px 20px', borderBottom:`1px solid ${border}`, background:headBg, display:'flex', alignItems:'center', gap:12 }}>
@@ -11912,14 +15452,16 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 >Done</button>
               </div>
 
+
               {/* Group colour picker */}
               <div style={{ padding:'10px 24px', borderBottom:`1px solid ${border}`, display:'flex', alignItems:'center', gap:10 }}>
-                <span style={{fontSize:12,color:dm?'#94a3b8':'#64748b',fontWeight:600}}>Group colour:</span>
+                <span style={{fontSize:12,color:dm?'#94a3b8':pw.secondText,fontWeight:600}}>Group colour:</span>
                 {PRIMARY_GROUP_COLORS.map(c => (
                   <button key={c} onClick={()=>setGroupColors(prev=>({...prev,[hub.id]:c}))}
                     style={{width:22,height:22,borderRadius:'50%',background:c,border:(groupColors[hub.id]||PRIMARY_GROUP_COLORS[nodes.filter(n=>n.type==='hub').findIndex(n=>n.id===hub.id)%PRIMARY_GROUP_COLORS.length])===c?'3px solid white':'2px solid transparent',cursor:'pointer',boxShadow:(groupColors[hub.id]||PRIMARY_GROUP_COLORS[nodes.filter(n=>n.type==='hub').findIndex(n=>n.id===hub.id)%PRIMARY_GROUP_COLORS.length])===c?'0 0 0 2px '+c:'none'}}/>
                 ))}
               </div>
+
 
               {/* Action buttons */}
               <div style={{ padding:'12px 24px', borderBottom:`1px solid ${border}`, display:'flex', gap:10 }}>
@@ -11942,6 +15484,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   <span>👤</span><span>New Friend</span>
                 </button>
               </div>
+
 
               {/* Table */}
               <div style={{ overflowX:'auto', overflowY:'auto', flex:1 }}>
@@ -11999,6 +15542,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 </table>
               </div>
 
+
               {/* Bottom row: Group Flower + Key + Delete — all in one line */}
               {/* Vine blob colour row */}
               {showVineBorders && (
@@ -12010,7 +15554,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         style={{width:18,height:18,borderRadius:'50%',background:c,border:'2px solid '+(hub.vineBlobColor===c?'white':'transparent'),boxShadow:hub.vineBlobColor===c?'0 0 0 2px '+c:'none',cursor:'pointer',flexShrink:0}}/>
                     ))}
                     <button onClick={()=>setNodes(prev=>prev.map(n=>n.id===hub.id?{...n,vineBlobColor:null}:n))}
-                      style={{width:18,height:18,borderRadius:'50%',background:'transparent',border:'1.5px dashed #94a3b8',cursor:'pointer',fontSize:8,color:'#94a3b8',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>✕</button>
+                      style={{width:18,height:18,borderRadius:'50%',background:'transparent',border:'1.5px dashed #94a3b8',cursor:'pointer',fontSize:8,color:'#475569',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>✕</button>
                   </div>
                   <input type="range" min={0} max={1} step={0.05}
                     value={hub.vineBlobOpacity??0.9}
@@ -12019,6 +15563,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   <span style={{fontSize:10,color:subtext,flexShrink:0,width:28}}>{Math.round((hub.vineBlobOpacity??0.9)*100)}%</span>
                 </div>
               )}
+
 
               <div style={{padding:'8px 12px',borderTop:`1px solid ${border}`,display:'flex',alignItems:'center',gap:6}}>
                 {/* Group Flower */}
@@ -12054,6 +15599,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   </span>
                 </button>
 
+
                 {/* Key toggle */}
                 <button onClick={()=>setShowMapKey(p=>!p)}
                   style={{display:'flex',alignItems:'center',gap:4,padding:'6px 10px',borderRadius:8,
@@ -12063,6 +15609,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     color:showMapKey?'#3b82f6':subtext,flexShrink:0}}>
                   🔑 {showMapKey?'Key on':'Key'}
                 </button>
+
 
                 {showMapKey && (
                   <div style={{display:'flex',gap:8,flexWrap:'wrap',flex:1,fontSize:10,color:subtext}}>
@@ -12075,7 +15622,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   </div>
                 )}
 
+
                 {!showMapKey && <div style={{flex:1}}/>}
+
 
                 {/* Delete group */}
                 <button onClick={()=>{
@@ -12130,17 +15679,45 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         ].map(tab => {
           const active = tab.action ? (tab.id==='add' ? showAddMenu : false) : viewMode === tab.id;
           const color = active ? '#10b981' : (theme.darkMode ? '#94a3b8' : '#64748b');
+          const isAddTab = tab.id === 'add';
+          const isMapTab = tab.id === 'canvas';
           return (
             <button key={tab.id}
-              onClick={() => tab.action ? tab.action() : setViewMode(tab.id)}
+              onClick={() => { if (!isAddTab) setViewMode(tab.id); }}
+              onPointerDown={isAddTab ? (e=>{
+                e.currentTarget.setPointerCapture(e.pointerId);
+                bottomAddDragStart.current = { moved: false, startX: e.clientX, startY: e.clientY };
+                setBottomAddDrag({ x: e.clientX, y: e.clientY });
+              }) : isMapTab ? (()=>{
+                mapHoldTimer.current = setTimeout(()=>{ setShowMapStyleBar(true); }, 450);
+              }) : undefined}
+              onPointerMove={isAddTab ? (e=>{
+                const d = bottomAddDragStart.current; if (!d) return;
+                const dx = e.clientX - d.startX, dy = e.clientY - d.startY;
+                if (Math.sqrt(dx*dx + dy*dy) > 8) d.moved = true;
+                setBottomAddDrag({ x: e.clientX, y: e.clientY });
+              }) : undefined}
+              onPointerUp={isAddTab ? (e=>{
+                const d = bottomAddDragStart.current;
+                if (d && d.moved) {
+                  if (viewMode !== 'canvas') setViewMode('canvas');
+                  spawnNodeAtScreenPoint(e.clientX, e.clientY);
+                } else {
+                  setShowAddMenu(p=>!p);
+                }
+                bottomAddDragStart.current = null;
+                setBottomAddDrag(null);
+              }) : isMapTab ? (()=>{ clearTimeout(mapHoldTimer.current); }) : undefined}
+              onPointerLeave={isMapTab ? (()=>{ clearTimeout(mapHoldTimer.current); }) : undefined}
               style={{
                 flex: 1, display: 'flex', flexDirection: 'column',
                 alignItems: 'center', justifyContent: 'center',
                 padding: '8px 4px 6px',
-                background: 'none', border: 'none', cursor: 'pointer',
+                background: 'none', border: 'none', cursor: isAddTab ? 'grab' : 'pointer',
                 color,
                 borderTop: active ? `2px solid #10b981` : '2px solid transparent',
                 transition: 'color 0.15s',
+                touchAction: isAddTab ? 'none' : undefined,
               }}>
               {tab.icon(active)}
               <span style={{fontSize: 10, fontWeight: active ? 700 : 500, marginTop: 2}}>{tab.label}</span>
@@ -12149,10 +15726,54 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         })}
       </div>
 
+      {/* Section revealed by holding the Map tab -- same 3 view options as the FAB's eye picker */}
+      {showMapStyleBar && (
+        <>
+          <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:198}}
+            onClick={()=>setShowMapStyleBar(false)}/>
+          <div style={{position:'fixed', left:8, right:8, bottom:64, zIndex:199,
+            background:theme.darkMode?'#1e293b':'white', borderRadius:16,
+            boxShadow:'0 -4px 24px rgba(0,0,0,0.35)',
+            border:`1px solid ${theme.darkMode?'#334155':'#e2e8f0'}`,
+            display:'flex', overflow:'hidden'}}>
+            {[
+              {key:'full', emoji:'🌿', name:'Detailed'},
+              {key:'simple', emoji:'⚪', name:'Simple'},
+              {key:'feed', emoji:'📜', name:'Stacked'},
+              {key:'feedDetailed', emoji:'🌱', name:'Stacked+'},
+            ].map((opt, oi) => (
+              <button key={opt.key}
+                onClick={()=>{ setMapStyle(opt.key); setSimpleMode(opt.key === 'simple'); setShowMapStyleBar(false); if (viewMode !== 'canvas') setViewMode('canvas'); }}
+                style={{flex:1, display:'flex', flexDirection:'column', alignItems:'center', gap:4,
+                  padding:'14px 8px', background:mapStyle===opt.key?(theme.darkMode?'#0f2d1a':'#ecfdf5'):'none',
+                  border:'none', borderRight: oi<3 ? `1px solid ${theme.darkMode?'#334155':'#f1f5f9'}` : 'none',
+                  cursor:'pointer'}}>
+                <span style={{fontSize:22}}>{opt.emoji}</span>
+                <span style={{fontSize:12,fontWeight:700,color:mapStyle===opt.key?'#10b981':(theme.darkMode?'#e2e8f0':'#334155')}}>{opt.name}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* Ghost circle following the finger while dragging the bottom-bar Add button out */}
+      {bottomAddDrag && (
+        <div style={{position:'fixed',left:bottomAddDrag.x-28,top:bottomAddDrag.y-28,width:56,height:56,
+          borderRadius:'50%',background:'#10b981',opacity:0.9,zIndex:300,pointerEvents:'none',
+          display:'flex',alignItems:'center',justifyContent:'center',fontSize:24,
+          boxShadow:'0 6px 20px rgba(0,0,0,0.4)',border:'2px solid white'}}>
+          🌱
+        </div>
+      )}
+
+
     </div>
     </>
   );
 }
+
+
+
 
 
 
@@ -12183,6 +15804,7 @@ const spiral = (count, cq, cr, used) => {
   return cells;
 };
 
+
 const getTrend = (node) => {
   const log = node.interactionLog || [];
   const now = new Date();
@@ -12207,6 +15829,7 @@ const getTrend = (node) => {
   return 'stable';
 };
 
+
 const onDragStart = (actId) => setDragActivity({ dimKey: flowerPanel, actId });
 const onDragOver  = (e, overId) => {
   e.preventDefault();
@@ -12222,6 +15845,7 @@ const onDragOver  = (e, overId) => {
   });
 };
 
+
 const onSvgTouchEnd = (e) => {
   if (e.touches.length <= 1) pinchRef.current = null;
   if (e.touches.length === 0) panRef.current = null;
@@ -12232,7 +15856,13 @@ const onSvgTouchEnd = (e) => {
 
 
 
+
+
+
+
+
 const mkCat = (name, pts) => ({ id: name.toLowerCase().replace(/\W+/g,'_'), name, pts });
+
 
 const DEFAULT_DIMENSIONS = {
   creativity: {
@@ -12301,6 +15931,7 @@ const DEFAULT_DIMENSIONS = {
     autoCalculated: true, // feeds from friendship interaction scores
   },
 };
+
 
 export default function App() {
   return <ErrorBoundary><AppInner /></ErrorBoundary>;
