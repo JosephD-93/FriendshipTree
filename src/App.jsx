@@ -5299,7 +5299,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
 
   const linkParts = useMemo(() => {
-    if (sliderDragging) return [];
+    if (sliderDragging || simpleMode) return [];
     const newFallenAccum = [];
     const fallenLeafIdSet = new Set(fallenLeaves.map(fl => fl.id));
     const blockerNodesAll = activeRenderNodes.filter(n => !n.hidden && n.renderX != null && n.renderY != null);
@@ -5382,7 +5382,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       });
     }
     return result;
-  }, [links, activeRenderNodes, nodes, theme, nodeGroupMap, sliderDragging, transform, growingVines, vineBorderParams, fallenLeaves]);
+  }, [links, activeRenderNodes, nodes, theme, nodeGroupMap, sliderDragging, simpleMode, transform, growingVines, vineBorderParams, fallenLeaves]);
   return (
     <>
     <style>{KEYFRAMES_CSS}</style>
