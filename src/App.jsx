@@ -11439,14 +11439,19 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           members.forEach(n => {
             const key = `${dimKey}:${n.id}`;
             const saved = feedPositions[key];
-            if (saved && saved.col >= 0 && saved.col < COLS) {
+            const savedCellKey = saved ? `${saved.col},${saved.row}` : null;
+            if (saved && saved.col >= 0 && saved.col < COLS && !occupied.has(savedCellKey)) {
               placed[n.id] = saved;
-              occupied.add(`${saved.col},${saved.row}`);
+              occupied.add(savedCellKey);
               // Hubs render as a wide pill spanning roughly two columns -- reserve
               // the neighbouring cell too so newly auto-placed people don't land
               // directly beside one and overlap it.
               if (n.type === 'hub' && saved.col + 1 < COLS) occupied.add(`${saved.col+1},${saved.row}`);
             } else {
+              // Either no saved position, or the saved cell is already taken by
+              // someone else (can happen when a node was unreachable for a while
+              // and its old slot got reused, then it reappears) -- find a fresh
+              // spot instead of overlapping whoever's already there.
               pending.push(n);
             }
           });
@@ -11503,14 +11508,20 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           const targetEl = elementsUnder.find(el => el.dataset && el.dataset.feedNodeId && el.dataset.feedNodeId !== nodeId);
           const targetId = targetEl ? targetEl.dataset.feedNodeId : null;
           const targetNode = targetId ? nodes.find(n => n.id === targetId) : null;
-          // TEMP DEBUG
-          showToast(`drop debug: targetId=${targetId||'none'} targetType=${targetNode?.type||'n/a'} draggedType=${draggedNode?.type||'n/a'} elementsCount=${elementsUnder.length}`);
 
           if (targetNode && draggedNode) {
             const alreadyLinked = links.some(l =>
               (l.source === nodeId && l.target === targetId) || (l.source === targetId && l.target === nodeId));
             setFeedCarrying(null);
-            if (draggedNode.type === 'hub' && targetNode.type === 'hub') {
+            if (targetNode.type === 'flower') {
+              if (!alreadyLinked) {
+                setLinks(prev => [...prev, { source: targetId, target: nodeId }]);
+                showLinkUndo(targetId, nodeId);
+                showToast('🌱 Connected to ' + targetNode.label);
+              } else {
+                showToast('Already connected');
+              }
+            } else if (draggedNode.type === 'hub' && targetNode.type === 'hub') {
               setMergePrompt({ type: 'group', a: nodeId, b: targetId });
             } else if (targetNode.type === 'hub') {
               if (!alreadyLinked) {
@@ -11677,7 +11688,25 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               const dim = dimensions[dimKey];
               const flowerNode = nodes.find(n => n.id === flowerId);
               if (!dim || !flowerNode) return null;
-              const { members: allMembers, parentOf, minimisedHere } = buildMembers(flowerId);
+              const { members: allMembersRaw, parentOf, minimisedHere } = buildMembers(flowerId);
+              // Recover orphaned nodes: anyone who has a SAVED position in this
+              // dimension but is no longer reachable from the flower (e.g. the one
+              // link connecting them back to the tree was just cut) stays visible
+              // in their last known spot instead of disappearing outright. They
+              // have no parent here, so no connecting line draws to them, until
+              // they're linked to something again (e.g. dropped onto the flower
+              // band directly).
+              const reachableIds = new Set(allMembersRaw.map(n => n.id));
+              const orphans = [];
+              Object.keys(feedPositions).forEach(key => {
+                if (!key.startsWith(`${dimKey}:`)) return;
+                const oid = key.slice(dimKey.length + 1);
+                if (reachableIds.has(oid)) return;
+                const oNode = nodes.find(n => n.id === oid);
+                if (!oNode || oNode.hidden || oNode.type === 'flower' || oNode.id === 'me') return;
+                orphans.push(oNode);
+              });
+              const allMembers = [...allMembersRaw, ...orphans];
               const minimisedSet = new Set(minimisedHere);
               // In Detailed mode, a group's direct people-members move off the grid
               // entirely too -- they cluster as small flowers around the group's
@@ -11725,7 +11754,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 <div key={dimKey} data-feed-section={dimKey} style={{borderBottom:`1px solid ${dm?'#1e293b':'#e2e8f0'}`, padding:'0'}}>
                   <div style={{position:'relative', height:sectionH}}>
                     {/* Flower band, full height of the section */}
-                    <div style={{position:'absolute', left:0, top:0, bottom:0, width:BAND_W,
+                    <div data-feed-node-id={flowerId} style={{position:'absolute', left:0, top:0, bottom:0, width:BAND_W,
                       background:dim.color, display:'flex', flexDirection:'column', alignItems:'center',
                       justifyContent:'center', gap:6, borderRight:'3px solid #000000'}}>
                       <div style={{fontSize:22}}>{dim.emoji}</div>
