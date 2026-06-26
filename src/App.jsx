@@ -196,7 +196,7 @@ function FabMenu(props) {
     rakeActive, setRakeActive,
     lassoMode, setLassoMode, setLassoPath, setLassoSelected, setLassoMenuOpen,
     visibleTools = {},
-    simpleMode, setSimpleMode, mapStyle, setMapStyle,
+    simpleMode, setSimpleMode, mapStyle, setMapStyle, feedMacheteMode, setFeedMacheteMode,
   } = props;
 
 
@@ -226,7 +226,13 @@ function FabMenu(props) {
     {id:'search',icon:'🔍',label:'Search',  fn:()=>{setSearchOpen(true);setFabOpen(false);}},
     {id:'undo',  icon:'↩', label:'Undo',    fn:()=>undo(), holdFn:()=>redo(), holdIcon:'↪',holdLabel:'Redo', dim:historyLen===0&&futureLen===0},
     {id:'vine',  icon:'🌿',label:vineDrawMode?'Commit':'Vine', fn:()=>{vineDrawMode?(commitAllPaths(),setVineDrawMode(false)):(setVineDrawMode(true),setMacheteMode(false),setPendingPaths([]),setCurrentStroke([]));setFabOpen(false);}, active:vineDrawMode},
-    {id:'cut',   icon:'🪓',label:macheteMode?'Stop':'Cut', fn:()=>{setMacheteMode(!macheteMode);setVineDrawMode(false);setFabOpen(false);}, active:macheteMode},
+    {id:'cut',   icon:'🪓',label:(mapStyle==='feed'||mapStyle==='feedDetailed') ? (feedMacheteMode?'Stop':'Cut') : (macheteMode?'Stop':'Cut'),
+      fn:()=>{
+        if (mapStyle==='feed'||mapStyle==='feedDetailed') { setFeedMacheteMode(p=>!p); }
+        else { setMacheteMode(!macheteMode); setVineDrawMode(false); }
+        setFabOpen(false);
+      },
+      active:(mapStyle==='feed'||mapStyle==='feedDetailed') ? feedMacheteMode : macheteMode},
     {id:'rake',  icon:'🧹',label:rakeActive?'Hide Rake':'Rake', fn:()=>{setRakeActive(v=>!v);setFabOpen(false);}, active:rakeActive},
     {id:'lasso', icon:'⭕',label:lassoMode?'Stop':'Select', fn:()=>{setLassoMode(v=>!v);setLassoPath([]);setLassoSelected([]);setLassoMenuOpen(false);setFabOpen(false);}, active:lassoMode},
     {id:'daynight', icon: theme.darkMode?'☀️':'🌙', label: theme.darkMode?'Day':'Night', fn:()=>{setTheme(p=>({...p,darkMode:!p.darkMode}));setFabOpen(false);}},
@@ -1837,6 +1843,9 @@ function AppInner() {
   const [feedCarrying, setFeedCarrying] = useState(null); // {dimKey, nodeId, branchIds, pageX, pageY, dropMode, holdPointerId}
   const [feedScrollTop, setFeedScrollTop] = useState(0);
   const [feedDragMode, setFeedDragMode] = useState((() => { try { return JSON.parse(localStorage.getItem('ft_settings')||'{}').feedDragMode || 'onehand'; } catch(e) { return 'onehand'; } })()); // 'onehand' | 'twohand'
+  const [feedMacheteMode, setFeedMacheteMode] = useState(false); // axe tool toggle for Feed -- when on, the page freezes and a finger-drag draws a slash trail that cuts any connection it crosses
+  const [feedSlashing, setFeedSlashing] = useState(false); // true while actively mid-slash (freezes scroll)
+  const [feedSlashTrail, setFeedSlashTrail] = useState([]); // [{x,y}] points of the current slash, in screen coordinates
   const [darknessFilter, setDarknessFilter] = useState((() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); return s.darknessFilter !== undefined ? s.darknessFilter : true; } catch(e) { return true; } })());
 
 
@@ -5565,6 +5574,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         rakeActive={rakeActive} setRakeActive={setRakeActive}
         hasFallenLeaves={fallenLeaves.length > 0}
         simpleMode={simpleMode} setSimpleMode={setSimpleMode} mapStyle={mapStyle} setMapStyle={setMapStyle}
+        feedMacheteMode={feedMacheteMode} setFeedMacheteMode={setFeedMacheteMode}
         onTornado={()=>{
           setTornadoActive(true);
           // clear the fallen leaves after they've swirled off-screen
@@ -11493,6 +11503,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           const targetEl = elementsUnder.find(el => el.dataset && el.dataset.feedNodeId && el.dataset.feedNodeId !== nodeId);
           const targetId = targetEl ? targetEl.dataset.feedNodeId : null;
           const targetNode = targetId ? nodes.find(n => n.id === targetId) : null;
+          // TEMP DEBUG
+          showToast(`drop debug: targetId=${targetId||'none'} targetType=${targetNode?.type||'n/a'} draggedType=${draggedNode?.type||'n/a'} elementsCount=${elementsUnder.length}`);
 
           if (targetNode && draggedNode) {
             const alreadyLinked = links.some(l =>
@@ -11577,11 +11589,17 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
         return (
           <div ref={feedScrollRef} style={{position:'absolute', top:0, left:0, right:0, bottom:56,
-            overflowY: feedCarrying ? 'hidden' : 'auto',
-            touchAction: feedCarrying ? 'none' : 'auto',
+            overflowY: (feedCarrying || feedSlashing) ? 'hidden' : 'auto',
+            touchAction: (feedCarrying || feedSlashing || feedMacheteMode) ? 'none' : 'auto',
+            cursor: feedMacheteMode ? 'crosshair' : 'auto',
             userSelect:'none', WebkitUserSelect:'none', WebkitTouchCallout:'none',
             background:bg}}
             onScroll={e => setFeedScrollTop(e.currentTarget.scrollTop)}
+            onPointerDown={e => {
+              if (!feedMacheteMode) return;
+              setFeedSlashing(true);
+              setFeedSlashTrail([{ x: e.clientX, y: e.clientY }]);
+            }}
             onPointerMove={e => {
               // Page is frozen while carrying -- the carried node follows the
               // finger directly instead of riding along with a scroll. Throttled
@@ -11590,6 +11608,49 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               // view (including re-walking the connection tree for all 5
               // dimensions), which was slow enough on a phone to drop events and
               // make the drag freeze partway through.
+              if (feedMacheteMode && feedSlashing) {
+                const x = e.clientX, y = e.clientY;
+                setFeedSlashTrail(prev => {
+                  const next = [...prev, { x, y }];
+                  // Check the newest segment against every visible connection on
+                  // screen right now -- same geometry test the main canvas uses,
+                  // just against each link's actual on-screen anchor points
+                  // instead of world x/y.
+                  if (next.length >= 2) {
+                    const p1 = next[next.length - 2], p2 = next[next.length - 1];
+                    const cuts = [];
+                    const svgRects = new Map();
+                    document.querySelectorAll('[data-feed-link]').forEach(el => {
+                      const svgEl = el.closest('[data-feed-lines-svg]');
+                      if (!svgEl) return;
+                      let rect = svgRects.get(svgEl);
+                      if (!rect) { rect = svgEl.getBoundingClientRect(); svgRects.set(svgEl, rect); }
+                      const lx1 = parseFloat(el.dataset.lx1), ly1 = parseFloat(el.dataset.ly1);
+                      const lx2 = parseFloat(el.dataset.lx2), ly2 = parseFloat(el.dataset.ly2);
+                      const sx = rect.left + lx1, sy = rect.top + ly1;
+                      const tx = rect.left + lx2, ty = rect.top + ly2;
+                      if (segmentsIntersect(p1, p2, {x:sx,y:sy}, {x:tx,y:ty})) {
+                        cuts.push({ source: el.dataset.linkSource, target: el.dataset.linkTarget });
+                      }
+                    });
+                    if (cuts.length > 0) {
+                      setLinks(prevLinks => {
+                        const remaining = prevLinks.filter(l => !cuts.some(c =>
+                          (l.source===c.source&&l.target===c.target) || (l.source===c.target&&l.target===c.source)));
+                        const removed = prevLinks.filter(l => cuts.some(c =>
+                          (l.source===c.source&&l.target===c.target) || (l.source===c.target&&l.target===c.source)));
+                        if (removed.length > 0) {
+                          setArchivedLinks(arch => [...arch, ...removed.map(l => ({ ...l, cutAt: Date.now() }))]);
+                          showToast(`✂️ ${removed.length} connection${removed.length>1?'s':''} severed`);
+                        }
+                        return remaining;
+                      });
+                    }
+                  }
+                  return next;
+                });
+                return;
+              }
               if (!feedCarrying) return;
               if (feedCarrying.dropMode === 'twohand' && feedCarrying.holdPointerId !== e.pointerId) return; // a second, independent finger -- ignore for positioning
               const x = e.clientX, y = e.clientY;
@@ -11600,6 +11661,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               });
             }}
             onPointerUp={e => {
+              if (feedMacheteMode) { setFeedSlashing(false); setFeedSlashTrail([]); return; }
               // Two-hand mode: releasing the FINGER THAT'S HOLDING the carried node
               // places it wherever it's currently showing on screen. A second finger
               // would have been ignored for positioning above, and never reaches
@@ -11680,7 +11742,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         lifecycle, and under-node fade system as the main canvas
                         (via the shared renderVineLink function), just fed this
                         layout's grid coordinates instead of free canvas positions. */}
-                    <svg style={{position:'absolute', left:0, top:0, width:'100%', height:sectionH, pointerEvents:'none'}}>
+                    <svg data-feed-lines-svg={dimKey} style={{position:'absolute', left:0, top:0, width:'100%', height:sectionH, pointerEvents:'none'}}>
                       {!detailed ? members.map(n => {
                         const to = anchorOf[n.id];
                         const parentId = parentOf[n.id];
@@ -11689,7 +11751,10 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           : anchorOf[parentId];
                         if (!to || !from) return null;
                         return (
-                          <line key={`line-${n.id}`} x1={from.x} y1={from.y} x2={to.x} y2={to.y}
+                          <line key={`line-${n.id}`} data-feed-link
+                            data-link-source={parentId} data-link-target={n.id}
+                            data-lx1={from.x} data-ly1={from.y} data-lx2={to.x} data-ly2={to.y}
+                            x1={from.x} y1={from.y} x2={to.x} y2={to.y}
                             stroke={dim.color} strokeWidth={2} opacity={0.5}/>
                         );
                       }) : members.map((n, ni) => {
@@ -11717,7 +11782,17 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           fallenLeafIds: null, onNewFallenLeaves: null, scale: 0.35,
                         });
                         if (!parts) return null;
-                        return <g key={`feedvine-${n.id}`}>{parts.vine}{parts.foliage}</g>;
+                        return (
+                          <g key={`feedvine-${n.id}`}>
+                            {parts.vine}{parts.foliage}
+                            {/* Invisible hit-line for the axe tool's slash-cut detection --
+                                kept separate from the shared vine rendering so cutting
+                                doesn't need any changes to renderVineLink itself. */}
+                            <line data-feed-link data-link-source={parentId} data-link-target={n.id}
+                              data-lx1={from.x} data-ly1={from.y} data-lx2={to.x} data-ly2={to.y}
+                              x1={from.x} y1={from.y} x2={to.x} y2={to.y} stroke="transparent" strokeWidth={14}/>
+                          </g>
+                        );
                       })}
                     </svg>
 
@@ -12081,6 +12156,14 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 the finger directly. The page is frozen (scroll locked) for the
                 duration of the carry, so there's no scroll offset to account for --
                 screenX/screenY are just the live pointer position. */}
+            {/* Visible slash trail while actively cutting with the axe tool */}
+            {feedSlashing && feedSlashTrail.length > 1 && (
+              <svg style={{position:'fixed', top:0, left:0, width:'100%', height:'100%', zIndex:300, pointerEvents:'none'}}>
+                <polyline points={feedSlashTrail.map(p => `${p.x},${p.y}`).join(' ')}
+                  fill="none" stroke="#ef4444" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" opacity={0.85}/>
+              </svg>
+            )}
+
             {feedCarrying && (() => {
               const draggedNode = nodes.find(n => n.id === feedCarrying.nodeId);
               if (!draggedNode) return null;
