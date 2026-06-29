@@ -1381,6 +1381,17 @@ function AppInner() {
   // the Feed view, so both agree on what colour a given group actually is.
   const resolveHubColor = (hubId) => {
     if (groupColors[hubId]) return groupColors[hubId];
+    // A hidden hub belongs to one specific anchor person (e.g. hidden_hub_hayley
+    // belongs to Hayley) -- if that person has set their own personal colour,
+    // the whole group should consistently use it, rather than falling back to
+    // an unrelated array-index colour that has nothing to do with what they
+    // actually chose. This is what makes a person's own custom colour apply
+    // to everyone connected to them, not just their own circle.
+    if (hubId && hubId.startsWith('hidden_hub_')) {
+      const anchorId = hubId.slice('hidden_hub_'.length);
+      const anchor = nodes.find(n => n.id === anchorId);
+      if (anchor && anchor.personalColor) return anchor.personalColor;
+    }
     const idx = nodes.filter(n => n.type === 'hub').findIndex(n => n.id === hubId);
     return PRIMARY_GROUP_COLORS[idx % PRIMARY_GROUP_COLORS.length];
   };
@@ -1694,19 +1705,63 @@ function AppInner() {
   }, []); // eslint-disable-line
 
 
-  // Auto-create hidden hubs for anyone connected directly to the social node.
-  // This gives each social-connected person their own group (with vine border)
-  // that holds them plus anyone branching off them.
+  // Auto-create hidden hubs for any person who has at least one real CHILD
+  // of their own -- someone reachable by moving away from social, not merely
+  // anyone connected to them at all. This directional check is essential:
+  // treating "has someone attached" symmetrically would also match a pure
+  // leaf (someone who only has a PARENT attached, no children), which then
+  // fights the cleanup effect below in an infinite loop -- cleanup retires
+  // their hub for being a now-demoted descendant, creation immediately
+  // recreates it because they're still "connected to someone", forever.
   useEffect(() => {
+    const isRealPerson = (n) => n && n.type !== 'hub' && n.type !== 'flower' && n.id !== 'me';
+    const isHiddenHubId = (id) => { const n = nodes.find(x => x.id === id); return !!(n && n.type === 'hub' && n.hidden); };
+    // Real adjacency only -- hidden-hub edges are pure bookkeeping, never
+    // genuine tree structure, so they're excluded from the direction test.
+    const realAdj = {};
+    links.forEach(l => {
+      if (isHiddenHubId(l.source) || isHiddenHubId(l.target)) return;
+      (realAdj[l.source] = realAdj[l.source] || []).push(l.target);
+      (realAdj[l.target] = realAdj[l.target] || []).push(l.source);
+    });
+    // Parent-toward-social pointer for every real node, via BFS from social --
+    // whoever discovered a node IS that node's real parent, so anyone who
+    // appears as someone else's discovered neighbour (i.e. is some OTHER
+    // node's parent value) has at least one real child.
+    const parent = { flower_social: null };
+    let frontier = ['flower_social'];
+    let guard = 0;
+    while (frontier.length > 0 && guard < 5000) {
+      const next = [];
+      frontier.forEach(id => {
+        guard++;
+        (realAdj[id] || []).forEach(oid => {
+          if (oid in parent) return;
+          parent[oid] = id;
+          next.push(oid);
+        });
+      });
+      frontier = next;
+    }
+    const realParents = new Set(Object.values(parent).filter(Boolean));
+    const onSocialDirectly = new Set(
+      links
+        .filter(l => l.source === 'flower_social' || l.target === 'flower_social')
+        .map(l => l.source === 'flower_social' ? l.target : l.source)
+    );
+
     const newHubs = [];
     const newHubLinks = [];
-    links
-      .filter(l => l.source === 'flower_social' || l.target === 'flower_social')
-      .map(l => l.source === 'flower_social' ? l.target : l.source)
-      .filter(id => { const n = nodes.find(n => n.id === id); return n && n.type !== 'hub' && n.type !== 'flower' && n.id !== 'me'; })
-      .forEach(id => {
+    nodes
+      .filter(isRealPerson)
+      // Anyone directly on social always gets their own group ready to use,
+      // even before they've added anyone -- matching the original behaviour.
+      // Anyone deeper in the tree only gets one once they actually have a
+      // real child of their own.
+      .filter(person => onSocialDirectly.has(person.id) || realParents.has(person.id))
+      .forEach(person => {
+        const id = person.id;
         const hubId = 'hidden_hub_' + id;
-        const person = nodes.find(n => n.id === id);
         if (!nodes.some(n => n.id === hubId)) {
           newHubs.push({ id: hubId, type: 'hub', hidden: true, label: (person && person.label ? person.label : 'Friend') + "'s Group", x: (person && person.x ? person.x : 0) + 180, y: (person && person.y ? person.y : 0), pinned: false });
         }
@@ -1732,6 +1787,73 @@ function AppInner() {
       });
       return changed ? fixed : prev;
     });
+  }, [links]); // eslint-disable-line
+
+
+  // Actively retire a hidden hub the moment its anchor person becomes someone
+  // ELSE's descendant via real structure -- i.e. another hidden hub's anchor
+  // (or visible hub) now sits between them and social. This is what makes a
+  // person's grouping reflect their CURRENT connections only: the instant
+  // Josh is linked through Sam (who's linked through Dad, Family, Social),
+  // Josh's own old hidden hub (left over from once being on social directly)
+  // gets deleted outright, rather than competing for him indefinitely.
+  //
+  // The key insight: "is this person reachable from social" is true for
+  // EVERYONE in a connected tree, so that alone can't distinguish a genuine
+  // root from a now-demoted leftover. What actually matters is whether
+  // ANOTHER hidden hub's own anchor sits on the real path between this
+  // anchor and social -- if so, this anchor is that other anchor's
+  // descendant now, not a root in their own right.
+  useEffect(() => {
+    const hiddenHubs = nodes.filter(n => n.type === 'hub' && n.hidden);
+    if (hiddenHubs.length === 0) return;
+    const isHiddenHubId = (id) => { const n = nodes.find(x => x.id === id); return !!(n && n.type === 'hub' && n.hidden); };
+    // Real adjacency only -- every hidden-hub edge is excluded entirely, since
+    // it's pure bookkeeping, never genuine tree structure.
+    const realAdj = {};
+    links.forEach(l => {
+      if (isHiddenHubId(l.source) || isHiddenHubId(l.target)) return;
+      (realAdj[l.source] = realAdj[l.source] || []).push(l.target);
+      (realAdj[l.target] = realAdj[l.target] || []).push(l.source);
+    });
+    // Parent-toward-social pointer for every real node, via BFS from social.
+    const parent = { flower_social: null };
+    let frontier = ['flower_social'];
+    let guard = 0;
+    while (frontier.length > 0 && guard < 5000) {
+      const next = [];
+      frontier.forEach(id => {
+        guard++;
+        (realAdj[id] || []).forEach(oid => {
+          if (oid in parent) return;
+          parent[oid] = id;
+          next.push(oid);
+        });
+      });
+      frontier = next;
+    }
+    const anchorIds = new Set(hiddenHubs.map(h => h.id.replace('hidden_hub_', '')));
+    const toRetire = [];
+    hiddenHubs.forEach(hub => {
+      const anchorId = hub.id.replace('hidden_hub_', '');
+      if (!nodes.some(n => n.id === anchorId)) { toRetire.push(hub.id); return; } // anchor itself is gone
+      if (!(anchorId in parent)) return; // not reachable from social at all yet -- leave alone
+      let cur = parent[anchorId];
+      let isDescendantOfAnother = false;
+      let walkGuard = 0;
+      while (cur != null && walkGuard < 5000) {
+        walkGuard++;
+        if (anchorIds.has(cur) && cur !== anchorId) { isDescendantOfAnother = true; break; }
+        cur = parent[cur];
+      }
+      if (isDescendantOfAnother) toRetire.push(hub.id);
+    });
+
+    if (toRetire.length > 0) {
+      const retireSet = new Set(toRetire);
+      setNodes(prev => prev.filter(n => !retireSet.has(n.id)));
+      setLinks(prev => prev.filter(l => !retireSet.has(l.source) && !retireSet.has(l.target)));
+    }
   }, [links]); // eslint-disable-line
 
 
@@ -3263,7 +3385,6 @@ function AppInner() {
     } else {
       setLinks(prev => [...prev, { source: 'flower_social', target: newId }]);
     }
-    setSelectedNodeId(newId);
     setAddFriendForms(prev => prev.filter(f => f.id !== formId));
     showToast(resolvedName.trim() ? `🌱 ${resolvedName.trim()} added` : '🌱 New friend added');
   };
@@ -4726,60 +4847,79 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
 
   // Map each person to the hub group they belong to (visible or hidden hubs),
-  // walking the tree that branches off each hub's directly-linked members.
-  // Used to hide vine links that cross between different groups.
+  // based on their CURRENT shortest path through the live graph -- never on
+  // historical state. A hidden hub is never deleted once created, so earlier
+  // designs that let "is there a hidden hub linking to me" win outright kept
+  // anchoring people to old, abandoned connections even after they'd moved
+  // somewhere else in the tree entirely (e.g. Hayley's children briefly
+  // touching social once, then permanently refusing to join Hayley's group
+  // afterward no matter how directly they were now connected to her).
+  // Fix: a single multi-source BFS from every active hub at once, so whoever
+  // is genuinely CLOSEST to a person right now wins, regardless of which
+  // hub happened to exist first or claim them in some earlier pass.
   const nodeGroupMap = useMemo(() => {
     const map = {};
     const allHubs = nodes.filter(n => n.type === 'hub');
+    const isRealPersonForGroupMap = (n) => n && n.type !== 'hub' && n.type !== 'flower' && n.id !== 'me';
+    const hasAnyPersonAttached = (pid) => links.some(l => {
+      const otherId = l.source === pid ? l.target : (l.target === pid ? l.source : null);
+      if (!otherId) return false;
+      return isRealPersonForGroupMap(nodes.find(n => n.id === otherId));
+    });
+    // A hidden hub only counts as active right now if its anchor person
+    // currently has at least one person attached -- otherwise it's a stale
+    // leftover from a connection that no longer exists at all.
+    const activeHubs = allHubs.filter(hub => !hub.hidden || hasAnyPersonAttached(hub.id.replace('hidden_hub_', '')));
 
+    // Build adjacency once.
+    const adj = {};
+    links.forEach(l => {
+      (adj[l.source] = adj[l.source] || []).push(l.target);
+      (adj[l.target] = adj[l.target] || []).push(l.source);
+    });
 
-    // Pass 1: a person who anchors their own hidden hub (i.e. is connected
-    // directly to social) always belongs to their OWN group — never reassigned.
-    const hiddenHubs = nodes.filter(n => n.type === 'hub' && n.hidden);
-    hiddenHubs.forEach(hub => {
-      links.filter(l => l.source === hub.id || l.target === hub.id).forEach(l => {
-        const pid = l.source === hub.id ? l.target : l.source;
+    // Multi-source BFS: every active hub's direct members are the starting
+    // frontier, all at distance 1, expanding outward together one step at a
+    // time. Whichever hub's wavefront reaches a person FIRST (i.e. is
+    // genuinely fewer links away right now) wins -- ties keep whichever hub
+    // got there first in iteration order, which in practice means the most
+    // directly-connected relationship always wins over a more distant or
+    // stale one.
+    const dist = {};
+    let frontier = [];
+    activeHubs.forEach(hub => {
+      const directIds = links
+        .filter(l => l.source === hub.id || l.target === hub.id)
+        .map(l => l.source === hub.id ? l.target : l.source);
+      directIds.forEach(pid => {
         const n = nodes.find(x => x.id === pid);
-        if (n && n.type !== 'flower' && n.type !== 'hub' && pid !== 'me') {
+        if (!isRealPersonForGroupMap(n)) return;
+        if (!(pid in dist)) {
+          dist[pid] = 1;
           map[pid] = hub.id;
+          frontier.push(pid);
         }
       });
     });
-
-
-    // Pass 2: direct visible-hub links — claim only people not already anchored.
-    const visibleHubs = allHubs.filter(h => !h.hidden);
-    visibleHubs.forEach(hub => {
-      links.filter(l => l.source === hub.id || l.target === hub.id).forEach(l => {
-        const pid = l.source === hub.id ? l.target : l.source;
-        const n = nodes.find(x => x.id === pid);
-        if (n && n.type !== 'flower' && n.type !== 'hub' && pid !== 'me' && !map[pid]) {
-          map[pid] = hub.id;
-        }
-      });
-    });
-
-
-    // Pass 2: walk the tree branching off each hub's members for indirect members
-    allHubs.forEach(hub => {
-      const directIds = links.filter(l => l.source === hub.id || l.target === hub.id).map(l => l.source === hub.id ? l.target : l.source);
-      const visited = new Set(['me', 'flower_social']);
-      allHubs.forEach(h => visited.add(h.id));
-      const queue = [...directIds];
-      while (queue.length > 0) {
-        const id = queue.shift();
-        if (visited.has(id)) continue;
-        visited.add(id);
-        const n = nodes.find(x => x.id === id);
-        if (!n || n.type === 'flower' || n.type === 'hub') continue;
-        // Only claim if not already claimed by a direct hub link
-        if (!map[id]) map[id] = hub.id;
-        links.filter(l => l.source === id || l.target === id).forEach(l => {
-          const oid = l.source === id ? l.target : l.source;
-          if (!visited.has(oid)) queue.push(oid);
+    const visitedHubBoundary = new Set(allHubs.map(h => h.id));
+    visitedHubBoundary.add('me');
+    visitedHubBoundary.add('flower_social');
+    while (frontier.length > 0) {
+      const next = [];
+      frontier.forEach(id => {
+        const hubId = map[id];
+        (adj[id] || []).forEach(oid => {
+          if (oid in dist) return; // already reached by someone, first arrival wins
+          if (visitedHubBoundary.has(oid)) return; // never cross through another hub, me, or social
+          const n = nodes.find(x => x.id === oid);
+          if (!isRealPersonForGroupMap(n)) return;
+          dist[oid] = dist[id] + 1;
+          map[oid] = hubId;
+          next.push(oid);
         });
-      }
-    });
+      });
+      frontier = next;
+    }
     return map;
   }, [nodes, links]);
 
@@ -11325,7 +11465,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         const detailed = mapStyle === 'feedDetailed';
         const dm = theme.darkMode;
         const bg = dm ? '#0f172a' : '#f8fafc';
-        const COLS = 5; // locked horizontal width
+        const COLS = 4; // locked horizontal width
         const BAND_W = 40; // width of the flower band itself, sits left of column 0 (66% of the original 60)
         // Size hexes so 5 columns always fit within the actual screen width --
         // previously a fixed 56px hex made the strip wider than the viewport,
@@ -12207,7 +12347,26 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         const px = colOffsets[col] + rowShift + FEED_HEX;
                         const py = row * ROW_STEP + 50;
                         const isHub = node.type === 'hub';
-                        const r = (isHub ? Math.min(38, FEED_HEX*0.5) : Math.min(38, (node.radius || 40) * 0.5)) * 1.3;
+                        // Both hubs and people now scale directly off FEED_HEX -- the
+                        // actual grid cell size -- instead of people using a fixed,
+                        // score-based pixel value from the main canvas that had no
+                        // relationship to the Feed grid at all. That mismatch was
+                        // exactly why dropping the column count only spread cells
+                        // apart without ever making the icons themselves bigger: the
+                        // cells grew, but a person's circle size never read from them.
+                        const baseR = Math.min(38, FEED_HEX * 0.5) * 1.3;
+                        // Lower-tier friends render smaller within their own cell --
+                        // a first visual step before deciding whether to also pack
+                        // them tighter (more than one per cell). Tier 1 (Acquaintance)
+                        // and tier 2 (Friendly) shrink; tier 3 (Good Friend) and above,
+                        // plus family/partner, stay full size.
+                        const tierSizeScale = isHub ? 1 : (() => {
+                          const t = getTier(node.interactionScore || 0, node);
+                          if (t === 1) return 0.55;
+                          if (t === 2) return 0.75;
+                          return 1; // tier 3+, family, partner
+                        })();
+                        const r = baseR * tierSizeScale;
                         // Hubs render as a rounded "pill" bar in Simple Stacked, or a
                         // solid-coloured "berry" circle in Detailed mode. Their members
                         // stay full-size on the grid like anyone else, same as Simple
@@ -12457,6 +12616,25 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           hub, the person's own personalColor if set, else white. */}
                       {(() => {
                         const minimisedSetAll = new Set(minimisedHere);
+                        // Every minimised flower actually placed so far in this section,
+                        // as {x, y, r} -- checked by every SUBSEQUENT flower (top-level
+                        // or satellite) so they avoid landing on top of each other, not
+                        // just on top of regular grid members. Without this, two people
+                        // minimised near the same parent (or two groups whose corners
+                        // happened to coincide) had no way to know about each other at
+                        // all, since each was only ever checked against the static grid.
+                        const placedFlowers = [];
+                        const clearOfEverything = (x, y, rad, excludeParentId) => {
+                          const margin = rad + 6;
+                          const clearOfMembers = !members.some(m => {
+                            if (m.id === excludeParentId) return false;
+                            const mPos = anchorOf[m.id];
+                            if (!mPos) return false;
+                            return Math.hypot(x - mPos.x, y - mPos.y) < margin + 14;
+                          });
+                          if (!clearOfMembers) return false;
+                          return !placedFlowers.some(f => Math.hypot(x - f.x, y - f.y) < margin + f.r);
+                        };
                         // Recursively render a minimised node's own flower at the given
                         // anchor point, then its direct still-minimised children as
                         // satellites around it -- each satellite recurses into ITS OWN
@@ -12495,6 +12673,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           // might otherwise make the two modes look different.
                           const baseR = Math.min(38, FEED_HEX * 0.5) * 1.3 * 0.45;
                           const R = baseR * (depth === 0 ? 1.3 : 1);
+                          placedFlowers.push({ x: anchorX, y: anchorY, r: R });
                           const directChildIds = minimisedHere.filter(cid => parentOf[cid] === id);
                           const directChildren = directChildIds.map(cid => nodes.find(n => n.id === cid)).filter(Boolean);
                           const childR = baseR;
@@ -12552,8 +12731,24 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                               </div>
                               {directChildren.map((child, di) => {
                                 const a = (di / Math.max(1, directChildren.length)) * Math.PI * 2 + seed * 0.3;
-                                const sx = anchorX + Math.cos(a) * satelliteRing;
-                                const sy = anchorY + Math.sin(a) * satelliteRing;
+                                const childIsHub = child.type === 'hub';
+                                const childR = childIsHub ? baseR : baseR; // satellite radius is always the base size, regardless of the child's own tier
+                                // Start on the standard ring, then push further outward
+                                // (and very slightly around) until genuinely clear of both
+                                // the real grid and any other flower already placed --
+                                // this is what stops a group's satellite ring from simply
+                                // covering whichever real people happen to sit nearby.
+                                let sx = anchorX + Math.cos(a) * satelliteRing;
+                                let sy = anchorY + Math.sin(a) * satelliteRing;
+                                let ring = satelliteRing;
+                                let found = clearOfEverything(sx, sy, childR, id);
+                                for (let step = 0; step < 16 && !found; step++) {
+                                  ring += childR * 0.6 + 6;
+                                  const wobble = (step % 2 === 0 ? 1 : -1) * 0.18 * Math.ceil(step / 2);
+                                  sx = anchorX + Math.cos(a + wobble) * ring;
+                                  sy = anchorY + Math.sin(a + wobble) * ring;
+                                  found = clearOfEverything(sx, sy, childR, id);
+                                }
                                 return renderMinimisedFlower(child.id, sx, sy, depth + 1);
                               })}
                             </React.Fragment>
@@ -12587,24 +12782,34 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                             // over, which let a marker visually wander into a neighbouring
                             // group's space even though it was technically a valid corner.
                             const hexR = ((1.5 * FEED_HEX) / (0.75 * Math.sqrt(3))) * 0.55;
+                            const isHubHere = nodes.find(n => n.id === id)?.type === 'hub';
+                            const ownR = (Math.min(38, FEED_HEX * 0.5) * 1.3 * 0.45) * (isHubHere ? 1.3 : 1);
                             let candidateCorners = Array.from({length: 6}, (_, i) => {
                               const a = (Math.PI/180) * (30 + 60*i);
                               return { x: parentAnchor.x + hexR*Math.cos(a), y: parentAnchor.y + hexR*Math.sin(a) };
                             });
                             candidateCorners = candidateCorners.filter(c => c.x > 30);
-                            const clearMargin = 28;
-                            candidateCorners = candidateCorners.filter(c => {
-                              return !members.some(m => {
-                                if (m.id === parentId) return false;
-                                const mPos = anchorOf[m.id];
-                                if (!mPos) return false;
-                                const dx = c.x - mPos.x, dy = c.y - mPos.y;
-                                return Math.sqrt(dx*dx + dy*dy) < clearMargin;
-                              });
-                            });
-                            if (candidateCorners.length === 0) candidateCorners = [{ x: parentAnchor.x + hexR, y: parentAnchor.y }];
+                            candidateCorners = candidateCorners.filter(c => clearOfEverything(c.x, c.y, ownR, parentId));
                             const seed = id.split('').reduce((s,c)=>s+c.charCodeAt(0),0);
-                            const corner = candidateCorners[seed % candidateCorners.length];
+                            let corner;
+                            if (candidateCorners.length > 0) {
+                              corner = candidateCorners[seed % candidateCorners.length];
+                            } else {
+                              // None of the six corners were clear -- search further
+                              // outward from the parent at increasing radius/angle until
+                              // genuinely clear space is found, rather than falling back
+                              // to a fixed corner that's guaranteed to overlap.
+                              corner = { x: parentAnchor.x + hexR, y: parentAnchor.y };
+                              let r2 = hexR, found = false;
+                              for (let step = 0; step < 20 && !found; step++) {
+                                r2 += ownR * 0.5 + 8;
+                                for (let k = 0; k < 6; k++) {
+                                  const a = (Math.PI/180) * (30 + 60*k) + step * 0.35;
+                                  const cx = parentAnchor.x + r2*Math.cos(a), cy = parentAnchor.y + r2*Math.sin(a);
+                                  if (cx > 30 && clearOfEverything(cx, cy, ownR, parentId)) { corner = { x: cx, y: cy }; found = true; break; }
+                                }
+                              }
+                            }
                             return renderMinimisedFlower(id, corner.x, corner.y, 0);
                           });
                       })()}
