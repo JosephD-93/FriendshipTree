@@ -1834,21 +1834,27 @@ function AppInner() {
       next.sort();
       frontier = next;
     }
-    const anchorIds = new Set(hiddenHubs.map(h => h.id.replace('hidden_hub_', '')));
+    const onSocialDirectly = new Set(
+      links
+        .filter(l => l.source === 'flower_social' || l.target === 'flower_social')
+        .map(l => l.source === 'flower_social' ? l.target : l.source)
+    );
+    const realParents = new Set(Object.values(parent).filter(Boolean));
     const toRetire = [];
     hiddenHubs.forEach(hub => {
       const anchorId = hub.id.replace('hidden_hub_', '');
       if (!nodes.some(n => n.id === anchorId)) { toRetire.push(hub.id); return; } // anchor itself is gone
       if (!(anchorId in parent)) return; // not reachable from social at all yet -- leave alone
-      let cur = parent[anchorId];
-      let isDescendantOfAnother = false;
-      let walkGuard = 0;
-      while (cur != null && walkGuard < 5000) {
-        walkGuard++;
-        if (anchorIds.has(cur) && cur !== anchorId) { isDescendantOfAnother = true; break; }
-        cur = parent[cur];
-      }
-      if (isDescendantOfAnother) toRetire.push(hub.id);
+      // Use the EXACT SAME eligibility test the creation effect uses, just
+      // inverted: a hub survives only if its anchor still qualifies for one
+      // right now (directly on social, or a genuine parent of their own).
+      // Anyone who no longer meets either condition -- like Ella, who has no
+      // children and reaches social only via Imogen now -- gets retired,
+      // regardless of whether the person now "above" them happens to have
+      // their own hidden hub or not. Using the identical condition in both
+      // effects is what guarantees they can never disagree with each other.
+      const stillEligible = onSocialDirectly.has(anchorId) || realParents.has(anchorId);
+      if (!stillEligible) toRetire.push(hub.id);
     });
 
     if (toRetire.length > 0) {
