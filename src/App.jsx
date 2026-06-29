@@ -1677,7 +1677,18 @@ function AppInner() {
         if (all.length === 0) return;
         const photoMap = {};
         all.forEach(({ nodeId, dataUrl }) => { if (dataUrl) photoMap[nodeId] = dataUrl; });
-        setNodes(prev => prev.map(n => photoMap[n.id] ? { ...n, img: photoMap[n.id] } : n));
+        setNodes(prev => prev.map(n => {
+          if (!photoMap[n.id]) return n;
+          // Restoring the main icon photo without also putting it back into the
+          // `photos` carousel array is exactly why the profile-pictures row at
+          // the top of a person's window stayed blank after every restart -- the
+          // icon worked because it reads `img` directly, but that row reads only
+          // from `photos`, which this restore never touched.
+          const restored = photoMap[n.id];
+          const already = (n.photos || []).some(p => p.cropped === restored);
+          const photos = already ? n.photos : [...(n.photos || []), { orig: restored, cropped: restored }];
+          return { ...n, img: restored, photos, activePhotoIdx: already ? n.activePhotoIdx : photos.length - 1 };
+        }));
       } catch(e) { console.warn('Photo restore failed:', e); }
     })();
   }, []); // eslint-disable-line
@@ -3408,7 +3419,12 @@ function AppInner() {
         if (c.phones && c.phones.length) updates.phone = c.phones[0].number;
         if (c.image && c.image.base64String) updates.img = 'data:image/jpeg;base64,' + c.image.base64String;
         if (c.contactId) updates.contactId = c.contactId; // remember so we can re-open it
-        setNodes(prev => prev.map(n => n.id === selectedNodeId ? { ...n, ...updates } : n));
+        setNodes(prev => prev.map(n => {
+          if (n.id !== selectedNodeId) return n;
+          if (!updates.img) return { ...n, ...updates };
+          const photos = [...(n.photos || []), { orig: updates.img, cropped: updates.img }];
+          return { ...n, ...updates, photos, activePhotoIdx: photos.length - 1 };
+        }));
         if (updates.img && typeof savePhotoToDB === 'function') savePhotoToDB(selectedNodeId, updates.img);
         showToast('Contact imported!');
         return;
@@ -11363,17 +11379,25 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               // now-stale snapshot, letting the same node slip through twice.
               if (visited.has(k.id)) return;
               visited.add(k.id);
-              out.push(k);
               parentOf[k.id] = nodeId;
-              if (minimisedNodes.includes(k.id)) {
+              const kMinimised = minimisedNodes.includes(k.id);
+              if (kMinimised) {
                 // Minimised: this node still shows (as a flower bundle), but its
-                // own downstream branch is folded away -- don't walk past it.
+                // own downstream branch is folded away by default -- it does NOT
+                // go into `out` (the grid member list), only into `minimisedHere`.
                 minimisedHere.push(k.id);
-                return;
+              } else {
+                // Not minimised -- this node belongs on the actual grid, even if
+                // its own PARENT happens to be minimised (e.g. a satellite member
+                // that was individually un-minimised back out while the rest of
+                // the group stays collapsed).
+                out.push(k);
               }
-              // Recurse through ANY node type -- people can have other people or
-              // groups branching off them too, not just hubs. The walk only ever
-              // stops because `visited` prevents revisiting, not because of type.
+              // Recurse regardless of whether k itself is minimised -- a minimised
+              // node's OWN children might include someone who was individually
+              // un-minimised and needs to be found and placed back on the grid.
+              // The walk only ever stops adding a node to `out` because that node
+              // itself is minimised, never because some ancestor further up is.
               walk(k.id);
             });
           };
@@ -11439,7 +11463,6 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             const saved = feedPositions[key];
             if (saved && saved.col >= 0 && saved.col < COLS) {
               occupied.add(`${saved.col},${saved.row}`);
-              if (n.type === 'hub' && saved.col + 1 < COLS) occupied.add(`${saved.col+1},${saved.row}`);
             }
           });
           members.forEach(n => {
@@ -11449,10 +11472,6 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             if (saved && saved.col >= 0 && saved.col < COLS && !occupied.has(savedCellKey)) {
               placed[n.id] = saved;
               occupied.add(savedCellKey);
-              // Hubs render as a wide pill spanning roughly two columns -- reserve
-              // the neighbouring cell too so newly auto-placed people don't land
-              // directly beside one and overlap it.
-              if (n.type === 'hub' && saved.col + 1 < COLS) occupied.add(`${saved.col+1},${saved.row}`);
             } else if (saved && saved.col >= 0 && saved.col < COLS) {
               // Saved cell exists but collides with someone already placed -- find
               // the NEAREST free cell to where this node actually belongs, not the
@@ -11471,7 +11490,6 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               }
               placed[n.id] = { col: foundCol, row: foundRow };
               occupied.add(`${foundCol},${foundRow}`);
-              if (n.type === 'hub' && foundCol + 1 < COLS) occupied.add(`${foundCol+1},${foundRow}`);
             } else {
               pending.push(n);
             }
@@ -11485,7 +11503,6 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             placed[n.id] = { col, row };
             newlyPlaced[`${dimKey}:${n.id}`] = { col, row };
             occupied.add(`${col},${row}`);
-            if (n.type === 'hub' && col + 1 < COLS) occupied.add(`${col+1},${row}`);
             col++; if (col >= COLS) { col = 0; row++; }
           });
           if (Object.keys(newlyPlaced).length > 0) {
@@ -11577,7 +11594,6 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 const actualCol = colBase + col;
                 next[`${targetDimKey}:${id}`] = { col: actualCol, row: rowCursor + row };
                 occupied.add(`${col},${row}`);
-                if (n && n.type === 'hub' && col + 1 < blockCols) occupied.add(`${col+1},${row}`);
                 col++; if (col >= blockCols) { col = 0; row++; }
               });
               const usedRows = Math.max(...ids.map(id => {
@@ -11667,7 +11683,6 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 const actualCol = colBase + col;
                 next[`${targetDimKey}:${id}`] = { col: actualCol, row: rowCursor + row };
                 occupied.add(`${col},${row}`);
-                if (n && n.type === 'hub' && col + 1 < blockCols) occupied.add(`${col+1},${row}`);
                 col++; if (col >= blockCols) { col = 0; row++; }
               });
               const usedRows = Math.max(...ids.map(id => {
@@ -11890,6 +11905,34 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               // have no parent here, so no connecting line draws to them, until
               // they're linked to something again (e.g. dropped onto the flower
               // band directly).
+              //
+              // Crucially, this must NOT catch someone who's unreachable simply
+              // because an ANCESTOR of theirs is minimised -- buildMembers stops
+              // walking past a minimised node on purpose, which made every child
+              // of a minimised group look exactly like an orphan and got them
+              // pulled straight back onto the grid, undoing the minimise entirely.
+              // A genuine orphan still has all of its links intact; it's just that
+              // walking the CURRENT tree from the flower no longer reaches it.
+              const minimisedSetForOrphanCheck = new Set(minimisedHere);
+              const isDescendantOfMinimised = (nodeId) => {
+                const adj = {};
+                links.forEach(l => {
+                  (adj[l.source] = adj[l.source] || []).push(l.target);
+                  (adj[l.target] = adj[l.target] || []).push(l.source);
+                });
+                const visited = new Set([nodeId]);
+                const queue = [nodeId];
+                while (queue.length) {
+                  const cur = queue.shift();
+                  for (const nb of (adj[cur] || [])) {
+                    if (visited.has(nb)) continue;
+                    visited.add(nb);
+                    if (minimisedSetForOrphanCheck.has(nb)) return true;
+                    queue.push(nb);
+                  }
+                }
+                return false;
+              };
               const reachableIds = new Set(allMembersRaw.map(n => n.id));
               const orphans = [];
               Object.keys(feedPositions).forEach(key => {
@@ -11898,6 +11941,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 if (reachableIds.has(oid)) return;
                 const oNode = nodes.find(n => n.id === oid);
                 if (!oNode || oNode.hidden || oNode.type === 'flower' || oNode.id === 'me') return;
+                if (isDescendantOfMinimised(oid)) return;
                 orphans.push(oNode);
               });
               const allMembers = [...allMembersRaw, ...orphans];
@@ -12168,14 +12212,40 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         // solid-coloured "berry" circle in Detailed mode. Their members
                         // stay full-size on the grid like anyone else, same as Simple
                         // Stacked -- minimising is the only way to shrink them now.
-                        const pillW = detailed ? r * 2.4 : FEED_HEX * 1.7;
-                        const pillH = detailed ? pillW : r * 1.1;
+                        //
+                        // The hub itself only ever occupies its OWN single grid cell for
+                        // placement/collision purposes (see resolvePositions etc.) -- but
+                        // visually, its pill stretches sideways to bridge the gap toward
+                        // whichever real neighbours happen to sit immediately left/right
+                        // of it on the same row, so it reads as a wide name-banner sitting
+                        // BETWEEN two people rather than a box that claims a second cell.
+                        // If a side has no neighbour, that edge falls back to a sensible
+                        // single-cell half-width instead of stretching into empty space.
+                        const colStep = FEED_HEX * 1.5;
+                        const leftNeighbour = members.find(m => {
+                          const p = positions[m.id];
+                          return p && p.row === row && p.col === col - 1;
+                        });
+                        const rightNeighbour = members.find(m => {
+                          const p = positions[m.id];
+                          return p && p.row === row && p.col === col + 1;
+                        });
+                        const fallbackHalf = (detailed ? r * 2.4 : FEED_HEX * 1.7) / 2;
+                        const leftHalf = leftNeighbour ? colStep / 2 : fallbackHalf;
+                        const rightHalf = rightNeighbour ? colStep / 2 : fallbackHalf;
+                        const pillW = leftHalf + rightHalf;
+                        const pillH = detailed ? Math.min(pillW, r * 2.4) : r * 1.1;
                         const initials = getInitials(node.label);
                         const hubColor = isHub ? resolveHubColor(node.id) : null;
                         const myGroupId = nodeGroupMap[node.id];
                         const groupColor = node.personalColor || (myGroupId ? resolveHubColor(myGroupId) : null);
                         const ringColor = !feedShowBorderColors ? (dm?'#475569':'#94a3b8') : (isHub ? hubColor : (groupColor || dim.color));
                         const isCarried = feedCarrying && (feedCarrying.nodeId === node.id || (feedCarrying.branchIds && feedCarrying.branchIds.has(node.id))) && feedCarrying.dimKey === dimKey;
+                        // The pill is no longer symmetric around its own centre when the
+                        // left/right halves differ -- offset the box left edge so px still
+                        // marks the hub's true anchor point (used for connection lines,
+                        // drag, etc.), with the pill extending leftHalf to its left and
+                        // rightHalf to its right of that point.
                         const boxW = isHub ? pillW : r * 2;
                         const boxH = isHub ? pillH : r * 2;
                         return (
@@ -12262,7 +12332,26 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                 if (myTimer) { clearTimeout(myTimer); feedSingleTapTimersRef.current.delete(node.id); }
                                 feedLastTapRef.current.delete(node.id);
                                 const willMin = !minimisedNodes.includes(node.id);
-                                setMinimisedNodes(prev => prev.includes(node.id) ? prev.filter(id => id !== node.id) : [...prev, node.id]);
+                                // Minimising/expanding a GROUP also minimises/expands all of
+                                // its current direct members at the same time -- this is what
+                                // produces the group-flower + satellite-member cluster.
+                                // Minimising a PERSON auto-collapses their direct PEOPLE
+                                // children the same way, but explicitly leaves any attached
+                                // GROUP expanded -- a sub-group stays fully visible on the
+                                // grid, connected via a line running from the person's
+                                // now-collapsed flower marker out to it.
+                                const directChildIds = members
+                                  .filter(m => parentOf[m.id] === node.id)
+                                  .filter(m => node.type === 'hub' || m.type !== 'hub')
+                                  .map(m => m.id);
+                                setMinimisedNodes(prev => {
+                                  if (willMin) {
+                                    const toAdd = [node.id, ...directChildIds].filter(id => !prev.includes(id));
+                                    return [...prev, ...toAdd];
+                                  }
+                                  const toRemove = new Set([node.id, ...directChildIds]);
+                                  return prev.filter(id => !toRemove.has(id));
+                                });
                                 showToast(willMin ? '📁 Minimised' : '📂 Expanded');
                               } else {
                                 feedLastTapRef.current.set(node.id, now);
@@ -12278,7 +12367,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                               }
                             }}
                             data-feed-node-id={node.id}
-                            style={{position:'absolute', left:px-boxW/2, top:py-boxH/2, width:boxW, height:boxH,
+                            style={{position:'absolute', left:isHub ? px-leftHalf : px-boxW/2, top:py-boxH/2, width:boxW, height:boxH,
                               cursor:'grab', display:'flex', flexDirection:'column', alignItems:'center',
                               opacity: isCarried ? 0.25 : 1, transition:'opacity 0.1s', zIndex: isHub ? 2 : 1,
                               userSelect:'none', WebkitUserSelect:'none', WebkitTouchCallout:'none'}}>
@@ -12366,93 +12455,159 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           whichever parent (group or person) they're connected
                           through. Colour: the group's colour if minimised under a
                           hub, the person's own personalColor if set, else white. */}
-                      {minimisedHere.map((id, mi) => {
-                        const mNode = nodes.find(n => n.id === id);
-                        if (!mNode) return null;
-                        const parentId = parentOf[id];
-                        // If the parent is the flower band itself, don't use its
-                        // section-wide vertical-midpoint anchor -- that ignores where
-                        // THIS person actually sits and could be far away (e.g. someone
-                        // near the bottom of a tall section anchoring to the middle).
-                        // Use their own saved row instead, near the band, at their own
-                        // height.
-                        let parentAnchor;
-                        if (parentId === flowerId) {
-                          const ownSaved = feedPositions[`${dimKey}:${id}`];
-                          const ownRow = ownSaved ? ownSaved.row : 0;
-                          parentAnchor = { x: BAND_W / 2, y: ownRow * ROW_STEP + 50 };
-                        } else {
-                          parentAnchor = anchorOf[parentId];
-                        }
-                        if (!parentAnchor) return null;
-                        const parentNode = nodes.find(n => n.id === parentId);
-                        const markerColor = parentNode && parentNode.type === 'hub'
-                          ? resolveHubColor(parentNode.id)
-                          : (mNode.personalColor || 'white');
-                        const mr = detailed ? 9 * 1.8 : 9;
-                        // Use the same SIX DIRECTIONS as the parent's real hexagon
-                        // vertices, but pulled noticeably closer than the true vertex
-                        // distance -- a full vertex sits as far away as the next cell
-                        // over, which let a marker visually wander into a neighbouring
-                        // group's space even though it was technically a valid corner.
-                        // This keeps the same natural, slightly-randomised feel while
-                        // staying clearly "attached" to its actual parent.
-                        const hexR = ((1.5 * FEED_HEX) / (0.75 * Math.sqrt(3))) * 0.55;
-                        let candidateCorners = Array.from({length: 6}, (_, i) => {
-                          const a = (Math.PI/180) * (30 + 60*i);
-                          return { x: parentAnchor.x + hexR*Math.cos(a), y: parentAnchor.y + hexR*Math.sin(a) };
-                        });
-                        // Keep corners clear of the flower band on the left.
-                        candidateCorners = candidateCorners.filter(c => c.x > mr + 4);
-                        // Keep corners clear of any OTHER member's actual circle too --
-                        // a vertex sits right where a neighbouring cell's circle could be,
-                        // so skip any that land too close to someone who's actually there.
-                        const clearMargin = mr + 18;
-                        candidateCorners = candidateCorners.filter(c => {
-                          return !members.some(m => {
-                            if (m.id === parentId) return false;
-                            const mPos = anchorOf[m.id];
-                            if (!mPos) return false;
-                            const dx = c.x - mPos.x, dy = c.y - mPos.y;
-                            return Math.sqrt(dx*dx + dy*dy) < clearMargin;
-                          });
-                        });
-                        if (candidateCorners.length === 0) candidateCorners = [{ x: parentAnchor.x + hexR, y: parentAnchor.y }];
-                        // Pick semi-randomly among whichever vertices are actually clear,
-                        // stable per node id so it doesn't reshuffle every render -- this
-                        // is what gives the natural, non-uniform feel across different
-                        // groupings rather than always picking the same slot first.
-                        const seed = id.split('').reduce((s,c)=>s+c.charCodeAt(0),0);
-                        const corner = candidateCorners[seed % candidateCorners.length];
-                        const mx = corner.x, my = corner.y;
-                        return (
-                          <div key={`min-${id}`}
-                            onClick={(e) => { e.stopPropagation(); setMinimisedNodes(prev => prev.filter(x => x !== id)); }}
-                            style={{position:'absolute', left:mx-mr, top:my-mr, width:mr*2, height:mr*2+14,
-                              cursor:'pointer', display:'flex', flexDirection:'column', alignItems:'center', zIndex:5}}>
-                            <svg width={mr*2} height={mr*2} style={{overflow:'visible'}}>
-                              {/* Dashed ring -- the one clear visual difference between
-                                  "minimised" (this) and "always clustered around its
-                                  group" (the other flower style), which otherwise look
-                                  identical and made toggling look like nothing happened. */}
-                              <circle cx={mr} cy={mr} r={mr*1.25} fill="none" stroke={dm?'#475569':'#94a3b8'} strokeWidth={1} strokeDasharray="2.5 2.5"/>
+                      {(() => {
+                        const minimisedSetAll = new Set(minimisedHere);
+                        // Recursively render a minimised node's own flower at the given
+                        // anchor point, then its direct still-minimised children as
+                        // satellites around it -- each satellite recurses into ITS OWN
+                        // children the same way, so a chain like Hayley -> Family ->
+                        // (Family's own minimised members) renders correctly at every
+                        // level, each positioned relative to its real parent's actual
+                        // computed screen position rather than a flat, one-level-only
+                        // lookup that breaks the moment a parent has no grid anchor of
+                        // its own (because it's minimised too).
+                        const renderMinimisedFlower = (id, anchorX, anchorY, depth) => {
+                          const mNode = nodes.find(n => n.id === id);
+                          if (!mNode) return null;
+                          const parentId = parentOf[id];
+                          const parentNode = nodes.find(n => n.id === parentId);
+                          const isHub = mNode.type === 'hub';
+                          const ownColor = isHub ? resolveHubColor(id) : (mNode.personalColor || (dm ? '#94a3b8' : 'white'));
+                          // A person minimised while still belonging to a group (their
+                          // parent here is a hub) gets the same border-ring-matches-
+                          // group-colour look a satellite gets, even when shown as a
+                          // top-level flower rather than literally nested under that
+                          // hub's own cluster.
+                          // A minimised person's flower border matches whoever they're
+                          // attached to -- the group's colour if their parent is a hub,
+                          // or the parent PERSON's own colour if minimised directly off
+                          // another person (e.g. Hayley's direct people-connections).
+                          const parentColorOf = (pn) => {
+                            if (!pn) return null;
+                            if (pn.type === 'hub') return resolveHubColor(pn.id);
+                            return pn.personalColor || null;
+                          };
+                          const ownRingColor = !isHub ? parentColorOf(parentNode) : null;
+                          // Sized directly off FEED_HEX -- the same base unit a regular
+                          // person circle on the grid uses -- rather than a flat constant,
+                          // so the flower visually matches a real node's scale in BOTH
+                          // Simple and Detailed Stacked, regardless of anything else that
+                          // might otherwise make the two modes look different.
+                          const baseR = Math.min(38, FEED_HEX * 0.5) * 1.3 * 0.45;
+                          const R = baseR * (depth === 0 ? 1.3 : 1);
+                          const directChildIds = minimisedHere.filter(cid => parentOf[cid] === id);
+                          const directChildren = directChildIds.map(cid => nodes.find(n => n.id === cid)).filter(Boolean);
+                          const childR = baseR;
+                          const satelliteRing = R + childR + 10;
+                          const seed = id.split('').reduce((s,c)=>s+c.charCodeAt(0),0);
+                          const groupFlower = (cx, cy, RR, fillColor, ringColor) => (
+                            <svg width={RR*2} height={RR*2} style={{position:'absolute', left:cx-RR, top:cy-RR, overflow:'visible'}}>
                               {Array.from({length:6}, (_, pi) => {
                                 const pa = (pi/6) * Math.PI * 2;
                                 return (
-                                  <ellipse key={pi} cx={mr+Math.cos(pa)*mr*0.55} cy={mr+Math.sin(pa)*mr*0.55}
-                                    rx={mr*0.4} ry={mr*0.22} fill={markerColor} stroke={dm?'#0f172a':'#94a3b8'} strokeWidth={0.5}
-                                    transform={`rotate(${pa*180/Math.PI},${mr+Math.cos(pa)*mr*0.55},${mr+Math.sin(pa)*mr*0.55})`}/>
+                                  <ellipse key={pi} cx={RR+Math.cos(pa)*RR*0.55} cy={RR+Math.sin(pa)*RR*0.55}
+                                    rx={RR*0.4} ry={RR*0.22} fill={fillColor}
+                                    stroke={ringColor || (dm?'#0f172a':'#94a3b8')} strokeWidth={ringColor ? 1.6 : 0.5}
+                                    transform={`rotate(${pa*180/Math.PI},${RR+Math.cos(pa)*RR*0.55},${RR+Math.sin(pa)*RR*0.55})`}/>
                                 );
                               })}
-                              <circle cx={mr} cy={mr} r={mr*0.32} fill={dm?'#fde68a':'#fbbf24'} stroke={dm?'#92400e':'#b45309'} strokeWidth={0.5}/>
+                              <circle cx={RR} cy={RR} r={RR*0.32} fill={dm?'#fde68a':'#fbbf24'} stroke={dm?'#92400e':'#b45309'} strokeWidth={0.5}/>
                             </svg>
-                            <div style={{fontSize:8,fontWeight:600,color:dm?'#94a3b8':'#64748b',
-                              marginTop:1, whiteSpace:'nowrap', maxWidth:40, overflow:'hidden', textOverflow:'ellipsis'}}>
-                              {mNode.label}
-                            </div>
-                          </div>
-                        );
-                      })}
+                          );
+                          return (
+                            <React.Fragment key={`min-${id}`}>
+                              <div
+                                onPointerDown={(e) => {
+                                  e.stopPropagation();
+                                  feedJustPlaced.current.delete(`longpress-${id}`);
+                                  feedHoldTimer.current = setTimeout(() => {
+                                    feedJustPlaced.current.add(`longpress-${id}`);
+                                    setSelectedNodeId(id);
+                                  }, 450);
+                                }}
+                                onPointerUp={(e) => {
+                                  e.stopPropagation();
+                                  if (feedHoldTimer.current) { clearTimeout(feedHoldTimer.current); feedHoldTimer.current = null; }
+                                }}
+                                onPointerLeave={() => { if (feedHoldTimer.current) { clearTimeout(feedHoldTimer.current); feedHoldTimer.current = null; } }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  // A long-press already opened the profile panel above --
+                                  // don't also un-minimise in that case.
+                                  if (feedJustPlaced.current.has(`longpress-${id}`)) {
+                                    feedJustPlaced.current.delete(`longpress-${id}`);
+                                    return;
+                                  }
+                                  const toRemove = new Set([id, ...directChildIds]);
+                                  setMinimisedNodes(prev => prev.filter(x => !toRemove.has(x)));
+                                }}
+                                style={{position:'absolute', left:anchorX-R, top:anchorY-R, width:R*2, height:R*2+14,
+                                  cursor:'pointer', zIndex:6}}>
+                                {groupFlower(R, R, R, ownColor, ownRingColor)}
+                                <div style={{position:'absolute', top:R*2+1, left:0, width:R*2, textAlign:'center',
+                                  fontSize:8, fontWeight:700, color:dm?'#94a3b8':'#64748b',
+                                  whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>
+                                  {mNode.label}
+                                </div>
+                              </div>
+                              {directChildren.map((child, di) => {
+                                const a = (di / Math.max(1, directChildren.length)) * Math.PI * 2 + seed * 0.3;
+                                const sx = anchorX + Math.cos(a) * satelliteRing;
+                                const sy = anchorY + Math.sin(a) * satelliteRing;
+                                return renderMinimisedFlower(child.id, sx, sy, depth + 1);
+                              })}
+                            </React.Fragment>
+                          );
+                        };
+
+                        return minimisedHere
+                          // Only true top-level roots here -- a node whose own parent is
+                          // ALSO minimised gets rendered via recursion from that parent
+                          // instead, using the parent's real computed screen position.
+                          .filter(id => !minimisedSetAll.has(parentOf[id]))
+                          .map((id) => {
+                            const parentId = parentOf[id];
+                            // If the parent is the flower band itself, don't use its
+                            // section-wide vertical-midpoint anchor -- that ignores where
+                            // THIS person actually sits and could be far away. Use their
+                            // own saved row instead, near the band, at their own height.
+                            let parentAnchor;
+                            if (parentId === flowerId) {
+                              const ownSaved = feedPositions[`${dimKey}:${id}`];
+                              const ownRow = ownSaved ? ownSaved.row : 0;
+                              parentAnchor = { x: BAND_W / 2, y: ownRow * ROW_STEP + 50 };
+                            } else {
+                              parentAnchor = anchorOf[parentId];
+                            }
+                            if (!parentAnchor) return null;
+
+                            // Use the same SIX DIRECTIONS as the parent's real hexagon
+                            // vertices, but pulled noticeably closer than the true vertex
+                            // distance -- a full vertex sits as far away as the next cell
+                            // over, which let a marker visually wander into a neighbouring
+                            // group's space even though it was technically a valid corner.
+                            const hexR = ((1.5 * FEED_HEX) / (0.75 * Math.sqrt(3))) * 0.55;
+                            let candidateCorners = Array.from({length: 6}, (_, i) => {
+                              const a = (Math.PI/180) * (30 + 60*i);
+                              return { x: parentAnchor.x + hexR*Math.cos(a), y: parentAnchor.y + hexR*Math.sin(a) };
+                            });
+                            candidateCorners = candidateCorners.filter(c => c.x > 30);
+                            const clearMargin = 28;
+                            candidateCorners = candidateCorners.filter(c => {
+                              return !members.some(m => {
+                                if (m.id === parentId) return false;
+                                const mPos = anchorOf[m.id];
+                                if (!mPos) return false;
+                                const dx = c.x - mPos.x, dy = c.y - mPos.y;
+                                return Math.sqrt(dx*dx + dy*dy) < clearMargin;
+                              });
+                            });
+                            if (candidateCorners.length === 0) candidateCorners = [{ x: parentAnchor.x + hexR, y: parentAnchor.y }];
+                            const seed = id.split('').reduce((s,c)=>s+c.charCodeAt(0),0);
+                            const corner = candidateCorners[seed % candidateCorners.length];
+                            return renderMinimisedFlower(id, corner.x, corner.y, 0);
+                          });
+                      })()}
 
                     </div>
                   </div>
@@ -13868,10 +14023,28 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               <div style={{fontSize:12,fontWeight:700,color:'rgba(255,255,255,0.6)',textTransform:'uppercase',letterSpacing:0.5,margin:'8px 0'}}>Profile pictures</div>
               <div style={{display:'flex',flexWrap:'wrap',gap:10}}>
                 {profilePics.map((p,idx)=>(
-                  <button key={idx} onClick={()=>{setNodes(prev=>prev.map(n=>n.id===sn.id?{...n,img:p.cropped,activePhotoIdx:idx}:n));}}
-                    style={{padding:0,border:`3px solid ${activeIdx===idx?'#10b981':'transparent'}`,borderRadius:'50%',cursor:'pointer',background:'none'}}>
-                    <img src={p.cropped} style={{width:72,height:72,borderRadius:'50%',objectFit:'cover',display:'block'}}/>
-                  </button>
+                  <div key={idx} style={{position:'relative'}}>
+                    <button onClick={()=>{setNodes(prev=>prev.map(n=>n.id===sn.id?{...n,img:p.cropped,activePhotoIdx:idx}:n));}}
+                      style={{padding:0,border:`3px solid ${activeIdx===idx?'#10b981':'transparent'}`,borderRadius:'50%',cursor:'pointer',background:'none'}}>
+                      <img src={p.cropped} style={{width:72,height:72,borderRadius:'50%',objectFit:'cover',display:'block'}}/>
+                    </button>
+                    {/* Re-crop button -- reopens the cropper on this photo's original
+                        (uncropped) source, so framing/zoom can be adjusted after the
+                        fact instead of being locked in the moment it was first cropped. */}
+                    <button
+                      onClick={(e)=>{
+                        e.stopPropagation();
+                        setProfilePhotosViewer(null);
+                        setPhotoCrop({nodeId: sn.id, src: p.orig || p.cropped, originalSrc: p.orig || p.cropped, crop:{x:0,y:0,scale:1}});
+                      }}
+                      title="Re-crop this photo"
+                      style={{position:'absolute',bottom:-2,right:-2,width:24,height:24,borderRadius:'50%',
+                        background:'rgba(0,0,0,0.7)',border:'1.5px solid rgba(255,255,255,0.6)',
+                        color:'white',fontSize:12,cursor:'pointer',display:'flex',
+                        alignItems:'center',justifyContent:'center',lineHeight:1,padding:0}}>
+                      ✏️
+                    </button>
+                  </div>
                 ))}
                 {/* Tagged group photos shown as circles - tap to use as profile pic */}
                 <TaggedProfilePics nodeId={sn.id} openPhotoDB={openPhotoDB}
