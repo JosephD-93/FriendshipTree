@@ -1735,12 +1735,13 @@ function AppInner() {
       const next = [];
       frontier.forEach(id => {
         guard++;
-        (realAdj[id] || []).forEach(oid => {
+        (realAdj[id] || []).slice().sort().forEach(oid => {
           if (oid in parent) return;
           parent[oid] = id;
           next.push(oid);
         });
       });
+      next.sort();
       frontier = next;
     }
     const realParents = new Set(Object.values(parent).filter(Boolean));
@@ -1824,12 +1825,13 @@ function AppInner() {
       const next = [];
       frontier.forEach(id => {
         guard++;
-        (realAdj[id] || []).forEach(oid => {
+        (realAdj[id] || []).slice().sort().forEach(oid => {
           if (oid in parent) return;
           parent[oid] = id;
           next.push(oid);
         });
       });
+      next.sort();
       frontier = next;
     }
     const anchorIds = new Set(hiddenHubs.map(h => h.id.replace('hidden_hub_', '')));
@@ -4869,7 +4871,16 @@ Return only the JSON array. If nothing trackable is found, return [].`;
     // A hidden hub only counts as active right now if its anchor person
     // currently has at least one person attached -- otherwise it's a stale
     // leftover from a connection that no longer exists at all.
-    const activeHubs = allHubs.filter(hub => !hub.hidden || hasAnyPersonAttached(hub.id.replace('hidden_hub_', '')));
+    // Sorted by id so the SAME set of active hubs always processes in the
+    // SAME order, regardless of whatever order they happen to sit in inside
+    // `nodes` at this particular render -- without this, a person sitting at
+    // an exact tie in distance from two different hubs could resolve to a
+    // different winner from one render to the next purely from array
+    // ordering, which is exactly what produced the random border-colour
+    // flicker (most visible right after a pan/scroll forces extra renders).
+    const activeHubs = allHubs
+      .filter(hub => !hub.hidden || hasAnyPersonAttached(hub.id.replace('hidden_hub_', '')))
+      .sort((a, b) => a.id.localeCompare(b.id));
 
     // Build adjacency once.
     const adj = {};
@@ -4881,16 +4892,15 @@ Return only the JSON array. If nothing trackable is found, return [].`;
     // Multi-source BFS: every active hub's direct members are the starting
     // frontier, all at distance 1, expanding outward together one step at a
     // time. Whichever hub's wavefront reaches a person FIRST (i.e. is
-    // genuinely fewer links away right now) wins -- ties keep whichever hub
-    // got there first in iteration order, which in practice means the most
-    // directly-connected relationship always wins over a more distant or
-    // stale one.
+    // genuinely fewer links away right now) wins -- ties always resolve the
+    // same way every time, by hub id, rather than by incidental array order.
     const dist = {};
     let frontier = [];
     activeHubs.forEach(hub => {
       const directIds = links
         .filter(l => l.source === hub.id || l.target === hub.id)
-        .map(l => l.source === hub.id ? l.target : l.source);
+        .map(l => l.source === hub.id ? l.target : l.source)
+        .sort();
       directIds.forEach(pid => {
         const n = nodes.find(x => x.id === pid);
         if (!isRealPersonForGroupMap(n)) return;
@@ -4901,6 +4911,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         }
       });
     });
+    frontier.sort();
     const visitedHubBoundary = new Set(allHubs.map(h => h.id));
     visitedHubBoundary.add('me');
     visitedHubBoundary.add('flower_social');
@@ -4908,7 +4919,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       const next = [];
       frontier.forEach(id => {
         const hubId = map[id];
-        (adj[id] || []).forEach(oid => {
+        (adj[id] || []).slice().sort().forEach(oid => {
           if (oid in dist) return; // already reached by someone, first arrival wins
           if (visitedHubBoundary.has(oid)) return; // never cross through another hub, me, or social
           const n = nodes.find(x => x.id === oid);
@@ -4918,6 +4929,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           next.push(oid);
         });
       });
+      next.sort();
       frontier = next;
     }
     return map;
