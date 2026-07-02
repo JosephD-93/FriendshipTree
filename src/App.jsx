@@ -1392,8 +1392,16 @@ function AppInner() {
       const anchor = nodes.find(n => n.id === anchorId);
       if (anchor && anchor.personalColor) return anchor.personalColor;
     }
-    const idx = nodes.filter(n => n.type === 'hub').findIndex(n => n.id === hubId);
-    return PRIMARY_GROUP_COLORS[idx % PRIMARY_GROUP_COLORS.length];
+    // Stable hash of the hub's own id -- NOT its position in the array of all
+    // hubs. An index-based fallback meant every hub's colour could shift the
+    // moment ANY OTHER hub anywhere in the app was created or deleted (e.g.
+    // by the stale-hidden-hub cleanup), even for groups that were never
+    // touched by that change at all. Hashing the id keeps a hub's own colour
+    // permanently tied to itself.
+    let hash = 0;
+    for (let i = 0; i < hubId.length; i++) { hash = (hash * 31 + hubId.charCodeAt(i)) | 0; }
+    const idx = Math.abs(hash) % PRIMARY_GROUP_COLORS.length;
+    return PRIMARY_GROUP_COLORS[idx];
   };
 
   // Initials shown on a circle with no photo. Multi-word names use the first
@@ -1967,6 +1975,18 @@ function AppInner() {
   // fixed-width hex strip for that one dimension.
   const [feedPositions, setFeedPositions] = useState((() => { try { return JSON.parse(localStorage.getItem('ft_feed_positions')||'{}'); } catch(e) { return {}; } })());
   const feedLayoutHistory = useRef([]); // snapshots of feedPositions taken before any destructive layout operation (optimise, reset), so they can be undone -- the main app's undo only tracks nodes/links, never this
+  // Cache for minimised flower positions -- keyed by nodeId, stores {x, y,
+  // parentX, parentY} so flowers don't reshuffle every render when any
+  // single node's minimise state changes. Invalidated when the parent's
+  // actual position changes meaningfully (e.g. after a layout reset).
+  const minimisedFlowerPosCache = useRef({});
+  // Bumped whenever the minimised-flower placement algorithm itself changes --
+  // this is what invalidates every previously cached position automatically,
+  // closing the gap where stale positions from an OLDER version of the
+  // algorithm could otherwise persist indefinitely (the cache only ever
+  // checked whether the PARENT moved, never whether the logic computing the
+  // position had changed underneath it).
+  const MINIMISED_LAYOUT_VERSION = 'v5-straight-line-travel';
   useEffect(() => { try { localStorage.setItem('ft_feed_positions', JSON.stringify(feedPositions)); } catch(e) {} }, [feedPositions]);
   const feedScrollRef = useRef(null);
   const feedDragRAF = useRef(null); // pending requestAnimationFrame id, used to throttle drag position updates to once per repaint instead of once per raw pointer event
@@ -1984,6 +2004,13 @@ function AppInner() {
   // a second, independent finger scrolls; lifting the holding finger drops it).
   const [feedCarrying, setFeedCarrying] = useState(null); // {dimKey, nodeId, branchIds, pageX, pageY, dropMode, holdPointerId}
   const [feedScrollTop, setFeedScrollTop] = useState(0);
+  // Extra height (beyond the row-based calculation) needed per Feed section so
+  // minimised flowers that render lower than their reserved row -- because
+  // they're placed at an angle toward their own saved position, not always
+  // exactly on it -- never spill into the next section below. Measured
+  // directly from actual rendered positions rather than guessed, since a
+  // fixed buffer isn't reliable when flower drift can vary a lot.
+  const [feedSectionExtraH, setFeedSectionExtraH] = useState({});
   const [feedDragMode, setFeedDragMode] = useState((() => { try { return JSON.parse(localStorage.getItem('ft_settings')||'{}').feedDragMode || 'onehand'; } catch(e) { return 'onehand'; } })()); // 'onehand' | 'twohand'
   const [feedMacheteMode, setFeedMacheteMode] = useState(false); // axe tool toggle for Feed -- when on, the page freezes and a finger-drag draws a slash trail that cuts any connection it crosses
   const [feedShowSettings, setFeedShowSettings] = useState(null); // null, or the dimKey whose band was double-tapped
@@ -2354,6 +2381,52 @@ function AppInner() {
     }, 60);
     return () => clearTimeout(t);
   }, [minimisedNodes, findFreeSpot]);
+
+  // After every Feed render, measure whether any minimised flower has actually
+  // rendered past the bottom edge of its own section -- if so, grow that
+  // section's allocated height so the next section can never start above
+  // content that's still visually part of this one. This replaces a guessed
+  // fixed buffer with a real measurement, since how far a flower can end up
+  // from its reserved row varies a lot depending on how crowded the area is.
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      const sectionEls = document.querySelectorAll('[data-feed-section]');
+      const updates = {};
+      sectionEls.forEach(sectionEl => {
+        const dimKey = sectionEl.getAttribute('data-feed-section');
+        const sectionRect = sectionEl.getBoundingClientRect();
+        const stripEl = sectionEl.querySelector('[data-feed-strip]');
+        if (!stripEl) return;
+        let maxOverflow = 0;
+        stripEl.querySelectorAll('[data-min-flower]').forEach(el => {
+          const r = el.getBoundingClientRect();
+          const overflow = r.bottom - sectionRect.bottom;
+          if (overflow > maxOverflow) maxOverflow = overflow;
+        });
+        if (maxOverflow > 2) {
+          updates[dimKey] = Math.ceil(maxOverflow) + 16;
+        }
+      });
+      if (Object.keys(updates).length > 0) {
+        setFeedSectionExtraH(prev => {
+          let changed = false;
+          const next = { ...prev };
+          Object.entries(updates).forEach(([k, neededExtra]) => {
+            // The measured overflow is relative to the CURRENT (already-adjusted)
+            // section height, so the new total extra needed is what's already
+            // applied plus this pass's shortfall -- not a fresh replacement,
+            // since maxOverflow was measured against the current, already-grown
+            // rect. Only grow, never shrink, and only update if it actually changes.
+            const current = prev[k] || 0;
+            const newTotal = current + neededExtra;
+            if (newTotal !== current) { next[k] = newTotal; changed = true; }
+          });
+          return changed ? next : prev;
+        });
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [minimisedNodes, feedPositions, nodes, links]);
 
 
 
@@ -4131,28 +4204,57 @@ function AppInner() {
 
 
   // -- Auto-save to localStorage ---------------------------------------------
-  // Debounced so photos (large base64) don't block on every render
+  // Debounced during normal use so photos (large base64) don't block on every
+  // render, but ALSO flushed immediately and synchronously the moment the app
+  // is backgrounded or closed -- without this, a burst of rapid edits (add a
+  // person, add their photo, add another person) right before closing could
+  // keep resetting the 500ms timer so it never actually fires before Android
+  // kills the process, silently losing whatever was still pending.
   const saveTimer = useRef(null);
+  const nodesRef = useRef(nodes);
+  nodesRef.current = nodes;
+  const doSaveNodes = () => {
+    try {
+      // Strip photo data from localStorage — photos are stored in IndexedDB separately
+      const nodesWithoutPhotos = nodesRef.current.map(n => {
+        if (n.img && n.img.startsWith('data:image')) {
+          const { img, ...rest } = n;
+          return rest;
+        }
+        return n;
+      });
+      localStorage.setItem('ft_nodes', JSON.stringify(nodesWithoutPhotos));
+    } catch(e) {
+      console.warn('localStorage save failed:', e);
+    }
+  };
   useEffect(() => {
     clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
-      try {
-        // Strip photo data from localStorage — photos are stored in IndexedDB separately
-        const nodesWithoutPhotos = nodes.map(n => {
-          if (n.img && n.img.startsWith('data:image')) {
-            const { img, ...rest } = n;
-            return rest;
-          }
-          return n;
-        });
-        localStorage.setItem('ft_nodes', JSON.stringify(nodesWithoutPhotos));
-      } catch(e) {
-        console.warn('localStorage save failed:', e);
-      }
-    }, 500);
+    saveTimer.current = setTimeout(doSaveNodes, 500);
   }, [nodes]);
   useEffect(() => { try { localStorage.setItem('ft_links', JSON.stringify(links)); } catch(e) {} }, [links]);
   useEffect(() => { try { localStorage.setItem('ft_dimensions', JSON.stringify(dimensions)); } catch(e) {} }, [dimensions]);
+  // Force an immediate, non-debounced save the moment the app is backgrounded
+  // or closed -- this is the actual fix for people/photos going missing after
+  // closing the app. visibilitychange firing 'hidden' is the most reliable
+  // signal available before Android suspends or kills the process; pagehide
+  // is added as a second safety net since some webview environments fire
+  // that instead of (or in addition to) visibilitychange.
+  useEffect(() => {
+    const flushNow = () => {
+      clearTimeout(saveTimer.current);
+      doSaveNodes();
+      try { localStorage.setItem('ft_links', JSON.stringify(links)); } catch(e) {}
+      try { localStorage.setItem('ft_dimensions', JSON.stringify(dimensions)); } catch(e) {}
+    };
+    const onVisibility = () => { if (document.hidden) flushNow(); };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pagehide', flushNow);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pagehide', flushNow);
+    };
+  }, [links, dimensions]);
 
 
   // -- Persist all settings to ft_settings ----------------------------------
@@ -7396,6 +7498,26 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   <>
                   {/* Group header — main photo left, members right, vine border around all */}
                   <div style={{textAlign:'center',padding:'4px 0 0',position:'relative'}}>
+                    {/* Set/change the group's own main photo -- shown as the centre
+                        circle in the shells/mandala cluster below. Without this,
+                        selectedNode.img was always blank for a group since nothing
+                        anywhere in the app ever let you set it for a hub. */}
+                    <div style={{display:'flex',justifyContent:'center',marginBottom:8}}>
+                      <input type="file" accept="image/*" id={`group-photo-input-${hubId}`} style={{display:'none'}}
+                        onChange={e=>{
+                          const file = e.target.files[0];
+                          if (!file) return;
+                          const reader = new FileReader();
+                          reader.onload = ev => setPhotoCrop({ nodeId: hubId, src: ev.target.result, originalSrc: ev.target.result, crop:{x:0,y:0,scale:1} });
+                          reader.readAsDataURL(file);
+                        }}/>
+                      <label htmlFor={`group-photo-input-${hubId}`}
+                        style={{padding:'5px 12px',borderRadius:99,fontSize:11,fontWeight:700,cursor:'pointer',
+                          background:dm?'#1e293b':'#f1f5f9', color:dm?'#94a3b8':'#64748b',
+                          border:`1px solid ${pw.border}`, display:'inline-flex', alignItems:'center', gap:4}}>
+                        📷 {selectedNode.img ? 'Change group photo' : 'Set group photo'}
+                      </label>
+                    </div>
                     {/* Photo layout style toggle */}
                     <div style={{display:'flex',gap:4,justifyContent:'center',marginBottom:6}}>
                       {[{k:'shells',label:'🌿 Shells'},{k:'mandala',label:'🌻 Mandala'}].map(opt=>(
@@ -11652,7 +11774,22 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               pending.push(n);
             }
           });
-          let row = 0, col = 0;
+          // Compute a starting row near the middle of the currently visible
+          // viewport, so newly-added people/groups appear in view rather than
+          // at the very top of the page (row 0), which is often scrolled
+          // off-screen or too high to reach.
+          let startRow = 0;
+          try {
+            const sc = feedScrollRef.current;
+            const sectionEl = document.querySelector(`[data-feed-section="${dimKey}"]`);
+            if (sc && sectionEl && pending.length > 0) {
+              const viewMid = sc.scrollTop + sc.clientHeight / 2;
+              const sectionTop = sectionEl.offsetTop;
+              const midRow = Math.round((viewMid - sectionTop - 50) / ROW_STEP);
+              startRow = Math.max(0, midRow);
+            }
+          } catch (e) { startRow = 0; }
+          let row = startRow, col = 0;
           const newlyPlaced = {};
           pending.forEach(n => {
             while (occupied.has(`${col},${row}`)) {
@@ -12051,6 +12188,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 else setFeedCarrying(null);
               }
             }}>
+            {/* Top padding so the first row of items never sits right at the
+                very top edge of the screen, where it's under the header overlays
+                or too high to reach with a thumb. Shifts all sections down
+                uniformly, so node and flower positions stay consistent. */}
+            <div style={{height: 76}} />
             {sectionDefs.map(({dimKey, flowerId}) => {
               const dim = dimensions[dimKey];
               const flowerNode = nodes.find(n => n.id === flowerId);
@@ -12163,7 +12305,15 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 .map(p => p.row);
               const allRows = [...members.map(n => positions[n.id].row), ...reservedRows];
               const maxRow = allRows.length ? Math.max(...allRows) : 0;
-              const sectionH = Math.max(160, (maxRow + 1) * ROW_STEP + 80);
+              // Extra height measured directly from actual rendered flower
+              // positions (see feedSectionExtraH effect below) -- a minimised
+              // flower is placed at an angle toward its own original position,
+              // which can visually extend it further down than its reserved row
+              // alone would suggest. Without accounting for the REAL rendered
+              // extent, the next section could start above where a flower near
+              // the boundary actually ends up.
+              const measuredExtra = feedSectionExtraH[dimKey] || 0;
+              const sectionH = Math.max(160, (maxRow + 1) * ROW_STEP + 80 + measuredExtra);
 
               // Anchor point for each member (centre of its circle) plus the flower
               // band's own anchor, so we can draw a line from every node back to
@@ -12509,18 +12659,29 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                 if (myTimer) { clearTimeout(myTimer); feedSingleTapTimersRef.current.delete(node.id); }
                                 feedLastTapRef.current.delete(node.id);
                                 const willMin = !minimisedNodes.includes(node.id);
-                                // Minimising/expanding a GROUP also minimises/expands all of
-                                // its current direct members at the same time -- this is what
-                                // produces the group-flower + satellite-member cluster.
-                                // Minimising a PERSON auto-collapses their direct PEOPLE
-                                // children the same way, but explicitly leaves any attached
-                                // GROUP expanded -- a sub-group stays fully visible on the
-                                // grid, connected via a line running from the person's
-                                // now-collapsed flower marker out to it.
-                                const directChildIds = members
-                                  .filter(m => parentOf[m.id] === node.id)
-                                  .filter(m => node.type === 'hub' || m.type !== 'hub')
-                                  .map(m => m.id);
+                                // Minimising/expanding a GROUP cascades down through its
+                                // WHOLE branch -- every person reachable beneath it, at
+                                // any depth -- not just its direct members. This is what
+                                // lets a grandchild (e.g. Jane, connected only through
+                                // Matt who is himself a direct member of Family) actually
+                                // fold into the cluster as a satellite of Matt's own
+                                // satellite, mirroring the real tree shape instead of
+                                // leaving deeper people stranded on the grid with nothing
+                                // collapsed above them. Minimising a PERSON still only
+                                // cascades through PEOPLE, explicitly stopping at any
+                                // attached GROUP, which stays fully expanded on the grid.
+                                const collectDescendants = (rootId, stopAtHubBoundary) => {
+                                  const out = [];
+                                  const stack = members.filter(m => parentOf[m.id] === rootId);
+                                  while (stack.length) {
+                                    const m = stack.pop();
+                                    if (stopAtHubBoundary && m.type === 'hub') continue;
+                                    out.push(m.id);
+                                    members.filter(mm => parentOf[mm.id] === m.id).forEach(mm => stack.push(mm));
+                                  }
+                                  return out;
+                                };
+                                const directChildIds = collectDescendants(node.id, node.type !== 'hub');
                                 setMinimisedNodes(prev => {
                                   if (willMin) {
                                     const toAdd = [node.id, ...directChildIds].filter(id => !prev.includes(id));
@@ -12634,6 +12795,15 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           hub, the person's own personalColor if set, else white. */}
                       {(() => {
                         const minimisedSetAll = new Set(minimisedHere);
+                        // Clear cache entries for nodes no longer minimised in this
+                        // section so if they're re-minimised later they get a fresh
+                        // position, not stale coordinates from a previous state.
+                        Object.keys(minimisedFlowerPosCache.current).forEach(k => {
+                          const prefix = `${MINIMISED_LAYOUT_VERSION}:${dimKey}:`;
+                          if (!k.startsWith(prefix)) return;
+                          const nodeId = k.replace(prefix, '').replace(':sat', '');
+                          if (!minimisedSetAll.has(nodeId)) delete minimisedFlowerPosCache.current[k];
+                        });
                         // Every minimised flower actually placed so far in this section,
                         // as {x, y, r} -- checked by every SUBSEQUENT flower (top-level
                         // or satellite) so they avoid landing on top of each other, not
@@ -12642,17 +12812,70 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         // happened to coincide) had no way to know about each other at
                         // all, since each was only ever checked against the static grid.
                         const placedFlowers = [];
-                        const clearOfEverything = (x, y, rad, excludeParentId) => {
-                          const margin = rad + 6;
-                          const clearOfMembers = !members.some(m => {
-                            if (m.id === excludeParentId) return false;
-                            const mPos = anchorOf[m.id];
-                            if (!mPos) return false;
-                            return Math.hypot(x - mPos.x, y - mPos.y) < margin + 14;
+                        const clearOfEverything = (x, y, rad, excludeIds) => {
+                          const excl = Array.isArray(excludeIds) ? excludeIds : [excludeIds];
+                          const clearOfNodes = !Object.entries(allNodePos).some(([nid, npos]) => {
+                            if (excl.includes(nid)) return false; // parent (anchor) and the node's own reserved cell are not obstacles to its own flower
+                            return Math.hypot(x - npos.x, y - npos.y) < npos.r + rad + 1;
                           });
-                          if (!clearOfMembers) return false;
-                          return !placedFlowers.some(f => Math.hypot(x - f.x, y - f.y) < margin + f.r);
+                          if (!clearOfNodes) return false;
+                          return !placedFlowers.some(f => Math.hypot(x - f.x, y - f.y) < rad + f.r + 1);
                         };
+
+                        // Given a parent position, its radius, and an angle, find the
+                        // valid placement band for a flower in that direction:
+                        //   innerDist = parent's outer radius edge (flower must sit outside this)
+                        //   outerDist = nearest maximised node's own radius edge in that direction,
+                        //               or the screen clamp if nothing nearby
+                        // Flower should be centred between these two, or squeezed in if tight.
+                        // Build a map of EVERY node's real screen position and radius
+                        // for this dimension -- both maximised (from anchorOf) and
+                        // minimised (from feedPositions). Minimised nodes' original
+                        // circle positions are permanently reserved off-limits space
+                        // for flower placement, even though nothing is drawn there --
+                        // the gaps between all node circles define the only valid zones.
+                        const allNodePos = {};
+                        const nodeRadius = (n) => {
+                          if (!n) return 0;
+                          const isHubN = n.type === 'hub';
+                          const tierScale = isHubN ? 1 : (() => {
+                            const t = getTier(n.interactionScore || 0, n);
+                            if (t === 1) return 0.55; if (t === 2) return 0.75; return 1;
+                          })();
+                          return (Math.min(38, FEED_HEX * 0.5) * 1.3) * tierScale;
+                        };
+                        members.forEach(n => {
+                          if (anchorOf[n.id]) allNodePos[n.id] = { ...anchorOf[n.id], r: nodeRadius(n) };
+                        });
+                        minimisedHere.forEach(nid => {
+                          const saved = feedPositions[`${dimKey}:${nid}`];
+                          if (!saved) return;
+                          const rowShift = (saved.row % 2 === 1) ? FEED_HEX * 0.75 : 0;
+                          const x = BAND_W + colOffsets[saved.col] + rowShift + FEED_HEX;
+                          const y = saved.row * ROW_STEP + 50;
+                          const n = nodes.find(nd => nd.id === nid);
+                          allNodePos[nid] = { x, y, r: nodeRadius(n) };
+                        });
+
+                        const gapBounds = (parentX, parentY, parentR, angle, flowerR, excludeIds) => {
+                          const excl = Array.isArray(excludeIds) ? excludeIds : [excludeIds];
+                          const dx = Math.cos(angle), dy = Math.sin(angle);
+                          const innerDist = parentR + flowerR + 1;
+                          let outerDist = stripW;
+                          Object.entries(allNodePos).forEach(([nid, npos]) => {
+                            if (excl.includes(nid)) return;
+                            const relX = npos.x - parentX, relY = npos.y - parentY;
+                            const along = relX * dx + relY * dy;
+                            if (along <= 0) return;
+                            const perpSq = relX*relX + relY*relY - along*along;
+                            const needed = npos.r + flowerR;
+                            if (perpSq > needed * needed) return;
+                            const nearEdge = along - Math.sqrt(Math.max(0, needed*needed - perpSq));
+                            if (nearEdge > 0 && nearEdge < outerDist) outerDist = nearEdge;
+                          });
+                          return { innerDist, outerDist };
+                        };
+
                         // Recursively render a minimised node's own flower at the given
                         // anchor point, then its direct still-minimised children as
                         // satellites around it -- each satellite recurses into ITS OWN
@@ -12662,7 +12885,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         // computed screen position rather than a flat, one-level-only
                         // lookup that breaks the moment a parent has no grid anchor of
                         // its own (because it's minimised too).
-                        const renderMinimisedFlower = (id, anchorX, anchorY, depth) => {
+                        const renderMinimisedFlower = (id, anchorX, anchorY, depth, parentX, parentY) => {
                           const mNode = nodes.find(n => n.id === id);
                           if (!mNode) return null;
                           const parentId = parentOf[id];
@@ -12690,10 +12913,18 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           // Simple and Detailed Stacked, regardless of anything else that
                           // might otherwise make the two modes look different.
                           const baseR = Math.min(38, FEED_HEX * 0.5) * 1.3 * 0.45;
-                          const R = baseR * (depth === 0 ? 1.3 : 1);
-                          placedFlowers.push({ x: anchorX, y: anchorY, r: R });
                           const directChildIds = minimisedHere.filter(cid => parentOf[cid] === id);
                           const directChildren = directChildIds.map(cid => nodes.find(n => n.id === cid)).filter(Boolean);
+                          // Three-tier sizing: a group (hub) flower is the biggest, a
+                          // person who has their own attached branch (at least one
+                          // minimised satellite of their own, e.g. Hayley) gets the
+                          // size groups used to be, and a plain person with nothing
+                          // attached stays at the base size, unchanged.
+                          const R = depth !== 0 ? baseR
+                                   : isHub ? baseR * 1.55
+                                   : directChildIds.length > 0 ? baseR * 1.3
+                                   : baseR;
+                          placedFlowers.push({ x: anchorX, y: anchorY, r: R });
                           const childR = baseR;
                           const satelliteRing = R + childR + 10;
                           const seed = id.split('').reduce((s,c)=>s+c.charCodeAt(0),0);
@@ -12713,7 +12944,14 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           );
                           return (
                             <React.Fragment key={`min-${id}`}>
+                              {parentX != null && parentY != null && (
+                                <svg style={{position:'absolute', left:0, top:0, width:'100%', height:'100%', pointerEvents:'none', overflow:'visible', zIndex:4}}>
+                                  <line x1={parentX} y1={parentY} x2={anchorX} y2={anchorY}
+                                    stroke="#22c55e" strokeWidth={1.5} opacity={0.55} strokeDasharray="4 3"/>
+                                </svg>
+                              )}
                               <div
+                                data-min-flower={id}
                                 onPointerDown={(e) => {
                                   e.stopPropagation();
                                   feedJustPlaced.current.delete(`longpress-${id}`);
@@ -12741,95 +12979,470 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                 style={{position:'absolute', left:anchorX-R, top:anchorY-R, width:R*2, height:R*2+14,
                                   cursor:'pointer', zIndex:6}}>
                                 {groupFlower(R, R, R, ownColor, ownRingColor)}
-                                <div style={{position:'absolute', top:R*2+1, left:0, width:R*2, textAlign:'center',
-                                  fontSize:8, fontWeight:700, color:dm?'#94a3b8':'#64748b',
-                                  whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>
-                                  {mNode.label}
-                                </div>
                               </div>
                               {directChildren.map((child, di) => {
-                                const a = (di / Math.max(1, directChildren.length)) * Math.PI * 2 + seed * 0.3;
+                                // Spread satellites across a wide arc centred on "due
+                                // right" (away from the social band), rather than the
+                                // full 360 degrees evenly -- this keeps the cluster
+                                // Gap-based placement for this satellite: use gapBounds
+                                // to find the valid band between the parent flower's
+                                // own radius and the nearest maximised node in each
+                                // candidate direction, then centre the flower in that gap.
                                 const childIsHub = child.type === 'hub';
-                                const childR = childIsHub ? baseR : baseR; // satellite radius is always the base size, regardless of the child's own tier
-                                // Start on the standard ring, then push further outward
-                                // (and very slightly around) until genuinely clear of both
-                                // the real grid and any other flower already placed --
-                                // this is what stops a group's satellite ring from simply
-                                // covering whichever real people happen to sit nearby.
-                                let sx = anchorX + Math.cos(a) * satelliteRing;
-                                let sy = anchorY + Math.sin(a) * satelliteRing;
-                                let ring = satelliteRing;
-                                let found = clearOfEverything(sx, sy, childR, id);
-                                for (let step = 0; step < 16 && !found; step++) {
-                                  ring += childR * 0.6 + 6;
-                                  const wobble = (step % 2 === 0 ? 1 : -1) * 0.18 * Math.ceil(step / 2);
-                                  sx = anchorX + Math.cos(a + wobble) * ring;
-                                  sy = anchorY + Math.sin(a + wobble) * ring;
-                                  found = clearOfEverything(sx, sy, childR, id);
+                                const childR = baseR;
+                                // Compute the REAL angle from the group's grid position
+                                // to this child's grid position, using feedPositions
+                                // (the persisted col/row store) since anchorOf only
+                                // contains NON-minimised nodes and is always undefined
+                                // for minimised members -- which was why the angle fell
+                                // back to the arbitrary arc silently every single time.
+                                const posToXY = (nodeId) => {
+                                  const saved = feedPositions[`${dimKey}:${nodeId}`];
+                                  if (!saved) return null;
+                                  const rowShift = (saved.row % 2 === 1) ? FEED_HEX * 0.75 : 0;
+                                  return {
+                                    x: BAND_W + colOffsets[saved.col] + rowShift + FEED_HEX,
+                                    y: saved.row * ROW_STEP + 50,
+                                  };
+                                };
+                                const groupGridPos = posToXY(id);
+                                const childGridPos = posToXY(child.id);
+                                const realAngle = (groupGridPos && childGridPos)
+                                  ? Math.atan2(childGridPos.y - groupGridPos.y, childGridPos.x - groupGridPos.x)
+                                  : (di / Math.max(1, directChildren.length)) * Math.PI * 2 + seed * 0.2;
+                                // Try the real angle first, then fan out in small steps
+                                // on both sides -- preserves direction as much as possible
+                                // while still finding clear space if blocked.
+                                const satCandidateAngles = [realAngle];
+                                for (let dd = 10; dd <= 180; dd += 10) {
+                                  satCandidateAngles.push(realAngle + dd * Math.PI / 180);
+                                  satCandidateAngles.push(realAngle - dd * Math.PI / 180);
                                 }
-                                return renderMinimisedFlower(child.id, sx, sy, depth + 1);
+                                const satCacheKey = `${MINIMISED_LAYOUT_VERSION}:${dimKey}:${child.id}:sat`;
+                                const satCached = minimisedFlowerPosCache.current[satCacheKey];
+                                const satParentMoved = !satCached || Math.hypot(satCached.parentX - anchorX, satCached.parentY - anchorY) > 2;
+                                let sx, sy;
+                                if (satCached && !satParentMoved) {
+                                  sx = satCached.x; sy = satCached.y;
+                                } else {
+                                let found = false;
+                                sx = anchorX; sy = anchorY;
+                                const overlapAmountSat = (tx, ty) => {
+                                  let worst = 0;
+                                  Object.entries(allNodePos).forEach(([nid, npos]) => {
+                                    if (nid === id || nid === child.id) return;
+                                    const d = Math.hypot(tx - npos.x, ty - npos.y);
+                                    const need = npos.r + childR + 1;
+                                    if (need - d > worst) worst = need - d;
+                                  });
+                                  placedFlowers.forEach(f => {
+                                    const d = Math.hypot(tx - f.x, ty - f.y);
+                                    const need = childR + 1 + f.r;
+                                    if (need - d > worst) worst = need - d;
+                                  });
+                                  return worst;
+                                };
+                                for (const a of satCandidateAngles) {
+                                  if (found) break;
+                                  const { innerDist, outerDist } = gapBounds(anchorX, anchorY, R, a, childR, [id, child.id]);
+                                  if (outerDist <= innerDist) continue;
+                                  const placeDist = innerDist + 1;
+                                  if (placeDist > outerDist) continue; // neighbour too close, try next angle
+                                  const tx = anchorX + Math.cos(a) * placeDist;
+                                  const ty = anchorY + Math.sin(a) * placeDist;
+                                  if (tx < 30 || tx > stripW - 24) continue;
+                                  if (clearOfEverything(tx, ty, childR, [id, child.id])) { sx = tx; sy = ty; found = true; break; }
+                                }
+                                if (!found) {
+                                  // Genuine 2D search around the preferred angle: both
+                                  // along the ray (nearer/further) AND perpendicular to
+                                  // it, so a satellite can route AROUND another sibling
+                                  // occupying its preferred spot rather than only ever
+                                  // trying different distances along the same blocked
+                                  // line -- this is what stops multiple satellites from
+                                  // converging on the same crowded point.
+                                  const perpAngle = realAngle + Math.PI / 2;
+                                  const baseInner = childR * 0.5 + 2;
+                                  let bestPx = anchorX + Math.cos(realAngle) * (R + childR + 2);
+                                  let bestPy = anchorY + Math.sin(realAngle) * (R + childR + 2);
+                                  let bestViol = Infinity;
+                                  const maxAlong = R + childR * 6;
+                                  for (let step = 0; step <= 14; step++) {
+                                    const d = (R + childR + 2) + step * ((maxAlong - (R + childR + 2)) / 14);
+                                    for (let side = -6; side <= 6; side++) {
+                                      const perpOffset = side * (childR * 0.6);
+                                      const px = anchorX + Math.cos(realAngle) * d + Math.cos(perpAngle) * perpOffset;
+                                      const py = anchorY + Math.sin(realAngle) * d + Math.sin(perpAngle) * perpOffset;
+                                      if (px < 30 || px > stripW - 24) continue;
+                                      const v = overlapAmountSat(px, py);
+                                      if (v <= 0) { bestPx = px; bestPy = py; bestViol = 0; break; }
+                                      if (v < bestViol) { bestViol = v; bestPx = px; bestPy = py; }
+                                    }
+                                    if (bestViol <= 0) break;
+                                  }
+                                  sx = bestPx; sy = bestPy;
+                                }
+                                } // end cache-miss else block
+                                sx = Math.max(30, Math.min(stripW - 24, sx));
+                                minimisedFlowerPosCache.current[satCacheKey] = { x: sx, y: sy, parentX: anchorX, parentY: anchorY };
+                                freshPositions[child.id] = { x: sx, y: sy, r: childR };
+                                return renderMinimisedFlower(child.id, sx, sy, depth + 1, anchorX, anchorY);
                               })}
                             </React.Fragment>
                           );
                         };
 
-                        return minimisedHere
-                          // Only true top-level roots here -- a node whose own parent is
-                          // ALSO minimised gets rendered via recursion from that parent
-                          // instead, using the parent's real computed screen position.
-                          .filter(id => !minimisedSetAll.has(parentOf[id]))
-                          .map((id) => {
-                            const parentId = parentOf[id];
-                            // If the parent is the flower band itself, don't use its
-                            // section-wide vertical-midpoint anchor -- that ignores where
-                            // THIS person actually sits and could be far away. Use their
-                            // own saved row instead, near the band, at their own height.
-                            let parentAnchor;
-                            if (parentId === flowerId) {
-                              const ownSaved = feedPositions[`${dimKey}:${id}`];
-                              const ownRow = ownSaved ? ownSaved.row : 0;
-                              parentAnchor = { x: BAND_W / 2, y: ownRow * ROW_STEP + 50 };
-                            } else {
-                              parentAnchor = anchorOf[parentId];
-                            }
-                            if (!parentAnchor) return null;
+                        // Group top-level minimised nodes by their actual parent --
+                        // this is what makes everyone minimised off the SAME source
+                        // (e.g. all of Imogen's people) form one tight visual cluster,
+                        // while a DIFFERENT parent's minimised people form their own
+                        // separate cluster elsewhere, instead of every flower
+                        // independently wandering off to whatever spot happened to be
+                        // clear at the moment -- which is what was producing the
+                        // scattered, ambiguous-looking mess of flowers.
+                        // Each TRUE TOP-LEVEL minimised root (someone whose own parent
+                        // is NOT minimised) gets its own cluster site, found by
+                        // searching outward from where it actually sits, biased away
+                        // from the social band. From that one anchor point, the
+                        // existing recursive renderMinimisedFlower call below builds
+                        // out the REAL nested parent-child satellite structure on its
+                        // own -- direct children ring around their parent, and anyone
+                        // reachable only through one of those children (a grandchild,
+                        // e.g. Jane through Matt) automatically appears one step
+                        // further out as a satellite of THAT child specifically,
+                        // mirroring the real tree shape rather than flattening
+                        // everyone into one same-distance ring regardless of how
+                        // they're actually connected to each other.
+                        const topLevelIds = minimisedHere.filter(id => !minimisedSetAll.has(parentOf[id]));
+                        // Multiple top-level roots can share the exact same parent
+                        // anchor (e.g. Hayley's three direct people AND Family all
+                        // radiate from Hayley's own position) -- without some
+                        // awareness of each other, every one of them independently
+                        // tries the same "due right, away from social" starting
+                        // angle first, and only separates by whatever clearance-
+                        // avoidance happens to push them, which produces a tight
+                        // jumbled clump rather than genuinely distinct clusters.
+                        // Grouping them here is ONLY to spread their own starting
+                        // search angle apart -- each root still independently builds
+                        // its own real recursive satellite structure afterward, so
+                        // this doesn't reintroduce the earlier mistake of flattening
+                        // parent-child relationships together.
+                        const rootsByAnchor = {};
+                        topLevelIds.forEach(id => {
+                          const pid = parentOf[id];
+                          (rootsByAnchor[pid] = rootsByAnchor[pid] || []).push(id);
+                        });
+                        Object.keys(rootsByAnchor).forEach(pid => rootsByAnchor[pid].sort());
 
-                            // Use the same SIX DIRECTIONS as the parent's real hexagon
-                            // vertices, but pulled noticeably closer than the true vertex
-                            // distance -- a full vertex sits as far away as the next cell
-                            // over, which let a marker visually wander into a neighbouring
-                            // group's space even though it was technically a valid corner.
-                            const hexR = ((1.5 * FEED_HEX) / (0.75 * Math.sqrt(3))) * 0.55;
-                            const isHubHere = nodes.find(n => n.id === id)?.type === 'hub';
-                            const ownR = (Math.min(38, FEED_HEX * 0.5) * 1.3 * 0.45) * (isHubHere ? 1.3 : 1);
-                            let candidateCorners = Array.from({length: 6}, (_, i) => {
-                              const a = (Math.PI/180) * (30 + 60*i);
-                              return { x: parentAnchor.x + hexR*Math.cos(a), y: parentAnchor.y + hexR*Math.sin(a) };
-                            });
-                            candidateCorners = candidateCorners.filter(c => c.x > 30);
-                            candidateCorners = candidateCorners.filter(c => clearOfEverything(c.x, c.y, ownR, parentId));
-                            const seed = id.split('').reduce((s,c)=>s+c.charCodeAt(0),0);
-                            let corner;
-                            if (candidateCorners.length > 0) {
-                              corner = candidateCorners[seed % candidateCorners.length];
-                            } else {
-                              // None of the six corners were clear -- search further
-                              // outward from the parent at increasing radius/angle until
-                              // genuinely clear space is found, rather than falling back
-                              // to a fixed corner that's guaranteed to overlap.
-                              corner = { x: parentAnchor.x + hexR, y: parentAnchor.y };
-                              let r2 = hexR, found = false;
-                              for (let step = 0; step < 20 && !found; step++) {
-                                r2 += ownR * 0.5 + 8;
-                                for (let k = 0; k < 6; k++) {
-                                  const a = (Math.PI/180) * (30 + 60*k) + step * 0.35;
-                                  const cx = parentAnchor.x + r2*Math.cos(a), cy = parentAnchor.y + r2*Math.sin(a);
-                                  if (cx > 30 && clearOfEverything(cx, cy, ownR, parentId)) { corner = { x: cx, y: cy }; found = true; break; }
-                                }
+                        const freshPositions = {}; // id -> {x, y, r} -- the ACTUAL final position each flower is rendered at THIS pass, used directly by the name pass below instead of re-reading the cache, so a name can never diverge from its own flower's real position.
+                        const flowerElements = topLevelIds.map((id) => {
+                          const parentId = parentOf[id];
+                          // If the parent is the flower band itself, don't use its
+                          // section-wide vertical-midpoint anchor -- that ignores where
+                          // THIS root actually sits and could be far away. Use its own
+                          // saved row instead, near the band, at its own height.
+                          let parentAnchor;
+                          if (parentId === flowerId) {
+                            const ownSaved = feedPositions[`${dimKey}:${id}`];
+                            const ownRow = ownSaved ? ownSaved.row : 0;
+                            parentAnchor = { x: BAND_W / 2, y: ownRow * ROW_STEP + 50 };
+                          } else {
+                            parentAnchor = anchorOf[parentId];
+                          }
+                          if (!parentAnchor) return null;
+
+                          const isHubHere = nodes.find(n => n.id === id)?.type === 'hub';
+                          // Top-level flowers are always depth 0, drawn at baseR*1.3 --
+                          // placement radius must match the drawn radius exactly or the
+                          // flower overlaps its neighbours by the difference.
+                          const ownR = (Math.min(38, FEED_HEX * 0.5) * 1.3 * 0.45) * 1.3;
+                          const hexR = ((1.5 * FEED_HEX) / (0.75 * Math.sqrt(3))) * 0.55;
+                          const seed = id.split('').reduce((s,c)=>s+c.charCodeAt(0),0);
+                          // This root's own lane: split the outward-facing 180-degree
+                          // arc evenly among every sibling sharing this same anchor,
+                          // so each one's search starts in a different direction
+                          // before any clearance-avoidance even kicks in.
+                          const siblingsHere = rootsByAnchor[parentId] || [id];
+                          const laneIdx = siblingsHere.indexOf(id);
+                          const laneCount = siblingsHere.length;
+                          // Compute the REAL angle from the parent's position to this
+                          // node's own saved grid position -- this is the direction
+                          // of travel: straight toward the parent, stopping at
+                          // whatever is hit first (see below), never fanning out to
+                          // search other directions.
+                          const ownPos = allNodePos[id];
+                          const realAngleToSelf = (ownPos && parentAnchor)
+                            ? Math.atan2(ownPos.y - parentAnchor.y, ownPos.x - parentAnchor.x)
+                            : laneCount > 1 ? (-90 + (laneIdx / (laneCount - 1)) * 180) * Math.PI / 180 : 0;
+                          // Compute the parent's own radius so gapBounds knows the
+                          // inner edge of the valid placement zone.
+                          const parentNode = nodes.find(n => n.id === parentId);
+                          const parentIsHub = parentNode && parentNode.type === 'hub';
+                          const parentTierScale = (!parentIsHub && parentNode) ? (() => {
+                            const t = getTier(parentNode.interactionScore || 0, parentNode);
+                            if (t === 1) return 0.55; if (t === 2) return 0.75; return 1;
+                          })() : 1;
+                          const parentR = parentId === flowerId
+                            ? BAND_W / 2
+                            : (Math.min(38, FEED_HEX * 0.5) * 1.3) * parentTierScale;
+                          // Check cache first -- if this flower was already placed
+                          // in a previous render with the same parent position, reuse
+                          // that position directly rather than recomputing and
+                          // potentially shuffling everything around.
+                          const cacheKey = `${MINIMISED_LAYOUT_VERSION}:${dimKey}:${id}`;
+                          const cached = minimisedFlowerPosCache.current[cacheKey];
+                          const parentMoved = !cached || Math.hypot(cached.parentX - parentAnchor.x, cached.parentY - parentAnchor.y) > 2;
+                          let cx, cy;
+                          if (cached && !parentMoved) {
+                            cx = cached.x; cy = cached.y;
+                          } else {
+                          // Travel in a STRAIGHT LINE from the parent toward this
+                          // node's own original position, and stop at whatever is
+                          // hit FIRST along that exact path -- the parent itself, or
+                          // another person/flower blocking the way. No searching
+                          // other directions: the rule is direct travel toward the
+                          // real relationship, clamped by the first real obstacle.
+                          const { innerDist, outerDist } = gapBounds(parentAnchor.x, parentAnchor.y, parentR, realAngleToSelf, ownR, [parentId, id]);
+                          // If something is genuinely in the way before the flower
+                          // could even clear the parent's own edge, stop right at
+                          // that obstacle's boundary instead -- never overlap it,
+                          // even if that means sitting very close to the parent.
+                          const placeDist = Math.max(innerDist, Math.min(innerDist + 1, outerDist - 1));
+                          const tx = parentAnchor.x + Math.cos(realAngleToSelf) * Math.min(placeDist, outerDist - 0.5);
+                          const ty = parentAnchor.y + Math.sin(realAngleToSelf) * Math.min(placeDist, outerDist - 0.5);
+                          let found = false;
+                          if (tx >= 30 && tx <= stripW - 24 && outerDist > innerDist - 1 && clearOfEverything(tx, ty, ownR, [parentId, id])) {
+                            cx = tx; cy = ty; found = true;
+                          }
+                          if (!found) {
+                            // Extremely tight squeeze (e.g. parent has almost no gap
+                            // in this direction at all) -- fall back to whichever
+                            // position along this same line has the least overlap,
+                            // rather than abandoning the direct-line rule for a
+                            // completely different direction.
+                            const overlapAmount = (px, py) => {
+                              let worst = 0;
+                              Object.entries(allNodePos).forEach(([nid, npos]) => {
+                                if (nid === parentId || nid === id) return;
+                                const d = Math.hypot(px - npos.x, py - npos.y);
+                                const need = npos.r + ownR + 1;
+                                if (need - d > worst) worst = need - d;
+                              });
+                              placedFlowers.forEach(f => {
+                                const d = Math.hypot(px - f.x, py - f.y);
+                                const need = ownR + 1 + f.r;
+                                if (need - d > worst) worst = need - d;
+                              });
+                              return worst;
+                            };
+                            // Search a small 2D neighbourhood around the direct-line
+                            // spot -- both along the line (closer/further from the
+                            // parent) AND perpendicular to it (side to side). This is
+                            // essential when the direct spot is blocked by an already-
+                            // placed SIBLING flower heading in nearly the same
+                            // direction: sliding only along the line can never get
+                            // around another point sitting on that same line, which is
+                            // exactly what was causing every sibling to stack on top
+                            // of each other at the same spot.
+                            const perpAngle = realAngleToSelf + Math.PI / 2;
+                            let bestPx = parentAnchor.x + Math.cos(realAngleToSelf) * innerDist;
+                            let bestPy = parentAnchor.y + Math.sin(realAngleToSelf) * innerDist;
+                            let bestViol = Infinity;
+                            const maxAlong = Math.max(outerDist, innerDist + 40);
+                            for (let step = 0; step <= 16; step++) {
+                              const d = innerDist + step * ((maxAlong - innerDist) / 16);
+                              for (let side = -6; side <= 6; side++) {
+                                const perpOffset = side * (ownR * 0.6);
+                                const px = parentAnchor.x + Math.cos(realAngleToSelf) * d + Math.cos(perpAngle) * perpOffset;
+                                const py = parentAnchor.y + Math.sin(realAngleToSelf) * d + Math.sin(perpAngle) * perpOffset;
+                                if (px < 30 || px > stripW - 24) continue;
+                                const v = overlapAmount(px, py);
+                                if (v <= 0) { bestPx = px; bestPy = py; bestViol = 0; break; }
+                                if (v < bestViol) { bestViol = v; bestPx = px; bestPy = py; }
                               }
+                              if (bestViol <= 0) break;
                             }
-                            return renderMinimisedFlower(id, corner.x, corner.y, 0);
+                            cx = bestPx; cy = bestPy;
+                          }
+                          } // end cache-miss else block
+                          cx = Math.max(30, Math.min(stripW - 24, cx));
+                          // Store to cache so subsequent renders don't recompute and
+                          // reshuffle this flower unless the parent actually moves.
+                          minimisedFlowerPosCache.current[cacheKey] = { x: cx, y: cy, parentX: parentAnchor.x, parentY: parentAnchor.y };
+                          const isHubForR = nodes.find(n => n.id === id)?.type === 'hub';
+                          // Does this person have their own attached branch (at least
+                          // one minimised satellite of their own)? If so, they get the
+                          // size groups used to be -- a group itself now gets an even
+                          // bigger size, and a plain person with nothing attached stays
+                          // at the base size, unchanged from before.
+                          const hasOwnBranch = minimisedHere.some(nid => nid !== id && parentOf[nid] === id);
+                          const baseFlowerR = Math.min(38, FEED_HEX * 0.5) * 1.3 * 0.45;
+                          const rootR = isHubForR ? baseFlowerR * 1.55
+                                       : hasOwnBranch ? baseFlowerR * 1.3
+                                       : baseFlowerR;
+                          freshPositions[id] = { x: cx, y: cy, r: rootR };
+                          return renderMinimisedFlower(id, cx, cy, 0, parentAnchor.x, parentAnchor.y);
+                        });
+
+                        // ---- SECOND PASS: curved names, positioned relative to the
+                        // REAL CLUSTER CENTRE now that every flower's final position
+                        // is known (read from the position cache, populated during
+                        // the pass above). A flower sitting on the right edge of its
+                        // cluster gets its name on the right, one on top gets top,
+                        // one on the bottom gets its name underneath -- read outward
+                        // from the cluster as a whole, not from each flower's own
+                        // individual parent, which is what "outside of the cluster"
+                        // actually means as opposed to "away from my own parent".
+                        // Group every currently-minimised flower (top-level roots AND
+                        // their satellites) by ultimate top-level ancestor, so the
+                        // whole branch counts as one cluster for centring purposes.
+                        const ultimateRootOf = {};
+                        const findRoot = (nid) => {
+                          let cur = nid, guard = 0;
+                          while (minimisedSetAll.has(parentOf[cur]) && guard < 100) { cur = parentOf[cur]; guard++; }
+                          return cur;
+                        };
+                        minimisedHere.forEach(nid => { ultimateRootOf[nid] = findRoot(nid); });
+                        const clusterMembers = {}; // rootId -> [{id, x, y, r}]
+                        minimisedHere.forEach(nid => {
+                          // Use freshPositions -- the ACTUAL position this flower was
+                          // just rendered at THIS pass -- never the cache directly, so
+                          // a name can never diverge from where its own flower really
+                          // is on screen right now.
+                          const fresh = freshPositions[nid];
+                          if (!fresh) return;
+                          const root = ultimateRootOf[nid];
+                          (clusterMembers[root] = clusterMembers[root] || []).push({ id: nid, x: fresh.x, y: fresh.y, r: fresh.r });
+                        });
+                        const clusterCentreOf = {};
+                        Object.entries(clusterMembers).forEach(([root, list]) => {
+                          const cx2 = list.reduce((s, m) => s + m.x, 0) / list.length;
+                          const cy2 = list.reduce((s, m) => s + m.y, 0) / list.length;
+                          list.forEach(m => { clusterCentreOf[m.id] = { x: cx2, y: cy2 }; });
+                        });
+
+                        if (!feedShowNames) return flowerElements;
+                        const allPlacedList = Object.values(clusterMembers).flat();
+                        // Process outer flowers first (furthest from their cluster
+                        // centre), so names on the sparse edge of a cluster claim
+                        // their natural spot before the tightly-packed inner flowers
+                        // have to route around what's already been placed -- this
+                        // matters because the crowded centre of a cluster is exactly
+                        // where names were still overlapping.
+                        const orderedForNames = [...allPlacedList].sort((a, b) => {
+                          const ca = clusterCentreOf[a.id], cb = clusterCentreOf[b.id];
+                          const da = ca ? Math.hypot(a.x - ca.x, a.y - ca.y) : 0;
+                          const db = cb ? Math.hypot(b.x - cb.x, b.y - cb.y) : 0;
+                          return db - da;
+                        });
+                        const chosenLabelPositions = []; // {x, y} of each already-placed name's actual centre
+                        const nameChoiceById = {};
+                        orderedForNames.forEach(({ id: fid, x: fx, y: fy, r: fr }) => {
+                          const centre = clusterCentreOf[fid];
+                          let awayAngle = -90;
+                          if (centre) {
+                            const dx = fx - centre.x, dy = fy - centre.y;
+                            if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
+                              awayAngle = Math.atan2(dy, dx) * 180 / Math.PI;
+                            }
+                          }
+                          // 12 candidate angles (30 degree steps) instead of 6, giving
+                          // finer granularity to actually find a clear slot in a
+                          // densely packed cluster rather than being forced to choose
+                          // between only 6 coarse directions.
+                          const positionsDeg = [];
+                          for (let d = -180; d < 180; d += 30) positionsDeg.push(d);
+                          let best = positionsDeg[0], bestScore = Infinity;
+                          positionsDeg.forEach(p => {
+                            const angleDiff = Math.abs(((awayAngle - p + 540) % 360) - 180);
+                            const labelX = fx + Math.cos(p * Math.PI / 180) * (fr + 14);
+                            const labelY = fy + Math.sin(p * Math.PI / 180) * (fr + 14);
+                            let proximityPenalty = 0;
+                            // Penalise sitting close to any OTHER flower's circle.
+                            allPlacedList.forEach(other => {
+                              if (other.id === fid) return;
+                              const d = Math.hypot(labelX - other.x, labelY - other.y);
+                              if (d < other.r + 22) proximityPenalty += (other.r + 22 - d) * 3;
+                            });
+                            // Penalise sitting close to any name ALREADY CHOSEN this
+                            // pass -- this is what actually stops two names from
+                            // landing on top of each other in a crowded centre.
+                            chosenLabelPositions.forEach(chosen => {
+                              const d = Math.hypot(labelX - chosen.x, labelY - chosen.y);
+                              if (d < 30) proximityPenalty += (30 - d) * 4;
+                            });
+                            const score = angleDiff + proximityPenalty;
+                            if (score < bestScore) { bestScore = score; best = p; }
                           });
+                          nameChoiceById[fid] = best;
+                          const finalLabelX = fx + Math.cos(best * Math.PI / 180) * (fr + 7);
+                          const finalLabelY = fy + Math.sin(best * Math.PI / 180) * (fr + 7);
+                          chosenLabelPositions.push({ x: finalLabelX, y: finalLabelY });
+                        });
+                        return (
+                          <>
+                            {flowerElements}
+                            {allPlacedList.map(({ id: fid, x: fx, y: fy, r: fr }) => {
+                              const fNode = nodes.find(n => n.id === fid);
+                              if (!fNode) return null;
+                              const best = nameChoiceById[fid];
+                              const arcR = fr + 7;
+                              const pathId = `minflowerarc-${dimKey}-${fid}`;
+                              const startX = fr - arcR, startY = fr, endX = fr + arcR, endY = fr;
+                              return (
+                                <React.Fragment key={`namewrap-${fid}`}>
+                                <svg key={`name-${fid}`} width={fr*2+80} height={fr*2+80}
+                                  style={{position:'absolute', left:fx-fr-40, top:fy-fr-40, overflow:'visible', pointerEvents:'none', zIndex:7}}>
+                                  {/* Genuine curved text, built by positioning EACH
+                                      CHARACTER individually along an arc around the
+                                      flower, rather than relying on SVG's textPath
+                                      (which doesn't resolve its href reference
+                                      reliably in this rendering environment -- confirmed
+                                      by regular maximised-node names showing the
+                                      identical failure). Each letter is placed at its
+                                      own angle around the flower's rim and rotated to
+                                      stay tangent to that circle, so the whole word
+                                      reads as a natural arc without needing any path
+                                      reference at all. */}
+                                  {(() => {
+                                    let label = fNode.label || '';
+                                    const charArcR = fr + 9;
+                                    const fontSize = Math.max(7, fr * 0.34);
+                                    const degPerChar = Math.min(18, (fontSize * 0.62) / charArcR * (180 / Math.PI));
+                                    const totalSpan = degPerChar * (label.length - 1);
+                                    const localCx = fr + 40, localCy = fr + 40;
+                                    // If the label sits in the LOWER half of the circle
+                                    // (best between 0 and 180, i.e. positive Y / below
+                                    // the flower), the plain tangent rotation would read
+                                    // upside down -- reverse the character order and
+                                    // flip the tangent by 180 degrees so it always reads
+                                    // left-to-right, right-side-up, on either side.
+                                    const isLowerHalf = best > 0 && best < 180;
+                                    const chars = isLowerHalf ? label.split('').reverse() : label.split('');
+                                    return chars.map((ch, i) => {
+                                      const charAngleDeg = best - totalSpan / 2 + i * degPerChar;
+                                      const rad = charAngleDeg * Math.PI / 180;
+                                      const cx2 = localCx + Math.cos(rad) * charArcR;
+                                      const cy2 = localCy + Math.sin(rad) * charArcR;
+                                      const tangentDeg = charAngleDeg + 90 + (isLowerHalf ? 180 : 0);
+                                      return (
+                                        <text key={i}
+                                          x={cx2} y={cy2}
+                                          fontSize={fontSize} fontWeight="700"
+                                          fill={dm?'#94a3b8':'#64748b'} style={{userSelect:'none'}}
+                                          textAnchor="middle" dominantBaseline="middle"
+                                          transform={`rotate(${tangentDeg}, ${cx2}, ${cy2})`}>
+                                          {ch}
+                                        </text>
+                                      );
+                                    });
+                                  })()}
+                                </svg>
+                                </React.Fragment>
+                              );
+                            })}
+                          </>
+                        );
                       })()}
 
                     </div>
@@ -16315,10 +16928,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               {/* Group colour picker */}
               <div style={{ padding:'10px 24px', borderBottom:`1px solid ${border}`, display:'flex', alignItems:'center', gap:10 }}>
                 <span style={{fontSize:12,color:dm?'#94a3b8':pw.secondText,fontWeight:600}}>Group colour:</span>
-                {PRIMARY_GROUP_COLORS.map(c => (
-                  <button key={c} onClick={()=>setGroupColors(prev=>({...prev,[hub.id]:c}))}
-                    style={{width:22,height:22,borderRadius:'50%',background:c,border:(groupColors[hub.id]||PRIMARY_GROUP_COLORS[nodes.filter(n=>n.type==='hub').findIndex(n=>n.id===hub.id)%PRIMARY_GROUP_COLORS.length])===c?'3px solid white':'2px solid transparent',cursor:'pointer',boxShadow:(groupColors[hub.id]||PRIMARY_GROUP_COLORS[nodes.filter(n=>n.type==='hub').findIndex(n=>n.id===hub.id)%PRIMARY_GROUP_COLORS.length])===c?'0 0 0 2px '+c:'none'}}/>
-                ))}
+                {PRIMARY_GROUP_COLORS.map(c => {
+                  const currentColor = resolveHubColor(hub.id);
+                  return (
+                    <button key={c} onClick={()=>setGroupColors(prev=>({...prev,[hub.id]:c}))}
+                      style={{width:22,height:22,borderRadius:'50%',background:c,border:currentColor===c?'3px solid white':'2px solid transparent',cursor:'pointer',boxShadow:currentColor===c?'0 0 0 2px '+c:'none'}}/>
+                  );
+                })}
               </div>
 
 
