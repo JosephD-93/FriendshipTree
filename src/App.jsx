@@ -1359,6 +1359,13 @@ function AppInner() {
   const cropDragRef = useRef(null);
   const cropResizeRef = useRef(false);
   const idbRef = useRef(null);
+  // Tracks IndexedDB writes that are currently in flight (a Set of Promises)
+  // -- photos are saved via a fire-and-forget call for responsiveness during
+  // normal use, but if the app closes while one of these is still resolving,
+  // the write can be lost even though the person's own name/entry (saved
+  // synchronously to localStorage) survives -- this is what makes a person
+  // appear fine while the app is open but their photo vanish after reopening.
+  const pendingPhotoWrites = useRef(new Set());
   const borderFlowerPositionsRef = useRef({});
 
 
@@ -1620,12 +1627,68 @@ function AppInner() {
   };
 
 
+  // Resize any source image (data URL) up or down to a standard square,
+  // matching the quality standard used for manually-cropped photos elsewhere
+  // in the app. Needed specifically because Android's Contacts API returns
+  // photos as small thumbnails (often under 200px) -- without this, an
+  // imported contact photo would be saved permanently at that tiny
+  // resolution, forever, since it otherwise skips the normal crop step
+  // entirely.
+  const resizeImageDataUrl = (dataUrl, targetSize = 800) => new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = targetSize; canvas.height = targetSize;
+      const ctx = canvas.getContext('2d');
+      const iw = img.naturalWidth, ih = img.naturalHeight;
+      if (!iw || !ih) { resolve(dataUrl); return; } // couldn't decode -- fall back to original rather than lose it
+      // Cover-fit: scale so the shorter side fills the square, centre-cropping
+      // the longer side, matching how profile photos are cropped elsewhere.
+      const scale = Math.max(targetSize / iw, targetSize / ih);
+      const drawW = iw * scale, drawH = ih * scale;
+      const dx = (targetSize - drawW) / 2, dy = (targetSize - drawH) / 2;
+      ctx.drawImage(img, dx, dy, drawW, drawH);
+      resolve(canvas.toDataURL('image/jpeg', 0.9));
+    };
+    img.onerror = () => resolve(dataUrl); // decode failed -- fall back to original rather than lose it
+    img.src = dataUrl;
+  });
+
   const savePhotoToDB = async (nodeId, dataUrl) => {
-    try {
-      const db = idbRef.current || (idbRef.current = await openPhotoDB());
-      const tx = db.transaction('photos', 'readwrite');
-      tx.objectStore('photos').put({ nodeId, dataUrl });
-    } catch(e) { console.warn('Photo save failed:', e); }
+    const writePromise = (async () => {
+      try {
+        const db = idbRef.current || (idbRef.current = await openPhotoDB());
+        await new Promise((resolve, reject) => {
+          const tx = db.transaction('photos', 'readwrite');
+          tx.objectStore('photos').put({ nodeId, dataUrl });
+          // put() alone doesn't guarantee the write is actually committed --
+          // only tx.oncomplete does. Without waiting for this, a write could
+          // still be in flight (not yet flushed to disk) at the moment the
+          // app closes, even though the call itself had already "returned".
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error);
+        });
+        // ALSO write to genuine device file storage, not just IndexedDB --
+        // IndexedDB lives inside the app's own sandboxed storage, which can
+        // still be cleared by the OS, an app data reset, or an uninstall.
+        // Writing a real file to the DOCUMENTS directory (the same location
+        // and naming convention the existing backup-restore code already
+        // uses) makes the photo durable independent of the app's own data,
+        // and consistent with how a restore already expects to find it.
+        try {
+          const isNative = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+          const FilesystemP = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Filesystem;
+          if (isNative && FilesystemP && dataUrl && dataUrl.startsWith('data:image')) {
+            const b64 = dataUrl.split(',')[1];
+            const ext = dataUrl.startsWith('data:image/png') ? 'png' : 'jpg';
+            await FilesystemP.writeFile({ path: `ft_photo_${nodeId}.${ext}`, data: b64, directory: 'DOCUMENTS', recursive: true });
+          }
+        } catch(fsErr) { console.warn('Filesystem photo write failed:', fsErr); }
+      } catch(e) { console.warn('Photo save failed:', e); }
+    })();
+    pendingPhotoWrites.current.add(writePromise);
+    writePromise.finally(() => pendingPhotoWrites.current.delete(writePromise));
+    return writePromise;
   };
 
 
@@ -1684,6 +1747,7 @@ function AppInner() {
   // On mount — restore photos from IndexedDB onto nodes
   useEffect(() => {
     (async () => {
+      setPhotosRestoring(true);
       try {
         const db = await openPhotoDB();
         idbRef.current = db;
@@ -1693,22 +1757,75 @@ function AppInner() {
           req.onsuccess = () => res(req.result);
           req.onerror = () => rej(req.error);
         });
-        if (all.length === 0) return;
-        const photoMap = {};
-        all.forEach(({ nodeId, dataUrl }) => { if (dataUrl) photoMap[nodeId] = dataUrl; });
-        setNodes(prev => prev.map(n => {
-          if (!photoMap[n.id]) return n;
-          // Restoring the main icon photo without also putting it back into the
-          // `photos` carousel array is exactly why the profile-pictures row at
-          // the top of a person's window stayed blank after every restart -- the
-          // icon worked because it reads `img` directly, but that row reads only
-          // from `photos`, which this restore never touched.
-          const restored = photoMap[n.id];
-          const already = (n.photos || []).some(p => p.cropped === restored);
-          const photos = already ? n.photos : [...(n.photos || []), { orig: restored, cropped: restored }];
-          return { ...n, img: restored, photos, activePhotoIdx: already ? n.activePhotoIdx : photos.length - 1 };
-        }));
+        if (all.length === 0) {
+          // IndexedDB is completely empty -- this is exactly the scenario the
+          // Filesystem backup exists to protect against (e.g. the app's own
+          // storage was cleared, but real files on the device survived).
+          // Attempt to recover from those durable copies before giving up.
+          try {
+            const isNative = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+            const FilesystemP = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Filesystem;
+            if (isNative && FilesystemP) {
+              const listing = await FilesystemP.readdir({ path: '', directory: 'DOCUMENTS' }).catch(() => null);
+              const photoFiles = (listing && listing.files || []).filter(f => {
+                const name = typeof f === 'string' ? f : f.name;
+                return name && name.startsWith('ft_photo_');
+              });
+              if (photoFiles.length > 0) {
+                showToast(`🔄 Recovering ${photoFiles.length} photo(s) from device storage…`);
+                for (const f of photoFiles) {
+                  const name = typeof f === 'string' ? f : f.name;
+                  const match = name.match(/^ft_photo_(.+)\.(jpg|png)$/);
+                  if (!match) continue;
+                  const nodeId = match[1];
+                  const ext = match[2];
+                  try {
+                    const readResult = await FilesystemP.readFile({ path: name, directory: 'DOCUMENTS' });
+                    const dataUrl = `data:image/${ext === 'png' ? 'png' : 'jpeg'};base64,${readResult.data}`;
+                    await savePhotoToDB(nodeId, dataUrl);
+                  } catch (readErr) { console.warn('Recovery read failed for', name, readErr); }
+                }
+                // Re-fetch now that IndexedDB has been repopulated, so the
+                // normal restore flow below picks up the recovered photos.
+                const tx2 = db.transaction('photos', 'readonly');
+                const recovered = await new Promise((res, rej) => {
+                  const req = tx2.objectStore('photos').getAll();
+                  req.onsuccess = () => res(req.result);
+                  req.onerror = () => rej(req.error);
+                });
+                if (recovered.length > 0) { all.push(...recovered); }
+              }
+            }
+          } catch (recoveryErr) { console.warn('Photo recovery attempt failed:', recoveryErr); }
+          if (all.length === 0) { setPhotosRestoring(false); return; }
+        }
+        // Apply photos in small SEQUENTIAL batches rather than one giant
+        // simultaneous update -- this is what makes photos appear
+        // progressively as they load, instead of everyone waiting through a
+        // silent delay and then seeing every photo pop in at once.
+        const BATCH_SIZE = 4;
+        for (let i = 0; i < all.length; i += BATCH_SIZE) {
+          const batch = all.slice(i, i + BATCH_SIZE);
+          const photoMap = {};
+          batch.forEach(({ nodeId, dataUrl }) => { if (dataUrl) photoMap[nodeId] = dataUrl; });
+          setNodes(prev => prev.map(n => {
+            if (!photoMap[n.id]) return n;
+            // Restoring the main icon photo without also putting it back into the
+            // `photos` carousel array is exactly why the profile-pictures row at
+            // the top of a person's window stayed blank after every restart -- the
+            // icon worked because it reads `img` directly, but that row reads only
+            // from `photos`, which this restore never touched.
+            const restored = photoMap[n.id];
+            const already = (n.photos || []).some(p => p.cropped === restored);
+            const photos = already ? n.photos : [...(n.photos || []), { orig: restored, cropped: restored }];
+            return { ...n, img: restored, photos, activePhotoIdx: already ? n.activePhotoIdx : photos.length - 1 };
+          }));
+          // Small pause between batches so the update genuinely renders as a
+          // visible step rather than all batches collapsing into one paint.
+          if (i + BATCH_SIZE < all.length) await new Promise(r => setTimeout(r, 60));
+        }
       } catch(e) { console.warn('Photo restore failed:', e); }
+      setPhotosRestoring(false);
     })();
   }, []); // eslint-disable-line
 
@@ -2004,6 +2121,11 @@ function AppInner() {
   // a second, independent finger scrolls; lifting the holding finger drops it).
   const [feedCarrying, setFeedCarrying] = useState(null); // {dimKey, nodeId, branchIds, pageX, pageY, dropMode, holdPointerId}
   const [feedScrollTop, setFeedScrollTop] = useState(0);
+  // True while photos are being restored from IndexedDB on startup -- shown
+  // as a loading indicator so it's clear the app is actively working, since
+  // photos aren't available instantly and previously just appeared all at
+  // once after a silent wait with no visible feedback.
+  const [photosRestoring, setPhotosRestoring] = useState(false);
   // Extra height (beyond the row-based calculation) needed per Feed section so
   // minimised flowers that render lower than their reserved row -- because
   // they're placed at an angle toward their own saved position, not always
@@ -3619,7 +3741,13 @@ function AppInner() {
         const updates = { syncDismissed: true };
         if (c.name && c.name.display) updates.label = c.name.display;
         if (c.phones && c.phones.length) updates.phone = c.phones[0].number;
-        if (c.image && c.image.base64String) updates.img = 'data:image/jpeg;base64,' + c.image.base64String;
+        if (c.image && c.image.base64String) {
+          const rawImg = 'data:image/jpeg;base64,' + c.image.base64String;
+          // Contact photos from Android's Contacts API are typically small
+          // thumbnails -- resize to the app's standard quality before saving
+          // permanently, rather than storing that low resolution forever.
+          updates.img = await resizeImageDataUrl(rawImg, 800);
+        }
         if (c.contactId) updates.contactId = c.contactId; // remember so we can re-open it
         setNodes(prev => prev.map(n => {
           if (n.id !== selectedNodeId) return n;
@@ -3651,7 +3779,13 @@ function AppInner() {
           if (contact.icon?.length) {
             const blob = contact.icon[0];
             const blobReader = new FileReader();
-            blobReader.onload = ev => { updates.img = ev.target.result; setNodes(prev => prev.map(n => n.id === selectedNodeId ? { ...n, ...updates } : n)); };
+            blobReader.onload = async ev => {
+              // Same resize normalization as the native path -- browser
+              // Contacts API photos are also typically small thumbnails.
+              updates.img = await resizeImageDataUrl(ev.target.result, 800);
+              setNodes(prev => prev.map(n => n.id === selectedNodeId ? { ...n, ...updates } : n));
+              savePhotoToDB(selectedNodeId, updates.img);
+            };
             blobReader.readAsDataURL(blob);
           }
           setNodes(prev => prev.map(n => n.id === selectedNodeId ? { ...n, ...updates } : n));
@@ -4246,6 +4380,16 @@ function AppInner() {
       doSaveNodes();
       try { localStorage.setItem('ft_links', JSON.stringify(links)); } catch(e) {}
       try { localStorage.setItem('ft_dimensions', JSON.stringify(dimensions)); } catch(e) {}
+      // A webview's visibilitychange/pagehide handler can't reliably await
+      // async work before the process actually suspends, so a still-pending
+      // IndexedDB photo write genuinely can't be guaranteed to finish here.
+      // What CAN be done is surface a clear warning immediately, while the
+      // app is still visible for a brief moment, rather than the photo just
+      // silently vanishing with no indication anything was ever at risk.
+      if (pendingPhotoWrites.current.size > 0) {
+        console.warn(`[FT] App closing with ${pendingPhotoWrites.current.size} photo write(s) still in progress -- may not be saved.`);
+        try { showToast('⚠️ Closing while a photo was still saving — check it saved correctly'); } catch(e) {}
+      }
     };
     const onVisibility = () => { if (document.hidden) flushNow(); };
     document.addEventListener('visibilitychange', onVisibility);
@@ -5677,6 +5821,16 @@ Return only the JSON array. If nothing trackable is found, return [].`;
   return (
     <>
     <style>{KEYFRAMES_CSS}</style>
+    {photosRestoring && (
+      <div style={{position:'fixed', top:12, left:'50%', transform:'translateX(-50%)', zIndex:9999,
+        background:'rgba(15,23,42,0.9)', color:'white', padding:'6px 14px', borderRadius:99,
+        fontSize:12, fontWeight:600, display:'flex', alignItems:'center', gap:8, pointerEvents:'none',
+        boxShadow:'0 4px 12px rgba(0,0,0,0.3)'}}>
+        <div style={{width:12, height:12, border:'2px solid rgba(255,255,255,0.3)', borderTopColor:'white',
+          borderRadius:'50%', animation:'spin 0.8s linear infinite'}}/>
+        Loading photos…
+      </div>
+    )}
     <div className={`fixed inset-0 font-sans overflow-hidden transition-colors duration-300 ${theme.darkMode ? 'text-slate-100' : 'text-slate-50'}`}
       style={{
         display:'flex', flexDirection:'column',
@@ -15083,6 +15237,20 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         const applyCrop = () => {
           const img = cropImgRef.current;
           if (!img) return;
+          // Detect the specific, common failure case: the browser accepted the
+          // file but couldn't actually DECODE it into a usable image (0-size
+          // natural dimensions) -- this happens most often with formats the
+          // webview doesn't support, like HEIC photos straight from an iPhone
+          // camera. Surfacing the file type here is what lets a pattern across
+          // failures actually be noticed, instead of the photo just silently
+          // not saving with no visible explanation at all.
+          if (!img.naturalWidth || !img.naturalHeight) {
+            const srcStr = (photoCrop.src || '').toString();
+            const guessedFormat = srcStr.match(/^data:image\/([a-zA-Z0-9+.-]+)/)?.[1] || 'unknown';
+            showToast(`⚠️ Photo failed to load (format: ${guessedFormat}) — try a JPG or PNG instead`);
+            console.warn('[FT] Photo decode failed. Detected format:', guessedFormat, 'src prefix:', srcStr.slice(0, 40));
+            return;
+          }
           const canvas = document.createElement('canvas');
           canvas.width = SIZE; canvas.height = SIZE;
           const ctx = canvas.getContext('2d');
