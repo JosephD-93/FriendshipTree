@@ -14,7 +14,7 @@ const APP_VERSION = '3.1';
 // Google Cloud Console (APIs & Services → Credentials → Create OAuth client →
 // Android). You'll also need your app's SHA-1 fingerprint registered there.
 // Until then, the Calendar sync UI will show but sign-in will fail gracefully.
-const GOOGLE_CLIENT_ID = 'YOUR_GOOGLE_CLIENT_ID_HERE.apps.googleusercontent.com';
+const GOOGLE_CLIENT_ID = '54802084194-qiej4s3ahd0eojf26rnjtsoius482fio.apps.googleusercontent.com';
 const GOOGLE_CALENDAR_SCOPES = 'https://www.googleapis.com/auth/calendar';
 const GOOGLE_REDIRECT_URI = 'com.friendshiptree:/oauth'; // custom scheme for Android
 // ─────────────────────────────────────────────────────────────────────────────
