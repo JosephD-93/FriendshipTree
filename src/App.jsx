@@ -9,6 +9,16 @@ import {
 
 
 const APP_VERSION = '3.1';
+// ─── Google Calendar Integration ─────────────────────────────────────────────
+// Replace GOOGLE_CLIENT_ID with your real OAuth 2.0 Client ID from
+// Google Cloud Console (APIs & Services → Credentials → Create OAuth client →
+// Android). You'll also need your app's SHA-1 fingerprint registered there.
+// Until then, the Calendar sync UI will show but sign-in will fail gracefully.
+const GOOGLE_CLIENT_ID = 'YOUR_GOOGLE_CLIENT_ID_HERE.apps.googleusercontent.com';
+const GOOGLE_CALENDAR_SCOPES = 'https://www.googleapis.com/auth/calendar';
+const GOOGLE_REDIRECT_URI = 'com.friendshiptree:/oauth'; // custom scheme for Android
+// ─────────────────────────────────────────────────────────────────────────────
+
 const INTERACTION_DISTANCE = 70;
 const TIER_COLORS_GLOBAL = ['#bef264','#84cc16','#166534','#3b82f6','#9333ea'];
 const PRIMARY_GROUP_COLORS = ['#ef4444','#3b82f6','#f59e0b','#10b981','#8b5cf6','#ec4899','#06b6d4','#f97316'];
@@ -1278,6 +1288,23 @@ function AppInner() {
     try { return JSON.parse(localStorage.getItem('ft_viewMode')) || 'canvas'; } catch(e) { return 'canvas'; }
   });
   const [calendarLayout, setCalendarLayout] = useState('circle');
+  const [calViewMode, setCalViewMode] = useState('monthly');
+  const [calMonth, setCalMonth] = useState(() => new Date().getMonth());
+  const [calYear, setCalYear] = useState(() => new Date().getFullYear());
+  const [calEvents, setCalEvents] = useState(() => { try { return JSON.parse(localStorage.getItem('ft_cal_events') || '[]'); } catch(e) { return []; } });
+  const [calRecurring, setCalRecurring] = useState(() => { try { return JSON.parse(localStorage.getItem('ft_cal_recurring') || '[]'); } catch(e) { return []; } });
+  const [showAddCalEvent, setShowAddCalEvent] = useState(null); // date string for new event modal
+  const [calEventSelectedPeople, setCalEventSelectedPeople] = useState([]); // node ids selected in event modal
+
+  const [calDayDetail, setCalDayDetail] = useState(null); // date string for day detail popup
+  const [calAddMode, setCalAddMode] = useState(null); // null | 'single' | 'multi'
+  const [calMultiDays, setCalMultiDays] = useState([]); // selected days in multi mode
+  const calAddHoldTimer = useRef(null);
+
+  const [showAddRecurring, setShowAddRecurring] = useState(false);
+  const [pendingReminders, setPendingReminders] = useState([]);
+  const calSwipeRef = useRef({ startX: 0, startY: 0, active: false });
+
   const [dimensions, setDimensions] = useState(() => {
     try { const s = localStorage.getItem('ft_dimensions'); return s ? { ...DEFAULT_DIMENSIONS, ...JSON.parse(s) } : DEFAULT_DIMENSIONS; } catch(e) { return DEFAULT_DIMENSIONS; }
   });
@@ -2121,6 +2148,13 @@ function AppInner() {
   // a second, independent finger scrolls; lifting the holding finger drops it).
   const [feedCarrying, setFeedCarrying] = useState(null); // {dimKey, nodeId, branchIds, pageX, pageY, dropMode, holdPointerId}
   const [feedScrollTop, setFeedScrollTop] = useState(0);
+  // Google Calendar integration state
+  const [gCalToken, setGCalToken] = useState(() => { try { return localStorage.getItem('ft_gcal_token') || null; } catch(e) { return null; } });
+  const [gCalEvents, setGCalEvents] = useState([]);
+  const [gCalSyncing, setGCalSyncing] = useState(false);
+  const [gCalError, setGCalError] = useState(null);
+  const [showGCalPanel, setShowGCalPanel] = useState(false);
+
   // True while photos are being restored from IndexedDB on startup -- shown
   // as a loading indicator so it's clear the app is actively working, since
   // photos aren't available instantly and previously just appeared all at
@@ -3713,7 +3747,167 @@ function AppInner() {
   };
 
 
+  // ─── Google Calendar Integration ───────────────────────────────────────────
+
+  // Sign in with Google via OAuth2 PKCE flow using Capacitor Browser plugin.
+  // This opens the device browser for the consent screen, then redirects back
+  // to the app via the custom URL scheme com.friendshiptree:/oauth.
+  const gCalSignIn = async () => {
+    try {
+      setGCalError(null);
+      // Generate PKCE code verifier and challenge (no client secret needed)
+      const array = new Uint8Array(32);
+      crypto.getRandomValues(array);
+      const verifier = btoa(String.fromCharCode(...array)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+      const encoder = new TextEncoder();
+      const data = encoder.encode(verifier);
+      const digest = await crypto.subtle.digest('SHA-256', data);
+      const challenge = btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+      sessionStorage.setItem('gcal_verifier', verifier);
+      const state = Math.random().toString(36).slice(2);
+      sessionStorage.setItem('gcal_state', state);
+      const params = new URLSearchParams({
+        client_id: GOOGLE_CLIENT_ID,
+        redirect_uri: GOOGLE_REDIRECT_URI,
+        response_type: 'code',
+        scope: GOOGLE_CALENDAR_SCOPES,
+        state,
+        code_challenge: challenge,
+        code_challenge_method: 'S256',
+        access_type: 'offline',
+        prompt: 'consent',
+      });
+      const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
+      // Use Capacitor Browser plugin to open in system browser and handle redirect
+      const Browser = window.Capacitor?.Plugins?.Browser;
+      if (Browser) {
+        // Listen for the app URL open event that fires when the custom scheme redirect happens
+        const { App } = window.Capacitor?.Plugins || {};
+        if (App) {
+          const listener = await App.addListener('appUrlOpen', async (event) => {
+            listener.remove();
+            await Browser.close();
+            await gCalHandleRedirect(event.url);
+          });
+        }
+        await Browser.open({ url: authUrl, windowName: '_blank' });
+      } else {
+        // Web fallback — redirect directly (works on GitHub Pages)
+        window.location.href = authUrl.replace(GOOGLE_REDIRECT_URI, window.location.origin + '/oauth-callback');
+      }
+    } catch(e) {
+      setGCalError('Sign-in failed: ' + e.message);
+    }
+  };
+
+  // Handle the OAuth redirect callback, exchange code for access token
+  const gCalHandleRedirect = async (url) => {
+    try {
+      const params = new URLSearchParams(url.split('?')[1] || url.split('#')[1] || '');
+      const code = params.get('code');
+      const state = params.get('state');
+      if (!code) { setGCalError('No auth code received'); return; }
+      if (state !== sessionStorage.getItem('gcal_state')) { setGCalError('State mismatch — possible CSRF'); return; }
+      const verifier = sessionStorage.getItem('gcal_verifier');
+      // Exchange auth code for access token using PKCE (no client secret)
+      const resp = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          client_id: GOOGLE_CLIENT_ID,
+          redirect_uri: GOOGLE_REDIRECT_URI,
+          grant_type: 'authorization_code',
+          code,
+          code_verifier: verifier,
+        }),
+      });
+      const data = await resp.json();
+      if (data.access_token) {
+        setGCalToken(data.access_token);
+        try { localStorage.setItem('ft_gcal_token', data.access_token); } catch(e) {}
+        if (data.refresh_token) { try { localStorage.setItem('ft_gcal_refresh', data.refresh_token); } catch(e) {} }
+        showToast('✅ Google Calendar connected!');
+        await gCalFetchEvents(data.access_token);
+      } else {
+        setGCalError('Token exchange failed: ' + (data.error_description || data.error || 'Unknown error'));
+      }
+    } catch(e) {
+      setGCalError('Auth failed: ' + e.message);
+    }
+  };
+
+  // Fetch upcoming events from Google Calendar (next 30 days)
+  const gCalFetchEvents = async (token = gCalToken) => {
+    if (!token) return;
+    setGCalSyncing(true);
+    setGCalError(null);
+    try {
+      const now = new Date().toISOString();
+      const end = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+      const resp = await fetch(
+        `https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${now}&timeMax=${end}&singleEvents=true&orderBy=startTime&maxResults=50`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (resp.status === 401) {
+        // Token expired — clear it and prompt re-auth
+        setGCalToken(null);
+        try { localStorage.removeItem('ft_gcal_token'); } catch(e) {}
+        setGCalError('Session expired — please sign in again');
+        return;
+      }
+      const data = await resp.json();
+      setGCalEvents(data.items || []);
+      showToast(`📅 Synced ${(data.items||[]).length} calendar events`);
+    } catch(e) {
+      setGCalError('Fetch failed: ' + e.message);
+    }
+    setGCalSyncing(false);
+  };
+
+  // Push an interaction log entry to Google Calendar as an event
+  const gCalPushEvent = async (title, dateStr, description = '', nodeId = null) => {
+    if (!gCalToken) { showToast('Connect Google Calendar first'); return; }
+    try {
+      const date = dateStr ? new Date(dateStr) : new Date();
+      const start = date.toISOString();
+      const end = new Date(date.getTime() + 60 * 60 * 1000).toISOString(); // 1 hour default
+      const node = nodeId ? nodes.find(n => n.id === nodeId) : null;
+      const resp = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${gCalToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          summary: title,
+          description: description + (node ? `\n\nFriendshipTree: ${node.label}` : ''),
+          start: { dateTime: start },
+          end: { dateTime: end },
+          colorId: '2', // sage green — matches the app's colour
+          source: { title: 'FriendshipTree', url: 'https://josephd-93.github.io/FriendshipTree/' },
+        }),
+      });
+      const data = await resp.json();
+      if (data.id) {
+        showToast('📅 Added to Google Calendar');
+        await gCalFetchEvents(); // refresh the event list
+        return data;
+      } else {
+        showToast('Calendar push failed: ' + (data.error?.message || 'Unknown error'));
+      }
+    } catch(e) {
+      showToast('Calendar push failed: ' + e.message);
+    }
+  };
+
+  const gCalSignOut = () => {
+    setGCalToken(null);
+    setGCalEvents([]);
+    try { localStorage.removeItem('ft_gcal_token'); localStorage.removeItem('ft_gcal_refresh'); } catch(e) {}
+    showToast('Disconnected from Google Calendar');
+  };
+
+  // ───────────────────────────────────────────────────────────────────────────
+
   const handleImportContact = async () => {
+
     const isNative = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 
 
@@ -4367,6 +4561,24 @@ function AppInner() {
     saveTimer.current = setTimeout(doSaveNodes, 500);
   }, [nodes]);
   useEffect(() => { try { localStorage.setItem('ft_links', JSON.stringify(links)); } catch(e) {} }, [links]);
+  useEffect(() => { try { localStorage.setItem('ft_cal_events', JSON.stringify(calEvents)); } catch(e) {} }, [calEvents]);
+  useEffect(() => { try { localStorage.setItem('ft_cal_recurring', JSON.stringify(calRecurring)); } catch(e) {} }, [calRecurring]);
+  useEffect(() => {
+    if (calRecurring.length === 0) return;
+    const today = new Date();
+    const todayStr = today.toISOString().slice(0,10);
+    const dayOfWeek = today.getDay();
+    const dayOfMonth = today.getDate();
+    const due = calRecurring.filter(r => {
+      if (r.lastConfirmed === todayStr) return false;
+      if (r.repeat === 'daily') return true;
+      if (r.repeat === 'weekly') return r.dayOfWeek === dayOfWeek;
+      if (r.repeat === 'monthly') return r.dayOfMonth === dayOfMonth;
+      return false;
+    });
+    if (due.length > 0) setPendingReminders(due);
+  }, [calRecurring]); // eslint-disable-line
+
   useEffect(() => { try { localStorage.setItem('ft_dimensions', JSON.stringify(dimensions)); } catch(e) {} }, [dimensions]);
   // Force an immediate, non-debounced save the moment the app is backgrounded
   // or closed -- this is the actual fix for people/photos going missing after
@@ -4380,6 +4592,8 @@ function AppInner() {
       doSaveNodes();
       try { localStorage.setItem('ft_links', JSON.stringify(links)); } catch(e) {}
       try { localStorage.setItem('ft_dimensions', JSON.stringify(dimensions)); } catch(e) {}
+      try { localStorage.setItem('ft_cal_events', JSON.stringify(calEvents)); } catch(e) {}
+      try { localStorage.setItem('ft_cal_recurring', JSON.stringify(calRecurring)); } catch(e) {}
       // A webview's visibilitychange/pagehide handler can't reliably await
       // async work before the process actually suspends, so a still-pending
       // IndexedDB photo write genuinely can't be guaranteed to finish here.
@@ -5725,7 +5939,14 @@ Return only the JSON array. If nothing trackable is found, return [].`;
     if (node?.isFamily) return 'family';
     return score < 100 ? 1 : score < 300 ? 2 : score < 600 ? 3 : score < 1000 ? 4 : 5;
   };
-  const TIER_SCORE_MAP = [0, 0, 100, 300, 600, 1000];
+  const TIER_SCORE_MAP = [0, 0, 100, 300, 600, 1000]; // tier minimums -- used for progress bars and display
+  // Midpoints of each tier (1–5), used whenever resetting or picking a tier
+  // from scratch -- landing someone at the middle of a tier rather than its
+  // very bottom gives them headroom in both directions from the start.
+  // Tier 1: 0-99 mid=50, Tier 2: 100-299 mid=200, Tier 3: 300-599 mid=450,
+  // Tier 4: 600-999 mid=800, Tier 5: 1000+ mid=1200 (treating as 1000-1400)
+  const TIER_MIDPOINTS = [0, 50, 200, 450, 800, 1200]; // index by tier number
+
   // Safe level lookup — handles both numeric tiers and 'family'
   const getLevel = (score, node) => {
     const t = getTier(score, node);
@@ -7191,7 +7412,20 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
                         {/* Interaction log */}
                         <div className="px-3 py-2">
-                          <p className="text-[10px] font-semibold uppercase tracking-wider opacity-50 mb-2">Interaction History</p>
+                          <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:6}}>
+                            <p className="text-[10px] font-semibold uppercase tracking-wider opacity-50">Interaction History</p>
+                            {gCalToken && (
+                              <button
+                                onClick={async () => {
+                                  const title = `Catch up with ${selectedNode.label}`;
+                                  await gCalPushEvent(title, new Date().toISOString(), '', selectedNode.id);
+                                }}
+                                style={{fontSize:10, padding:'2px 8px', borderRadius:99,
+                                  background:'#10b98120', color:'#10b981', border:'none', cursor:'pointer', fontWeight:600}}>
+                                📅 Schedule time
+                              </button>
+                            )}
+                          </div>
                           {interactions.length === 0
                             ? <p className="text-xs opacity-40 italic">No interactions logged yet.</p>
                             : <div className="space-y-1 max-h-28 overflow-y-auto">
@@ -7200,6 +7434,19 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                     <span>{entry.label}</span>
                                     <span className="opacity-50">{entry.date}</span>
                                     <span className="font-bold" style={{ color: currentLvl.color }}>+{entry.pts}</span>
+                                    {gCalToken && (
+                                      <button
+                                        onClick={() => gCalPushEvent(
+                                          `${entry.label} with ${selectedNode.label}`,
+                                          entry.ts ? new Date(entry.ts).toISOString() : new Date().toISOString(),
+                                          entry.note || '',
+                                          selectedNode.id
+                                        )}
+                                        style={{marginLeft:4, fontSize:9, padding:'1px 5px', borderRadius:99,
+                                          background:'#10b98115', color:'#10b981', border:'none', cursor:'pointer'}}>
+                                        📅
+                                      </button>
+                                    )}
                                   </div>
                                 ))}
                               </div>
@@ -7246,7 +7493,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                     } else if (lvl.tier === 'family') {
                                       setNodes(prev => prev.map(n => n.id === selectedNodeId ? { ...n, isFamily: true, isPartner: false } : n));
                                     } else {
-                                      setNodes(prev => prev.map(n => n.id === selectedNodeId ? { ...n, isFamily: false, isPartner: false, interactionScore: TIER_SCORE_MAP[lvl.tier] || 0 } : n));
+                                      setNodes(prev => prev.map(n => n.id === selectedNodeId ? { ...n, isFamily: false, isPartner: false, interactionScore: TIER_MIDPOINTS[lvl.tier] || TIER_MIDPOINTS[1] } : n));
                                     }
                                     showToast(`${lvl.emoji} Set to ${lvl.label}`);
                                   }}
@@ -8469,11 +8716,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               {/* Friendship level selector */}
               <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
                 {[
-                  {label:'New',    score:0,   color:'#bef264'},
-                  {label:'Friend', score:100, color:'#84cc16'},
-                  {label:'Good',   score:300, color:'#166534'},
-                  {label:'Close',  score:600, color:'#3b82f6'},
-                  {label:'Family', score:800, color:'#9333ea'},
+                  {label:'New',    score:50,   color:'#bef264'},
+                  {label:'Friend', score:200,  color:'#84cc16'},
+                  {label:'Good',   score:450,  color:'#166534'},
+                  {label:'Close',  score:800,  color:'#3b82f6'},
+                  {label:'Family', score:1200, color:'#9333ea'},
                   {label:'💑 Partner', score:1500, color:'#f43f5e'},
                 ].map(tier => (
                   <button key={tier.score}
@@ -9319,7 +9566,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 </g>
               );
             })()}
-            {viewMode === 'calendar' && (
+            {viewMode === 'calendar' && calViewMode === 'birthdays' && (
               <g>
                 {/* Shadow under vine */}
                 <path d={calendarPath} fill="none"
@@ -10323,7 +10570,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                               })()}
                             </>
                           )}
-                          {viewMode === 'calendar' && (
+                          {viewMode === 'calendar' && calViewMode === 'birthdays' && (
                             <>
                               {/* Arc name label inside circle at bottom */}
                               <g clipPath={`url(#clip-${node.id})`} style={{pointerEvents:'none'}}>
@@ -11171,7 +11418,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           const hubs = nodes.filter(n=>n.type==='hub'&&!n.hidden);
           const TIERS = [1,2,3,4,5];
           const TIER_LABELS = ['Budding','Growing','Established','Deep','Family'];
-          const TIER_SCORES = [0, 100, 300, 600, 1000];
+          const TIER_SCORES = [50, 200, 450, 800, 1200]; // midpoints of tiers 1-5
 
 
           const applyTier = (tier) => {
@@ -11443,7 +11690,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               style={{padding:'3px 8px', borderRadius:99, border:'none', cursor:'pointer', fontSize:10, fontWeight:700, background:'#ef4444', color:'white'}}>✕</button>
           </div>
         )}
-        {viewMode === 'calendar' && (
+        {viewMode === 'calendar' && calViewMode === 'birthdays' && (
           <div style={{position:'absolute',top:16,left:'50%',transform:'translateX(-50%)',zIndex:60,
             display:'flex',gap:6,background:theme.darkMode?'rgba(15,23,42,0.92)':'rgba(255,255,255,0.92)',
             borderRadius:99,padding:'6px 10px',boxShadow:'0 4px 20px rgba(0,0,0,0.2)',
@@ -11468,11 +11715,717 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             ))}
           </div>
         )}
+        {/* Google Calendar sync button — shown when in calendar view */}
+        {viewMode === 'calendar' && calViewMode === 'birthdays' && (
+          <button
+            onClick={() => setShowGCalPanel(p => !p)}
+            style={{position:'absolute', top:60, left:'50%', transform:'translateX(-50%)',
+              zIndex:60, display:'flex', alignItems:'center', gap:6,
+              background: gCalToken ? '#10b981' : (theme.darkMode?'rgba(15,23,42,0.92)':'rgba(255,255,255,0.92)'),
+              color: gCalToken ? 'white' : (theme.darkMode?'#94a3b8':'#64748b'),
+              border: `1px solid ${gCalToken?'#10b981':(theme.darkMode?'#334155':'#e2e8f0')}`,
+              borderRadius:99, padding:'5px 14px', fontSize:12, fontWeight:600, cursor:'pointer',
+              boxShadow:'0 4px 12px rgba(0,0,0,0.15)'}}>
+            📅 {gCalToken ? `Google Calendar (${gCalEvents.length})` : 'Connect Google Calendar'}
+          </button>
+        )}
+        {/* Google Calendar panel */}
+        {showGCalPanel && viewMode === 'calendar' && (
+          <div style={{position:'absolute', top:105, left:'50%', transform:'translateX(-50%)',
+            zIndex:70, width:Math.min(360, window.innerWidth-32),
+            background:theme.darkMode?'#0f172a':'white',
+            border:`1px solid ${theme.darkMode?'#334155':'#e2e8f0'}`,
+            borderRadius:16, boxShadow:'0 8px 32px rgba(0,0,0,0.25)', overflow:'hidden'}}>
+            {/* Header */}
+            <div style={{padding:'14px 16px 10px', borderBottom:`1px solid ${theme.darkMode?'#1e293b':'#f1f5f9'}`,
+              display:'flex', alignItems:'center', justifyContent:'space-between'}}>
+              <div style={{display:'flex', alignItems:'center', gap:8}}>
+                <span style={{fontSize:20}}>📅</span>
+                <div>
+                  <div style={{fontSize:14, fontWeight:700, color:theme.darkMode?'white':'#0f172a'}}>Google Calendar</div>
+                  <div style={{fontSize:11, color:theme.darkMode?'#64748b':'#94a3b8'}}>
+                    {gCalToken ? 'Connected — events sync both ways' : 'Not connected'}
+                  </div>
+                </div>
+              </div>
+              <button onClick={() => setShowGCalPanel(false)}
+                style={{background:'none', border:'none', cursor:'pointer', fontSize:18,
+                  color:theme.darkMode?'#64748b':'#94a3b8', padding:4}}>×</button>
+            </div>
+            {/* Error banner */}
+            {gCalError && (
+              <div style={{margin:'10px 16px 0', padding:'8px 12px', borderRadius:8,
+                background:'#fef2f2', color:'#dc2626', fontSize:12}}>
+                ⚠️ {gCalError}
+              </div>
+            )}
+            {!gCalToken ? (
+              /* Sign-in state */
+              <div style={{padding:20, textAlign:'center'}}>
+                <div style={{fontSize:13, color:theme.darkMode?'#94a3b8':'#64748b', marginBottom:16, lineHeight:1.5}}>
+                  Connect your Google Calendar to sync events with FriendshipTree — see upcoming plans with friends and push interaction logs as calendar events.
+                </div>
+                <button onClick={gCalSignIn}
+                  style={{display:'flex', alignItems:'center', gap:10, margin:'0 auto',
+                    padding:'10px 20px', borderRadius:99, border:'1px solid #e2e8f0',
+                    background:'white', cursor:'pointer', fontSize:13, fontWeight:600, color:'#374151',
+                    boxShadow:'0 2px 8px rgba(0,0,0,0.1)'}}>
+                  <svg width="18" height="18" viewBox="0 0 24 24">
+                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                  </svg>
+                  Sign in with Google
+                </button>
+                <div style={{marginTop:12, fontSize:11, color:theme.darkMode?'#475569':'#94a3b8'}}>
+                  You'll need a Client ID set up in Google Cloud Console.{'\n'}See the setup guide in the app's README.
+                </div>
+              </div>
+            ) : (
+              /* Connected state */
+              <div>
+                {/* Action buttons */}
+                <div style={{padding:'10px 16px', display:'flex', gap:8,
+                  borderBottom:`1px solid ${theme.darkMode?'#1e293b':'#f1f5f9'}`}}>
+                  <button onClick={() => gCalFetchEvents()} disabled={gCalSyncing}
+                    style={{flex:1, padding:'8px 0', borderRadius:8, border:'none',
+                      background:'#10b981', color:'white', fontSize:12, fontWeight:600,
+                      cursor:gCalSyncing?'wait':'pointer', opacity:gCalSyncing?0.7:1}}>
+                    {gCalSyncing ? '⏳ Syncing…' : '🔄 Sync Now'}
+                  </button>
+                  <button onClick={gCalSignOut}
+                    style={{padding:'8px 14px', borderRadius:8, border:`1px solid ${theme.darkMode?'#334155':'#e2e8f0'}`,
+                      background:'none', color:theme.darkMode?'#94a3b8':'#64748b', fontSize:12,
+                      fontWeight:600, cursor:'pointer'}}>
+                    Disconnect
+                  </button>
+                </div>
+                {/* Upcoming events list */}
+                <div style={{maxHeight:280, overflowY:'auto', padding:'8px 0'}}>
+                  {gCalEvents.length === 0 ? (
+                    <div style={{padding:'20px 16px', textAlign:'center', fontSize:13,
+                      color:theme.darkMode?'#475569':'#94a3b8'}}>
+                      {gCalSyncing ? 'Loading events…' : 'No upcoming events in the next 30 days'}
+                    </div>
+                  ) : gCalEvents.map(event => {
+                    const start = event.start?.dateTime || event.start?.date;
+                    const startDate = start ? new Date(start) : null;
+                    const isAllDay = !event.start?.dateTime;
+                    // Try to match event title to a person in FriendshipTree
+                    const matchedNode = nodes.find(n =>
+                      n.type === 'friend' && n.label &&
+                      (event.summary || '').toLowerCase().includes(n.label.toLowerCase())
+                    );
+                    return (
+                      <div key={event.id}
+                        style={{padding:'10px 16px', borderBottom:`1px solid ${theme.darkMode?'#1e293b':'#f8fafc'}`,
+                          display:'flex', alignItems:'flex-start', gap:10}}>
+                        <div style={{flexShrink:0, width:36, textAlign:'center',
+                          background:theme.darkMode?'#1e293b':'#f1f5f9', borderRadius:8, padding:'4px 0'}}>
+                          {startDate && (
+                            <>
+                              <div style={{fontSize:9, fontWeight:700, color:'#10b981', textTransform:'uppercase'}}>
+                                {startDate.toLocaleDateString('en',{month:'short'})}
+                              </div>
+                              <div style={{fontSize:15, fontWeight:800, color:theme.darkMode?'white':'#0f172a', lineHeight:1}}>
+                                {startDate.getDate()}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                        <div style={{flex:1, minWidth:0}}>
+                          <div style={{fontSize:13, fontWeight:600, color:theme.darkMode?'white':'#0f172a',
+                            overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>
+                            {event.summary || '(no title)'}
+                          </div>
+                          <div style={{fontSize:11, color:theme.darkMode?'#64748b':'#94a3b8', marginTop:1}}>
+                            {isAllDay ? 'All day' : startDate?.toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'})}
+                            {matchedNode && <span style={{marginLeft:6, color:'#10b981'}}>· {matchedNode.label}</span>}
+                          </div>
+                        </div>
+                        {/* Push interaction log button if a person is matched */}
+                        {matchedNode && (
+                          <button
+                            onClick={() => {
+                              const logEntry = { type:'calendar', note:`Calendar event: ${event.summary}`, ts: startDate?.getTime() || Date.now() };
+                              setNodes(prev => prev.map(n => n.id === matchedNode.id ? {
+                                ...n, interactionLog: [...(n.interactionLog||[]), logEntry]
+                              } : n));
+                              showToast(`Logged to ${matchedNode.label}'s history`);
+                            }}
+                            style={{flexShrink:0, padding:'4px 8px', borderRadius:6,
+                              border:'none', background:'#10b98120', color:'#10b981',
+                              fontSize:11, fontWeight:600, cursor:'pointer'}}>
+                            Log
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                {/* Push a new event to Google Calendar */}
+                <div style={{padding:'10px 16px', borderTop:`1px solid ${theme.darkMode?'#1e293b':'#f1f5f9'}`}}>
+                  <button
+                    onClick={async () => {
+                      const title = prompt('Event title (e.g. "Coffee with Sarah"):');
+                      if (!title) return;
+                      await gCalPushEvent(title, new Date().toISOString());
+                    }}
+                    style={{width:'100%', padding:'8px 0', borderRadius:8,
+                      border:`1px dashed ${theme.darkMode?'#334155':'#e2e8f0'}`,
+                      background:'none', color:theme.darkMode?'#64748b':'#94a3b8',
+                      fontSize:12, fontWeight:600, cursor:'pointer'}}>
+                    + Add event to Google Calendar
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Monthly Calendar View ─────────────────────────────── */}
+        {viewMode === 'calendar' && calViewMode === 'monthly' && (() => {
+          const dm = theme.darkMode;
+          const today = new Date();
+          const todayStr = today.toISOString().slice(0,10);
+          const firstDay = new Date(calYear, calMonth, 1);
+          const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+          const startDow = firstDay.getDay();
+          const MONTH_NAMES_FULL = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+          const DAY_NAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+          const pad = n => String(n).padStart(2,'0');
+          const itemsByDate = {};
+          calEvents.forEach(ev => { (itemsByDate[ev.date] = itemsByDate[ev.date] || []).push(ev); });
+          gCalEvents.forEach(ev => {
+            const d = (ev.start?.dateTime || ev.start?.date || '').slice(0,10);
+            if (d) (itemsByDate[d] = itemsByDate[d] || []).push({...ev, _gcal:true});
+          });
+          nodes.forEach(n => {
+            if (!n.birthday) return;
+            const parts = (n.birthday||'').split('-');
+            if (parts.length < 3) return;
+            const key = `${calYear}-${parts[1]}-${parts[2]}`;
+            (itemsByDate[key] = itemsByDate[key] || []).push({_birthday:true, label:n.label, nodeId:n.id});
+          });
+          for (let d = 1; d <= daysInMonth; d++) {
+            const date = new Date(calYear, calMonth, d);
+            const dateStr = `${calYear}-${pad(calMonth+1)}-${pad(d)}`;
+            calRecurring.forEach(r => {
+              let due = false;
+              if (r.repeat === 'daily') due = true;
+              if (r.repeat === 'weekly' && r.dayOfWeek === date.getDay()) due = true;
+              if (r.repeat === 'monthly' && r.dayOfMonth === d) due = true;
+              if (due) (itemsByDate[dateStr] = itemsByDate[dateStr] || []).push({...r, _recurring:true});
+            });
+          }
+          const cells = [];
+          for (let i = 0; i < startDow; i++) cells.push(null);
+          for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+          while (cells.length % 7 !== 0) cells.push(null);
+          const onSwipeStart = (e) => { 
+            const t = e.touches?.[0] || e;
+            calSwipeRef.current.startX = t.clientX; 
+            calSwipeRef.current.startY = t.clientY; 
+            calSwipeRef.current.active = true; 
+          };
+          const onSwipeEnd = (e) => {
+            if (!calSwipeRef.current.active) return;
+            calSwipeRef.current.active = false;
+            const t = e.changedTouches?.[0] || e;
+            const dx = t.clientX - calSwipeRef.current.startX;
+            const dy = t.clientY - calSwipeRef.current.startY;
+            if (Math.abs(dx) < 50 || Math.abs(dy) > Math.abs(dx) * 0.8) return;
+            if (dx < 0) { let m = calMonth + 1, y = calYear; if (m > 11) { m = 0; y++; } setCalMonth(m); setCalYear(y); }
+            else { let m = calMonth - 1, y = calYear; if (m < 0) { m = 11; y--; } setCalMonth(m); setCalYear(y); }
+          };
+          return (
+            <div
+              onTouchStart={onSwipeStart}
+              onTouchEnd={onSwipeEnd}
+              style={{position:'absolute',inset:0,zIndex:55,display:'flex',flexDirection:'column',
+              background:dm?'#0f172a':'#f8fafc',overflowY:'auto',touchAction:'pan-y'}}>
+              {/* Header */}
+              <div style={{padding:'14px 16px 10px',display:'flex',alignItems:'center',gap:8,
+                background:dm?'#0f172a':'white',borderBottom:`1px solid ${dm?'#1e293b':'#e2e8f0'}`,
+                position:'sticky',top:0,zIndex:10}}>
+                <button onClick={()=>{let m=calMonth-1,y=calYear;if(m<0){m=11;y--;}setCalMonth(m);setCalYear(y);}}
+                  style={{padding:'6px 10px',borderRadius:8,border:`1px solid ${dm?'#334155':'#e2e8f0'}`,
+                    background:'none',color:dm?'white':'#0f172a',cursor:'pointer',fontSize:16}}>‹</button>
+                <div style={{flex:1,textAlign:'center'}}>
+                  <div style={{fontSize:18,fontWeight:800,color:dm?'white':'#0f172a'}}>
+                    {MONTH_NAMES_FULL[calMonth]} {calYear}
+                  </div>
+                </div>
+                <button onClick={()=>{let m=calMonth+1,y=calYear;if(m>11){m=0;y++;}setCalMonth(m);setCalYear(y);}}
+                  style={{padding:'6px 10px',borderRadius:8,border:`1px solid ${dm?'#334155':'#e2e8f0'}`,
+                    background:'none',color:dm?'white':'#0f172a',cursor:'pointer',fontSize:16}}>›</button>
+                <button onClick={()=>{setCalMonth(today.getMonth());setCalYear(today.getFullYear());}}
+                  style={{padding:'5px 10px',borderRadius:8,border:`1px solid ${dm?'#334155':'#e2e8f0'}`,
+                    background:'none',color:'#10b981',cursor:'pointer',fontSize:11,fontWeight:700}}>Today</button>
+              </div>
+              {/* Pending reminders */}
+              {pendingReminders.length > 0 && (
+                <div style={{margin:'10px 12px 0',borderRadius:10,overflow:'hidden',
+                  border:'1px solid #f59e0b',background:'#fefce8'}}>
+                  <div style={{padding:'8px 12px',fontSize:12,fontWeight:700,color:'#92400e',
+                    borderBottom:'1px solid #fde68a'}}>
+                    🔔 {pendingReminders.length} {pendingReminders.length===1?'activity':'activities'} due today
+                  </div>
+                  {pendingReminders.map((r,ri) => (
+                    <div key={ri} style={{display:'flex',alignItems:'center',gap:8,padding:'8px 12px',
+                      borderBottom:ri<pendingReminders.length-1?'1px solid #fde68a':'none'}}>
+                      <div style={{flex:1}}>
+                        <div style={{fontSize:13,fontWeight:600,color:'#92400e'}}>{r.title}</div>
+                        {r.nodeId && <div style={{fontSize:11,color:'#78350f'}}>{nodes.find(n=>n.id===r.nodeId)?.label}</div>}
+                      </div>
+                      <button onClick={()=>{
+                        if (r.nodeId && r.scoreIncrease) {
+                          setNodes(prev=>prev.map(n=>n.id===r.nodeId?{...n,
+                            interactionScore:Math.min(MAX_SCORE,(n.interactionScore||0)+(r.scoreIncrease||5)),
+                            prevScore:n.interactionScore||0,
+                            interactionLog:[...(n.interactionLog||[]),{label:r.title,date:today.toLocaleDateString(),pts:r.scoreIncrease||5,ts:Date.now()}]
+                          }:n));
+                        }
+                        setCalRecurring(prev=>prev.map(x=>x.id===r.id?{...x,lastConfirmed:todayStr}:x));
+                        setPendingReminders(prev=>prev.filter(x=>x.id!==r.id));
+                        showToast(r.nodeId?`✅ ${r.title} confirmed — score updated!`:`✅ ${r.title} done!`);
+                      }}
+                        style={{padding:'5px 12px',borderRadius:99,border:'none',
+                          background:'#10b981',color:'white',fontSize:12,fontWeight:700,cursor:'pointer'}}>
+                        ✓ Done
+                      </button>
+                      <button onClick={()=>setPendingReminders(prev=>prev.filter(x=>x.id!==r.id))}
+                        style={{padding:'5px 10px',borderRadius:99,border:'1px solid #fde68a',
+                          background:'none',color:'#92400e',fontSize:12,cursor:'pointer'}}>
+                        Skip
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {/* Action buttons */}
+              <div style={{display:'flex',gap:8,padding:'10px 12px 6px',flexWrap:'wrap'}}>
+                <button
+                  onPointerDown={() => {
+                    calAddHoldTimer.current = setTimeout(() => {
+                      // Long press → strong green multi-day mode
+                      setCalAddMode('multi');
+                      setCalMultiDays([]);
+                      calAddHoldTimer.current = null;
+                    }, 500);
+                  }}
+                  onPointerUp={() => {
+                    if (calAddHoldTimer.current) {
+                      // Short tap → single-add mode or cancel if already in a mode
+                      clearTimeout(calAddHoldTimer.current);
+                      calAddHoldTimer.current = null;
+                      if (calAddMode) { setCalAddMode(null); setCalMultiDays([]); }
+                      else setCalAddMode('single');
+                    }
+                  }}
+                  onPointerLeave={() => { clearTimeout(calAddHoldTimer.current); calAddHoldTimer.current = null; }}
+                  style={{flex:1, padding:'8px 0', borderRadius:8, border:'none', cursor:'pointer',
+                    fontSize:12, fontWeight:700, color:'white',
+                    background: calAddMode === 'multi' ? '#10b981' : calAddMode === 'single' ? '#86efac' : (dm?'#334155':'#e2e8f0'),
+                    color: calAddMode ? 'white' : (dm?'#94a3b8':'#64748b'),
+                    transition:'background 0.2s'}}>
+                  {calAddMode === 'multi' ? '🟢 Multi-day' : calAddMode === 'single' ? '+ Add Event' : '+ Add Event'}
+                </button>
+                {calAddMode === 'multi' && (
+                  <button
+                    onClick={() => {
+                      if (calMultiDays.length > 0) setShowAddCalEvent(calMultiDays[0]);
+                      else { setCalAddMode(null); setCalMultiDays([]); }
+                    }}
+                    style={{flex:1, padding:'8px 0', borderRadius:8, border:'none',
+                      background:'#10b981', color:'white', fontSize:12, fontWeight:700, cursor:'pointer'}}>
+                    ✓ Done ({calMultiDays.length})
+                  </button>
+                )}
+                <button onClick={()=>setShowAddRecurring(true)}
+                  style={{flex:1,padding:'8px 0',borderRadius:8,
+                    border:`1px solid ${dm?'#334155':'#e2e8f0'}`,
+                    background:'none',color:dm?'#94a3b8':'#64748b',fontSize:12,fontWeight:700,cursor:'pointer'}}>
+                  🔁 Recurring
+                </button>
+                <button onClick={()=>setCalViewMode('birthdays')}
+                  style={{flex:1,padding:'8px 0',borderRadius:8,
+                    border:`1px solid ${dm?'#334155':'#e2e8f0'}`,
+                    background:'none',color:dm?'#94a3b8':'#64748b',fontSize:12,fontWeight:700,cursor:'pointer'}}>
+                  🎂 Birthdays
+                </button>
+              </div>
+              {/* Day name headers */}
+              <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',
+                padding:'0 12px',gap:2,marginBottom:2}}>
+                {DAY_NAMES.map(d => (
+                  <div key={d} style={{textAlign:'center',fontSize:10,fontWeight:700,
+                    color:dm?'#475569':'#94a3b8',padding:'4px 0',
+                    textTransform:'uppercase',letterSpacing:0.5}}>{d}</div>
+                ))}
+              </div>
+              {/* Day cells */}
+              <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',
+                padding:'0 12px 12px',gap:3,flex:1}}>
+                {cells.map((day,ci) => {
+                  if (!day) return <div key={`b${ci}`}/>;
+                  const dateStr = `${calYear}-${pad(calMonth+1)}-${pad(day)}`;
+                  const isToday = dateStr === todayStr;
+                  const items = itemsByDate[dateStr] || [];
+                  const isSelected = calMultiDays.includes(dateStr);
+                  const cellBg = isSelected ? '#bbf7d0'
+                    : isToday ? (dm?'#064e3b':'#ecfdf5')
+                    : (dm?'#1e293b':'white');
+                  const cellBorder = isSelected ? '#10b981'
+                    : isToday ? '#10b981'
+                    : (dm?'#334155':'#e2e8f0');
+                  return (
+                    <div key={dateStr}
+                      onClick={() => {
+                        if (calAddMode === 'single') {
+                          setCalAddMode(null);
+                          setShowAddCalEvent(dateStr);
+                        } else if (calAddMode === 'multi') {
+                          setCalMultiDays(prev =>
+                            prev.includes(dateStr) ? prev.filter(d=>d!==dateStr) : [...prev, dateStr]
+                          );
+                        } else {
+                          setCalDayDetail(dateStr);
+                        }
+                      }}
+                      style={{minHeight:56,borderRadius:8,padding:'4px 5px',
+                        background:cellBg,
+                        border:`1px solid ${cellBorder}`,
+                        cursor:'pointer',overflow:'hidden',
+                        boxShadow:isSelected?'0 0 0 2px #10b981':undefined}}>
+                      <div style={{fontSize:12,fontWeight:isToday||isSelected?800:600,
+                        color:isToday||isSelected?'#10b981':(dm?'white':'#0f172a'),marginBottom:2}}>{day}</div>
+                      <div style={{display:'flex',gap:2,flexWrap:'wrap',marginBottom:2}}>
+                        {items.some(x=>x._birthday) && <div style={{width:5,height:5,borderRadius:'50%',background:'#f59e0b'}}/>}
+                        {items.some(x=>x._recurring) && <div style={{width:5,height:5,borderRadius:'50%',background:'#8b5cf6'}}/>}
+                        {items.some(x=>!x._birthday&&!x._recurring) && <div style={{width:5,height:5,borderRadius:'50%',background:'#10b981'}}/>}
+                      </div>
+                      {items.slice(0,2).map((item,ii) => (
+                        <div key={ii} style={{fontSize:8,lineHeight:1.3,
+                          color:item._birthday?'#92400e':item._gcal?'#1d4ed8':item._recurring?'#6d28d9':(dm?'#94a3b8':'#475569'),
+                          overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                          {item._birthday?`🎂 ${item.label}`:item.title||item.summary||''}
+                        </div>
+                      ))}
+                      {items.length > 2 && <div style={{fontSize:8,color:dm?'#475569':'#94a3b8'}}>+{items.length-2}</div>}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* ── Day Detail Popup ──────────────────────────────────── */}
+              {calDayDetail && (() => {
+                const detailItems = itemsByDate[calDayDetail] || [];
+                const [,dMonth,,dDay] = calDayDetail.match(/(\d+)-(\d+)-(\d+)/) || [];
+                const label = calDayDetail === todayStr ? 'Today' : `${MONTH_NAMES_FULL[calMonth]} ${parseInt(calDayDetail.slice(8))}`;
+                return (
+                  <div style={{position:'fixed',inset:0,zIndex:200,display:'flex',
+                    alignItems:'flex-end',background:'rgba(0,0,0,0.5)',paddingBottom:'calc(68px + env(safe-area-inset-bottom, 0px))'}}
+                    onClick={e => { if (e.target === e.currentTarget) setCalDayDetail(null); }}>
+                    <div style={{width:'100%',background:dm?'#0f172a':'white',
+                      borderRadius:'16px 16px 0 0',padding:'20px 16px',
+                      paddingBottom:'max(20px, env(safe-area-inset-bottom, 20px))',
+                      maxHeight:'70vh',overflowY:'auto',boxSizing:'border-box'}}>
+                      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
+                        <div style={{fontSize:16,fontWeight:800,color:dm?'white':'#0f172a'}}>{label}</div>
+                        <button onClick={() => setCalDayDetail(null)}
+                          style={{background:'none',border:'none',fontSize:22,lineHeight:1,
+                            color:dm?'#64748b':'#94a3b8',cursor:'pointer',padding:'0 2px'}}>×</button>
+                      </div>
+                      {/* Add event button sits as first row, like an event entry */}
+                      <div onClick={() => { setCalDayDetail(null); setShowAddCalEvent(calDayDetail); }}
+                        style={{display:'flex',alignItems:'center',gap:10,padding:'10px 0',
+                          borderBottom:`1px solid ${dm?'#1e293b':'#f1f5f9'}`,cursor:'pointer'}}>
+                        <div style={{width:8,height:8,borderRadius:'50%',flexShrink:0,background:'#10b981',
+                          boxShadow:'0 0 0 3px #10b98130'}}/>
+                        <div style={{fontSize:13,fontWeight:600,color:'#10b981'}}>+ Add event to this day</div>
+                      </div>
+                      {detailItems.length === 0 ? (
+                        <div style={{textAlign:'center',padding:'24px 0',
+                          fontSize:13,color:dm?'#475569':'#94a3b8'}}>
+                          Nothing else planned for this day
+                        </div>
+                      ) : detailItems.map((item, ii) => (
+                        <div key={ii} style={{display:'flex',alignItems:'flex-start',gap:10,
+                          padding:'10px 0',borderBottom:`1px solid ${dm?'#1e293b':'#f1f5f9'}`}}>
+                          <div style={{width:8,height:8,borderRadius:'50%',marginTop:4,flexShrink:0,
+                            background:item._birthday?'#f59e0b':item._recurring?'#8b5cf6':item._gcal?'#4285F4':'#10b981'}}/>
+                          <div style={{flex:1}}>
+                            <div style={{fontSize:13,fontWeight:600,color:dm?'white':'#0f172a'}}>
+                              {item._birthday ? `🎂 ${item.label}'s birthday` : item.title || item.summary || ''}
+                            </div>
+                            {item.note && <div style={{fontSize:11,color:dm?'#64748b':'#94a3b8',marginTop:2}}>{item.note}</div>}
+                            {(item.nodeIds?.length > 0 || item.nodeId) && (
+                              <div style={{fontSize:11,color:'#10b981',marginTop:2}}>
+                                → {(item.nodeIds?.length > 0 ? item.nodeIds : [item.nodeId])
+                                    .map(id => nodes.find(n=>n.id===id)?.label).filter(Boolean).join(', ')}
+                              </div>
+                            )}
+                            {item._recurring && <div style={{fontSize:10,color:'#8b5cf6',marginTop:2}}>🔁 {item.repeat}</div>}
+                            {item._gcal && <div style={{fontSize:10,color:'#4285F4',marginTop:2}}>📅 Google Calendar</div>}
+                          </div>
+                          {!item._birthday && !item._gcal && !item._recurring && (
+                            <button onClick={() => {
+                              setCalEvents(prev => prev.filter(e => e.id !== item.id));
+                              showToast('Event removed');
+                            }}
+                              style={{padding:'2px 8px',borderRadius:99,border:'none',
+                                background:'#fee2e2',color:'#dc2626',fontSize:10,cursor:'pointer',flexShrink:0}}>
+                              Remove
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+              {showAddCalEvent && (
+                <div style={{position:'fixed',inset:0,zIndex:200,display:'flex',
+                  alignItems:'flex-end',background:'rgba(0,0,0,0.5)',paddingBottom:'calc(68px + env(safe-area-inset-bottom, 0px))'}}>
+                  <div style={{width:'100%',background:dm?'#0f172a':'white',
+                    borderRadius:'16px 16px 0 0',
+                    padding:'20px 16px',
+                    paddingBottom:'max(20px, env(safe-area-inset-bottom, 20px))',
+                    maxHeight:'70vh',overflowY:'auto',
+                    boxSizing:'border-box'}}>
+                    <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
+                      <div style={{fontSize:15,fontWeight:800,color:dm?'white':'#0f172a'}}>
+                        Add Event — {showAddCalEvent}
+                      </div>
+                      <button onClick={()=>setShowAddCalEvent(null)}
+                        style={{background:'none',border:'none',fontSize:22,lineHeight:1,
+                          color:dm?'#64748b':'#94a3b8',cursor:'pointer',padding:'0 2px'}}>×</button>
+                    </div>
+                    <div style={{display:'flex',flexDirection:'column',gap:10}}>
+                      <input id="cal-ev-title" placeholder="Title (e.g. Coffee with Sarah, Gym)"
+                        style={{padding:'10px 12px',borderRadius:8,border:`1px solid ${dm?'#334155':'#e2e8f0'}`,
+                          background:dm?'#1e293b':'#f8fafc',color:dm?'white':'#0f172a',fontSize:13}}/>
+                      <input id="cal-ev-note" placeholder="Notes (optional)"
+                        style={{padding:'10px 12px',borderRadius:8,border:`1px solid ${dm?'#334155':'#e2e8f0'}`,
+                          background:dm?'#1e293b':'#f8fafc',color:dm?'white':'#0f172a',fontSize:13}}/>
+                      {/* Multi-person picker — stack/list style */}
+                      <div>
+                        <div style={{fontSize:11,fontWeight:700,color:dm?'#64748b':'#94a3b8',
+                          textTransform:'uppercase',letterSpacing:0.5,marginBottom:6}}>
+                          People {calEventSelectedPeople.length > 0 ? `(${calEventSelectedPeople.length} selected)` : '(optional)'}
+                        </div>
+                        <div style={{maxHeight:180,overflowY:'auto',display:'flex',flexDirection:'column',gap:4,
+                          border:`1px solid ${dm?'#334155':'#e2e8f0'}`,borderRadius:8,padding:6,
+                          background:dm?'#1e293b':'#f8fafc'}}>
+                          {nodes.filter(n=>n.type==='friend'&&n.label).map(n => {
+                            const sel = calEventSelectedPeople.includes(n.id);
+                            const tier = getTier(n.interactionScore||0, n);
+                            const tierColors = ['','#bef264','#22c55e','#3b82f6','#8b5cf6','#ec4899'];
+                            const tc = tierColors[tier] || '#94a3b8';
+                            return (
+                              <div key={n.id}
+                                onClick={() => setCalEventSelectedPeople(prev =>
+                                  prev.includes(n.id) ? prev.filter(id=>id!==n.id) : [...prev, n.id]
+                                )}
+                                style={{display:'flex',alignItems:'center',gap:10,padding:'7px 8px',
+                                  borderRadius:7,cursor:'pointer',transition:'all 0.15s',
+                                  background: sel ? (dm?'#064e3b':'#ecfdf5') : 'transparent',
+                                  border:`2px solid ${sel ? '#10b981' : 'transparent'}`}}>
+                                {/* Photo or initials */}
+                                <div style={{width:32,height:32,borderRadius:'50%',flexShrink:0,
+                                  overflow:'hidden',border:`2px solid ${tc}`,
+                                  background:dm?'#334155':'#e2e8f0',
+                                  display:'flex',alignItems:'center',justifyContent:'center'}}>
+                                  {n.img
+                                    ? <img src={n.img} style={{width:'100%',height:'100%',objectFit:'cover'}}/>
+                                    : <span style={{fontSize:12,fontWeight:700,color:dm?'white':'#475569'}}>
+                                        {(n.label||'?').slice(0,2).toUpperCase()}
+                                      </span>
+                                  }
+                                </div>
+                                <div style={{flex:1,minWidth:0}}>
+                                  <div style={{fontSize:13,fontWeight:600,
+                                    color:sel?'#10b981':(dm?'white':'#0f172a'),
+                                    overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                                    {n.label}
+                                  </div>
+                                  <div style={{fontSize:10,color:dm?'#64748b':'#94a3b8'}}>
+                                    {['','Acquaintance','Friend','Good friend','Close friend','Family/Partner'][tier]||''}
+                                  </div>
+                                </div>
+                                {sel && <div style={{fontSize:16,color:'#10b981'}}>✓</div>}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      {gCalToken && (
+                        <label style={{display:'flex',alignItems:'center',gap:8,fontSize:13,
+                          color:dm?'#94a3b8':'#64748b',cursor:'pointer'}}>
+                          <input type="checkbox" id="cal-ev-gcal"/> Also add to Google Calendar
+                        </label>
+                      )}
+                      <div style={{display:'flex',gap:8,marginTop:4}}>
+                        <button onClick={async()=>{
+                          const t=document.getElementById('cal-ev-title')?.value?.trim();
+                          if(!t)return;
+                          const n=document.getElementById('cal-ev-note')?.value?.trim();
+                          const gcal=document.getElementById('cal-ev-gcal')?.checked;
+                          const datesToSave = calMultiDays.length > 0 ? calMultiDays : [showAddCalEvent];
+                          const newEvs = datesToSave.map((date, i) => ({
+                            id: (Date.now() + i).toString(), date, title:t, note:n,
+                            nodeIds: calEventSelectedPeople.length > 0 ? [...calEventSelectedPeople] : [],
+                            nodeId: calEventSelectedPeople[0] || null, // keep for backwards compat
+                          }));
+                          setCalEvents(prev=>[...prev,...newEvs]);
+                          setCalMultiDays([]);
+                          setCalAddMode(null);
+                          setCalEventSelectedPeople([]);
+                          if(gcal&&gCalToken) {
+                            const peopleLabels = calEventSelectedPeople.map(id=>nodes.find(nd=>nd.id===id)?.label).filter(Boolean).join(', ');
+                            await gCalPushEvent(t,new Date(showAddCalEvent).toISOString(),n+(peopleLabels?`\nWith: ${peopleLabels}`:''),calEventSelectedPeople[0]||null);
+                          }
+                          setShowAddCalEvent(null);
+                          showToast('Event added!');
+                        }}
+                          style={{flex:1,padding:'10px 0',borderRadius:8,border:'none',
+                            background:'#10b981',color:'white',fontSize:13,fontWeight:700,cursor:'pointer'}}>
+                          Save
+                        </button>
+                        <button onClick={()=>{setShowAddCalEvent(null);setCalEventSelectedPeople([]);}}
+                          style={{flex:1,padding:'10px 0',borderRadius:8,
+                            border:`1px solid ${dm?'#334155':'#e2e8f0'}`,
+                            background:'none',color:dm?'#94a3b8':'#64748b',fontSize:13,cursor:'pointer'}}>
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {/* Add Recurring Modal */}
+              {showAddRecurring && (
+                <div style={{position:'fixed',inset:0,zIndex:200,display:'flex',
+                  alignItems:'flex-end',background:'rgba(0,0,0,0.5)',paddingBottom:'calc(68px + env(safe-area-inset-bottom, 0px))'}}>
+                  <div style={{width:'100%',background:dm?'#0f172a':'white',borderRadius:'16px 16px 0 0',
+                    padding:'20px 16px',
+                    paddingBottom:'max(20px, env(safe-area-inset-bottom, 20px))',
+                    maxHeight:'80vh',overflowY:'auto',boxSizing:'border-box'}}>
+                    <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:4}}>
+                      <div style={{fontSize:15,fontWeight:800,color:dm?'white':'#0f172a'}}>
+                        Add Recurring Activity
+                      </div>
+                      <button onClick={()=>setShowAddRecurring(false)}
+                        style={{background:'none',border:'none',fontSize:22,lineHeight:1,
+                          color:dm?'#64748b':'#94a3b8',cursor:'pointer',padding:'0 2px'}}>×</button>
+                    </div>
+                    <div style={{fontSize:12,color:dm?'#64748b':'#94a3b8',marginBottom:14}}>
+                      Confirm each time it's done to increase score
+                    </div>
+                    <div style={{display:'flex',flexDirection:'column',gap:10}}>
+                      <input id="rec-title" placeholder="Activity (e.g. Call Mum, Weekly gym)"
+                        style={{padding:'10px 12px',borderRadius:8,border:`1px solid ${dm?'#334155':'#e2e8f0'}`,
+                          background:dm?'#1e293b':'#f8fafc',color:dm?'white':'#0f172a',fontSize:13}}/>
+                      <select id="rec-repeat"
+                        style={{padding:'10px 12px',borderRadius:8,border:`1px solid ${dm?'#334155':'#e2e8f0'}`,
+                          background:dm?'#1e293b':'#f8fafc',color:dm?'white':'#0f172a',fontSize:13}}>
+                        <option value="daily">Every day</option>
+                        <option value="weekly">Every week (same day)</option>
+                        <option value="monthly">Every month (same date)</option>
+                      </select>
+                      <select id="rec-node"
+                        style={{padding:'10px 12px',borderRadius:8,border:`1px solid ${dm?'#334155':'#e2e8f0'}`,
+                          background:dm?'#1e293b':'#f8fafc',color:dm?'white':'#0f172a',fontSize:13}}>
+                        <option value="">No score increase (general task)</option>
+                        {nodes.filter(n=>n.type==='friend'&&n.label).map(n=>(
+                          <option key={n.id} value={n.id}>Score → {n.label}</option>
+                        ))}
+                      </select>
+                      <select id="rec-pts"
+                        style={{padding:'10px 12px',borderRadius:8,border:`1px solid ${dm?'#334155':'#e2e8f0'}`,
+                          background:dm?'#1e293b':'#f8fafc',color:dm?'white':'#0f172a',fontSize:13}}>
+                        <option value="5">+5 pts (light touch)</option>
+                        <option value="10">+10 pts (regular)</option>
+                        <option value="20">+20 pts (meaningful)</option>
+                        <option value="30">+30 pts (significant)</option>
+                      </select>
+                      <div style={{display:'flex',gap:8,marginTop:4}}>
+                        <button onClick={()=>{
+                          const t=document.getElementById('rec-title')?.value?.trim();
+                          if(!t)return;
+                          const repeat=document.getElementById('rec-repeat')?.value;
+                          const nid=document.getElementById('rec-node')?.value;
+                          const pts=parseInt(document.getElementById('rec-pts')?.value||'10');
+                          const now=new Date();
+                          setCalRecurring(prev=>[...prev,{
+                            id:Date.now().toString(),title:t,repeat,
+                            dayOfWeek:now.getDay(),dayOfMonth:now.getDate(),
+                            nodeId:nid||null,scoreIncrease:pts,
+                            createdAt:todayStr,lastConfirmed:null,
+                          }]);
+                          setShowAddRecurring(false);
+                          showToast(`🔁 "${t}" added as recurring`);
+                        }}
+                          style={{flex:1,padding:'10px 0',borderRadius:8,border:'none',
+                            background:'#10b981',color:'white',fontSize:13,fontWeight:700,cursor:'pointer'}}>
+                          Save
+                        </button>
+                        <button onClick={()=>setShowAddRecurring(false)}
+                          style={{flex:1,padding:'10px 0',borderRadius:8,
+                            border:`1px solid ${dm?'#334155':'#e2e8f0'}`,
+                            background:'none',color:dm?'#94a3b8':'#64748b',fontSize:13,cursor:'pointer'}}>
+                          Cancel
+                        </button>
+                      </div>
+                      {calRecurring.length > 0 && (
+                        <div style={{marginTop:8,borderTop:`1px solid ${dm?'#1e293b':'#f1f5f9'}`,paddingTop:10}}>
+                          <div style={{fontSize:11,fontWeight:700,color:dm?'#64748b':'#94a3b8',
+                            textTransform:'uppercase',letterSpacing:0.5,marginBottom:8}}>Active recurring</div>
+                          {calRecurring.map(r=>(
+                            <div key={r.id} style={{display:'flex',alignItems:'center',gap:8,marginBottom:6,
+                              padding:'8px 10px',borderRadius:8,background:dm?'#1e293b':'#f8fafc'}}>
+                              <div style={{flex:1}}>
+                                <div style={{fontSize:13,fontWeight:600,color:dm?'white':'#0f172a'}}>{r.title}</div>
+                                <div style={{fontSize:11,color:dm?'#64748b':'#94a3b8'}}>
+                                  {r.repeat} · {r.nodeId?`+${r.scoreIncrease}pts → ${nodes.find(n=>n.id===r.nodeId)?.label||'?'}`:'general task'}
+                                </div>
+                              </div>
+                              <button onClick={()=>setCalRecurring(prev=>prev.filter(x=>x.id!==r.id))}
+                                style={{padding:'3px 8px',borderRadius:99,border:'none',
+                                  background:'#fee2e2',color:'#dc2626',fontSize:11,cursor:'pointer'}}>
+                                Remove
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+        {/* Back to monthly button when in birthdays view */}
+        {viewMode === 'calendar' && calViewMode === 'birthdays' && (
+          <button onClick={()=>setCalViewMode('monthly')}
+            style={{position:'absolute',top:12,left:12,zIndex:60,
+              padding:'6px 12px',borderRadius:99,border:'none',
+              background:theme.darkMode?'rgba(15,23,42,0.9)':'rgba(255,255,255,0.9)',
+              color:theme.darkMode?'#94a3b8':'#64748b',fontSize:12,fontWeight:700,cursor:'pointer',
+              boxShadow:'0 2px 8px rgba(0,0,0,0.15)'}}>
+            ← Calendar
+          </button>
+        )}
+        {viewMode === 'map' && (
         <div className={`absolute bottom-6 right-6 flex items-center space-x-2 p-2 rounded-xl shadow-lg border ${theme.darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`} style={{zIndex:120}}>
           <button onClick={() => setTransform(p => ({ ...p, scale: Math.max(0.01, p.scale / 1.3) }))} className={`p-2 rounded-lg transition-colors ${theme.darkMode ? 'hover:bg-slate-700 text-slate-300' : 'hover:bg-slate-100 text-slate-600'}`}><ZoomOut className="w-5 h-5" /></button>
           <button onClick={() => { const rect = svgRef.current ? svgRef.current.getBoundingClientRect() : { width: window.innerWidth, height: window.innerHeight }; setTransform({ x: rect.width/2, y: rect.height/2, scale: 0.5 }); }} title="Recenter" className={`p-2 rounded-lg transition-colors ${theme.darkMode ? 'hover:bg-slate-700 text-slate-300' : 'hover:bg-slate-100 text-slate-600'}`}><Home className="w-5 h-5" /></button>
           <button onClick={() => setTransform(p => ({ ...p, scale: Math.min(3, p.scale * 1.3) }))} className={`p-2 rounded-lg transition-colors ${theme.darkMode ? 'hover:bg-slate-700 text-slate-300' : 'hover:bg-slate-100 text-slate-600'}`}><ZoomIn className="w-5 h-5" /></button>
         </div>
+        )}
 
 
         {/* Mole keyframe styles */}
