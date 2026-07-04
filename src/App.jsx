@@ -11946,7 +11946,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               style={{position:'absolute',inset:0,zIndex:55,display:'flex',flexDirection:'column',
               background:dm?'#0f172a':'#f8fafc',overflowY:'auto',touchAction:'pan-y'}}>
               {/* Header */}
-              <div style={{padding:'14px 16px 10px',display:'flex',alignItems:'center',gap:8,
+              <div style={{padding:'14px 16px 10px',
+                paddingTop:'calc(env(safe-area-inset-top, 0px) + 14px)',
+                display:'flex',alignItems:'center',gap:8,
                 background:dm?'#0f172a':'white',borderBottom:`1px solid ${dm?'#1e293b':'#e2e8f0'}`,
                 position:'sticky',top:0,zIndex:10}}>
                 <button onClick={()=>{let m=calMonth-1,y=calYear;if(m<0){m=11;y--;}setCalMonth(m);setCalYear(y);}}
@@ -18327,7 +18329,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         <>
           <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:198}}
             onClick={()=>setShowMapStyleBar(false)}/>
-          <div style={{position:'fixed', left:8, right:8, bottom:64, zIndex:199,
+          <div style={{position:'fixed', left:8, right:8, bottom:'calc(64px + env(safe-area-inset-bottom, 0px))', zIndex:199,
             background:theme.darkMode?'#1e293b':'white', borderRadius:16,
             boxShadow:'0 -4px 24px rgba(0,0,0,0.35)',
             border:`1px solid ${theme.darkMode?'#334155':'#e2e8f0'}`,
