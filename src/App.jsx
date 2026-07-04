@@ -11715,7 +11715,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             ))}
           </div>
         )}
-        {/* Google Calendar sync button — shown when in calendar view */}
+        {/* Google Calendar sync button — only floating in birthdays mode,
+            in monthly mode it appears in the action buttons row instead */}
         {viewMode === 'calendar' && calViewMode === 'birthdays' && (
           <button
             onClick={() => setShowGCalPanel(p => !p)}
@@ -12056,6 +12057,14 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     border:`1px solid ${dm?'#334155':'#e2e8f0'}`,
                     background:'none',color:dm?'#94a3b8':'#64748b',fontSize:12,fontWeight:700,cursor:'pointer'}}>
                   🎂 Birthdays
+                </button>
+                <button onClick={()=>setShowGCalPanel(p=>!p)}
+                  style={{flex:1,padding:'8px 0',borderRadius:8,
+                    border:`1px solid ${gCalToken?'#10b981':(dm?'#334155':'#e2e8f0')}`,
+                    background:gCalToken?'#10b98120':'none',
+                    color:gCalToken?'#10b981':(dm?'#94a3b8':'#64748b'),
+                    fontSize:12,fontWeight:700,cursor:'pointer'}}>
+                  📅 {gCalToken ? 'GCal' : 'GCal'}
                 </button>
               </div>
               {/* Day name headers */}
@@ -17274,7 +17283,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         return (
           <div style={{position:'absolute',top:0,left:0,right:0,bottom:0,zIndex:50,background:bg,display:'flex',flexDirection:'column',overflow:'hidden',paddingBottom:56}}>
             {/* Header */}
-            <div style={{padding:'12px 20px 0',background:card,borderBottom:`1px solid ${border}`,flexShrink:0}}>
+            <div style={{padding:'12px 20px 0',paddingTop:'calc(env(safe-area-inset-top, 0px) + 12px)',background:card,borderBottom:`1px solid ${border}`,flexShrink:0}}>
               {/* Tabs */}
               <div style={{display:'flex',overflowX:'auto',gap:4,paddingBottom:1}}>
                 {TABS.map(tab => (
