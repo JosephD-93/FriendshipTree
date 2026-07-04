@@ -16,7 +16,7 @@ const APP_VERSION = '3.1';
 // Until then, the Calendar sync UI will show but sign-in will fail gracefully.
 const GOOGLE_CLIENT_ID = '54802084194-qiej4s3ahd0eojf26rnjtsoius482fio.apps.googleusercontent.com';
 const GOOGLE_CALENDAR_SCOPES = 'https://www.googleapis.com/auth/calendar';
-const GOOGLE_REDIRECT_URI = 'com.friendshiptree:/oauth'; // custom scheme for Android
+const GOOGLE_REDIRECT_URI = 'https://josephd-93.github.io/FriendshipTree/';
 // ─────────────────────────────────────────────────────────────────────────────
 
 const INTERACTION_DISTANCE = 70;
@@ -131,6 +131,11 @@ const INITIAL_NODES = [
   { id: 'flower_knowledge',  type: 'flower', dimKey: 'knowledge',  label: 'Knowledge',  x: 0,    y: 191,  pinned: false },
   { id: 'flower_health',     type: 'flower', dimKey: 'health',     label: 'Health',     x: 165,  y: 286,  pinned: false },
   { id: 'flower_growth',     type: 'flower', dimKey: 'growth',     label: 'Growth',     x: 165,  y: 95,   pinned: false },
+  // Health metric nodes — connected to flower_health, display live data from Health Connect
+  { id: 'health_steps',     type: 'health_metric', metric: 'steps',     label: 'Steps',      x: 330,  y: 191,  pinned: false, shape: 'pill'   },
+  { id: 'health_sleep',     type: 'health_metric', metric: 'sleep',     label: 'Sleep',      x: 330,  y: 381,  pinned: false, shape: 'pill'   },
+  { id: 'health_heartrate', type: 'health_metric', metric: 'heartRate', label: 'Heart Rate', x: 165,  y: 476,  pinned: false, shape: 'pill'   },
+  { id: 'health_workouts',  type: 'health_metric', metric: 'workouts',  label: 'Workouts',   x: 495,  y: 286,  pinned: false, shape: 'card'   },
 ];
 
 
@@ -140,6 +145,10 @@ const INITIAL_LINKS = [
   { source: 'me', target: 'flower_knowledge'  },
   { source: 'me', target: 'flower_health'     },
   { source: 'me', target: 'flower_growth'     },
+  { source: 'flower_health', target: 'health_steps'     },
+  { source: 'flower_health', target: 'health_sleep'     },
+  { source: 'flower_health', target: 'health_heartrate' },
+  { source: 'flower_health', target: 'health_workouts'  },
 ];
 
 
@@ -2150,6 +2159,18 @@ function AppInner() {
   const [feedScrollTop, setFeedScrollTop] = useState(0);
   // Google Calendar integration state
   const [gCalToken, setGCalToken] = useState(() => { try { return localStorage.getItem('ft_gcal_token') || null; } catch(e) { return null; } });
+
+  // ── Health Connect state ─────────────────────────────────────────────────
+  const [healthData, setHealthData] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('ft_health_data') || 'null') || {
+      steps: null, sleep: null, heartRate: null, workouts: [], lastFetched: null
+    }; } catch(e) { return { steps: null, sleep: null, heartRate: null, workouts: [], lastFetched: null }; }
+  });
+  const [healthPermission, setHealthPermission] = useState(null); // null | 'granted' | 'denied' | 'unavailable'
+  const [healthLoading, setHealthLoading] = useState(false);
+  const [showHealthPanel, setShowHealthPanel] = useState(false);
+  // ─────────────────────────────────────────────────────────────────────────
+
   const [gCalEvents, setGCalEvents] = useState([]);
   const [gCalSyncing, setGCalSyncing] = useState(false);
   const [gCalError, setGCalError] = useState(null);
@@ -2537,6 +2558,20 @@ function AppInner() {
     }, 60);
     return () => clearTimeout(t);
   }, [minimisedNodes, findFreeSpot]);
+
+  // On startup, check if Google redirected back with an OAuth code in the URL
+  // (happens when the user completes the Google sign-in consent screen and
+  // gets redirected back to GitHub Pages with ?code=...&state=...)
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const code = urlParams.get('code');
+    const state = urlParams.get('state');
+    if (code && state && localStorage.getItem('gcal_verifier')) {
+      // Clean the URL so the code doesn't persist in browser history
+      window.history.replaceState({}, document.title, window.location.pathname);
+      gCalHandleRedirect(window.location.href.split('?')[0] + '?' + urlParams.toString());
+    }
+  }, []); // eslint-disable-line
 
   // After every Feed render, measure whether any minimised flower has actually
   // rendered past the bottom edge of its own section -- if so, grow that
@@ -3043,7 +3078,13 @@ function AppInner() {
           const nid = ptr.nodeId;
           if (singleTapTimerRef.current) clearTimeout(singleTapTimerRef.current);
           singleTapTimerRef.current = setTimeout(() => {
-            setSelectedNodeId(nid);
+            // Health metric nodes open the health panel instead of a person window
+            const tappedNode = nodes.find(n => n.id === nid);
+            if (tappedNode?.type === 'health_metric') {
+              setShowHealthPanel(true);
+            } else {
+              setSelectedNodeId(nid);
+            }
             singleTapTimerRef.current = null;
           }, 520);
         }
@@ -3755,7 +3796,6 @@ function AppInner() {
   const gCalSignIn = async () => {
     try {
       setGCalError(null);
-      // Generate PKCE code verifier and challenge (no client secret needed)
       const array = new Uint8Array(32);
       crypto.getRandomValues(array);
       const verifier = btoa(String.fromCharCode(...array)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
@@ -3763,9 +3803,11 @@ function AppInner() {
       const data = encoder.encode(verifier);
       const digest = await crypto.subtle.digest('SHA-256', data);
       const challenge = btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
-      sessionStorage.setItem('gcal_verifier', verifier);
+      // Use localStorage (not sessionStorage) so it survives the browser
+      // redirect back to GitHub Pages after Google's consent screen
+      localStorage.setItem('gcal_verifier', verifier);
       const state = Math.random().toString(36).slice(2);
-      sessionStorage.setItem('gcal_state', state);
+      localStorage.setItem('gcal_state', state);
       const params = new URLSearchParams({
         client_id: GOOGLE_CLIENT_ID,
         redirect_uri: GOOGLE_REDIRECT_URI,
@@ -3778,22 +3820,13 @@ function AppInner() {
         prompt: 'consent',
       });
       const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
-      // Use Capacitor Browser plugin to open in system browser and handle redirect
+      // Open in system browser -- Google will redirect back to GitHub Pages
+      // with ?code=... in the URL, which gCalCheckRedirectOnLoad handles on startup
       const Browser = window.Capacitor?.Plugins?.Browser;
       if (Browser) {
-        // Listen for the app URL open event that fires when the custom scheme redirect happens
-        const { App } = window.Capacitor?.Plugins || {};
-        if (App) {
-          const listener = await App.addListener('appUrlOpen', async (event) => {
-            listener.remove();
-            await Browser.close();
-            await gCalHandleRedirect(event.url);
-          });
-        }
         await Browser.open({ url: authUrl, windowName: '_blank' });
       } else {
-        // Web fallback — redirect directly (works on GitHub Pages)
-        window.location.href = authUrl.replace(GOOGLE_REDIRECT_URI, window.location.origin + '/oauth-callback');
+        window.location.href = authUrl;
       }
     } catch(e) {
       setGCalError('Sign-in failed: ' + e.message);
@@ -3807,8 +3840,10 @@ function AppInner() {
       const code = params.get('code');
       const state = params.get('state');
       if (!code) { setGCalError('No auth code received'); return; }
-      if (state !== sessionStorage.getItem('gcal_state')) { setGCalError('State mismatch — possible CSRF'); return; }
-      const verifier = sessionStorage.getItem('gcal_verifier');
+      if (state !== localStorage.getItem('gcal_state')) { setGCalError('State mismatch — possible CSRF'); return; }
+      const verifier = localStorage.getItem('gcal_verifier');
+      localStorage.removeItem('gcal_verifier');
+      localStorage.removeItem('gcal_state');
       // Exchange auth code for access token using PKCE (no client secret)
       const resp = await fetch('https://oauth2.googleapis.com/token', {
         method: 'POST',
@@ -3904,7 +3939,115 @@ function AppInner() {
     showToast('Disconnected from Google Calendar');
   };
 
-  // ───────────────────────────────────────────────────────────────────────────
+  // ── Health Connect integration ───────────────────────────────────────────
+
+  const getHealthPlugin = () => window.Capacitor?.Plugins?.CapgoHealth || window.Capacitor?.Plugins?.Health;
+
+  const healthRequestPermission = async () => {
+    const Health = getHealthPlugin();
+    if (!Health) { setHealthPermission('unavailable'); return false; }
+    try {
+      const avail = await Health.isAvailable();
+      if (!avail.available) { setHealthPermission('unavailable'); return false; }
+      const result = await Health.requestAuthorization({
+        read: ['steps', 'sleep', 'heartRate', 'workout'],
+        write: [],
+      });
+      const granted = result.granted ?? (result.status === 'granted');
+      setHealthPermission(granted ? 'granted' : 'denied');
+      return granted;
+    } catch(e) {
+      console.warn('Health permission error:', e);
+      setHealthPermission('denied');
+      return false;
+    }
+  };
+
+  const healthFetchData = async () => {
+    const Health = getHealthPlugin();
+    if (!Health) return;
+    setHealthLoading(true);
+    try {
+      const now = new Date();
+      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const startOf7Days = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      const newData = { ...healthData, lastFetched: now.toISOString() };
+
+      // Steps — today's total
+      try {
+        const steps = await Health.queryAggregated({
+          dataType: 'steps',
+          startDate: startOfDay.toISOString(),
+          endDate: now.toISOString(),
+          aggregation: 'sum',
+        });
+        newData.steps = steps.value ?? steps.total ?? null;
+      } catch(e) { console.warn('Steps fetch failed:', e); }
+
+      // Sleep — last night
+      try {
+        const sleepStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 20, 0, 0);
+        const sleepSamples = await Health.readSamples({
+          dataType: 'sleep',
+          startDate: sleepStart.toISOString(),
+          endDate: now.toISOString(),
+        });
+        const samples = sleepSamples.samples || sleepSamples.data || [];
+        if (samples.length > 0) {
+          const totalMs = samples.reduce((sum, s) => {
+            const start = new Date(s.startDate || s.start).getTime();
+            const end = new Date(s.endDate || s.end).getTime();
+            return sum + (end - start);
+          }, 0);
+          newData.sleep = Math.round(totalMs / (1000 * 60)); // minutes
+        }
+      } catch(e) { console.warn('Sleep fetch failed:', e); }
+
+      // Heart rate — latest reading
+      try {
+        const hr = await Health.readSamples({
+          dataType: 'heartRate',
+          startDate: startOf7Days.toISOString(),
+          endDate: now.toISOString(),
+          limit: 10,
+        });
+        const samples = hr.samples || hr.data || [];
+        if (samples.length > 0) {
+          newData.heartRate = Math.round(samples[samples.length - 1].value || samples[samples.length - 1].quantity);
+        }
+      } catch(e) { console.warn('Heart rate fetch failed:', e); }
+
+      // Workouts — last 7 days
+      try {
+        const workouts = await Health.queryWorkouts({
+          startDate: startOf7Days.toISOString(),
+          endDate: now.toISOString(),
+          limit: 20,
+        });
+        newData.workouts = (workouts.workouts || workouts.data || []).map(w => ({
+          type: w.activityType || w.type || 'Workout',
+          duration: Math.round((w.duration || 0) / 60), // minutes
+          calories: Math.round(w.totalEnergyBurned || w.calories || 0),
+          date: w.startDate || w.start,
+        }));
+      } catch(e) { console.warn('Workouts fetch failed:', e); }
+
+      setHealthData(newData);
+      try { localStorage.setItem('ft_health_data', JSON.stringify(newData)); } catch(e) {}
+      showToast(`💪 Health data updated`);
+    } catch(e) {
+      console.warn('Health fetch error:', e);
+      showToast('Health data fetch failed');
+    }
+    setHealthLoading(false);
+  };
+
+  const healthConnect = async () => {
+    const granted = await healthRequestPermission();
+    if (granted) await healthFetchData();
+  };
+
+  // ─────────────────────────────────────────────────────────────────────────
 
   const handleImportContact = async () => {
 
@@ -10257,6 +10400,64 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
               {!simpleMode && activeRenderNodes.filter(n => n.type !== 'mole').flatMap(node => {
 
+                // ── Health metric nodes — pill/card shapes with live data ──
+                if (node.type === 'health_metric') {
+                  const HEALTH_COLORS = { steps: '#10b981', sleep: '#8b5cf6', heartRate: '#ef4444', workouts: '#f59e0b' };
+                  const color = HEALTH_COLORS[node.metric] || '#64748b';
+                  const dm = theme.darkMode;
+                  const isLifted2 = liftedNodeId === node.id;
+                  const value = node.metric === 'steps' ? healthData.steps
+                    : node.metric === 'sleep' ? healthData.sleep
+                    : node.metric === 'heartRate' ? healthData.heartRate
+                    : healthData.workouts?.length;
+                  const unit = node.metric === 'steps' ? 'steps' : node.metric === 'sleep' ? 'min' : node.metric === 'heartRate' ? 'bpm' : 'sessions';
+                  const displayVal = value != null ? value.toLocaleString() : '—';
+                  const nx = node.x || 0, ny = node.y || 0;
+
+                  if (node.shape === 'card') {
+                    // Workouts card — wider rounded rectangle showing recent workout types
+                    const cw = 120, ch = 60;
+                    return [(
+                      <g key={node.id} transform={`translate(${nx},${ny})`}
+                        style={{cursor:'pointer'}}
+                        onPointerDown={e => handlePointerDown(e, node)}>
+                        <rect x={-cw/2} y={-ch/2} width={cw} height={ch} rx={12}
+                          fill={dm?'#1e293b':'white'} stroke={color} strokeWidth={isLifted2?3:1.5}
+                          filter={isLifted2?'drop-shadow(0 4px 12px rgba(0,0,0,0.4))':undefined}/>
+                        <text x={0} y={-ch/2+14} textAnchor="middle" fontSize={9} fontWeight={700}
+                          fill={color} style={{textTransform:'uppercase',letterSpacing:1}}>{node.label}</text>
+                        <text x={0} y={-ch/2+28} textAnchor="middle" fontSize={16} fontWeight={800}
+                          fill={dm?'white':'#0f172a'}>{displayVal}</text>
+                        <text x={0} y={-ch/2+40} textAnchor="middle" fontSize={8}
+                          fill={dm?'#64748b':'#94a3b8'}>{unit} · last 7 days</text>
+                        {(healthData.workouts||[]).slice(0,3).map((w,wi) => (
+                          <text key={wi} x={0} y={ch/2-18+(wi*10)} textAnchor="middle" fontSize={7}
+                            fill={dm?'#94a3b8':'#64748b'}>
+                            {w.type} {w.duration}min
+                          </text>
+                        ))}
+                      </g>
+                    )];
+                  }
+
+                  // Pill shape for steps/sleep/heartrate
+                  const pw = 80, ph = 36;
+                  return [(
+                    <g key={node.id} transform={`translate(${nx},${ny})`}
+                      style={{cursor:'pointer'}}
+                      onPointerDown={e => handlePointerDown(e, node)}>
+                      <rect x={-pw/2} y={-ph/2} width={pw} height={ph} rx={ph/2}
+                        fill={dm?'#1e293b':'white'} stroke={color} strokeWidth={isLifted2?3:1.5}
+                        filter={isLifted2?'drop-shadow(0 4px 12px rgba(0,0,0,0.4))':undefined}/>
+                      <text x={0} y={-4} textAnchor="middle" fontSize={8} fontWeight={700}
+                        fill={color} style={{textTransform:'uppercase',letterSpacing:0.5}}>{node.label}</text>
+                      <text x={0} y={8} textAnchor="middle" fontSize={11} fontWeight={800}
+                        fill={dm?'white':'#0f172a'}>{displayVal} <tspan fontSize={7} fill={dm?'#64748b':'#94a3b8'}>{unit}</tspan></text>
+                    </g>
+                  )];
+                }
+                // ──────────────────────────────────────────────────────────
+
                 const isLifted = liftedNodeId === node.id && viewMode === 'canvas';
                 const scaleRatio = node.radius / 45;
                 const plateWidth = Math.max(100, node.radius * 2.2);
@@ -12438,6 +12639,108 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         </div>
         )}
 
+        {/* ── Health Panel ─────────────────────────────────────────────── */}
+        {showHealthPanel && (() => {
+          const dm = theme.darkMode;
+          const METRICS = [
+            { key: 'steps',     label: 'Steps',      icon: '👟', color: '#10b981', value: healthData.steps,     unit: 'steps today',  format: v => v?.toLocaleString() || '—' },
+            { key: 'sleep',     label: 'Sleep',      icon: '😴', color: '#8b5cf6', value: healthData.sleep,     unit: 'minutes',      format: v => v != null ? `${Math.floor(v/60)}h ${v%60}m` : '—' },
+            { key: 'heartRate', label: 'Heart Rate', icon: '❤️', color: '#ef4444', value: healthData.heartRate, unit: 'bpm',          format: v => v?.toString() || '—' },
+            { key: 'workouts',  label: 'Workouts',   icon: '💪', color: '#f59e0b', value: healthData.workouts?.length, unit: 'this week', format: v => v?.toString() || '—' },
+          ];
+          return (
+            <div style={{position:'fixed', inset:0, zIndex:300, display:'flex', alignItems:'flex-end',
+              background:'rgba(0,0,0,0.5)', paddingBottom:'calc(68px + env(safe-area-inset-bottom, 0px))'}}>
+              <div style={{width:'100%', background:dm?'#0f172a':'white', borderRadius:'16px 16px 0 0',
+                padding:'20px 16px', maxHeight:'80vh', overflowY:'auto', boxSizing:'border-box'}}>
+                {/* Header */}
+                <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:16}}>
+                  <div style={{display:'flex', alignItems:'center', gap:10}}>
+                    <span style={{fontSize:22}}>💪</span>
+                    <div>
+                      <div style={{fontSize:15, fontWeight:800, color:dm?'white':'#0f172a'}}>Health Connect</div>
+                      <div style={{fontSize:11, color:dm?'#64748b':'#94a3b8'}}>
+                        {healthData.lastFetched ? `Last updated ${new Date(healthData.lastFetched).toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'})}` : 'Not connected'}
+                      </div>
+                    </div>
+                  </div>
+                  <button onClick={() => setShowHealthPanel(false)}
+                    style={{background:'none', border:'none', fontSize:22, color:dm?'#64748b':'#94a3b8', cursor:'pointer'}}>×</button>
+                </div>
+                {/* Connect / Refresh buttons */}
+                <div style={{display:'flex', gap:8, marginBottom:16}}>
+                  <button onClick={healthConnect} disabled={healthLoading}
+                    style={{flex:1, padding:'9px 0', borderRadius:8, border:'none',
+                      background:'#10b981', color:'white', fontSize:13, fontWeight:700,
+                      cursor:healthLoading?'wait':'pointer', opacity:healthLoading?0.7:1}}>
+                    {healthLoading ? '⏳ Loading…' : healthPermission === 'granted' ? '🔄 Refresh' : '🔗 Connect Health'}
+                  </button>
+                  {healthPermission === 'granted' && (
+                    <button onClick={() => { if (window.Capacitor?.Plugins?.CapgoHealth?.openHealthConnectSettings) window.Capacitor.Plugins.CapgoHealth.openHealthConnectSettings(); }}
+                      style={{padding:'9px 14px', borderRadius:8, border:`1px solid ${dm?'#334155':'#e2e8f0'}`,
+                        background:'none', color:dm?'#94a3b8':'#64748b', fontSize:12, fontWeight:600, cursor:'pointer'}}>
+                      Settings
+                    </button>
+                  )}
+                </div>
+                {/* Metric cards */}
+                <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:16}}>
+                  {METRICS.map(m => (
+                    <div key={m.key} style={{borderRadius:12, padding:'12px 14px',
+                      background:dm?'#1e293b':'#f8fafc', border:`1px solid ${m.color}30`}}>
+                      <div style={{display:'flex', alignItems:'center', gap:6, marginBottom:6}}>
+                        <span style={{fontSize:16}}>{m.icon}</span>
+                        <span style={{fontSize:10, fontWeight:700, color:m.color, textTransform:'uppercase', letterSpacing:0.5}}>{m.label}</span>
+                      </div>
+                      <div style={{fontSize:24, fontWeight:800, color:dm?'white':'#0f172a', lineHeight:1}}>
+                        {m.format(m.value)}
+                      </div>
+                      <div style={{fontSize:10, color:dm?'#64748b':'#94a3b8', marginTop:2}}>{m.unit}</div>
+                    </div>
+                  ))}
+                </div>
+                {/* Recent workouts */}
+                {(healthData.workouts?.length || 0) > 0 && (
+                  <div>
+                    <div style={{fontSize:11, fontWeight:700, color:dm?'#64748b':'#94a3b8',
+                      textTransform:'uppercase', letterSpacing:0.5, marginBottom:8}}>Recent workouts</div>
+                    {healthData.workouts.slice(0,5).map((w,wi) => (
+                      <div key={wi} style={{display:'flex', alignItems:'center', justifyContent:'space-between',
+                        padding:'8px 0', borderBottom:`1px solid ${dm?'#1e293b':'#f1f5f9'}`}}>
+                        <div>
+                          <div style={{fontSize:13, fontWeight:600, color:dm?'white':'#0f172a'}}>{w.type}</div>
+                          <div style={{fontSize:11, color:dm?'#64748b':'#94a3b8'}}>
+                            {new Date(w.date).toLocaleDateString('en',{weekday:'short',month:'short',day:'numeric'})}
+                          </div>
+                        </div>
+                        <div style={{textAlign:'right'}}>
+                          <div style={{fontSize:13, fontWeight:700, color:'#f59e0b'}}>{w.duration} min</div>
+                          {w.calories > 0 && <div style={{fontSize:11, color:dm?'#64748b':'#94a3b8'}}>{w.calories} kcal</div>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {/* Link workouts to recurring activities */}
+                <div style={{marginTop:12, padding:'10px 12px', borderRadius:8,
+                  background:dm?'#1e293b':'#f8fafc', border:`1px solid ${dm?'#334155':'#e2e8f0'}`}}>
+                  <div style={{fontSize:12, fontWeight:600, color:dm?'white':'#0f172a', marginBottom:4}}>
+                    💡 Link workouts to friend scores
+                  </div>
+                  <div style={{fontSize:11, color:dm?'#64748b':'#94a3b8', lineHeight:1.5}}>
+                    Add recurring activities in the Calendar tab (e.g. "Climbing with James, every Wednesday") — confirming them boosts friendship scores automatically.
+                  </div>
+                  <button onClick={() => { setShowHealthPanel(false); setViewMode('calendar'); setCalViewMode('monthly'); setShowAddRecurring(true); }}
+                    style={{marginTop:8, padding:'6px 14px', borderRadius:8, border:'none',
+                      background:'#10b981', color:'white', fontSize:12, fontWeight:700, cursor:'pointer'}}>
+                    + Add recurring activity
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+        {/* ──────────────────────────────────────────────────────────────── */}
 
         {/* Mole keyframe styles */}
         <style>{`
@@ -13362,7 +13665,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 if (isDescendantOfMinimised(oid)) return;
                 orphans.push(oNode);
               });
-              const allMembers = [...allMembersRaw, ...orphans];
+              const allMembers = [...allMembersRaw, ...orphans].filter(n => n.type !== 'health_metric');
               const minimisedSet = new Set(minimisedHere);
               // In Detailed mode, a group's direct people-members move off the grid
               // entirely too -- they cluster as small flowers around the group's
@@ -13399,7 +13702,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               });
               const cellXY = (col, row) => {
                 const rowShift = (row % 2 === 1) ? FEED_HEX * 0.75 : 0;
-                return { x: colOffsets[col] + rowShift + FEED_HEX, y: row * ROW_STEP + 50 };
+                const yOff = dimKey === 'health' ? 148 : 50;
+                return { x: colOffsets[col] + rowShift + FEED_HEX, y: row * ROW_STEP + yOff };
               };
               const clusterCentre = {};
               topLevelIds.forEach(rootId => {
@@ -13431,7 +13735,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               // extent, the next section could start above where a flower near
               // the boundary actually ends up.
               const measuredExtra = feedSectionExtraH[dimKey] || 0;
-              const sectionH = Math.max(160, (maxRow + 1) * ROW_STEP + 80 + measuredExtra);
+              // Health section has extra cards at the top taking ~140px
+              const healthCardsExtra = dimKey === 'health' ? 148 : 0;
+              const sectionH = Math.max(160, (maxRow + 1) * ROW_STEP + 80 + measuredExtra + healthCardsExtra);
 
               // Anchor point for each member (centre of its circle) plus the flower
               // band's own anchor, so we can draw a line from every node back to
@@ -13441,9 +13747,10 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               members.forEach(n => {
                 const { col, row } = positions[n.id];
                 const rowShift = (row % 2 === 1) ? FEED_HEX * 0.75 : 0;
+                const yOff2 = dimKey === 'health' ? 148 : 50;
                 anchorOf[n.id] = {
                   x: BAND_W + colOffsets[col] + rowShift + FEED_HEX,
-                  y: row * ROW_STEP + 50,
+                  y: row * ROW_STEP + yOff2,
                 };
               });
               anchorOf[flowerId] = { x: BAND_W / 2, y: sectionH / 2 };
@@ -13592,14 +13899,45 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     <div data-feed-strip
                       onPointerUp={e=>{
                         if (!feedCarrying || feedCarrying.dimKey !== dimKey) return;
-                        if (feedCarrying.dropMode === 'twohand') return; // placement is via releasing the holding finger, handled elsewhere
-                        // One-hand mode: releasing the finger anywhere on this strip
-                        // places the carried node here -- a natural "drop" gesture,
-                        // not a second hold (which was being cancelled by the very act
-                        // of lifting the finger to drop, so placement could never fire).
+                        if (feedCarrying.dropMode === 'twohand') return;
                         placeCarriedNode(e.currentTarget, e.clientX, e.clientY);
                       }}
                       style={{position:'absolute', left:BAND_W, top:0, height:sectionH, width:stripW}}>
+                      {/* Health metric cards — only shown in the health section */}
+                      {dimKey === 'health' && (() => {
+                        const HEALTH_METRICS = [
+                          { key: 'steps',     label: 'Steps',      icon: '👟', color: '#10b981', value: healthData.steps,          unit: 'today',   format: v => v?.toLocaleString() || '—' },
+                          { key: 'sleep',     label: 'Sleep',      icon: '😴', color: '#8b5cf6', value: healthData.sleep,          unit: 'min',     format: v => v != null ? `${Math.floor(v/60)}h ${v%60}m` : '—' },
+                          { key: 'heartRate', label: 'Heart Rate', icon: '❤️', color: '#ef4444', value: healthData.heartRate,      unit: 'bpm',     format: v => v?.toString() || '—' },
+                          { key: 'workouts',  label: 'Workouts',   icon: '💪', color: '#f59e0b', value: healthData.workouts?.length, unit: 'this week', format: v => v?.toString() || '—' },
+                        ];
+                        return (
+                          <div style={{display:'flex', gap:8, padding:'10px 8px 0', flexWrap:'wrap'}}>
+                            {HEALTH_METRICS.map(m => (
+                              <div key={m.key} onClick={() => setShowHealthPanel(true)}
+                                style={{flex:'1 1 calc(50% - 4px)', minWidth:80, borderRadius:10, padding:'8px 10px',
+                                  background:dm?'#1e293b':'white', border:`1.5px solid ${m.color}40`,
+                                  cursor:'pointer', display:'flex', flexDirection:'column', gap:2}}>
+                                <div style={{display:'flex', alignItems:'center', gap:4}}>
+                                  <span style={{fontSize:12}}>{m.icon}</span>
+                                  <span style={{fontSize:9, fontWeight:700, color:m.color, textTransform:'uppercase', letterSpacing:0.5}}>{m.label}</span>
+                                </div>
+                                <div style={{fontSize:16, fontWeight:800, color:dm?'white':'#0f172a', lineHeight:1}}>{m.format(m.value)}</div>
+                                <div style={{fontSize:9, color:dm?'#64748b':'#94a3b8'}}>{m.unit}</div>
+                              </div>
+                            ))}
+                            <div style={{width:'100%'}}>
+                              <button onClick={() => setShowHealthPanel(true)}
+                                style={{width:'100%', padding:'7px 0', borderRadius:8, border:'none',
+                                  background: healthPermission === 'granted' ? '#10b98120' : '#10b981',
+                                  color: healthPermission === 'granted' ? '#10b981' : 'white',
+                                  fontSize:12, fontWeight:700, cursor:'pointer', marginTop:4}}>
+                                {healthLoading ? '⏳ Loading…' : healthPermission === 'granted' ? '🔄 Refresh health data' : '🔗 Connect Health Connect'}
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })()}
 
                       {/* Faint grid preview while dragging within this section, or
                           persistently if the "Show grid lattice" setting is on. */}
@@ -13631,7 +13969,59 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         const { col, row } = positions[node.id];
                         const rowShift = (row % 2 === 1) ? FEED_HEX * 0.75 : 0;
                         const px = colOffsets[col] + rowShift + FEED_HEX;
-                        const py = row * ROW_STEP + 50;
+                        const yOffset = dimKey === 'health' ? 148 : 50;
+                        const py = row * ROW_STEP + yOffset;
+
+                        // Health metric nodes — pill/card rendering in feed view
+                        if (node.type === 'health_metric') {
+                          const HEALTH_COLORS = { steps: '#10b981', sleep: '#8b5cf6', heartRate: '#ef4444', workouts: '#f59e0b' };
+                          const HEALTH_ICONS = { steps: '👟', sleep: '😴', heartRate: '❤️', workouts: '💪' };
+                          const color = HEALTH_COLORS[node.metric] || '#64748b';
+                          const icon = HEALTH_ICONS[node.metric] || '📊';
+                          const dm = theme.darkMode;
+                          const value = node.metric === 'steps' ? healthData.steps
+                            : node.metric === 'sleep' ? healthData.sleep
+                            : node.metric === 'heartRate' ? healthData.heartRate
+                            : healthData.workouts?.length;
+                          const unit = node.metric === 'steps' ? 'steps today'
+                            : node.metric === 'sleep' ? 'min sleep'
+                            : node.metric === 'heartRate' ? 'bpm'
+                            : 'this week';
+                          const displayVal = value != null ? value.toLocaleString() : '—';
+                          const cardW = FEED_HEX * 2.2, cardH = FEED_HEX * 1.2;
+                          const isCarried = feedCarrying?.nodeId === node.id;
+                          return (
+                            <div key={node.id} style={{position:'absolute', left:px-cardW/2, top:py-cardH/2,
+                              width:cardW, height:cardH, borderRadius:12,
+                              background:dm?'#1e293b':'white', border:`2px solid ${isCarried?color+'aa':color}`,
+                              display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
+                              gap:2, cursor:'grab', opacity:isCarried?0.5:1,
+                              touchAction:'none'}}
+                              onPointerDown={e=>{
+                                if (feedCarrying) return;
+                                const pointerId = e.pointerId;
+                                const startX = e.clientX, startY = e.clientY;
+                                const targetEl = e.currentTarget;
+                                feedLiftTimer.current = setTimeout(() => {
+                                  try { targetEl.setPointerCapture(pointerId); } catch(err) {}
+                                  setFeedCarrying({ dimKey, nodeId: node.id, branchIds: new Set([node.id]),
+                                    screenX: startX, screenY: startY,
+                                    dropMode: 'onehand', holdPointerId: null });
+                                }, 350);
+                              }}
+                              onPointerUp={()=>{ clearTimeout(feedLiftTimer.current); }}
+                              onPointerCancel={()=>{ clearTimeout(feedLiftTimer.current); }}
+                              onClick={() => setShowHealthPanel(true)}>
+                              <div style={{fontSize:14}}>{icon}</div>
+                              <div style={{fontSize:Math.max(10, FEED_HEX*0.28), fontWeight:800,
+                                color:dm?'white':'#0f172a', lineHeight:1}}>{displayVal}</div>
+                              <div style={{fontSize:Math.max(7, FEED_HEX*0.18), color:dm?'#64748b':'#94a3b8'}}>{unit}</div>
+                              <div style={{fontSize:Math.max(7, FEED_HEX*0.18), fontWeight:700, color, letterSpacing:0.5,
+                                textTransform:'uppercase'}}>{node.label}</div>
+                            </div>
+                          );
+                        }
+
                         const isHub = node.type === 'hub';
                         // Both hubs and people now scale directly off FEED_HEX -- the
                         // actual grid cell size -- instead of people using a fixed,
@@ -13970,7 +14360,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           if (!saved) return;
                           const rowShift = (saved.row % 2 === 1) ? FEED_HEX * 0.75 : 0;
                           const x = BAND_W + colOffsets[saved.col] + rowShift + FEED_HEX;
-                          const y = saved.row * ROW_STEP + 50;
+                          const y = saved.row * ROW_STEP + (dimKey === 'health' ? 148 : 50);
                           const n = nodes.find(nd => nd.id === nid);
                           allNodePos[nid] = { x, y, r: nodeRadius(n) };
                         });
@@ -14120,7 +14510,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                   const rowShift = (saved.row % 2 === 1) ? FEED_HEX * 0.75 : 0;
                                   return {
                                     x: BAND_W + colOffsets[saved.col] + rowShift + FEED_HEX,
-                                    y: saved.row * ROW_STEP + 50,
+                                    y: saved.row * ROW_STEP + (dimKey === 'health' ? 148 : 50),
                                   };
                                 };
                                 const groupGridPos = posToXY(id);
