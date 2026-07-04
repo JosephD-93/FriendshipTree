@@ -3849,6 +3849,20 @@ function AppInner() {
       // with ?code=... in the URL, which gCalCheckRedirectOnLoad handles on startup
       const Browser = window.Capacitor?.Plugins?.Browser;
       if (Browser) {
+        // Open in system browser via Capacitor Browser plugin.
+        // Listen for navigation events to detect when Google redirects back
+        // to the GitHub Pages URL with ?code=... -- on Android the app itself
+        // doesn't reload, so we must intercept it here rather than in the
+        // startup URL check (which only works in a real web browser).
+        const browserListener = await Browser.addListener('browserFinishedNavigation', async (event) => {
+          const url = event?.url || '';
+          showToast('🔍 Browser nav: ' + url.slice(0, 60));
+          if (url.includes('code=') && url.includes('state=')) {
+            browserListener.remove();
+            await Browser.close();
+            await gCalHandleRedirect(url);
+          }
+        });
         await Browser.open({ url: authUrl, windowName: '_blank' });
       } else {
         window.location.href = authUrl;
@@ -3861,15 +3875,24 @@ function AppInner() {
   // Handle the OAuth redirect callback, exchange code for access token
   const gCalHandleRedirect = async (url) => {
     try {
+      showToast('🔄 Processing sign-in…');
       const params = new URLSearchParams(url.split('?')[1] || url.split('#')[1] || '');
       const code = params.get('code');
       const state = params.get('state');
-      if (!code) { setGCalError('No auth code received'); return; }
-      if (state !== localStorage.getItem('gcal_state')) { setGCalError('State mismatch — possible CSRF'); return; }
+      const error = params.get('error');
+      if (error) { setGCalError('Google returned error: ' + error); showToast('❌ Google error: ' + error); return; }
+      if (!code) { setGCalError('No auth code in redirect URL'); showToast('❌ No auth code — URL: ' + url.slice(0,80)); return; }
+      const savedState = localStorage.getItem('gcal_state');
+      if (state !== savedState) {
+        setGCalError('State mismatch — try signing in again');
+        showToast('❌ State mismatch');
+        return;
+      }
       const verifier = localStorage.getItem('gcal_verifier');
+      if (!verifier) { setGCalError('Code verifier missing — try signing in again'); showToast('❌ Verifier missing'); return; }
       localStorage.removeItem('gcal_verifier');
       localStorage.removeItem('gcal_state');
-      // Exchange auth code for access token using PKCE (no client secret)
+      showToast('🔄 Exchanging token…');
       const resp = await fetch('https://oauth2.googleapis.com/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -3889,10 +3912,13 @@ function AppInner() {
         showToast('✅ Google Calendar connected!');
         await gCalFetchEvents(data.access_token);
       } else {
-        setGCalError('Token exchange failed: ' + (data.error_description || data.error || 'Unknown error'));
+        const errMsg = data.error_description || data.error || JSON.stringify(data).slice(0,100);
+        setGCalError('Token exchange failed: ' + errMsg);
+        showToast('❌ Token error: ' + (data.error || 'unknown'));
       }
     } catch(e) {
       setGCalError('Auth failed: ' + e.message);
+      showToast('❌ Auth error: ' + e.message);
     }
   };
 
@@ -12255,7 +12281,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   }}
                   onPointerLeave={() => { clearTimeout(calAddHoldTimer.current); calAddHoldTimer.current = null; }}
                   style={{flex:1, padding:'8px 0', borderRadius:8, border:'none', cursor:'pointer',
-                    fontSize:12, fontWeight:700, color:'white',
+                    fontSize:12, fontWeight:700,
                     background: calAddMode === 'multi' ? '#10b981' : calAddMode === 'single' ? '#86efac' : (dm?'#334155':'#e2e8f0'),
                     color: calAddMode ? 'white' : (dm?'#94a3b8':'#64748b'),
                     transition:'background 0.2s'}}>
@@ -12665,7 +12691,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         )}
 
         {/* ── Health Panel ─────────────────────────────────────────────── */}
-        {showHealthPanel && (() => {
+        {showHealthPanel && viewMode !== 'calendar' && viewMode !== 'me' && (() => {
           const dm = theme.darkMode;
           const METRICS = [
             { key: 'steps',     label: 'Steps',      icon: '👟', color: '#10b981', value: healthData.steps,     unit: 'steps today',  format: v => v?.toLocaleString() || '—' },
