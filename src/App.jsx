@@ -1286,11 +1286,36 @@ function AppInner() {
         const savedPos = (() => { try { return JSON.parse(localStorage.getItem('ft_mole_pos')||'null'); } catch(_){ return null; } })();
         loaded.push({ id:'mole', type:'mole', label:'Mole', x: savedPos?.x ?? 280, y: savedPos?.y ?? 280, pinned:false });
       }
+      // Backfill health metric nodes for existing users whose saved data
+      // predates these nodes being added to INITIAL_NODES
+      const healthMetrics = [
+        { id: 'health_steps',     type: 'health_metric', metric: 'steps',     label: 'Steps',      x: 330,  y: 191,  pinned: false, shape: 'pill' },
+        { id: 'health_sleep',     type: 'health_metric', metric: 'sleep',     label: 'Sleep',      x: 330,  y: 381,  pinned: false, shape: 'pill' },
+        { id: 'health_heartrate', type: 'health_metric', metric: 'heartRate', label: 'Heart Rate', x: 165,  y: 476,  pinned: false, shape: 'pill' },
+        { id: 'health_workouts',  type: 'health_metric', metric: 'workouts',  label: 'Workouts',   x: 495,  y: 286,  pinned: false, shape: 'card' },
+      ];
+      healthMetrics.forEach(hm => {
+        if (!loaded.find(n => n.id === hm.id)) loaded.push(hm);
+      });
       return loaded;
     } catch(e) { return INITIAL_NODES; }
   });
   const [links, setLinks] = useState(() => {
-    try { const s = localStorage.getItem('ft_links'); return s ? JSON.parse(s) : INITIAL_LINKS; } catch(e) { return INITIAL_LINKS; }
+    try {
+      const s = localStorage.getItem('ft_links');
+      const loaded = s ? JSON.parse(s) : INITIAL_LINKS;
+      // Backfill health metric links for existing users
+      const healthLinks = [
+        { source: 'flower_health', target: 'health_steps'     },
+        { source: 'flower_health', target: 'health_sleep'     },
+        { source: 'flower_health', target: 'health_heartrate' },
+        { source: 'flower_health', target: 'health_workouts'  },
+      ];
+      healthLinks.forEach(hl => {
+        if (!loaded.find(l => l.source === hl.source && l.target === hl.target)) loaded.push(hl);
+      });
+      return loaded;
+    } catch(e) { return INITIAL_LINKS; }
   });
   const [lastDecayCheck, setLastDecayCheck] = useState(Date.now());
   const [viewMode, setViewMode] = useState(() => {
@@ -13475,8 +13500,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           }
 
           const localX = screenX - stripRect.left, localY = screenY - stripRect.top;
+          const yOffsetForDrop = cDimKey === 'health' ? 148 : 50;
           let col = Math.round((localX - FEED_HEX) / (FEED_HEX * 1.5));
-          let row = Math.round((localY - FEED_HEX) / (ROW_STEP));
+          let row = Math.round((localY - yOffsetForDrop) / (ROW_STEP));
           col = Math.max(0, Math.min(COLS - 1, col));
           row = Math.max(0, row);
           setFeedPositions(prev => {
