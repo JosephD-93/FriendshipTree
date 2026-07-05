@@ -16,7 +16,7 @@ const APP_VERSION = '3.1';
 // Until then, the Calendar sync UI will show but sign-in will fail gracefully.
 const GOOGLE_CLIENT_ID = '54802084194-qiej4s3ahd0eojf26rnjtsoius482fio.apps.googleusercontent.com';
 const GOOGLE_CALENDAR_SCOPES = 'https://www.googleapis.com/auth/calendar';
-const GOOGLE_REDIRECT_URI = 'http://127.0.0.1';
+const GOOGLE_REDIRECT_URI = 'https://josephd-93.github.io/FriendshipTree/';
 // ─────────────────────────────────────────────────────────────────────────────
 
 const INTERACTION_DISTANCE = 70;
@@ -3853,13 +3853,14 @@ function AppInner() {
         // Listen for navigation events to detect when Google redirects back
         // to the GitHub Pages URL with ?code=... -- on Android the app itself
         // doesn't reload, so we must intercept it here rather than in the
-        // With loopback redirect (http://127.0.0.1), Google redirects the
-        // browser to that address with ?code=... appended. The browser
-        // can't actually load localhost so the navigation fires immediately,
-        // triggering browserFinishedNavigation with the full redirect URL.
+        // Open browser for OAuth. Google will redirect to GitHub Pages
+        // with ?code=... When the user returns to the Android app,
+        // the startup URL check handles the token exchange if running
+        // in a web browser. On Android, we listen for the browser
+        // navigating to our GitHub Pages URL with the code.
         const handleNav = async (event) => {
           const url = event?.url || event?.newUrl || '';
-          if (url.startsWith('http://127.0.0.1') && url.includes('code=')) {
+          if (url.includes('josephd-93.github.io/FriendshipTree') && url.includes('code=')) {
             try { navListener?.remove(); } catch(e) {}
             try { await Browser.close(); } catch(e) {}
             await gCalHandleRedirect(url);
@@ -3868,12 +3869,13 @@ function AppInner() {
         let navListener = null;
         try {
           navListener = await Browser.addListener('browserFinishedNavigation', handleNav);
-        } catch(e) {
-          try { navListener = await Browser.addListener('browserPageLoaded', handleNav); } catch(e2) {}
-        }
+        } catch(e) {}
+        try {
+          await Browser.addListener('browserPageLoaded', handleNav);
+        } catch(e) {}
 
         await Browser.open({ url: authUrl, windowName: '_blank' });
-        showToast('🔐 Complete sign-in in the browser');
+        showToast('🔐 Sign in then return to the app');
       } else {
         window.location.href = authUrl;
       }
