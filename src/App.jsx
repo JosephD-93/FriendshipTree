@@ -2584,18 +2584,9 @@ function AppInner() {
     return () => clearTimeout(t);
   }, [minimisedNodes, findFreeSpot]);
 
-  // On startup, check if Google redirected back with an OAuth code in the URL
-  // (happens when the user completes the Google sign-in consent screen and
-  // gets redirected back to GitHub Pages with ?code=...&state=...)
-  useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const code = urlParams.get('code');
-    const state = urlParams.get('state');
-    if (code && state) {
-      window.history.replaceState({}, document.title, window.location.pathname);
-      gCalHandleRedirect(window.location.href.split('?')[0] + '?' + urlParams.toString());
-    }
-  }, []); // eslint-disable-line
+  // Note: the old browser-redirect OAuth startup check has been removed --
+  // Google Calendar sign-in now uses the native plugin (gCalSignIn), which
+  // shows an in-app account picker with no browser or redirect involved.
 
   // After every Feed render, measure whether any minimised flower has actually
   // rendered past the bottom edge of its own section -- if so, grow that
@@ -3817,130 +3808,57 @@ function AppInner() {
   // Sign in with Google via OAuth2 PKCE flow using Capacitor Browser plugin.
   // This opens the device browser for the consent screen, then redirects back
   // to the app via the custom URL scheme com.friendshiptree:/oauth.
+  // ── Native Google Sign-In (no browser, no redirect) ────────────────────────
+  // Uses @capgo/capacitor-social-login, which wraps Android's Credential
+  // Manager API -- shows a genuine native account picker dialog directly in
+  // the app. No browser tab opens, no redirect URI needed, no GitHub Pages
+  // involvement. This is the correct approach for native app OAuth, unlike
+  // the browser-redirect flow which was fundamentally the wrong tool here.
+  let socialLoginInitialized = false;
+  const ensureSocialLoginInit = async () => {
+    if (socialLoginInitialized) return;
+    const SocialLogin = window.Capacitor?.Plugins?.SocialLogin;
+    if (!SocialLogin) return;
+    await SocialLogin.initialize({
+      google: { webClientId: GOOGLE_CLIENT_ID },
+    });
+    socialLoginInitialized = true;
+  };
+
   const gCalSignIn = async () => {
     try {
       setGCalError(null);
-      const array = new Uint8Array(32);
-      crypto.getRandomValues(array);
-      const verifier = btoa(String.fromCharCode(...array)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
-      const encoder = new TextEncoder();
-      const data = encoder.encode(verifier);
-      const digest = await crypto.subtle.digest('SHA-256', data);
-      const challenge = btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
-      // Encode the verifier directly into the state parameter (not
-      // localStorage) -- when the redirect lands on GitHub Pages via an
-      // external browser tab, that's a COMPLETELY SEPARATE browser context
-      // from the Android app's WebView, with its own isolated localStorage.
-      // The Android app's saved verifier would never be visible there.
-      // Packing it into state means whoever receives the redirect has
-      // everything needed, regardless of which context that turns out to be.
-      const stateObj = { r: Math.random().toString(36).slice(2), v: verifier };
-      const state = btoa(JSON.stringify(stateObj)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
-      const params = new URLSearchParams({
-        client_id: GOOGLE_CLIENT_ID,
-        redirect_uri: GOOGLE_REDIRECT_URI,
-        response_type: 'code',
-        scope: GOOGLE_CALENDAR_SCOPES,
-        state,
-        code_challenge: challenge,
-        code_challenge_method: 'S256',
-        access_type: 'offline',
-        prompt: 'consent',
+      const SocialLogin = window.Capacitor?.Plugins?.SocialLogin;
+      if (!SocialLogin) {
+        showToast('⚠️ Sign-in plugin not installed — run: npm install @capgo/capacitor-social-login');
+        return;
+      }
+      await ensureSocialLoginInit();
+      showToast('🔐 Opening Google sign-in…');
+      const res = await SocialLogin.login({
+        provider: 'google',
+        options: { scopes: ['email', 'profile', GOOGLE_CALENDAR_SCOPES] },
       });
-      const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
-      const Browser = window.Capacitor?.Plugins?.Browser;
-      if (Browser) {
-        // Open in system browser via Capacitor Browser plugin.
-        // Listen for navigation events to detect when Google redirects back
-        // to the GitHub Pages URL with ?code=... -- on Android the app itself
-        // doesn't reload, so we must intercept it here rather than in the
-        // Open browser for OAuth. Google will redirect to GitHub Pages
-        // with ?code=... When the user returns to the Android app,
-        // the startup URL check handles the token exchange if running
-        // in a web browser. On Android, we listen for the browser
-        // navigating to our GitHub Pages URL with the code.
-        const handleNav = async (event) => {
-          const url = event?.url || event?.newUrl || '';
-          if (url.includes('josephd-93.github.io/FriendshipTree') && url.includes('code=')) {
-            try { navListener?.remove(); } catch(e) {}
-            try { await Browser.close(); } catch(e) {}
-            await gCalHandleRedirect(url);
-          }
-        };
-        let navListener = null;
-        try {
-          navListener = await Browser.addListener('browserFinishedNavigation', handleNav);
-        } catch(e) {}
-        try {
-          await Browser.addListener('browserPageLoaded', handleNav);
-        } catch(e) {}
-
-        await Browser.open({ url: authUrl, windowName: '_blank' });
-        showToast('🔐 Sign in then return to the app');
+      // Token location varies slightly by plugin version -- check both
+      // the documented result.result path and a flat fallback.
+      const accessToken = res?.result?.accessToken?.token || res?.result?.accessToken
+        || res?.accessToken?.token || res?.accessToken;
+      if (accessToken) {
+        setGCalToken(accessToken);
+        try { localStorage.setItem('ft_gcal_token', accessToken); } catch(e) {}
+        showToast('✅ Google Calendar connected!');
+        await gCalFetchEvents(accessToken);
       } else {
-        window.location.href = authUrl;
+        setGCalError('Signed in but no Calendar access token returned — check scopes');
+        showToast('⚠️ Signed in, but no Calendar token — see error for details');
+        console.warn('[FT] SocialLogin result:', JSON.stringify(res));
       }
     } catch(e) {
       setGCalError('Sign-in failed: ' + e.message);
+      showToast('❌ Sign-in error: ' + e.message);
     }
   };
 
-  // Handle the OAuth redirect callback, exchange code for access token
-  const gCalHandleRedirect = async (url) => {
-    try {
-      showToast('🔄 Processing sign-in…');
-      const params = new URLSearchParams(url.split('?')[1] || url.split('#')[1] || '');
-      const code = params.get('code');
-      const state = params.get('state');
-      const error = params.get('error');
-      if (error) { setGCalError('Google returned error: ' + error); showToast('❌ Google error: ' + error); return; }
-      if (!code) { setGCalError('No auth code in redirect URL'); showToast('❌ No auth code — URL: ' + url.slice(0,80)); return; }
-      if (!state) { setGCalError('No state in redirect URL'); showToast('❌ No state received'); return; }
-      // Decode the verifier directly from state -- this works regardless of
-      // which browser context receives the redirect, since everything
-      // needed is self-contained in the URL rather than depending on
-      // localStorage that may belong to a different origin/context.
-      let verifier;
-      try {
-        const decoded = JSON.parse(atob(state.replace(/-/g,'+').replace(/_/g,'/')));
-        verifier = decoded.v;
-      } catch(e) {
-        setGCalError('Could not decode state — try signing in again');
-        showToast('❌ Bad state format');
-        return;
-      }
-      if (!verifier) { setGCalError('Code verifier missing from state'); showToast('❌ Verifier missing'); return; }
-      showToast('🔄 Exchanging token…');
-      const resp = await fetch('https://oauth2.googleapis.com/token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          client_id: GOOGLE_CLIENT_ID,
-          redirect_uri: GOOGLE_REDIRECT_URI,
-          grant_type: 'authorization_code',
-          code,
-          code_verifier: verifier,
-        }),
-      });
-      const data = await resp.json();
-      if (data.access_token) {
-        setGCalToken(data.access_token);
-        try { localStorage.setItem('ft_gcal_token', data.access_token); } catch(e) {}
-        if (data.refresh_token) { try { localStorage.setItem('ft_gcal_refresh', data.refresh_token); } catch(e) {} }
-        showToast('✅ Google Calendar connected!');
-        await gCalFetchEvents(data.access_token);
-      } else {
-        const errMsg = data.error_description || data.error || JSON.stringify(data).slice(0,100);
-        setGCalError('Token exchange failed: ' + errMsg);
-        showToast('❌ Token error: ' + (data.error || 'unknown'));
-      }
-    } catch(e) {
-      setGCalError('Auth failed: ' + e.message);
-      showToast('❌ Auth error: ' + e.message);
-    }
-  };
-
-  // Fetch upcoming events from Google Calendar (next 30 days)
   const gCalFetchEvents = async (token = gCalToken) => {
     if (!token) return;
     setGCalSyncing(true);
@@ -4001,10 +3919,14 @@ function AppInner() {
     }
   };
 
-  const gCalSignOut = () => {
+  const gCalSignOut = async () => {
     setGCalToken(null);
     setGCalEvents([]);
     try { localStorage.removeItem('ft_gcal_token'); localStorage.removeItem('ft_gcal_refresh'); } catch(e) {}
+    try {
+      const SocialLogin = window.Capacitor?.Plugins?.SocialLogin;
+      if (SocialLogin) await SocialLogin.logout({ provider: 'google' });
+    } catch(e) {}
     showToast('Disconnected from Google Calendar');
   };
 
