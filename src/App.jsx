@@ -2591,8 +2591,7 @@ function AppInner() {
     const urlParams = new URLSearchParams(window.location.search);
     const code = urlParams.get('code');
     const state = urlParams.get('state');
-    if (code && state && localStorage.getItem('gcal_verifier')) {
-      // Clean the URL so the code doesn't persist in browser history
+    if (code && state) {
       window.history.replaceState({}, document.title, window.location.pathname);
       gCalHandleRedirect(window.location.href.split('?')[0] + '?' + urlParams.toString());
     }
@@ -3828,11 +3827,15 @@ function AppInner() {
       const data = encoder.encode(verifier);
       const digest = await crypto.subtle.digest('SHA-256', data);
       const challenge = btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
-      // Use localStorage (not sessionStorage) so it survives the browser
-      // redirect back to GitHub Pages after Google's consent screen
-      localStorage.setItem('gcal_verifier', verifier);
-      const state = Math.random().toString(36).slice(2);
-      localStorage.setItem('gcal_state', state);
+      // Encode the verifier directly into the state parameter (not
+      // localStorage) -- when the redirect lands on GitHub Pages via an
+      // external browser tab, that's a COMPLETELY SEPARATE browser context
+      // from the Android app's WebView, with its own isolated localStorage.
+      // The Android app's saved verifier would never be visible there.
+      // Packing it into state means whoever receives the redirect has
+      // everything needed, regardless of which context that turns out to be.
+      const stateObj = { r: Math.random().toString(36).slice(2), v: verifier };
+      const state = btoa(JSON.stringify(stateObj)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
       const params = new URLSearchParams({
         client_id: GOOGLE_CLIENT_ID,
         redirect_uri: GOOGLE_REDIRECT_URI,
@@ -3845,8 +3848,6 @@ function AppInner() {
         prompt: 'consent',
       });
       const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
-      // Open in system browser -- Google will redirect back to GitHub Pages
-      // with ?code=... in the URL, which gCalCheckRedirectOnLoad handles on startup
       const Browser = window.Capacitor?.Plugins?.Browser;
       if (Browser) {
         // Open in system browser via Capacitor Browser plugin.
@@ -3894,16 +3895,21 @@ function AppInner() {
       const error = params.get('error');
       if (error) { setGCalError('Google returned error: ' + error); showToast('❌ Google error: ' + error); return; }
       if (!code) { setGCalError('No auth code in redirect URL'); showToast('❌ No auth code — URL: ' + url.slice(0,80)); return; }
-      const savedState = localStorage.getItem('gcal_state');
-      if (state !== savedState) {
-        setGCalError('State mismatch — try signing in again');
-        showToast('❌ State mismatch');
+      if (!state) { setGCalError('No state in redirect URL'); showToast('❌ No state received'); return; }
+      // Decode the verifier directly from state -- this works regardless of
+      // which browser context receives the redirect, since everything
+      // needed is self-contained in the URL rather than depending on
+      // localStorage that may belong to a different origin/context.
+      let verifier;
+      try {
+        const decoded = JSON.parse(atob(state.replace(/-/g,'+').replace(/_/g,'/')));
+        verifier = decoded.v;
+      } catch(e) {
+        setGCalError('Could not decode state — try signing in again');
+        showToast('❌ Bad state format');
         return;
       }
-      const verifier = localStorage.getItem('gcal_verifier');
-      if (!verifier) { setGCalError('Code verifier missing — try signing in again'); showToast('❌ Verifier missing'); return; }
-      localStorage.removeItem('gcal_verifier');
-      localStorage.removeItem('gcal_state');
+      if (!verifier) { setGCalError('Code verifier missing from state'); showToast('❌ Verifier missing'); return; }
       showToast('🔄 Exchanging token…');
       const resp = await fetch('https://oauth2.googleapis.com/token', {
         method: 'POST',
