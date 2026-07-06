@@ -9,15 +9,11 @@ import {
 
 
 const APP_VERSION = '3.1';
-// ─── Google Calendar Integration ─────────────────────────────────────────────
-// Replace GOOGLE_CLIENT_ID with your real OAuth 2.0 Client ID from
-// Google Cloud Console (APIs & Services → Credentials → Create OAuth client →
-// Android). You'll also need your app's SHA-1 fingerprint registered there.
-// Until then, the Calendar sync UI will show but sign-in will fail gracefully.
-const GOOGLE_CLIENT_ID = '54802084194-qiej4s3ahd0eojf26rnjtsoius482fio.apps.googleusercontent.com';
-const GOOGLE_CALENDAR_SCOPES = 'https://www.googleapis.com/auth/calendar';
-const GOOGLE_REDIRECT_URI = 'https://josephd-93.github.io/FriendshipTree/';
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Calendar Integration ─────────────────────────────────────────────────
+// Uses @capgo/capacitor-calendar to read/write the phone's built-in
+// calendar database directly (plain Android permission, no OAuth) --
+// see gCalRequestPermission below for details.
+// ─────────────────────────────────────────────────────────────────────────
 
 const INTERACTION_DISTANCE = 70;
 const TIER_COLORS_GLOBAL = ['#bef264','#84cc16','#166534','#3b82f6','#9333ea'];
@@ -2183,7 +2179,15 @@ function AppInner() {
   const [feedCarrying, setFeedCarrying] = useState(null); // {dimKey, nodeId, branchIds, pageX, pageY, dropMode, holdPointerId}
   const [feedScrollTop, setFeedScrollTop] = useState(0);
   // Google Calendar integration state
-  const [gCalToken, setGCalToken] = useState(() => { try { return localStorage.getItem('ft_gcal_token') || null; } catch(e) { return null; } });
+  const [gCalToken, setGCalToken] = useState(() => {
+    try {
+      const saved = localStorage.getItem('ft_gcal_token');
+      // Only the 'device' marker is meaningful now -- any old real OAuth
+      // access token from the abandoned Google Sign-In approach is stale
+      return saved === 'device' ? 'device' : null;
+    } catch(e) { return null; }
+  });
+
 
   // ── Health Connect state ─────────────────────────────────────────────────
   const [healthData, setHealthData] = useState(() => {
@@ -3803,116 +3807,83 @@ function AppInner() {
   };
 
 
-  // ─── Google Calendar Integration ───────────────────────────────────────────
-
-  // Sign in with Google via OAuth2 PKCE flow using Capacitor Browser plugin.
-  // This opens the device browser for the consent screen, then redirects back
-  // to the app via the custom URL scheme com.friendshiptree:/oauth.
-  // ── Native Google Sign-In (no browser, no redirect) ────────────────────────
-  // Uses @capgo/capacitor-social-login, which wraps Android's Credential
-  // Manager API -- shows a genuine native account picker dialog directly in
-  // the app. No browser tab opens, no redirect URI needed, no GitHub Pages
-  // involvement. This is the correct approach for native app OAuth, unlike
-  // the browser-redirect flow which was fundamentally the wrong tool here.
-  let socialLoginInitialized = false;
-  const ensureSocialLoginInit = async () => {
-    if (socialLoginInitialized) return;
-    const SocialLogin = window.Capacitor?.Plugins?.SocialLogin;
-    if (!SocialLogin) return;
-    await SocialLogin.initialize({
-      google: { webClientId: GOOGLE_CLIENT_ID },
-    });
-    socialLoginInitialized = true;
-  };
-
-  const gCalSignIn = async () => {
+  // ── Device Calendar Integration (no OAuth, no Cloud Console needed) ───────
+  // Uses @capgo/capacitor-calendar, which reads/writes the phone's built-in
+  // calendar database via a plain Android permission (like Contacts) --
+  // no Google sign-in, no scopes, no verification process. Since Google
+  // Calendar (and any other calendar app) syncs with this same on-device
+  // database, events created here appear in Google Calendar automatically,
+  // and existing Google Calendar events are already readable from here.
+  const gCalRequestPermission = async () => {
     try {
       setGCalError(null);
-      const SocialLogin = window.Capacitor?.Plugins?.SocialLogin;
-      if (!SocialLogin) {
-        showToast('⚠️ Sign-in plugin not installed — run: npm install @capgo/capacitor-social-login');
+      const Cal = window.Capacitor?.Plugins?.CapacitorCalendar;
+      if (!Cal) {
+        showToast('⚠️ Calendar plugin not installed — run: npm install @capgo/capacitor-calendar');
         return;
       }
-      await ensureSocialLoginInit();
-      showToast('🔐 Opening Google sign-in…');
-      const res = await SocialLogin.login({
-        provider: 'google',
-        options: { scopes: ['email', 'profile', GOOGLE_CALENDAR_SCOPES] },
-      });
-      // Token location varies slightly by plugin version -- check both
-      // the documented result.result path and a flat fallback.
-      const accessToken = res?.result?.accessToken?.token || res?.result?.accessToken
-        || res?.accessToken?.token || res?.accessToken;
-      if (accessToken) {
-        setGCalToken(accessToken);
-        try { localStorage.setItem('ft_gcal_token', accessToken); } catch(e) {}
-        showToast('✅ Google Calendar connected!');
-        await gCalFetchEvents(accessToken);
+      const perm = await Cal.requestFullCalendarAccess();
+      if (perm.result === 'granted') {
+        setGCalToken('device'); // marker value -- device calendar has no real token, just permission
+        try { localStorage.setItem('ft_gcal_token', 'device'); } catch(e) {}
+        showToast('✅ Calendar connected!');
+        await gCalFetchEvents();
       } else {
-        setGCalError('Signed in but no Calendar access token returned — check scopes');
-        showToast('⚠️ Signed in, but no Calendar token — see error for details');
-        console.warn('[FT] SocialLogin result:', JSON.stringify(res));
+        setGCalError('Calendar permission denied');
+        showToast('❌ Calendar permission denied');
       }
     } catch(e) {
-      setGCalError('Sign-in failed: ' + e.message);
-      showToast('❌ Sign-in error: ' + e.message);
+      setGCalError('Calendar connection failed: ' + e.message);
+      showToast('❌ Error: ' + e.message);
     }
   };
+  // Keep old name as an alias so existing UI calls (gCalSignIn) still work
+  const gCalSignIn = gCalRequestPermission;
 
-  const gCalFetchEvents = async (token = gCalToken) => {
-    if (!token) return;
+  const gCalFetchEvents = async () => {
+    const Cal = window.Capacitor?.Plugins?.CapacitorCalendar;
+    if (!Cal) return;
     setGCalSyncing(true);
     setGCalError(null);
     try {
-      const now = new Date().toISOString();
-      const end = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-      const resp = await fetch(
-        `https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${now}&timeMax=${end}&singleEvents=true&orderBy=startTime&maxResults=50`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      if (resp.status === 401) {
-        // Token expired — clear it and prompt re-auth
-        setGCalToken(null);
-        try { localStorage.removeItem('ft_gcal_token'); } catch(e) {}
-        setGCalError('Session expired — please sign in again');
-        return;
-      }
-      const data = await resp.json();
-      setGCalEvents(data.items || []);
-      showToast(`📅 Synced ${(data.items||[]).length} calendar events`);
+      const now = Date.now();
+      const end = now + 30 * 24 * 60 * 60 * 1000; // next 30 days
+      const { result } = await Cal.listEventsInRange({ from: now, to: end });
+      // Normalize to the same shape the UI already expects from the old
+      // Google REST API response, so the rest of the app doesn't need changes
+      const normalized = (result || []).map(ev => ({
+        id: ev.id,
+        summary: ev.title,
+        start: { dateTime: new Date(ev.startDate).toISOString() },
+        end: { dateTime: new Date(ev.endDate).toISOString() },
+        _device: true,
+      }));
+      setGCalEvents(normalized);
+      showToast(`📅 Synced ${normalized.length} calendar events`);
     } catch(e) {
       setGCalError('Fetch failed: ' + e.message);
     }
     setGCalSyncing(false);
   };
 
-  // Push an interaction log entry to Google Calendar as an event
   const gCalPushEvent = async (title, dateStr, description = '', nodeId = null) => {
-    if (!gCalToken) { showToast('Connect Google Calendar first'); return; }
+    const Cal = window.Capacitor?.Plugins?.CapacitorCalendar;
+    if (!Cal) { showToast('Connect your calendar first'); return; }
     try {
       const date = dateStr ? new Date(dateStr) : new Date();
-      const start = date.toISOString();
-      const end = new Date(date.getTime() + 60 * 60 * 1000).toISOString(); // 1 hour default
+      const startDate = date.getTime();
+      const endDate = startDate + 60 * 60 * 1000; // 1 hour default
       const node = nodeId ? nodes.find(n => n.id === nodeId) : null;
-      const resp = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${gCalToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          summary: title,
-          description: description + (node ? `\n\nFriendshipTree: ${node.label}` : ''),
-          start: { dateTime: start },
-          end: { dateTime: end },
-          colorId: '2', // sage green — matches the app's colour
-          source: { title: 'FriendshipTree', url: 'https://josephd-93.github.io/FriendshipTree/' },
-        }),
+      const { id } = await Cal.createEvent({
+        title,
+        startDate,
+        endDate,
+        description: description + (node ? `\n\nFriendshipTree: ${node.label}` : ''),
       });
-      const data = await resp.json();
-      if (data.id) {
-        showToast('📅 Added to Google Calendar');
-        await gCalFetchEvents(); // refresh the event list
-        return data;
-      } else {
-        showToast('Calendar push failed: ' + (data.error?.message || 'Unknown error'));
+      if (id) {
+        showToast('📅 Added to your calendar');
+        await gCalFetchEvents();
+        return { id };
       }
     } catch(e) {
       showToast('Calendar push failed: ' + e.message);
@@ -3922,13 +3893,10 @@ function AppInner() {
   const gCalSignOut = async () => {
     setGCalToken(null);
     setGCalEvents([]);
-    try { localStorage.removeItem('ft_gcal_token'); localStorage.removeItem('ft_gcal_refresh'); } catch(e) {}
-    try {
-      const SocialLogin = window.Capacitor?.Plugins?.SocialLogin;
-      if (SocialLogin) await SocialLogin.logout({ provider: 'google' });
-    } catch(e) {}
-    showToast('Disconnected from Google Calendar');
+    try { localStorage.removeItem('ft_gcal_token'); } catch(e) {}
+    showToast('Disconnected — FriendshipTree will stop showing device calendar events (permission itself must be revoked in phone Settings if desired)');
   };
+
 
   // ── Health Connect integration ───────────────────────────────────────────
 
@@ -11942,7 +11910,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               <div style={{display:'flex', alignItems:'center', gap:8}}>
                 <span style={{fontSize:20}}>📅</span>
                 <div>
-                  <div style={{fontSize:14, fontWeight:700, color:theme.darkMode?'white':'#0f172a'}}>Google Calendar</div>
+                  <div style={{fontSize:14, fontWeight:700, color:theme.darkMode?'white':'#0f172a'}}>Calendar Sync</div>
                   <div style={{fontSize:11, color:theme.darkMode?'#64748b':'#94a3b8'}}>
                     {gCalToken ? 'Connected — events sync both ways' : 'Not connected'}
                   </div>
@@ -11963,23 +11931,17 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               /* Sign-in state */
               <div style={{padding:20, textAlign:'center'}}>
                 <div style={{fontSize:13, color:theme.darkMode?'#94a3b8':'#64748b', marginBottom:16, lineHeight:1.5}}>
-                  Connect your Google Calendar to sync events with FriendshipTree — see upcoming plans with friends and push interaction logs as calendar events.
+                  Connect your phone's calendar to sync events with FriendshipTree — see upcoming plans with friends and push interaction logs as calendar events. Works with Google Calendar or any calendar app synced to your device.
                 </div>
                 <button onClick={gCalSignIn}
                   style={{display:'flex', alignItems:'center', gap:10, margin:'0 auto',
-                    padding:'10px 20px', borderRadius:99, border:'1px solid #e2e8f0',
-                    background:'white', cursor:'pointer', fontSize:13, fontWeight:600, color:'#374151',
+                    padding:'10px 20px', borderRadius:99, border:'none',
+                    background:'#10b981', cursor:'pointer', fontSize:13, fontWeight:600, color:'white',
                     boxShadow:'0 2px 8px rgba(0,0,0,0.1)'}}>
-                  <svg width="18" height="18" viewBox="0 0 24 24">
-                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-                  </svg>
-                  Sign in with Google
+                  📅 Connect Calendar
                 </button>
                 <div style={{marginTop:12, fontSize:11, color:theme.darkMode?'#475569':'#94a3b8'}}>
-                  You'll need a Client ID set up in Google Cloud Console.{'\n'}See the setup guide in the app's README.
+                  Just needs calendar permission on your phone — no account sign-in required.
                 </div>
               </div>
             ) : (
