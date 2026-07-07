@@ -157,6 +157,7 @@ const INITIAL_NODES = [
   { id: 'health_sleep',     type: 'health_metric', metric: 'sleep',     label: 'Sleep',      x: 330,  y: 381,  pinned: false, shape: 'pill'   },
   { id: 'health_heartrate', type: 'health_metric', metric: 'heartRate', label: 'Heart Rate', x: 165,  y: 476,  pinned: false, shape: 'pill'   },
   { id: 'health_workouts',  type: 'health_metric', metric: 'workouts',  label: 'Workouts',   x: 495,  y: 286,  pinned: false, shape: 'card'   },
+  { id: 'health_list_list_hntd', type: 'health_list', listId: 'list_hntd', label: 'How Not to Die', x: 660, y: 191, pinned: false },
 ];
 
 
@@ -170,6 +171,7 @@ const INITIAL_LINKS = [
   { source: 'flower_health', target: 'health_sleep'     },
   { source: 'flower_health', target: 'health_heartrate' },
   { source: 'flower_health', target: 'health_workouts'  },
+  { source: 'flower_health', target: 'health_list_list_hntd' },
 ];
 
 
@@ -1314,6 +1316,7 @@ function AppInner() {
         { id: 'health_sleep',     type: 'health_metric', metric: 'sleep',     label: 'Sleep',      x: 330,  y: 381,  pinned: false, shape: 'pill' },
         { id: 'health_heartrate', type: 'health_metric', metric: 'heartRate', label: 'Heart Rate', x: 165,  y: 476,  pinned: false, shape: 'pill' },
         { id: 'health_workouts',  type: 'health_metric', metric: 'workouts',  label: 'Workouts',   x: 495,  y: 286,  pinned: false, shape: 'card' },
+        { id: 'health_list_list_hntd', type: 'health_list', listId: 'list_hntd', label: 'How Not to Die', x: 660, y: 191, pinned: false },
       ];
       healthMetrics.forEach(hm => {
         if (!loaded.find(n => n.id === hm.id)) loaded.push(hm);
@@ -1331,6 +1334,7 @@ function AppInner() {
         { source: 'flower_health', target: 'health_sleep'     },
         { source: 'flower_health', target: 'health_heartrate' },
         { source: 'flower_health', target: 'health_workouts'  },
+        { source: 'flower_health', target: 'health_list_list_hntd' },
       ];
       healthLinks.forEach(hl => {
         if (!loaded.find(l => l.source === hl.source && l.target === hl.target)) loaded.push(hl);
@@ -2223,6 +2227,87 @@ function AppInner() {
   const [healthPermission, setHealthPermission] = useState(null); // null | 'granted' | 'denied' | 'unavailable'
   const [healthLoading, setHealthLoading] = useState(false);
   const [showHealthPanel, setShowHealthPanel] = useState(false);
+  // ── Health Lists (multiple named habit checklists, e.g. "How Not to Die",
+  //    "How Not to Age") -- each is its own draggable node on the map,
+  //    reusing the same node/link infrastructure as health_metric nodes.
+  const DEFAULT_HEALTH_LISTS = [
+    {
+      id: 'list_hntd', name: 'How Not to Die', icon: '🥗', color: '#10b981',
+      categories: [
+        { id: 'beans',       label: 'Beans/legumes',   icon: '🫘', target: 3, unit: 'servings', pointsPerServing: 5, pointsPerOverServing: 2 },
+        { id: 'berries',     label: 'Berries',         icon: '🫐', target: 1, unit: 'servings', pointsPerServing: 5, pointsPerOverServing: 2 },
+        { id: 'otherFruits', label: 'Other fruits',    icon: '🍎', target: 3, unit: 'servings', pointsPerServing: 5, pointsPerOverServing: 2 },
+        { id: 'cruciferous', label: 'Cruciferous veg', icon: '🥦', target: 1, unit: 'servings', pointsPerServing: 5, pointsPerOverServing: 2 },
+        { id: 'greens',      label: 'Greens',          icon: '🥬', target: 2, unit: 'servings', pointsPerServing: 5, pointsPerOverServing: 2 },
+        { id: 'otherVeg',    label: 'Other vegetables',icon: '🥕', target: 2, unit: 'servings', pointsPerServing: 5, pointsPerOverServing: 2 },
+        { id: 'nuts',        label: 'Nuts/seeds',      icon: '🌰', target: 1, unit: 'servings', pointsPerServing: 5, pointsPerOverServing: 2 },
+        { id: 'grains',      label: 'Whole grains',    icon: '🌾', target: 3, unit: 'servings', pointsPerServing: 5, pointsPerOverServing: 2 },
+        { id: 'water',       label: 'Water',           icon: '💧', target: 5, unit: 'cups',     pointsPerServing: 3, pointsPerOverServing: 1 },
+        { id: 'exercise',    label: 'Exercise',        icon: '🏃', target: 30, unit: 'minutes',  pointsPerServing: 1, pointsPerOverServing: 1 },
+      ],
+    },
+  ];
+  const [healthLists, setHealthLists] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('ft_health_lists') || 'null');
+      if (saved) return saved;
+      // Migrate from the old single flat-list structure if it exists
+      const oldCats = JSON.parse(localStorage.getItem('ft_habit_categories') || 'null');
+      if (oldCats) {
+        return [{ id: 'list_hntd', name: 'My Habits', icon: '🥗', color: '#10b981',
+          categories: oldCats.map(c => ({ ...c, pointsPerServing: 5, pointsPerOverServing: 2 })) }];
+      }
+      return DEFAULT_HEALTH_LISTS;
+    } catch(e) { return DEFAULT_HEALTH_LISTS; }
+  });
+  // habitToday: { [listId]: { [categoryId]: count } }
+  const [habitToday, setHabitToday] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('ft_habit_today_v2') || 'null');
+      if (saved) return saved;
+      const oldToday = JSON.parse(localStorage.getItem('ft_habit_today') || 'null');
+      if (oldToday) return { list_hntd: oldToday };
+      return {};
+    } catch(e) { return {}; }
+  });
+  const [habitLastResetDate, setHabitLastResetDate] = useState(() => {
+    try { return localStorage.getItem('ft_habit_last_reset') || new Date().toISOString().slice(0,10); }
+    catch(e) { return new Date().toISOString().slice(0,10); }
+  });
+  // habitHistory: { [dateStr]: { [listId]: { [categoryId]: count } } }
+  const [habitHistory, setHabitHistory] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('ft_habit_history_v2') || '{}'); } catch(e) { return {}; }
+  });
+  // listScores: { [listId]: number } -- persistent score that grows when you
+  // exceed your own daily targets and decays when you fall short, updated
+  // once per day at rollover. This is deliberately simple to start with:
+  // score += (today's earned points) - (today's baseline points if every
+  // category had hit exactly its target) -- so a perfectly on-target day is
+  // score-neutral, exceeding targets grows it, falling short shrinks it.
+  const [listScores, setListScores] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('ft_list_scores') || '{}'); } catch(e) { return {}; }
+  });
+  const [showHabitEditor, setShowHabitEditor] = useState(false);
+  const [showHealthListDetail, setShowHealthListDetail] = useState(null); // listId or null
+  const [showListPointsEditor, setShowListPointsEditor] = useState(null); // listId or null
+  const habitTodayRef = useRef(habitToday);
+  habitTodayRef.current = habitToday;
+
+  // Points formula: full rate up to target, a lower rate for anything logged
+  // beyond it -- e.g. target=3, pointsPerServing=5, pointsPerOverServing=2
+  // gives 1->5, 2->10, 3->15, 4->17, 5->19, matching diminishing returns for
+  // going past what's actually required.
+  const computeCategoryPoints = (count, cat) => {
+    const target = cat.target || 1;
+    const atTarget = Math.min(count, target) * (cat.pointsPerServing || 0);
+    const overTarget = Math.max(0, count - target) * (cat.pointsPerOverServing ?? cat.pointsPerServing ?? 0);
+    return atTarget + overTarget;
+  };
+  const computeListBaselinePoints = (list) =>
+    (list.categories || []).reduce((sum, c) => sum + (c.target || 1) * (c.pointsPerServing || 0), 0);
+  const computeListDayPoints = (list, dayCounts) =>
+    (list.categories || []).reduce((sum, c) => sum + computeCategoryPoints((dayCounts||{})[c.id] || 0, c), 0);
+
   // ─────────────────────────────────────────────────────────────────────────
 
   const [gCalEvents, setGCalEvents] = useState([]);
@@ -3943,7 +4028,7 @@ function AppInner() {
     try {
       const avail = await Health.isAvailable();
       if (!avail.available) { setHealthPermission('unavailable'); return false; }
-      const readTypes = ['steps', 'sleep', 'heartRate', 'workouts'];
+      const readTypes = ['steps', 'sleep', 'heartRate', 'workouts', 'distance', 'calories', 'totalCalories', 'flightsClimbed', 'restingHeartRate', 'heartRateVariability'];
       await Health.requestAuthorization({ read: readTypes, write: [] });
       // Verify what was actually granted rather than guessing at
       // requestAuthorization's return shape, which isn't fully documented
@@ -3969,68 +4054,102 @@ function AppInner() {
       const startOf7Days = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
       const newData = { ...healthData, lastFetched: now.toISOString() };
 
-      // Steps — today's total
-      try {
-        const stepsResult = await Health.queryAggregated({
-          dataType: 'steps',
-          startDate: startOfDay.toISOString(),
-          endDate: now.toISOString(),
-          bucket: 'day',
-          aggregation: 'sum',
-        });
-        const stepSamples = stepsResult?.samples || [];
-        newData.steps = stepSamples.length > 0
-          ? stepSamples.reduce((sum, s) => sum + (s.value || 0), 0)
-          : null;
-      } catch(e) { console.warn('Steps fetch failed:', e); }
+      const sumAggregated = async (dataType) => {
+        try {
+          const res = await Health.queryAggregated({
+            dataType, startDate: startOfDay.toISOString(), endDate: now.toISOString(),
+            bucket: 'day', aggregation: 'sum',
+          });
+          const samples = res?.samples || [];
+          return samples.length > 0 ? samples.reduce((sum, s) => sum + (s.value || 0), 0) : null;
+        } catch(e) { console.warn(`${dataType} fetch failed:`, e); return null; }
+      };
+      const latestSample = async (dataType, days = 7) => {
+        try {
+          const start = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+          const res = await Health.readSamples({
+            dataType, startDate: start.toISOString(), endDate: now.toISOString(),
+            limit: 20, ascending: false,
+          });
+          const samples = res?.samples || [];
+          return samples.length > 0 ? samples[0] : null;
+        } catch(e) { console.warn(`${dataType} fetch failed:`, e); return null; }
+      };
 
-      // Sleep — last night
+      // Steps -- today's total
+      newData.steps = await sumAggregated('steps');
+
+      // Distance -- today's total (metres, converted to km for display)
+      const distanceM = await sumAggregated('distance');
+      newData.distanceKm = distanceM != null ? Math.round((distanceM / 1000) * 10) / 10 : null;
+
+      // Calories -- active + total, today
+      newData.activeCalories = await sumAggregated('calories');
+      newData.totalCalories = await sumAggregated('totalCalories');
+
+      // Flights climbed -- today
+      newData.flights = await sumAggregated('flightsClimbed');
+
+      // Sleep -- last night, WITH stage breakdown for real quality insight
+      // (deep/light/rem/awake), not just total duration
       try {
-        const sleepStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 20, 0, 0);
-        const sleepSamples = await Health.readSamples({
-          dataType: 'sleep',
-          startDate: sleepStart.toISOString(),
-          endDate: now.toISOString(),
+        const sleepStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 18, 0, 0);
+        const sleepRes = await Health.readSamples({
+          dataType: 'sleep', startDate: sleepStart.toISOString(), endDate: now.toISOString(), limit: 100,
         });
-        const samples = sleepSamples.samples || sleepSamples.data || [];
+        const samples = sleepRes?.samples || [];
         if (samples.length > 0) {
-          const totalMs = samples.reduce((sum, s) => {
-            const start = new Date(s.startDate || s.start).getTime();
-            const end = new Date(s.endDate || s.end).getTime();
-            return sum + (end - start);
-          }, 0);
-          newData.sleep = Math.round(totalMs / (1000 * 60)); // minutes
+          const stageMinutes = { deep: 0, light: 0, rem: 0, awake: 0, asleep: 0 };
+          samples.forEach(s => {
+            const start = new Date(s.startDate).getTime();
+            const end = new Date(s.endDate).getTime();
+            const mins = Math.max(0, (end - start) / (1000 * 60));
+            const state = s.sleepState || 'asleep';
+            stageMinutes[state] = (stageMinutes[state] || 0) + mins;
+          });
+          const totalAsleep = stageMinutes.deep + stageMinutes.light + stageMinutes.rem + stageMinutes.asleep;
+          newData.sleep = Math.round(totalAsleep);
+          newData.sleepStages = {
+            deep: Math.round(stageMinutes.deep),
+            light: Math.round(stageMinutes.light),
+            rem: Math.round(stageMinutes.rem),
+            awake: Math.round(stageMinutes.awake),
+          };
+          // Simple quality indicator: deep + REM as a share of total time asleep --
+          // these are the restorative stages, so a higher share is generally better
+          const restorative = stageMinutes.deep + stageMinutes.rem;
+          newData.sleepQualityPct = totalAsleep > 0 ? Math.round((restorative / totalAsleep) * 100) : null;
+        } else {
+          newData.sleep = null;
+          newData.sleepStages = null;
+          newData.sleepQualityPct = null;
         }
       } catch(e) { console.warn('Sleep fetch failed:', e); }
 
-      // Heart rate — latest reading
-      try {
-        const hr = await Health.readSamples({
-          dataType: 'heartRate',
-          startDate: startOf7Days.toISOString(),
-          endDate: now.toISOString(),
-          limit: 10,
-        });
-        const samples = hr.samples || hr.data || [];
-        if (samples.length > 0) {
-          newData.heartRate = Math.round(samples[samples.length - 1].value || samples[samples.length - 1].quantity);
-        }
-      } catch(e) { console.warn('Heart rate fetch failed:', e); }
+      // Heart rate -- most recent reading
+      const hrSample = await latestSample('heartRate');
+      newData.heartRate = hrSample ? Math.round(hrSample.value) : null;
 
-      // Workouts — last 7 days
+      // Resting heart rate -- a good baseline fitness/recovery indicator
+      const rhrSample = await latestSample('restingHeartRate', 3);
+      newData.restingHeartRate = rhrSample ? Math.round(rhrSample.value) : null;
+
+      // Heart rate variability -- higher generally indicates better recovery/lower stress
+      const hrvSample = await latestSample('heartRateVariability', 3);
+      newData.hrv = hrvSample ? Math.round(hrvSample.value) : null;
+
+      // Workouts -- last 7 days
       try {
-        const workouts = await Health.queryWorkouts({
-          startDate: startOf7Days.toISOString(),
-          endDate: now.toISOString(),
-          limit: 20,
+        const workoutsRes = await Health.queryWorkouts({
+          startDate: startOf7Days.toISOString(), endDate: now.toISOString(), limit: 20,
         });
-        newData.workouts = (workouts.workouts || workouts.data || []).map(w => ({
-          type: w.activityType || w.type || 'Workout',
+        newData.workouts = (workoutsRes?.workouts || []).map(w => ({
+          type: w.workoutType || w.activityType || 'Workout',
           duration: Math.round((w.duration || 0) / 60), // minutes
           calories: Math.round(w.totalEnergyBurned || w.calories || 0),
-          date: w.startDate || w.start,
+          date: w.startDate,
         }));
-      } catch(e) { console.warn('Workouts fetch failed:', e); }
+      } catch(e) { console.warn('Workouts fetch failed:', e); newData.workouts = newData.workouts || []; }
 
       setHealthData(newData);
       try { localStorage.setItem('ft_health_data', JSON.stringify(newData)); } catch(e) {}
@@ -4709,6 +4828,53 @@ function AppInner() {
   useEffect(() => { try { localStorage.setItem('ft_links', JSON.stringify(links)); } catch(e) {} }, [links]);
   useEffect(() => { try { localStorage.setItem('ft_cal_events', JSON.stringify(calEvents)); } catch(e) {} }, [calEvents]);
   useEffect(() => { try { localStorage.setItem('ft_cal_recurring', JSON.stringify(calRecurring)); } catch(e) {} }, [calRecurring]);
+  useEffect(() => { try { localStorage.setItem('ft_health_lists', JSON.stringify(healthLists)); } catch(e) {} }, [healthLists]);
+  useEffect(() => { try { localStorage.setItem('ft_habit_today_v2', JSON.stringify(habitToday)); } catch(e) {} }, [habitToday]);
+  useEffect(() => { try { localStorage.setItem('ft_habit_history_v2', JSON.stringify(habitHistory)); } catch(e) {} }, [habitHistory]);
+  useEffect(() => { try { localStorage.setItem('ft_list_scores', JSON.stringify(listScores)); } catch(e) {} }, [listScores]);
+  const healthListsRef = useRef(healthLists);
+  healthListsRef.current = healthLists;
+  // Midnight rollover: archive today's counts into history for every list,
+  // update each list's persistent score based on how today's actual points
+  // compared to its baseline (hitting every target exactly = no change,
+  // exceeding it = score grows, falling short = score decays), then reset
+  // today's counts to zero for a fresh start.
+  const doHabitRollover = (dateToArchive) => {
+    const todayCountsByList = habitTodayRef.current;
+    setHabitHistory(prev => ({ ...prev, [dateToArchive]: todayCountsByList }));
+    setListScores(prev => {
+      const next = { ...prev };
+      healthListsRef.current.forEach(list => {
+        const dayPoints = computeListDayPoints(list, todayCountsByList[list.id]);
+        const baseline = computeListBaselinePoints(list);
+        const delta = dayPoints - baseline;
+        next[list.id] = Math.max(0, (prev[list.id] || 0) + delta);
+      });
+      return next;
+    });
+    setHabitToday({});
+  };
+  useEffect(() => {
+    const todayStr = new Date().toISOString().slice(0,10);
+    if (habitLastResetDate !== todayStr) {
+      doHabitRollover(habitLastResetDate);
+      setHabitLastResetDate(todayStr);
+      try { localStorage.setItem('ft_habit_last_reset', todayStr); } catch(e) {}
+    }
+    // Also re-check periodically in case the app stays open across midnight
+    const iv = setInterval(() => {
+      const now = new Date().toISOString().slice(0,10);
+      setHabitLastResetDate(prevDate => {
+        if (prevDate !== now) {
+          doHabitRollover(prevDate);
+          try { localStorage.setItem('ft_habit_last_reset', now); } catch(e) {}
+          return now;
+        }
+        return prevDate;
+      });
+    }, 60000); // check every minute
+    return () => clearInterval(iv);
+  }, []); // eslint-disable-line
   useEffect(() => {
     if (calRecurring.length === 0) return;
     const today = new Date();
@@ -10461,6 +10627,37 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 }
                 // ──────────────────────────────────────────────────────────
 
+                // ── Health List nodes -- draggable cards for each named
+                // habit checklist (e.g. "How Not to Die") ──────────────────
+                if (node.type === 'health_list') {
+                  const list = healthLists.find(l => l.id === node.listId);
+                  if (!list) return [];
+                  const dm = theme.darkMode;
+                  const isLifted2 = liftedNodeId === node.id;
+                  const nx = node.x || 0, ny = node.y || 0;
+                  const todayCounts = habitToday[list.id] || {};
+                  const hitCount = list.categories.filter(c => (todayCounts[c.id]||0) >= c.target).length;
+                  const score = Math.round(listScores[list.id] || 0);
+                  const cw = 120, ch = 66;
+                  return [(
+                    <g key={node.id} transform={`translate(${nx},${ny})`}
+                      style={{cursor:'pointer'}}
+                      onPointerDown={e => handlePointerDown(e, node)}
+                      onClick={() => setShowHealthListDetail(list.id)}>
+                      <rect x={-cw/2} y={-ch/2} width={cw} height={ch} rx={12}
+                        fill={dm?'#1e293b':'white'} stroke={list.color||'#10b981'} strokeWidth={isLifted2?3:1.5}
+                        filter={isLifted2?'drop-shadow(0 4px 12px rgba(0,0,0,0.4))':undefined}/>
+                      <text x={0} y={-ch/2+16} textAnchor="middle" fontSize={9} fontWeight={700}
+                        fill={list.color||'#10b981'}>{list.icon} {list.name}</text>
+                      <text x={0} y={-ch/2+32} textAnchor="middle" fontSize={13} fontWeight={800}
+                        fill={dm?'white':'#0f172a'}>{hitCount}/{list.categories.length} hit today</text>
+                      <text x={0} y={-ch/2+47} textAnchor="middle" fontSize={11} fontWeight={700}
+                        fill={score >= 0 ? '#10b981' : '#ef4444'}>⭐ {score} pts</text>
+                    </g>
+                  )];
+                }
+                // ──────────────────────────────────────────────────────────
+
                 const isLifted = liftedNodeId === node.id && viewMode === 'canvas';
                 const scaleRatio = node.radius / 45;
                 const plateWidth = Math.max(100, node.radius * 2.2);
@@ -12698,6 +12895,10 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             { key: 'sleep',     label: 'Sleep',      icon: '😴', color: '#8b5cf6', value: healthData.sleep,     unit: 'minutes',      format: v => v != null ? `${Math.floor(v/60)}h ${v%60}m` : '—' },
             { key: 'heartRate', label: 'Heart Rate', icon: '❤️', color: '#ef4444', value: healthData.heartRate, unit: 'bpm',          format: v => v?.toString() || '—' },
             { key: 'workouts',  label: 'Workouts',   icon: '💪', color: '#f59e0b', value: healthData.workouts?.length, unit: 'this week', format: v => v?.toString() || '—' },
+            { key: 'distance',  label: 'Distance',   icon: '🚶', color: '#06b6d4', value: healthData.distanceKm, unit: 'km today',   format: v => v != null ? `${v}` : '—' },
+            { key: 'calories',  label: 'Active Cal',  icon: '🔥', color: '#f97316', value: healthData.activeCalories, unit: 'kcal today', format: v => v != null ? Math.round(v).toLocaleString() : '—' },
+            { key: 'flights',   label: 'Flights',    icon: '🏢', color: '#84cc16', value: healthData.flights, unit: 'climbed today', format: v => v != null ? Math.round(v).toString() : '—' },
+            { key: 'restingHR', label: 'Resting HR', icon: '💤', color: '#ec4899', value: healthData.restingHeartRate, unit: 'bpm',   format: v => v?.toString() || '—' },
           ];
           return (
             <div style={{position:'fixed', inset:0, zIndex:300, display:'flex', alignItems:'flex-end',
@@ -12750,6 +12951,97 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     </div>
                   ))}
                 </div>
+                {/* Sleep quality breakdown -- deep/light/REM/awake stages */}
+                {healthData.sleepStages && (
+                  <div style={{marginBottom:16, borderRadius:12, padding:'12px 14px',
+                    background:dm?'#1e293b':'#f8fafc', border:`1px solid ${dm?'#334155':'#e2e8f0'}`}}>
+                    <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10}}>
+                      <div style={{fontSize:12, fontWeight:700, color:dm?'white':'#0f172a'}}>😴 Sleep Quality</div>
+                      {healthData.sleepQualityPct != null && (
+                        <div style={{fontSize:12, fontWeight:800, color:'#8b5cf6'}}>{healthData.sleepQualityPct}% restorative</div>
+                      )}
+                    </div>
+                    {/* Stacked bar showing proportion of each stage */}
+                    {(() => {
+                      const stages = healthData.sleepStages;
+                      const total = (stages.deep||0) + (stages.light||0) + (stages.rem||0) + (stages.awake||0);
+                      if (total === 0) return null;
+                      const segs = [
+                        { key:'deep', label:'Deep', color:'#5b21b6', mins:stages.deep },
+                        { key:'rem', label:'REM', color:'#8b5cf6', mins:stages.rem },
+                        { key:'light', label:'Light', color:'#c4b5fd', mins:stages.light },
+                        { key:'awake', label:'Awake', color:'#fbbf24', mins:stages.awake },
+                      ];
+                      return (
+                        <>
+                          <div style={{display:'flex', height:10, borderRadius:6, overflow:'hidden', marginBottom:8}}>
+                            {segs.map(s => s.mins > 0 && (
+                              <div key={s.key} style={{width:`${(s.mins/total)*100}%`, background:s.color}}/>
+                            ))}
+                          </div>
+                          <div style={{display:'flex', flexWrap:'wrap', gap:10}}>
+                            {segs.map(s => (
+                              <div key={s.key} style={{display:'flex', alignItems:'center', gap:5}}>
+                                <div style={{width:8, height:8, borderRadius:2, background:s.color}}/>
+                                <span style={{fontSize:11, color:dm?'#94a3b8':'#64748b'}}>
+                                  {s.label} {Math.floor(s.mins/60)}h{s.mins%60}m
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
+                )}
+                {/* Heart rate variability -- recovery/stress indicator */}
+                {healthData.hrv != null && (
+                  <div style={{marginBottom:16, borderRadius:12, padding:'10px 14px',
+                    background:dm?'#1e293b':'#f8fafc', border:`1px solid ${dm?'#334155':'#e2e8f0'}`,
+                    display:'flex', alignItems:'center', justifyContent:'space-between'}}>
+                    <div style={{fontSize:12, color:dm?'#94a3b8':'#64748b'}}>
+                      💓 Heart Rate Variability <span style={{fontSize:10}}>(higher = better recovery)</span>
+                    </div>
+                    <div style={{fontSize:14, fontWeight:800, color:'#ec4899'}}>{healthData.hrv} ms</div>
+                  </div>
+                )}
+                {/* Health Lists -- summary of each named habit checklist,
+                    tap to open its full detail/logging view */}
+                <div style={{marginBottom:16, borderRadius:12, padding:'12px 14px',
+                  background:dm?'#1e293b':'#f8fafc', border:`1px solid ${dm?'#334155':'#e2e8f0'}`}}>
+                  <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10}}>
+                    <div style={{fontSize:12, fontWeight:700, color:dm?'white':'#0f172a'}}>✅ Health Lists</div>
+                    <div style={{fontSize:12, fontWeight:800, color:'#10b981'}}>
+                      Total: {Math.round(healthLists.reduce((s,l)=>s+(listScores[l.id]||0),0))} pts
+                    </div>
+                  </div>
+                  <div style={{display:'flex', flexDirection:'column', gap:6}}>
+                    {healthLists.map(list => {
+                      const todayCounts = habitToday[list.id] || {};
+                      const hitCount = list.categories.filter(c => (todayCounts[c.id]||0) >= c.target).length;
+                      const score = Math.round(listScores[list.id] || 0);
+                      return (
+                        <div key={list.id} onClick={() => setShowHealthListDetail(list.id)}
+                          style={{display:'flex', alignItems:'center', gap:10, padding:'8px 10px',
+                            borderRadius:8, cursor:'pointer', background:dm?'#0f172a':'white',
+                            border:`1px solid ${dm?'#334155':'#e2e8f0'}`}}>
+                          <div style={{fontSize:18}}>{list.icon}</div>
+                          <div style={{flex:1, minWidth:0}}>
+                            <div style={{fontSize:13, fontWeight:600, color:dm?'white':'#0f172a'}}>{list.name}</div>
+                            <div style={{fontSize:11, color:dm?'#64748b':'#94a3b8'}}>{hitCount}/{list.categories.length} targets hit today</div>
+                          </div>
+                          <div style={{fontSize:13, fontWeight:800, color:score>=0?'#10b981':'#ef4444'}}>⭐ {score}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <button onClick={() => setShowHabitEditor(true)}
+                    style={{width:'100%', marginTop:10, padding:'7px 0', borderRadius:8,
+                      border:`1px dashed ${dm?'#334155':'#e2e8f0'}`, background:'none',
+                      color:dm?'#64748b':'#94a3b8', fontSize:12, fontWeight:600, cursor:'pointer'}}>
+                    Manage lists & categories
+                  </button>
+                </div>
                 {/* Recent workouts */}
                 {(healthData.workouts?.length || 0) > 0 && (
                   <div>
@@ -12787,6 +13079,241 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     + Add recurring activity
                   </button>
                 </div>
+              </div>
+            </div>
+          );
+        })()}
+        {/* ──────────────────────────────────────────────────────────────── */}
+
+        {/* ── Health List Detail (checklist + logging for one list) ──────── */}
+        {showHealthListDetail && (() => {
+          const dm = theme.darkMode;
+          const list = healthLists.find(l => l.id === showHealthListDetail);
+          if (!list) { setShowHealthListDetail(null); return null; }
+          const todayCounts = habitToday[list.id] || {};
+          const dayPoints = computeListDayPoints(list, todayCounts);
+          const baseline = computeListBaselinePoints(list);
+          return (
+            <div style={{position:'fixed', inset:0, zIndex:320, display:'flex', alignItems:'flex-end',
+              background:'rgba(0,0,0,0.5)', paddingBottom:'calc(68px + env(safe-area-inset-bottom, 0px))'}}
+              onClick={e => { if (e.target === e.currentTarget) setShowHealthListDetail(null); }}>
+              <div style={{width:'100%', background:dm?'#0f172a':'white', borderRadius:'16px 16px 0 0',
+                padding:'20px 16px', maxHeight:'80vh', overflowY:'auto', boxSizing:'border-box'}}>
+                <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:4}}>
+                  <div style={{fontSize:16, fontWeight:800, color:dm?'white':'#0f172a'}}>{list.icon} {list.name}</div>
+                  <button onClick={() => setShowHealthListDetail(null)}
+                    style={{background:'none', border:'none', fontSize:22, color:dm?'#64748b':'#94a3b8', cursor:'pointer'}}>×</button>
+                </div>
+                <div style={{fontSize:12, color:dm?'#64748b':'#94a3b8', marginBottom:16}}>
+                  Today: {dayPoints} pts {dayPoints >= baseline ? '(at or above your daily baseline 🎉)' : `(baseline is ${baseline} pts)`}
+                  &nbsp;·&nbsp; Score: <span style={{fontWeight:800, color:(listScores[list.id]||0)>=0?'#10b981':'#ef4444'}}>
+                    {Math.round(listScores[list.id]||0)} pts
+                  </span>
+                </div>
+                <div style={{display:'flex', flexDirection:'column', gap:10}}>
+                  {list.categories.map(cat => {
+                    const count = todayCounts[cat.id] || 0;
+                    const pct = Math.min(100, (count / cat.target) * 100);
+                    const hit = count >= cat.target;
+                    const over = count > cat.target;
+                    return (
+                      <div key={cat.id} style={{display:'flex', alignItems:'center', gap:10}}>
+                        <div style={{fontSize:16, width:22, textAlign:'center'}}>{cat.icon}</div>
+                        <div style={{flex:1, minWidth:0}}>
+                          <div style={{display:'flex', justifyContent:'space-between', marginBottom:3}}>
+                            <span style={{fontSize:12, fontWeight:600, color:dm?'white':'#0f172a',
+                              overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{cat.label}</span>
+                            <span style={{fontSize:11, fontWeight:700, color:over?'#f59e0b':hit?'#10b981':(dm?'#64748b':'#94a3b8')}}>
+                              {count}/{cat.target} {cat.unit}{over ? ' 🔥' : ''}
+                            </span>
+                          </div>
+                          <div style={{height:5, borderRadius:99, background:dm?'#334155':'#e2e8f0', overflow:'hidden'}}>
+                            <div style={{height:'100%', width:`${pct}%`, background:over?'#f59e0b':hit?'#10b981':'#8b5cf6',
+                              transition:'width 0.2s'}}/>
+                          </div>
+                        </div>
+                        <button onClick={() => setHabitToday(prev => ({ ...prev,
+                          [list.id]: { ...(prev[list.id]||{}), [cat.id]: (prev[list.id]?.[cat.id]||0) + 1 } }))}
+                          style={{width:28, height:28, borderRadius:8, border:'none', flexShrink:0,
+                            background:'#10b981', color:'white', fontSize:16, fontWeight:700, cursor:'pointer',
+                            display:'flex', alignItems:'center', justifyContent:'center'}}>
+                          +
+                        </button>
+                        {count > 0 && (
+                          <button onClick={() => setHabitToday(prev => ({ ...prev,
+                            [list.id]: { ...(prev[list.id]||{}), [cat.id]: Math.max(0,(prev[list.id]?.[cat.id]||0) - 1) } }))}
+                            style={{width:22, height:22, borderRadius:6, border:`1px solid ${dm?'#334155':'#e2e8f0'}`, flexShrink:0,
+                              background:'none', color:dm?'#64748b':'#94a3b8', fontSize:13, cursor:'pointer',
+                              display:'flex', alignItems:'center', justifyContent:'center'}}>
+                            −
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <button onClick={() => setShowListPointsEditor(list.id)}
+                  style={{width:'100%', marginTop:14, padding:'8px 0', borderRadius:8,
+                    border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:'none',
+                    color:dm?'#94a3b8':'#64748b', fontSize:12, fontWeight:600, cursor:'pointer'}}>
+                  ⚙️ Edit points per item
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+        {/* ──────────────────────────────────────────────────────────────── */}
+
+        {/* ── Health Lists Manager (add/remove lists, edit categories) ───── */}
+        {showHabitEditor && (() => {
+          const dm = theme.darkMode;
+          return (
+            <div style={{position:'fixed', inset:0, zIndex:310, display:'flex', alignItems:'flex-end',
+              background:'rgba(0,0,0,0.5)', paddingBottom:'calc(68px + env(safe-area-inset-bottom, 0px))'}}>
+              <div style={{width:'100%', background:dm?'#0f172a':'white', borderRadius:'16px 16px 0 0',
+                padding:'20px 16px', maxHeight:'80vh', overflowY:'auto', boxSizing:'border-box'}}>
+                <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:14}}>
+                  <div style={{fontSize:15, fontWeight:800, color:dm?'white':'#0f172a'}}>Manage Health Lists</div>
+                  <button onClick={() => setShowHabitEditor(false)}
+                    style={{background:'none', border:'none', fontSize:22, color:dm?'#64748b':'#94a3b8', cursor:'pointer'}}>×</button>
+                </div>
+                {healthLists.map((list, li) => (
+                  <div key={list.id} style={{marginBottom:14, padding:'10px 12px', borderRadius:10,
+                    background:dm?'#1e293b':'#f8fafc', border:`1px solid ${dm?'#334155':'#e2e8f0'}`}}>
+                    <div style={{display:'flex', alignItems:'center', gap:8, marginBottom:10}}>
+                      <input value={list.icon} onChange={e => {
+                        const v = e.target.value;
+                        setHealthLists(prev => prev.map((l,i) => i===li ? {...l, icon:v} : l));
+                      }} style={{width:30, textAlign:'center', fontSize:16, border:'none', background:'none', color:dm?'white':'#0f172a'}}/>
+                      <input value={list.name} onChange={e => {
+                        const v = e.target.value;
+                        setHealthLists(prev => prev.map((l,i) => i===li ? {...l, name:v} : l));
+                      }} style={{flex:1, fontSize:13, fontWeight:700, padding:'6px 8px', borderRadius:6,
+                        border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#0f172a':'white', color:dm?'white':'#0f172a'}}/>
+                      {healthLists.length > 1 && (
+                        <button onClick={() => setHealthLists(prev => prev.filter((l,i) => i!==li))}
+                          style={{padding:'5px 9px', borderRadius:6, border:'none',
+                            background:'#fee2e2', color:'#dc2626', fontSize:11, cursor:'pointer'}}>
+                          Remove list
+                        </button>
+                      )}
+                    </div>
+                    <div style={{display:'flex', flexDirection:'column', gap:6}}>
+                      {list.categories.map((cat, ci) => (
+                        <div key={cat.id} style={{display:'flex', alignItems:'center', gap:6}}>
+                          <input value={cat.icon} onChange={e => {
+                            const v = e.target.value;
+                            setHealthLists(prev => prev.map((l,i) => i!==li ? l : {...l,
+                              categories: l.categories.map((c,ci2) => ci2===ci ? {...c, icon:v} : c)}));
+                          }} style={{width:26, textAlign:'center', fontSize:14, border:'none', background:'none', color:dm?'white':'#0f172a'}}/>
+                          <input value={cat.label} onChange={e => {
+                            const v = e.target.value;
+                            setHealthLists(prev => prev.map((l,i) => i!==li ? l : {...l,
+                              categories: l.categories.map((c,ci2) => ci2===ci ? {...c, label:v} : c)}));
+                          }} style={{flex:1, minWidth:0, fontSize:12, padding:'5px 6px', borderRadius:6,
+                            border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#0f172a':'white', color:dm?'white':'#0f172a'}}/>
+                          <input type="number" value={cat.target} onChange={e => {
+                            const v = parseInt(e.target.value)||0;
+                            setHealthLists(prev => prev.map((l,i) => i!==li ? l : {...l,
+                              categories: l.categories.map((c,ci2) => ci2===ci ? {...c, target:v} : c)}));
+                          }} style={{width:38, fontSize:12, padding:'5px 3px', borderRadius:6, textAlign:'center',
+                            border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#0f172a':'white', color:dm?'white':'#0f172a'}}/>
+                          <input value={cat.unit} onChange={e => {
+                            const v = e.target.value;
+                            setHealthLists(prev => prev.map((l,i) => i!==li ? l : {...l,
+                              categories: l.categories.map((c,ci2) => ci2===ci ? {...c, unit:v} : c)}));
+                          }} style={{width:56, fontSize:10, padding:'5px 4px', borderRadius:6,
+                            border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#0f172a':'white', color:dm?'white':'#0f172a'}}/>
+                          <button onClick={() => setHealthLists(prev => prev.map((l,i) => i!==li ? l : {...l,
+                            categories: l.categories.filter((c,ci2) => ci2!==ci)}))}
+                            style={{padding:'3px 7px', borderRadius:6, border:'none',
+                              background:'#fee2e2', color:'#dc2626', fontSize:10, cursor:'pointer'}}>
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    <button onClick={() => setHealthLists(prev => prev.map((l,i) => i!==li ? l : {...l,
+                      categories: [...l.categories, { id: 'cat_'+Date.now(), label:'New item', icon:'⭐', target:1, unit:'x', pointsPerServing:5, pointsPerOverServing:2 }]}))}
+                      style={{width:'100%', marginTop:8, padding:'6px 0', borderRadius:6,
+                        border:`1px dashed ${dm?'#334155':'#e2e8f0'}`, background:'none',
+                        color:dm?'#64748b':'#94a3b8', fontSize:11, fontWeight:600, cursor:'pointer'}}>
+                      + Add item to this list
+                    </button>
+                  </div>
+                ))}
+                <button onClick={() => {
+                  const newId = 'list_'+Date.now();
+                  setHealthLists(prev => [...prev, { id:newId, name:'New List', icon:'📋', color:'#10b981', categories:[] }]);
+                  // Also add a corresponding draggable node on the map
+                  setNodes(prev => [...prev, { id:'health_list_'+newId, type:'health_list', listId:newId,
+                    label:'New List', x: 400 + Math.random()*100, y: 400 + Math.random()*100, pinned:false }]);
+                  setLinks(prev => [...prev, { source:'flower_health', target:'health_list_'+newId }]);
+                }}
+                  style={{width:'100%', marginTop:4, padding:'9px 0', borderRadius:8,
+                    border:'none', background:'#10b981', color:'white', fontSize:13, fontWeight:700, cursor:'pointer'}}>
+                  + Add new list
+                </button>
+                <button onClick={() => setShowHabitEditor(false)}
+                  style={{width:'100%', marginTop:10, padding:'10px 0', borderRadius:8,
+                    border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:'none',
+                    color:dm?'#94a3b8':'#64748b', fontSize:13, cursor:'pointer'}}>
+                  Done
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+        {/* ──────────────────────────────────────────────────────────────── */}
+
+        {/* ── Points Editor (per-category points-per-serving config) ─────── */}
+        {showListPointsEditor && (() => {
+          const dm = theme.darkMode;
+          const list = healthLists.find(l => l.id === showListPointsEditor);
+          if (!list) { setShowListPointsEditor(null); return null; }
+          return (
+            <div style={{position:'fixed', inset:0, zIndex:330, display:'flex', alignItems:'flex-end',
+              background:'rgba(0,0,0,0.5)', paddingBottom:'calc(68px + env(safe-area-inset-bottom, 0px))'}}>
+              <div style={{width:'100%', background:dm?'#0f172a':'white', borderRadius:'16px 16px 0 0',
+                padding:'20px 16px', maxHeight:'75vh', overflowY:'auto', boxSizing:'border-box'}}>
+                <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:4}}>
+                  <div style={{fontSize:15, fontWeight:800, color:dm?'white':'#0f172a'}}>Points — {list.name}</div>
+                  <button onClick={() => setShowListPointsEditor(null)}
+                    style={{background:'none', border:'none', fontSize:22, color:dm?'#64748b':'#94a3b8', cursor:'pointer'}}>×</button>
+                </div>
+                <div style={{fontSize:11, color:dm?'#64748b':'#94a3b8', marginBottom:14, lineHeight:1.5}}>
+                  Points per serving up to your target, and a separate (usually lower) rate for anything logged beyond it.
+                </div>
+                <div style={{display:'flex', flexDirection:'column', gap:10}}>
+                  {list.categories.map((cat, ci) => (
+                    <div key={cat.id} style={{padding:'8px 10px', borderRadius:8, background:dm?'#1e293b':'#f8fafc'}}>
+                      <div style={{fontSize:12, fontWeight:600, color:dm?'white':'#0f172a', marginBottom:6}}>
+                        {cat.icon} {cat.label} <span style={{fontWeight:400, color:dm?'#64748b':'#94a3b8'}}>(target: {cat.target})</span>
+                      </div>
+                      <div style={{display:'flex', gap:10, alignItems:'center'}}>
+                        <label style={{fontSize:11, color:dm?'#94a3b8':'#64748b', flexShrink:0}}>Pts/serving:</label>
+                        <input type="number" value={cat.pointsPerServing} onChange={e => {
+                          const v = parseFloat(e.target.value)||0;
+                          setHealthLists(prev => prev.map(l => l.id!==list.id ? l : {...l,
+                            categories: l.categories.map((c,ci2) => ci2===ci ? {...c, pointsPerServing:v} : c)}));
+                        }} style={{width:50, fontSize:12, padding:'4px 6px', borderRadius:6, textAlign:'center',
+                          border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#0f172a':'white', color:dm?'white':'#0f172a'}}/>
+                        <label style={{fontSize:11, color:dm?'#94a3b8':'#64748b', flexShrink:0}}>Pts/over:</label>
+                        <input type="number" value={cat.pointsPerOverServing} onChange={e => {
+                          const v = parseFloat(e.target.value)||0;
+                          setHealthLists(prev => prev.map(l => l.id!==list.id ? l : {...l,
+                            categories: l.categories.map((c,ci2) => ci2===ci ? {...c, pointsPerOverServing:v} : c)}));
+                        }} style={{width:50, fontSize:12, padding:'4px 6px', borderRadius:6, textAlign:'center',
+                          border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#0f172a':'white', color:dm?'white':'#0f172a'}}/>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <button onClick={() => setShowListPointsEditor(null)}
+                  style={{width:'100%', marginTop:14, padding:'10px 0', borderRadius:8, border:'none',
+                    background:'#10b981', color:'white', fontSize:13, fontWeight:700, cursor:'pointer'}}>
+                  Done
+                </button>
               </div>
             </div>
           );
@@ -13979,7 +14506,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                               </div>
                             ))}
                             <div style={{width:'100%'}}>
-                              <button onClick={() => setShowHealthPanel(true)}
+                              <button onClick={() => { if (healthPermission === 'granted') { healthFetchData(); } else { healthConnect(); } }}
                                 style={{width:'100%', padding:'7px 0', borderRadius:8, border:'none',
                                   background: healthPermission === 'granted' ? '#10b98120' : '#10b981',
                                   color: healthPermission === 'granted' ? '#10b981' : 'white',
@@ -14070,6 +14597,47 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                               <div style={{fontSize:Math.max(7, FEED_HEX*0.18), color:dm?'#64748b':'#94a3b8'}}>{unit}</div>
                               <div style={{fontSize:Math.max(7, FEED_HEX*0.18), fontWeight:700, color, letterSpacing:0.5,
                                 textTransform:'uppercase'}}>{node.label}</div>
+                            </div>
+                          );
+                        }
+
+                        if (node.type === 'health_list') {
+                          const list = healthLists.find(l => l.id === node.listId);
+                          if (!list) return null;
+                          const dm = theme.darkMode;
+                          const todayCounts = habitToday[list.id] || {};
+                          const hitCount = list.categories.filter(c => (todayCounts[c.id]||0) >= c.target).length;
+                          const score = Math.round(listScores[list.id] || 0);
+                          const cardW = FEED_HEX * 2.4, cardH = FEED_HEX * 1.3;
+                          const isCarried = feedCarrying?.nodeId === node.id;
+                          return (
+                            <div key={node.id} style={{position:'absolute', left:px-cardW/2, top:py-cardH/2,
+                              width:cardW, height:cardH, borderRadius:12,
+                              background:dm?'#1e293b':'white', border:`2px solid ${isCarried?(list.color||'#10b981')+'aa':(list.color||'#10b981')}`,
+                              display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
+                              gap:2, cursor:'grab', opacity:isCarried?0.5:1, padding:'0 6px',
+                              touchAction:'none'}}
+                              onPointerDown={e=>{
+                                if (feedCarrying) return;
+                                const pointerId = e.pointerId;
+                                const startX = e.clientX, startY = e.clientY;
+                                const targetEl = e.currentTarget;
+                                feedLiftTimer.current = setTimeout(() => {
+                                  try { targetEl.setPointerCapture(pointerId); } catch(err) {}
+                                  setFeedCarrying({ dimKey, nodeId: node.id, branchIds: new Set([node.id]),
+                                    screenX: startX, screenY: startY,
+                                    dropMode: 'onehand', holdPointerId: null });
+                                }, 350);
+                              }}
+                              onPointerUp={()=>{ clearTimeout(feedLiftTimer.current); }}
+                              onPointerCancel={()=>{ clearTimeout(feedLiftTimer.current); }}
+                              onClick={() => setShowHealthListDetail(list.id)}>
+                              <div style={{fontSize:14}}>{list.icon}</div>
+                              <div style={{fontSize:Math.max(9, FEED_HEX*0.22), fontWeight:800,
+                                color:dm?'white':'#0f172a', lineHeight:1.2, textAlign:'center',
+                                overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', maxWidth:'100%'}}>{list.name}</div>
+                              <div style={{fontSize:Math.max(8, FEED_HEX*0.2), color:dm?'#64748b':'#94a3b8'}}>{hitCount}/{list.categories.length} hit</div>
+                              <div style={{fontSize:Math.max(8, FEED_HEX*0.2), fontWeight:700, color:score>=0?'#10b981':'#ef4444'}}>⭐ {score}</div>
                             </div>
                           );
                         }
@@ -18295,6 +18863,87 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   </div>
                 </div>
               )}
+
+              {/* -- Health tab -- habit analysis: which categories are hit
+                  most/least consistently, and weekly points per list */}
+              {activeTab === 'health' && (() => {
+                const dm = theme.darkMode;
+                const last7Dates = Array.from({length:7}, (_,i) => {
+                  const d = new Date(); d.setDate(d.getDate() - (i+1));
+                  return d.toISOString().slice(0,10);
+                });
+                return (
+                  <div>
+                    {healthLists.map(list => {
+                      // Completion rate per category over the last 7 recorded days
+                      const catStats = list.categories.map(cat => {
+                        const daysHit = last7Dates.filter(d => {
+                          const dayData = habitHistory[d]?.[list.id];
+                          return dayData && (dayData[cat.id]||0) >= cat.target;
+                        }).length;
+                        const daysLogged = last7Dates.filter(d => habitHistory[d]?.[list.id]).length;
+                        return { ...cat, daysHit, daysLogged, rate: daysLogged > 0 ? daysHit/daysLogged : 0 };
+                      });
+                      const sorted = [...catStats].sort((a,b) => b.rate - a.rate);
+                      const best = sorted.slice(0, 3);
+                      const worst = sorted.slice(-3).reverse();
+                      // Weekly points: sum of each recorded day's points for this list
+                      const weeklyPoints = last7Dates.reduce((sum, d) => {
+                        const dayData = habitHistory[d]?.[list.id];
+                        return sum + (dayData ? computeListDayPoints(list, dayData) : 0);
+                      }, 0);
+                      return (
+                        <div key={list.id} style={{marginBottom:16, borderRadius:12, padding:'14px 16px',
+                          background:dm?'#1e293b':'#f8fafc', border:`1px solid ${dm?'#334155':'#e2e8f0'}`}}>
+                          <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:12}}>
+                            <div style={{fontSize:14, fontWeight:800, color:dm?'white':'#0f172a'}}>
+                              {list.icon} {list.name}
+                            </div>
+                            <div style={{fontSize:12, fontWeight:700, color:'#10b981'}}>
+                              {Math.round(weeklyPoints)} pts this week
+                            </div>
+                          </div>
+                          {sorted.every(c => c.daysLogged === 0) ? (
+                            <div style={{fontSize:12, color:dm?'#64748b':'#94a3b8', fontStyle:'italic'}}>
+                              No history yet — log a few days to see analysis here
+                            </div>
+                          ) : (
+                            <>
+                              <div style={{fontSize:11, fontWeight:700, color:'#10b981', marginBottom:6,
+                                textTransform:'uppercase', letterSpacing:0.5}}>Doing well</div>
+                              {best.map(c => (
+                                <div key={c.id} style={{display:'flex', alignItems:'center', gap:8, marginBottom:4}}>
+                                  <span style={{fontSize:14}}>{c.icon}</span>
+                                  <span style={{flex:1, fontSize:12, color:dm?'white':'#0f172a'}}>{c.label}</span>
+                                  <span style={{fontSize:11, fontWeight:700, color:'#10b981'}}>
+                                    {c.daysHit}/{c.daysLogged||7} days
+                                  </span>
+                                </div>
+                              ))}
+                              <div style={{fontSize:11, fontWeight:700, color:'#f59e0b', margin:'10px 0 6px',
+                                textTransform:'uppercase', letterSpacing:0.5}}>Needs work</div>
+                              {worst.map(c => (
+                                <div key={c.id} style={{display:'flex', alignItems:'center', gap:8, marginBottom:4}}>
+                                  <span style={{fontSize:14}}>{c.icon}</span>
+                                  <span style={{flex:1, fontSize:12, color:dm?'white':'#0f172a'}}>{c.label}</span>
+                                  <span style={{fontSize:11, fontWeight:700, color:'#f59e0b'}}>
+                                    {c.daysHit}/{c.daysLogged||7} days
+                                  </span>
+                                </div>
+                              ))}
+                            </>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {healthLists.length === 0 && (
+                      <div style={{textAlign:'center', padding:'30px 0', color:dm?'#64748b':'#94a3b8', fontSize:13}}>
+                        No health lists yet — add one from the Health hub on the map
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
 
               {/* -- Dimension tabs — creativity/knowledge/health/growth only -- */}
