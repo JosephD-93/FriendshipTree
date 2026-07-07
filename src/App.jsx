@@ -2288,6 +2288,12 @@ function AppInner() {
     try { return JSON.parse(localStorage.getItem('ft_list_scores') || '{}'); } catch(e) { return {}; }
   });
   const [showHabitEditor, setShowHabitEditor] = useState(false);
+  const [showBirthdayPicker, setShowBirthdayPicker] = useState(false);
+  const [pickDay, setPickDay] = useState(1);
+  const [pickMonth, setPickMonth] = useState(0);
+  const [pickYear, setPickYear] = useState(new Date().getFullYear() - 30);
+  const birthdayDayRef = useRef(null), birthdayMonthRef = useRef(null), birthdayYearRef = useRef(null);
+
   const [showHealthListDetail, setShowHealthListDetail] = useState(null); // listId or null
   const [showListPointsEditor, setShowListPointsEditor] = useState(null); // listId or null
   const habitTodayRef = useRef(habitToday);
@@ -6193,6 +6199,31 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
 
   const selectedNode = nodes.find(n => n.id === selectedNodeId);
+  const MONTHS_SHORT_GLOBAL = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const BIRTHDAY_DAYS_GLOBAL = Array.from({length:31}, (_,i) => i+1);
+  const BIRTHDAY_YEARS_GLOBAL = Array.from({length:100}, (_,i) => new Date().getFullYear() - i);
+  useEffect(() => {
+    if (!showBirthdayPicker || !selectedNode) return;
+    const parsed = parseBirthdayDateGlobal(selectedNode.birthday) || { day: 1, month: 0, year: new Date().getFullYear() - 30 };
+    setPickDay(parsed.day || 1);
+    setPickMonth(parsed.month ?? 0);
+    setPickYear(parsed.year || (new Date().getFullYear() - 30));
+    const ROW_H = 40;
+    requestAnimationFrame(() => {
+      if (birthdayDayRef.current) {
+        const idx = BIRTHDAY_DAYS_GLOBAL.indexOf(parsed.day || 1);
+        if (idx >= 0) birthdayDayRef.current.scrollTop = idx * ROW_H;
+      }
+      if (birthdayMonthRef.current) {
+        const idx = parsed.month ?? 0;
+        birthdayMonthRef.current.scrollTop = idx * ROW_H;
+      }
+      if (birthdayYearRef.current) {
+        const idx = BIRTHDAY_YEARS_GLOBAL.indexOf(parsed.year || (new Date().getFullYear() - 30));
+        if (idx >= 0) birthdayYearRef.current.scrollTop = idx * ROW_H;
+      }
+    });
+  }, [showBirthdayPicker, selectedNodeId]); // eslint-disable-line
   const bgClass = theme.darkMode ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-800';
   const sidebarBg = theme.darkMode ? 'bg-slate-800 border-slate-700' : 'bg-stone-50 border-stone-200';
   const panelBg = theme.darkMode ? 'bg-slate-900 border-slate-700 text-slate-300' : 'bg-stone-50 border-stone-200 text-slate-700';
@@ -7559,9 +7590,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   {/* Birthday */}
                   <div className="flex flex-col gap-1">
                     <label className={`text-xs font-semibold uppercase tracking-wider ${theme.darkMode?'text-slate-400':'text-slate-500'}`}>🎂 Your Birthday</label>
-                    <input type="text" value={selectedNode.birthday || ''} onChange={e => updateSelectedNode('birthday', e.target.value)}
-                      placeholder="e.g. 15 March 1993"
-                      className="px-3 py-2 rounded-lg text-sm outline-none" style={{background:pw.cellBg,border:`1px solid ${pw.border}`,color:pw.bodyText}}/>
+                    <button onClick={() => setShowBirthdayPicker(true)}
+                      className="px-3 py-2 rounded-lg text-sm outline-none text-left"
+                      style={{background:pw.cellBg,border:`1px solid ${pw.border}`,color:selectedNode.birthday?pw.bodyText:pw.secondText}}>
+                      {selectedNode.birthday || 'Tap to set birthday'}
+                    </button>
                   </div>
 
 
@@ -12538,13 +12571,14 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         const bday = items.find(x => x._birthday);
                         if (!bday) return null;
                         return (
-                          <div style={{position:'absolute', top:3, right:3, width:18, height:18,
-                            borderRadius:'50%', overflow:'hidden', border:'1.5px solid #f59e0b',
+                          <div style={{position:'absolute', bottom:3, left:'50%', transform:'translateX(-50%)',
+                            width:26, height:26,
+                            borderRadius:'50%', overflow:'hidden', border:'2px solid #f59e0b',
                             background:dm?'#334155':'#e2e8f0',
                             display:'flex', alignItems:'center', justifyContent:'center'}}>
                             {bday.img
                               ? <img src={bday.img} style={{width:'100%',height:'100%',objectFit:'cover'}}/>
-                              : <span style={{fontSize:8,fontWeight:800,color:dm?'white':'#475569'}}>
+                              : <span style={{fontSize:11,fontWeight:800,color:dm?'white':'#475569'}}>
                                   {(bday.label||'?').slice(0,1).toUpperCase()}
                                 </span>
                             }
@@ -13167,6 +13201,71 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         {/* ──────────────────────────────────────────────────────────────── */}
 
         {/* ── Health Lists Manager (add/remove lists, edit categories) ───── */}
+        {/* ── Birthday Wheel Picker ────────────────────────────────────── */}
+        {showBirthdayPicker && selectedNode && (() => {
+          const dm = theme.darkMode;
+          const ROW_H = 40;
+          const days = BIRTHDAY_DAYS_GLOBAL, MONTHS_SHORT = MONTHS_SHORT_GLOBAL, years = BIRTHDAY_YEARS_GLOBAL;
+
+          const makeWheel = (ref, list, current, onSelect, formatFn) => (
+            <div style={{position:'relative', flex:1, height:ROW_H*5}}>
+              <div style={{position:'absolute', top:ROW_H*2, left:0, right:0, height:ROW_H,
+                background:dm?'rgba(16,185,129,0.15)':'rgba(16,185,129,0.1)',
+                borderTop:'1.5px solid #10b981', borderBottom:'1.5px solid #10b981',
+                pointerEvents:'none', zIndex:1}}/>
+              <div ref={ref}
+                onScroll={e => {
+                  const idx = Math.round(e.target.scrollTop / ROW_H);
+                  const val = list[Math.max(0, Math.min(list.length-1, idx))];
+                  if (val !== undefined && val !== current) onSelect(val);
+                }}
+                style={{height:'100%', overflowY:'scroll', scrollSnapType:'y mandatory',
+                  paddingTop:ROW_H*2, paddingBottom:ROW_H*2,
+                  WebkitOverflowScrolling:'touch'}}>
+                {list.map((item, i) => (
+                  <div key={i} style={{height:ROW_H, display:'flex', alignItems:'center', justifyContent:'center',
+                    scrollSnapAlign:'start', fontSize:item===current?18:15,
+                    fontWeight:item===current?800:500,
+                    color:item===current?'#10b981':(dm?'#64748b':'#94a3b8')}}>
+                    {formatFn ? formatFn(item) : item}
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+
+          return (
+            <div style={{position:'fixed', inset:0, zIndex:320, display:'flex', alignItems:'flex-end',
+              background:'rgba(0,0,0,0.5)', paddingBottom:'calc(68px + env(safe-area-inset-bottom, 0px))'}}
+              onClick={e => { if (e.target === e.currentTarget) setShowBirthdayPicker(false); }}>
+              <div style={{width:'100%', background:dm?'#0f172a':'white', borderRadius:'16px 16px 0 0',
+                padding:'20px 16px', boxSizing:'border-box'}}>
+                <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:16}}>
+                  <div style={{fontSize:15, fontWeight:800, color:dm?'white':'#0f172a'}}>🎂 Set Birthday</div>
+                  <button onClick={() => setShowBirthdayPicker(false)}
+                    style={{background:'none', border:'none', fontSize:22, color:dm?'#64748b':'#94a3b8', cursor:'pointer'}}>×</button>
+                </div>
+                <div style={{display:'flex', gap:4}}>
+                  {makeWheel(birthdayDayRef, days, pickDay, setPickDay)}
+                  {makeWheel(birthdayMonthRef, MONTHS_SHORT, MONTHS_SHORT[pickMonth], v => setPickMonth(MONTHS_SHORT.indexOf(v)))}
+                  {makeWheel(birthdayYearRef, years, pickYear, setPickYear, y => `'${String(y).slice(-2)}`)}
+                </div>
+                <button onClick={() => {
+                  const dateStr = `${pickDay} ${MONTHS_SHORT[pickMonth]} ${pickYear}`;
+                  updateSelectedNode('birthday', dateStr);
+                  setShowBirthdayPicker(false);
+                  showToast(`🎂 Birthday set: ${dateStr}`);
+                }}
+                  style={{width:'100%', marginTop:16, padding:'11px 0', borderRadius:8, border:'none',
+                    background:'#10b981', color:'white', fontSize:14, fontWeight:700, cursor:'pointer'}}>
+                  Save
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+        {/* ──────────────────────────────────────────────────────────────── */}
+
         {showHabitEditor && (() => {
           const dm = theme.darkMode;
           return (
@@ -14633,7 +14732,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                               }}
                               onPointerUp={()=>{ clearTimeout(feedLiftTimer.current); }}
                               onPointerCancel={()=>{ clearTimeout(feedLiftTimer.current); }}
-                              onClick={() => setShowHealthListDetail(list.id)}>
+                              onClick={() => {
+                                showToast(`🔍 tap: carrying=${!!feedCarrying} justPlaced=${feedJustPlaced.current.has(node.id)} listId=${list.id}`);
+                                if (feedCarrying || feedJustPlaced.current.has(node.id)) return;
+                                setShowHealthListDetail(list.id);
+                              }}>
                               <div style={{fontSize:14}}>{list.icon}</div>
                               <div style={{fontSize:Math.max(9, FEED_HEX*0.22), fontWeight:800,
                                 color:dm?'white':'#0f172a', lineHeight:1.2, textAlign:'center',
