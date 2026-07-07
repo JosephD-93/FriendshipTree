@@ -9,6 +9,31 @@ import {
 
 
 const APP_VERSION = '3.1';
+
+// Shared birthday parser -- birthdays are stored as free-text (e.g. "15 March
+// 1993", "03/15/93") since that's what the input field accepts, not a
+// structured date. This is the single source of truth for interpreting that
+// text, used by both the spiral calendar view and the monthly calendar.
+const parseBirthdayDateGlobal = (str) => {
+  if (!str) return null;
+  const MONTHS = {jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
+  const clean = str.toLowerCase().replace(/[,\/\-\.]/g,' ').replace(/\s+/g,' ').trim();
+  const tokens = clean.split(' ');
+  let day = null, month = null, year = null;
+  tokens.forEach(tok => {
+    const stripped = tok.replace(/\D/g,'');
+    const mKey = tok.replace(/[^a-z]/g,'').slice(0,3);
+    if (MONTHS[mKey] !== undefined) { month = MONTHS[mKey]; return; }
+    const num = parseInt(stripped, 10);
+    if (isNaN(num)) return;
+    if (num > 31) { year = num > 100 ? num : (num >= 0 && num <= 30 ? 2000 + num : 1900 + num); }
+    else if (day === null) { day = num; }
+    else if (year === null) { year = num > 100 ? num : (num >= 0 && num <= 30 ? 2000 + num : 1900 + num); }
+  });
+  if (!day || month === null) return null;
+  return { day, month, year: year || null };
+};
+
 // ─── Calendar Integration ─────────────────────────────────────────────────
 // Uses @capgo/capacitor-calendar to read/write the phone's built-in
 // calendar database directly (plain Android permission, no OAuth) --
@@ -4018,6 +4043,9 @@ function AppInner() {
   };
 
   const healthConnect = async () => {
+    showToast('🔍 Checking Health Connect…');
+    console.log('[FT] All registered Capacitor plugins:', Object.keys(window.Capacitor?.Plugins || {}));
+    showToast('🔍 Plugins: ' + Object.keys(window.Capacitor?.Plugins || {}).join(', ').slice(0, 100));
     const granted = await healthRequestPermission();
     if (granted) await healthFetchData();
   };
@@ -12074,9 +12102,10 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           });
           nodes.forEach(n => {
             if (!n.birthday) return;
-            const parts = (n.birthday||'').split('-');
-            if (parts.length < 3) return;
-            const key = `${calYear}-${parts[1]}-${parts[2]}`;
+            const parsed = parseBirthdayDateGlobal(n.birthday);
+            if (!parsed) return;
+            const pad2 = v => String(v).padStart(2,'0');
+            const key = `${calYear}-${pad2(parsed.month+1)}-${pad2(parsed.day)}`;
             (itemsByDate[key] = itemsByDate[key] || []).push({_birthday:true, label:n.label, nodeId:n.id, img:n.img});
           });
           for (let d = 1; d <= daysInMonth; d++) {
