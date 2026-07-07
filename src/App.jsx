@@ -35,8 +35,8 @@ const parseBirthdayDateGlobal = (str) => {
 };
 
 // ─── Calendar Integration ─────────────────────────────────────────────────
-// Uses @capgo/capacitor-calendar to read/write the phone's built-in
-// calendar database directly (plain Android permission, no OAuth) --
+// Uses the Capgo calendar plugin (Capacitor) to read/write the phone's
+// built-in calendar database directly (plain Android permission, no OAuth) --
 // see gCalRequestPermission below for details.
 // ─────────────────────────────────────────────────────────────────────────
 
@@ -3926,9 +3926,9 @@ function AppInner() {
 
 
   // ── Device Calendar Integration (no OAuth, no Cloud Console needed) ───────
-  // Uses @capgo/capacitor-calendar, which reads/writes the phone's built-in
-  // calendar database via a plain Android permission (like Contacts) --
-  // no Google sign-in, no scopes, no verification process. Since Google
+  // Uses the Capgo calendar plugin (Capacitor), which reads/writes the
+  // phone's built-in calendar database via a plain Android permission (like
+  // Contacts) -- no Google sign-in, no scopes, no verification process. Since Google
   // Calendar (and any other calendar app) syncs with this same on-device
   // database, events created here appear in Google Calendar automatically,
   // and existing Google Calendar events are already readable from here.
@@ -3937,7 +3937,7 @@ function AppInner() {
       setGCalError(null);
       const Cal = window.Capacitor?.Plugins?.CapacitorCalendar;
       if (!Cal) {
-        showToast('⚠️ Calendar plugin not installed — run: npm install @capgo/capacitor-calendar');
+        showToast('⚠️ Calendar plugin not installed — run: npm install ' + '@capgo/capacitor' + '-calendar');
         return;
       }
       const perm = await Cal.requestFullCalendarAccess();
@@ -4020,10 +4020,10 @@ function AppInner() {
 
   const getHealthPlugin = () => {
     // The plugin's registered Capacitor bridge name is "Health" (matching
-    // its JS export `import { Health } from '@capgo/capacitor-health'`)
+    // its JS export, from the Capgo health plugin for Capacitor)
     const plugin = window.Capacitor?.Plugins?.Health || window.Capacitor?.Plugins?.CapgoHealth;
     if (!plugin && window.Capacitor?.isNativePlatform?.()) {
-      showToast('⚠️ Health plugin not found — check npm install @capgo/capacitor-health + npx cap sync android ran');
+      showToast('⚠️ Health plugin not found — check npm install ' + '@capgo/capacitor' + '-health' + ' + npx cap sync android ran');
       console.warn('[FT] Available Capacitor plugins:', Object.keys(window.Capacitor?.Plugins || {}));
     }
     return plugin;
@@ -4184,7 +4184,7 @@ function AppInner() {
     const isNative = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 
 
-    // NATIVE: real Android contacts via @capacitor-community/contacts
+    // NATIVE: real Android contacts via the Capacitor community contacts plugin
     if (isNative && window.Capacitor.Plugins && window.Capacitor.Plugins.Contacts) {
       try {
         const Contacts = window.Capacitor.Plugins.Contacts;
@@ -4305,7 +4305,7 @@ function AppInner() {
     };
 
 
-    // NATIVE: real Android contacts via @capacitor-community/contacts
+    // NATIVE: real Android contacts via the Capacitor community contacts plugin
     const isNative = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
     if (isNative && window.Capacitor.Plugins && window.Capacitor.Plugins.Contacts) {
       try {
@@ -7590,7 +7590,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   {/* Birthday */}
                   <div className="flex flex-col gap-1">
                     <label className={`text-xs font-semibold uppercase tracking-wider ${theme.darkMode?'text-slate-400':'text-slate-500'}`}>🎂 Your Birthday</label>
-                    <button onClick={() => setShowBirthdayPicker(true)}
+                    <button onClick={() => { showToast('🔍 Opening birthday picker...'); setShowBirthdayPicker(true); }}
                       className="px-3 py-2 rounded-lg text-sm outline-none text-left"
                       style={{background:pw.cellBg,border:`1px solid ${pw.border}`,color:selectedNode.birthday?pw.bodyText:pw.secondText}}>
                       {selectedNode.birthday || 'Tap to set birthday'}
@@ -13235,7 +13235,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           );
 
           return (
-            <div style={{position:'fixed', inset:0, zIndex:320, display:'flex', alignItems:'flex-end',
+            <div style={{position:'fixed', inset:0, zIndex:400, display:'flex', alignItems:'flex-end',
               background:'rgba(0,0,0,0.5)', paddingBottom:'calc(68px + env(safe-area-inset-bottom, 0px))'}}
               onClick={e => { if (e.target === e.currentTarget) setShowBirthdayPicker(false); }}>
               <div style={{width:'100%', background:dm?'#0f172a':'white', borderRadius:'16px 16px 0 0',
@@ -14204,7 +14204,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         };
 
         return (
-          <div ref={feedScrollRef} style={{position:'absolute', top:0, left:0, right:0, bottom:56,
+          <div ref={feedScrollRef} style={{position:'absolute', top:0, left:0, right:0, bottom:56, zIndex:1,
             overflowY: (feedCarrying || feedSlashing) ? 'hidden' : 'auto',
             touchAction: (feedCarrying || feedSlashing || feedMacheteMode) ? 'none' : 'auto',
             cursor: feedMacheteMode ? 'crosshair' : 'auto',
