@@ -3901,9 +3901,12 @@ function AppInner() {
   // ── Health Connect integration ───────────────────────────────────────────
 
   const getHealthPlugin = () => {
-    const plugin = window.Capacitor?.Plugins?.CapgoHealth || window.Capacitor?.Plugins?.Health;
+    // The plugin's registered Capacitor bridge name is "Health" (matching
+    // its JS export `import { Health } from '@capgo/capacitor-health'`)
+    const plugin = window.Capacitor?.Plugins?.Health || window.Capacitor?.Plugins?.CapgoHealth;
     if (!plugin && window.Capacitor?.isNativePlatform?.()) {
-      showToast('⚠️ Health Connect plugin not installed — run: npm install @capgo/capacitor-health');
+      showToast('⚠️ Health plugin not found — check npm install @capgo/capacitor-health + npx cap sync android ran');
+      console.warn('[FT] Available Capacitor plugins:', Object.keys(window.Capacitor?.Plugins || {}));
     }
     return plugin;
   };
@@ -3915,15 +3918,17 @@ function AppInner() {
     try {
       const avail = await Health.isAvailable();
       if (!avail.available) { setHealthPermission('unavailable'); return false; }
-      const result = await Health.requestAuthorization({
-        read: ['steps', 'sleep', 'heartRate', 'workout'],
-        write: [],
-      });
-      const granted = result.granted ?? (result.status === 'granted');
+      const readTypes = ['steps', 'sleep', 'heartRate', 'workouts'];
+      await Health.requestAuthorization({ read: readTypes, write: [] });
+      // Verify what was actually granted rather than guessing at
+      // requestAuthorization's return shape, which isn't fully documented
+      const status = await Health.checkAuthorization({ read: readTypes, write: [] });
+      const granted = (status?.readAuthorized?.length || 0) > 0;
       setHealthPermission(granted ? 'granted' : 'denied');
       return granted;
     } catch(e) {
       console.warn('Health permission error:', e);
+      showToast('❌ Health permission error: ' + e.message);
       setHealthPermission('denied');
       return false;
     }
@@ -3941,13 +3946,17 @@ function AppInner() {
 
       // Steps — today's total
       try {
-        const steps = await Health.queryAggregated({
+        const stepsResult = await Health.queryAggregated({
           dataType: 'steps',
           startDate: startOfDay.toISOString(),
           endDate: now.toISOString(),
+          bucket: 'day',
           aggregation: 'sum',
         });
-        newData.steps = steps.value ?? steps.total ?? null;
+        const stepSamples = stepsResult?.samples || [];
+        newData.steps = stepSamples.length > 0
+          ? stepSamples.reduce((sum, s) => sum + (s.value || 0), 0)
+          : null;
       } catch(e) { console.warn('Steps fetch failed:', e); }
 
       // Sleep — last night
@@ -12068,7 +12077,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             const parts = (n.birthday||'').split('-');
             if (parts.length < 3) return;
             const key = `${calYear}-${parts[1]}-${parts[2]}`;
-            (itemsByDate[key] = itemsByDate[key] || []).push({_birthday:true, label:n.label, nodeId:n.id});
+            (itemsByDate[key] = itemsByDate[key] || []).push({_birthday:true, label:n.label, nodeId:n.id, img:n.img});
           });
           for (let d = 1; d <= daysInMonth; d++) {
             const date = new Date(calYear, calMonth, d);
@@ -12288,23 +12297,41 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           setCalDayDetail(dateStr);
                         }
                       }}
-                      style={{minHeight:56,borderRadius:8,padding:'4px 5px',
+                      style={{minHeight:56,borderRadius:8,padding:'4px 5px',position:'relative',
                         background:cellBg,
                         border:`1px solid ${cellBorder}`,
                         cursor:'pointer',overflow:'hidden',
                         boxShadow:isSelected?'0 0 0 2px #10b981':undefined}}>
                       <div style={{fontSize:12,fontWeight:isToday||isSelected?800:600,
                         color:isToday||isSelected?'#10b981':(dm?'white':'#0f172a'),marginBottom:2}}>{day}</div>
+                      {/* Birthday photo badge - shown prominently since a face is
+                          more recognisable at a glance than text */}
+                      {(() => {
+                        const bday = items.find(x => x._birthday);
+                        if (!bday) return null;
+                        return (
+                          <div style={{position:'absolute', top:3, right:3, width:18, height:18,
+                            borderRadius:'50%', overflow:'hidden', border:'1.5px solid #f59e0b',
+                            background:dm?'#334155':'#e2e8f0',
+                            display:'flex', alignItems:'center', justifyContent:'center'}}>
+                            {bday.img
+                              ? <img src={bday.img} style={{width:'100%',height:'100%',objectFit:'cover'}}/>
+                              : <span style={{fontSize:8,fontWeight:800,color:dm?'white':'#475569'}}>
+                                  {(bday.label||'?').slice(0,1).toUpperCase()}
+                                </span>
+                            }
+                          </div>
+                        );
+                      })()}
                       <div style={{display:'flex',gap:2,flexWrap:'wrap',marginBottom:2}}>
-                        {items.some(x=>x._birthday) && <div style={{width:5,height:5,borderRadius:'50%',background:'#f59e0b'}}/>}
                         {items.some(x=>x._recurring) && <div style={{width:5,height:5,borderRadius:'50%',background:'#8b5cf6'}}/>}
                         {items.some(x=>!x._birthday&&!x._recurring) && <div style={{width:5,height:5,borderRadius:'50%',background:'#10b981'}}/>}
                       </div>
-                      {items.slice(0,2).map((item,ii) => (
+                      {items.filter(x=>!x._birthday).slice(0,2).map((item,ii) => (
                         <div key={ii} style={{fontSize:8,lineHeight:1.3,
-                          color:item._birthday?'#92400e':item._gcal?'#1d4ed8':item._recurring?'#6d28d9':(dm?'#94a3b8':'#475569'),
+                          color:item._gcal?'#1d4ed8':item._recurring?'#6d28d9':(dm?'#94a3b8':'#475569'),
                           overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
-                          {item._birthday?`🎂 ${item.label}`:item.title||item.summary||''}
+                          {item.title||item.summary||''}
                         </div>
                       ))}
                       {items.length > 2 && <div style={{fontSize:8,color:dm?'#475569':'#94a3b8'}}>+{items.length-2}</div>}
@@ -12348,8 +12375,21 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       ) : detailItems.map((item, ii) => (
                         <div key={ii} style={{display:'flex',alignItems:'flex-start',gap:10,
                           padding:'10px 0',borderBottom:`1px solid ${dm?'#1e293b':'#f1f5f9'}`}}>
-                          <div style={{width:8,height:8,borderRadius:'50%',marginTop:4,flexShrink:0,
-                            background:item._birthday?'#f59e0b':item._recurring?'#8b5cf6':item._gcal?'#4285F4':'#10b981'}}/>
+                          {item._birthday ? (
+                            <div style={{width:32,height:32,borderRadius:'50%',flexShrink:0,overflow:'hidden',
+                              border:'2px solid #f59e0b',background:dm?'#334155':'#e2e8f0',
+                              display:'flex',alignItems:'center',justifyContent:'center'}}>
+                              {item.img
+                                ? <img src={item.img} style={{width:'100%',height:'100%',objectFit:'cover'}}/>
+                                : <span style={{fontSize:12,fontWeight:800,color:dm?'white':'#475569'}}>
+                                    {(item.label||'?').slice(0,2).toUpperCase()}
+                                  </span>
+                              }
+                            </div>
+                          ) : (
+                            <div style={{width:8,height:8,borderRadius:'50%',marginTop:4,flexShrink:0,
+                              background:item._recurring?'#8b5cf6':item._gcal?'#4285F4':'#10b981'}}/>
+                          )}
                           <div style={{flex:1}}>
                             <div style={{fontSize:13,fontWeight:600,color:dm?'white':'#0f172a'}}>
                               {item._birthday ? `🎂 ${item.label}'s birthday` : item.title || item.summary || ''}
