@@ -3211,6 +3211,8 @@ function AppInner() {
             const tappedNode = nodes.find(n => n.id === nid);
             if (tappedNode?.type === 'health_metric') {
               setShowHealthPanel(true);
+            } else if (tappedNode?.type === 'health_list') {
+              setShowHealthListDetail(tappedNode.listId);
             } else {
               setSelectedNodeId(nid);
             }
