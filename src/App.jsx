@@ -4928,9 +4928,20 @@ function AppInner() {
     const onVisibility = () => { if (document.hidden) flushNow(); };
     document.addEventListener('visibilitychange', onVisibility);
     window.addEventListener('pagehide', flushNow);
+    // Capacitor's native App plugin 'pause' event, backed by Android's own
+    // onPause lifecycle callback -- this is the reliable signal on Android,
+    // since visibilitychange/pagehide (web-standard) don't always fire
+    // consistently inside a Capacitor WebView, especially when the OS kills
+    // the app process directly rather than gracefully backgrounding it.
+    let appPauseListener = null;
+    const CapApp = window.Capacitor?.Plugins?.App;
+    if (CapApp) {
+      CapApp.addListener('pause', flushNow).then(l => { appPauseListener = l; });
+    }
     return () => {
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('pagehide', flushNow);
+      if (appPauseListener) appPauseListener.remove();
     };
   }, [links, dimensions]);
 
@@ -14710,33 +14721,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           const hitCount = list.categories.filter(c => (todayCounts[c.id]||0) >= c.target).length;
                           const score = Math.round(listScores[list.id] || 0);
                           const cardW = FEED_HEX * 2.4, cardH = FEED_HEX * 1.3;
-                          const isCarried = feedCarrying?.nodeId === node.id;
                           return (
                             <div key={node.id} style={{position:'absolute', left:px-cardW/2, top:py-cardH/2,
                               width:cardW, height:cardH, borderRadius:12,
-                              background:dm?'#1e293b':'white', border:`2px solid ${isCarried?(list.color||'#10b981')+'aa':(list.color||'#10b981')}`,
+                              background:dm?'#1e293b':'white', border:`2px solid ${list.color||'#10b981'}`,
                               display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
-                              gap:2, cursor:'grab', opacity:isCarried?0.5:1, padding:'0 6px',
-                              touchAction:'none'}}
-                              onPointerDown={e=>{
-                                if (feedCarrying) return;
-                                const pointerId = e.pointerId;
-                                const startX = e.clientX, startY = e.clientY;
-                                const targetEl = e.currentTarget;
-                                feedLiftTimer.current = setTimeout(() => {
-                                  try { targetEl.setPointerCapture(pointerId); } catch(err) {}
-                                  setFeedCarrying({ dimKey, nodeId: node.id, branchIds: new Set([node.id]),
-                                    screenX: startX, screenY: startY,
-                                    dropMode: 'onehand', holdPointerId: null });
-                                }, 350);
-                              }}
-                              onPointerUp={()=>{ clearTimeout(feedLiftTimer.current); }}
-                              onPointerCancel={()=>{ clearTimeout(feedLiftTimer.current); }}
-                              onClick={() => {
-                                showToast(`🔍 tap: carrying=${!!feedCarrying} justPlaced=${feedJustPlaced.current.has(node.id)} listId=${list.id}`);
-                                if (feedCarrying || feedJustPlaced.current.has(node.id)) return;
-                                setShowHealthListDetail(list.id);
-                              }}>
+                              gap:2, cursor:'pointer', padding:'0 6px'}}
+                              onClick={() => setShowHealthListDetail(list.id)}>
                               <div style={{fontSize:14}}>{list.icon}</div>
                               <div style={{fontSize:Math.max(9, FEED_HEX*0.22), fontWeight:800,
                                 color:dm?'white':'#0f172a', lineHeight:1.2, textAlign:'center',
