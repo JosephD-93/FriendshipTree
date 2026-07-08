@@ -13118,197 +13118,6 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         {/* ── Health Panel ─────────────────────────────────────────────── */}
         {/* ──────────────────────────────────────────────────────────────── */}
 
-        {/* ── Points Editor (per-category points-per-serving config) ─────── */}
-        {showListPointsEditor && (() => {
-          const dm = theme.darkMode;
-          const list = healthLists.find(l => l.id === showListPointsEditor);
-          if (!list) { setShowListPointsEditor(null); return null; }
-          const updateList = (fn) => setHealthLists(prev => prev.map(l => l.id!==list.id ? l : fn(l)));
-          const sortMode = list.sortMode || 'custom';
-          const alphaDir = list.alphaDir || 'asc';
-          const struggleDir = list.struggleDir || 'weak';
-
-          // Compute the DISPLAYED order based on current sort mode -- 'custom'
-          // shows list.categories as-is (the order dragging maintains),
-          // 'alpha'/'struggle' show a computed sort without altering the
-          // underlying saved custom order, so switching back to "My order"
-          // always restores whatever was last dragged.
-          let displayCats = list.categories;
-          if (sortMode === 'alpha') {
-            displayCats = [...list.categories].sort((a,b) =>
-              alphaDir === 'asc' ? a.label.localeCompare(b.label) : b.label.localeCompare(a.label));
-          } else if (sortMode === 'struggle') {
-            displayCats = [...list.categories].sort((a,b) => {
-              const ra = computeCategoryCompletionRate(list.id, a), rb = computeCategoryCompletionRate(list.id, b);
-              return struggleDir === 'weak' ? ra - rb : rb - ra;
-            });
-          }
-
-          // Dragging always operates on list.categories directly (the "My
-          // order" array) -- if the user drags while viewing an alpha/struggle
-          // sort, we first capture that visible order as the new baseline,
-          // then apply the drag on top of it and switch to custom mode.
-          const startDrag = (catId, clientY) => {
-            listItemDragRef.current = { draggingId: catId, startY: clientY, baseOrder: displayCats.map(c => c.id) };
-          };
-          const handleDragMove = (clientY) => {
-            const drag = listItemDragRef.current;
-            if (!drag.draggingId) return;
-            const container = document.getElementById('list-items-container');
-            if (!container) return;
-            const itemEls = Array.from(container.querySelectorAll('[data-cat-item]'));
-            let targetIdx = drag.baseOrder.indexOf(drag.draggingId);
-            for (let i = 0; i < itemEls.length; i++) {
-              const rect = itemEls[i].getBoundingClientRect();
-              if (clientY >= rect.top && clientY <= rect.bottom) {
-                targetIdx = i;
-                break;
-              }
-            }
-            const currentIdx = drag.baseOrder.indexOf(drag.draggingId);
-            if (targetIdx !== currentIdx) {
-              const newOrder = [...drag.baseOrder];
-              const [moved] = newOrder.splice(currentIdx, 1);
-              newOrder.splice(targetIdx, 0, moved);
-              drag.baseOrder = newOrder;
-              const reordered = newOrder.map(id => list.categories.find(c => c.id === id)).filter(Boolean);
-              updateList(l => ({ ...l, categories: reordered, sortMode: 'custom' }));
-            }
-          };
-          const endDrag = () => { listItemDragRef.current = { draggingId: null, startY: 0, baseOrder: [] }; };
-
-          return (
-            <div style={{position:'fixed', inset:0, zIndex:330, display:'flex', alignItems:'flex-end',
-              background:'rgba(0,0,0,0.5)', paddingBottom:'calc(68px + env(safe-area-inset-bottom, 0px))'}}
-              onPointerMove={e => handleDragMove(e.clientY)}
-              onPointerUp={endDrag} onPointerCancel={endDrag}>
-              <div style={{width:'100%', background:dm?'#0f172a':'white', borderRadius:'16px 16px 0 0',
-                padding:'20px 16px', maxHeight:'80vh', overflowY:'auto', boxSizing:'border-box'}}>
-                <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:14}}>
-                  <div style={{fontSize:15, fontWeight:800, color:dm?'white':'#0f172a'}}>⚙️ List Settings</div>
-                  <button onClick={() => setShowListPointsEditor(null)}
-                    style={{background:'none', border:'none', fontSize:22, color:dm?'#64748b':'#94a3b8', cursor:'pointer'}}>×</button>
-                </div>
-
-                {/* Rename group/list */}
-                <div style={{marginBottom:14}}>
-                  <label style={{fontSize:11, fontWeight:700, color:dm?'#64748b':'#94a3b8',
-                    textTransform:'uppercase', letterSpacing:0.5, display:'block', marginBottom:6}}>List name</label>
-                  <div style={{display:'flex', gap:8}}>
-                    <input value={list.icon} onChange={e => updateList(l => ({...l, icon:e.target.value}))}
-                      style={{width:40, textAlign:'center', fontSize:16, padding:'8px 0', borderRadius:8,
-                        border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#1e293b':'#f8fafc', color:dm?'white':'#0f172a'}}/>
-                    <input value={list.name} onChange={e => updateList(l => ({...l, name:e.target.value}))}
-                      style={{flex:1, fontSize:13, fontWeight:700, padding:'8px 10px', borderRadius:8,
-                        border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#1e293b':'#f8fafc', color:dm?'white':'#0f172a'}}/>
-                  </div>
-                </div>
-
-                {/* Sort mode: 3 toggle-style buttons */}
-                <div style={{marginBottom:14}}>
-                  <label style={{fontSize:11, fontWeight:700, color:dm?'#64748b':'#94a3b8',
-                    textTransform:'uppercase', letterSpacing:0.5, display:'block', marginBottom:6}}>Sort items</label>
-                  <div style={{display:'flex', gap:6}}>
-                    <button onClick={() => updateList(l => ({...l,
-                      sortMode: 'alpha', alphaDir: (l.sortMode==='alpha' && l.alphaDir==='asc') ? 'desc' : 'asc'}))}
-                      style={{flex:1, padding:'8px 0', borderRadius:8,
-                        border: sortMode==='alpha' ? '1.5px solid #10b981' : `1px solid ${dm?'#334155':'#e2e8f0'}`,
-                        background: sortMode==='alpha' ? (dm?'#064e3b':'#ecfdf5') : 'none',
-                        color: sortMode==='alpha' ? '#10b981' : (dm?'#94a3b8':'#64748b'),
-                        fontSize:12, fontWeight:700, cursor:'pointer'}}>
-                      {sortMode==='alpha' && alphaDir==='desc' ? 'Z→A' : 'A→Z'}
-                    </button>
-                    <button onClick={() => updateList(l => ({...l,
-                      sortMode: 'struggle', struggleDir: (l.sortMode==='struggle' && l.struggleDir==='weak') ? 'strong' : 'weak'}))}
-                      style={{flex:1, padding:'8px 0', borderRadius:8,
-                        border: sortMode==='struggle' ? '1.5px solid #10b981' : `1px solid ${dm?'#334155':'#e2e8f0'}`,
-                        background: sortMode==='struggle' ? (dm?'#064e3b':'#ecfdf5') : 'none',
-                        color: sortMode==='struggle' ? '#10b981' : (dm?'#94a3b8':'#64748b'),
-                        fontSize:14, fontWeight:700, cursor:'pointer'}}>
-                      {sortMode==='struggle' && struggleDir==='strong' ? '❄️' : '🔥'}
-                    </button>
-                    <button onClick={() => updateList(l => ({...l, sortMode: 'custom'}))}
-                      style={{flex:1, padding:'8px 0', borderRadius:8,
-                        border: sortMode==='custom' ? '1.5px solid #10b981' : `1px solid ${dm?'#334155':'#e2e8f0'}`,
-                        background: sortMode==='custom' ? (dm?'#064e3b':'#ecfdf5') : 'none',
-                        color: sortMode==='custom' ? '#10b981' : (dm?'#94a3b8':'#64748b'),
-                        fontSize:11, fontWeight:700, cursor:'pointer'}}>
-                      My order
-                    </button>
-                  </div>
-                  <div style={{fontSize:10, color:dm?'#475569':'#94a3b8', marginTop:6}}>
-                    Drag the ⠿ handle to reorder — this saves as "My order" automatically.
-                  </div>
-                </div>
-
-                {/* Items: drag handle, rename, points, remove */}
-                <label style={{fontSize:11, fontWeight:700, color:dm?'#64748b':'#94a3b8',
-                  textTransform:'uppercase', letterSpacing:0.5, display:'block', marginBottom:6}}>Items</label>
-                <div id="list-items-container" style={{display:'flex', flexDirection:'column', gap:8, marginBottom:12}}>
-                  {displayCats.map((cat) => {
-                    const ci = list.categories.findIndex(c => c.id === cat.id);
-                    return (
-                    <div key={cat.id} data-cat-item data-cat-id={cat.id}
-                      style={{padding:'8px 10px', borderRadius:8, background:dm?'#1e293b':'#f8fafc',
-                        opacity: listItemDragRef.current.draggingId === cat.id ? 0.5 : 1}}>
-                      <div style={{display:'flex', alignItems:'center', gap:6, marginBottom:6}}>
-                        <div
-                          onPointerDown={e => { e.currentTarget.setPointerCapture(e.pointerId); startDrag(cat.id, e.clientY); }}
-                          style={{cursor:'grab', fontSize:16, color:dm?'#64748b':'#94a3b8', padding:'0 4px', touchAction:'none'}}>
-                          ⠿
-                        </div>
-                        <input value={cat.icon} onChange={e => updateList(l => ({...l,
-                          categories: l.categories.map((c,ci2) => ci2===ci ? {...c, icon:e.target.value} : c)}))}
-                          style={{width:26, textAlign:'center', fontSize:14, border:'none', background:'none', color:dm?'white':'#0f172a'}}/>
-                        <input value={cat.label} onChange={e => updateList(l => ({...l,
-                          categories: l.categories.map((c,ci2) => ci2===ci ? {...c, label:e.target.value} : c)}))}
-                          style={{flex:1, minWidth:0, fontSize:12, padding:'5px 6px', borderRadius:6,
-                            border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#0f172a':'white', color:dm?'white':'#0f172a'}}/>
-                        <button onClick={() => updateList(l => ({...l, categories: l.categories.filter((c,ci2) => ci2!==ci)}))}
-                          style={{padding:'4px 8px', borderRadius:6, border:'none',
-                            background:'#fee2e2', color:'#dc2626', fontSize:11, cursor:'pointer'}}>
-                          ✕
-                        </button>
-                      </div>
-                      <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap', paddingLeft:24}}>
-                        <label style={{fontSize:10, color:dm?'#94a3b8':'#64748b'}}>Target:</label>
-                        <input type="number" value={cat.target} onChange={e => updateList(l => ({...l,
-                          categories: l.categories.map((c,ci2) => ci2===ci ? {...c, target:parseInt(e.target.value)||0} : c)}))}
-                          style={{width:40, fontSize:11, padding:'4px 4px', borderRadius:6, textAlign:'center',
-                            border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#0f172a':'white', color:dm?'white':'#0f172a'}}/>
-                        <input value={cat.unit} onChange={e => updateList(l => ({...l,
-                          categories: l.categories.map((c,ci2) => ci2===ci ? {...c, unit:e.target.value} : c)}))}
-                          style={{width:52, fontSize:10, padding:'4px 4px', borderRadius:6,
-                            border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#0f172a':'white', color:dm?'white':'#0f172a'}}/>
-                        <label style={{fontSize:10, color:dm?'#94a3b8':'#64748b'}}>Pts:</label>
-                        <input type="number" value={cat.pointsPerServing} onChange={e => updateList(l => ({...l,
-                          categories: l.categories.map((c,ci2) => ci2===ci ? {...c, pointsPerServing:parseFloat(e.target.value)||0} : c)}))}
-                          style={{width:40, fontSize:11, padding:'4px 4px', borderRadius:6, textAlign:'center',
-                            border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#0f172a':'white', color:dm?'white':'#0f172a'}}/>
-                        <label style={{fontSize:10, color:dm?'#94a3b8':'#64748b'}}>/over:</label>
-                        <input type="number" value={cat.pointsPerOverServing} onChange={e => updateList(l => ({...l,
-                          categories: l.categories.map((c,ci2) => ci2===ci ? {...c, pointsPerOverServing:parseFloat(e.target.value)||0} : c)}))}
-                          style={{width:40, fontSize:11, padding:'4px 4px', borderRadius:6, textAlign:'center',
-                            border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#0f172a':'white', color:dm?'white':'#0f172a'}}/>
-                      </div>
-                    </div>
-                  );})}
-                </div>
-                <button onClick={() => updateList(l => ({...l,
-                  categories: [...l.categories, { id:'cat_'+Date.now(), label:'New item', icon:'⭐', target:1, unit:'x', pointsPerServing:5, pointsPerOverServing:2 }]}))}
-                  style={{width:'100%', padding:'8px 0', borderRadius:8, border:`1px dashed ${dm?'#334155':'#e2e8f0'}`,
-                    background:'none', color:dm?'#64748b':'#94a3b8', fontSize:12, fontWeight:600, cursor:'pointer'}}>
-                  + Add item
-                </button>
-                <button onClick={() => setShowListPointsEditor(null)}
-                  style={{width:'100%', marginTop:14, padding:'10px 0', borderRadius:8, border:'none',
-                    background:'#10b981', color:'white', fontSize:13, fontWeight:700, cursor:'pointer'}}>
-                  Done
-                </button>
-              </div>
-            </div>
-          );
-        })()}
         {/* ──────────────────────────────────────────────────────────────── */}
 
         {/* Mole keyframe styles */}
@@ -13578,6 +13387,198 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         )}
       </div>
       )}
+
+        {/* ── Points Editor (per-category points-per-serving config) ─────── */}
+        {showListPointsEditor && (() => {
+          const dm = theme.darkMode;
+          const list = healthLists.find(l => l.id === showListPointsEditor);
+          if (!list) { setShowListPointsEditor(null); return null; }
+          const updateList = (fn) => setHealthLists(prev => prev.map(l => l.id!==list.id ? l : fn(l)));
+          const sortMode = list.sortMode || 'custom';
+          const alphaDir = list.alphaDir || 'asc';
+          const struggleDir = list.struggleDir || 'weak';
+
+          // Compute the DISPLAYED order based on current sort mode -- 'custom'
+          // shows list.categories as-is (the order dragging maintains),
+          // 'alpha'/'struggle' show a computed sort without altering the
+          // underlying saved custom order, so switching back to "My order"
+          // always restores whatever was last dragged.
+          let displayCats = list.categories;
+          if (sortMode === 'alpha') {
+            displayCats = [...list.categories].sort((a,b) =>
+              alphaDir === 'asc' ? a.label.localeCompare(b.label) : b.label.localeCompare(a.label));
+          } else if (sortMode === 'struggle') {
+            displayCats = [...list.categories].sort((a,b) => {
+              const ra = computeCategoryCompletionRate(list.id, a), rb = computeCategoryCompletionRate(list.id, b);
+              return struggleDir === 'weak' ? ra - rb : rb - ra;
+            });
+          }
+
+          // Dragging always operates on list.categories directly (the "My
+          // order" array) -- if the user drags while viewing an alpha/struggle
+          // sort, we first capture that visible order as the new baseline,
+          // then apply the drag on top of it and switch to custom mode.
+          const startDrag = (catId, clientY) => {
+            listItemDragRef.current = { draggingId: catId, startY: clientY, baseOrder: displayCats.map(c => c.id) };
+          };
+          const handleDragMove = (clientY) => {
+            const drag = listItemDragRef.current;
+            if (!drag.draggingId) return;
+            const container = document.getElementById('list-items-container');
+            if (!container) return;
+            const itemEls = Array.from(container.querySelectorAll('[data-cat-item]'));
+            let targetIdx = drag.baseOrder.indexOf(drag.draggingId);
+            for (let i = 0; i < itemEls.length; i++) {
+              const rect = itemEls[i].getBoundingClientRect();
+              if (clientY >= rect.top && clientY <= rect.bottom) {
+                targetIdx = i;
+                break;
+              }
+            }
+            const currentIdx = drag.baseOrder.indexOf(drag.draggingId);
+            if (targetIdx !== currentIdx) {
+              const newOrder = [...drag.baseOrder];
+              const [moved] = newOrder.splice(currentIdx, 1);
+              newOrder.splice(targetIdx, 0, moved);
+              drag.baseOrder = newOrder;
+              const reordered = newOrder.map(id => list.categories.find(c => c.id === id)).filter(Boolean);
+              updateList(l => ({ ...l, categories: reordered, sortMode: 'custom' }));
+            }
+          };
+          const endDrag = () => { listItemDragRef.current = { draggingId: null, startY: 0, baseOrder: [] }; };
+
+          return (
+            <div style={{position:'fixed', inset:0, zIndex:330, display:'flex', alignItems:'flex-end',
+              background:'rgba(0,0,0,0.5)', paddingBottom:'calc(68px + env(safe-area-inset-bottom, 0px))'}}
+              onPointerMove={e => handleDragMove(e.clientY)}
+              onPointerUp={endDrag} onPointerCancel={endDrag}>
+              <div style={{width:'100%', background:dm?'#0f172a':'white', borderRadius:'16px 16px 0 0',
+                padding:'20px 16px', maxHeight:'80vh', overflowY:'auto', boxSizing:'border-box'}}>
+                <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:14}}>
+                  <div style={{fontSize:15, fontWeight:800, color:dm?'white':'#0f172a'}}>⚙️ List Settings</div>
+                  <button onClick={() => setShowListPointsEditor(null)}
+                    style={{background:'none', border:'none', fontSize:22, color:dm?'#64748b':'#94a3b8', cursor:'pointer'}}>×</button>
+                </div>
+
+                {/* Rename group/list */}
+                <div style={{marginBottom:14}}>
+                  <label style={{fontSize:11, fontWeight:700, color:dm?'#64748b':'#94a3b8',
+                    textTransform:'uppercase', letterSpacing:0.5, display:'block', marginBottom:6}}>List name</label>
+                  <div style={{display:'flex', gap:8}}>
+                    <input value={list.icon} onChange={e => updateList(l => ({...l, icon:e.target.value}))}
+                      style={{width:40, textAlign:'center', fontSize:16, padding:'8px 0', borderRadius:8,
+                        border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#1e293b':'#f8fafc', color:dm?'white':'#0f172a'}}/>
+                    <input value={list.name} onChange={e => updateList(l => ({...l, name:e.target.value}))}
+                      style={{flex:1, fontSize:13, fontWeight:700, padding:'8px 10px', borderRadius:8,
+                        border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#1e293b':'#f8fafc', color:dm?'white':'#0f172a'}}/>
+                  </div>
+                </div>
+
+                {/* Sort mode: 3 toggle-style buttons */}
+                <div style={{marginBottom:14}}>
+                  <label style={{fontSize:11, fontWeight:700, color:dm?'#64748b':'#94a3b8',
+                    textTransform:'uppercase', letterSpacing:0.5, display:'block', marginBottom:6}}>Sort items</label>
+                  <div style={{display:'flex', gap:6}}>
+                    <button onClick={() => updateList(l => ({...l,
+                      sortMode: 'alpha', alphaDir: (l.sortMode==='alpha' && l.alphaDir==='asc') ? 'desc' : 'asc'}))}
+                      style={{flex:1, padding:'8px 0', borderRadius:8,
+                        border: sortMode==='alpha' ? '1.5px solid #10b981' : `1px solid ${dm?'#334155':'#e2e8f0'}`,
+                        background: sortMode==='alpha' ? (dm?'#064e3b':'#ecfdf5') : 'none',
+                        color: sortMode==='alpha' ? '#10b981' : (dm?'#94a3b8':'#64748b'),
+                        fontSize:12, fontWeight:700, cursor:'pointer'}}>
+                      {sortMode==='alpha' && alphaDir==='desc' ? 'Z→A' : 'A→Z'}
+                    </button>
+                    <button onClick={() => updateList(l => ({...l,
+                      sortMode: 'struggle', struggleDir: (l.sortMode==='struggle' && l.struggleDir==='weak') ? 'strong' : 'weak'}))}
+                      style={{flex:1, padding:'8px 0', borderRadius:8,
+                        border: sortMode==='struggle' ? '1.5px solid #10b981' : `1px solid ${dm?'#334155':'#e2e8f0'}`,
+                        background: sortMode==='struggle' ? (dm?'#064e3b':'#ecfdf5') : 'none',
+                        color: sortMode==='struggle' ? '#10b981' : (dm?'#94a3b8':'#64748b'),
+                        fontSize:14, fontWeight:700, cursor:'pointer'}}>
+                      {sortMode==='struggle' && struggleDir==='strong' ? '❄️' : '🔥'}
+                    </button>
+                    <button onClick={() => updateList(l => ({...l, sortMode: 'custom'}))}
+                      style={{flex:1, padding:'8px 0', borderRadius:8,
+                        border: sortMode==='custom' ? '1.5px solid #10b981' : `1px solid ${dm?'#334155':'#e2e8f0'}`,
+                        background: sortMode==='custom' ? (dm?'#064e3b':'#ecfdf5') : 'none',
+                        color: sortMode==='custom' ? '#10b981' : (dm?'#94a3b8':'#64748b'),
+                        fontSize:11, fontWeight:700, cursor:'pointer'}}>
+                      My order
+                    </button>
+                  </div>
+                  <div style={{fontSize:10, color:dm?'#475569':'#94a3b8', marginTop:6}}>
+                    Drag the ⠿ handle to reorder — this saves as "My order" automatically.
+                  </div>
+                </div>
+
+                {/* Items: drag handle, rename, points, remove */}
+                <label style={{fontSize:11, fontWeight:700, color:dm?'#64748b':'#94a3b8',
+                  textTransform:'uppercase', letterSpacing:0.5, display:'block', marginBottom:6}}>Items</label>
+                <div id="list-items-container" style={{display:'flex', flexDirection:'column', gap:8, marginBottom:12}}>
+                  {displayCats.map((cat) => {
+                    const ci = list.categories.findIndex(c => c.id === cat.id);
+                    return (
+                    <div key={cat.id} data-cat-item data-cat-id={cat.id}
+                      style={{padding:'8px 10px', borderRadius:8, background:dm?'#1e293b':'#f8fafc',
+                        opacity: listItemDragRef.current.draggingId === cat.id ? 0.5 : 1}}>
+                      <div style={{display:'flex', alignItems:'center', gap:6, marginBottom:6}}>
+                        <div
+                          onPointerDown={e => { e.currentTarget.setPointerCapture(e.pointerId); startDrag(cat.id, e.clientY); }}
+                          style={{cursor:'grab', fontSize:16, color:dm?'#64748b':'#94a3b8', padding:'0 4px', touchAction:'none'}}>
+                          ⠿
+                        </div>
+                        <input value={cat.icon} onChange={e => updateList(l => ({...l,
+                          categories: l.categories.map((c,ci2) => ci2===ci ? {...c, icon:e.target.value} : c)}))}
+                          style={{width:26, textAlign:'center', fontSize:14, border:'none', background:'none', color:dm?'white':'#0f172a'}}/>
+                        <input value={cat.label} onChange={e => updateList(l => ({...l,
+                          categories: l.categories.map((c,ci2) => ci2===ci ? {...c, label:e.target.value} : c)}))}
+                          style={{flex:1, minWidth:0, fontSize:12, padding:'5px 6px', borderRadius:6,
+                            border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#0f172a':'white', color:dm?'white':'#0f172a'}}/>
+                        <button onClick={() => updateList(l => ({...l, categories: l.categories.filter((c,ci2) => ci2!==ci)}))}
+                          style={{padding:'4px 8px', borderRadius:6, border:'none',
+                            background:'#fee2e2', color:'#dc2626', fontSize:11, cursor:'pointer'}}>
+                          ✕
+                        </button>
+                      </div>
+                      <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap', paddingLeft:24}}>
+                        <label style={{fontSize:10, color:dm?'#94a3b8':'#64748b'}}>Target:</label>
+                        <input type="number" value={cat.target} onChange={e => updateList(l => ({...l,
+                          categories: l.categories.map((c,ci2) => ci2===ci ? {...c, target:parseInt(e.target.value)||0} : c)}))}
+                          style={{width:40, fontSize:11, padding:'4px 4px', borderRadius:6, textAlign:'center',
+                            border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#0f172a':'white', color:dm?'white':'#0f172a'}}/>
+                        <input value={cat.unit} onChange={e => updateList(l => ({...l,
+                          categories: l.categories.map((c,ci2) => ci2===ci ? {...c, unit:e.target.value} : c)}))}
+                          style={{width:52, fontSize:10, padding:'4px 4px', borderRadius:6,
+                            border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#0f172a':'white', color:dm?'white':'#0f172a'}}/>
+                        <label style={{fontSize:10, color:dm?'#94a3b8':'#64748b'}}>Pts:</label>
+                        <input type="number" value={cat.pointsPerServing} onChange={e => updateList(l => ({...l,
+                          categories: l.categories.map((c,ci2) => ci2===ci ? {...c, pointsPerServing:parseFloat(e.target.value)||0} : c)}))}
+                          style={{width:40, fontSize:11, padding:'4px 4px', borderRadius:6, textAlign:'center',
+                            border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#0f172a':'white', color:dm?'white':'#0f172a'}}/>
+                        <label style={{fontSize:10, color:dm?'#94a3b8':'#64748b'}}>/over:</label>
+                        <input type="number" value={cat.pointsPerOverServing} onChange={e => updateList(l => ({...l,
+                          categories: l.categories.map((c,ci2) => ci2===ci ? {...c, pointsPerOverServing:parseFloat(e.target.value)||0} : c)}))}
+                          style={{width:40, fontSize:11, padding:'4px 4px', borderRadius:6, textAlign:'center',
+                            border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#0f172a':'white', color:dm?'white':'#0f172a'}}/>
+                      </div>
+                    </div>
+                  );})}
+                </div>
+                <button onClick={() => updateList(l => ({...l,
+                  categories: [...l.categories, { id:'cat_'+Date.now(), label:'New item', icon:'⭐', target:1, unit:'x', pointsPerServing:5, pointsPerOverServing:2 }]}))}
+                  style={{width:'100%', padding:'8px 0', borderRadius:8, border:`1px dashed ${dm?'#334155':'#e2e8f0'}`,
+                    background:'none', color:dm?'#64748b':'#94a3b8', fontSize:12, fontWeight:600, cursor:'pointer'}}>
+                  + Add item
+                </button>
+                <button onClick={() => setShowListPointsEditor(null)}
+                  style={{width:'100%', marginTop:14, padding:'10px 0', borderRadius:8, border:'none',
+                    background:'#10b981', color:'white', fontSize:13, fontWeight:700, cursor:'pointer'}}>
+                  Done
+                </button>
+              </div>
+            </div>
+          );
+        })()}
 
         {showHealthPanel && viewMode !== 'calendar' && viewMode !== 'me' && (() => {
           const dm = theme.darkMode;
