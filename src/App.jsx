@@ -3820,7 +3820,7 @@ function AppInner() {
       : { x: (Math.random()-0.5)*600, y: (Math.random()-0.5)*600 };
     const clearPos = findClearPosition(anchor, nodes);
     snapshot();
-    setNodes(prev => [...prev, {
+    const newNode = {
       id: newId,
       label: resolvedName.trim(),
       img: img || makeBlankAvatar(),
@@ -3828,13 +3828,20 @@ function AppInner() {
       interactionScore: form.initialScore || STARTING_SCORE,
       pinned: false, type: 'friend',
       syncDismissed: !!img,
-    }]);
+    };
+    const newNodesArray = [...nodesRef.current, newNode];
+    setNodes(prev => [...prev, newNode]);
+    // Save immediately with the explicit array, not waiting for a debounce
+    // timer or a close-event to fire -- a hard swipe-away kill on Android
+    // can end the process with zero guaranteed time for either to run.
+    doSaveNodes(newNodesArray);
     // Link to parent or auto-link to flower_social if no parent
-    if (form.parentId) {
-      setLinks(prev => [...prev, { source: form.parentId, target: newId }]);
-    } else {
-      setLinks(prev => [...prev, { source: 'flower_social', target: newId }]);
-    }
+    const newLink = form.parentId
+      ? { source: form.parentId, target: newId }
+      : { source: 'flower_social', target: newId };
+    const newLinksArray = [...linksRef.current, newLink];
+    setLinks(prev => [...prev, newLink]);
+    try { localStorage.setItem('ft_links', JSON.stringify(newLinksArray)); } catch(e) {}
     setAddFriendForms(prev => prev.filter(f => f.id !== formId));
     showToast(resolvedName.trim() ? `🌱 ${resolvedName.trim()} added` : '🌱 New friend added');
   };
@@ -4987,10 +4994,13 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
   const saveTimer = useRef(null);
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
-  const doSaveNodes = () => {
+  const linksRef = useRef(links);
+  linksRef.current = links;
+  const doSaveNodes = (explicitNodes = null) => {
     try {
+      const source = explicitNodes || nodesRef.current;
       // Strip photo data from localStorage — photos are stored in IndexedDB separately
-      const nodesWithoutPhotos = nodesRef.current.map(n => {
+      const nodesWithoutPhotos = source.map(n => {
         if (n.img && n.img.startsWith('data:image')) {
           const { img, ...rest } = n;
           return rest;
@@ -5267,19 +5277,18 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
     snapshot();
     if (kind === 'group') {
       const newId = `hub_${Date.now()}`;
-      setNodes(prev => [...prev, {
-        id: newId, type: 'hub', label: 'New Group',
-        x: svgX, y: svgY, pinned: false,
-      }]);
+      const newNode = { id: newId, type: 'hub', label: 'New Group', x: svgX, y: svgY, pinned: false };
+      const newNodesArray = [...nodesRef.current, newNode];
+      setNodes(prev => [...prev, newNode]);
+      doSaveNodes(newNodesArray);
       setSelectedNodeId(newId);
     } else {
       const newId = `node_${Date.now()}`;
-      setNodes(prev => [...prev, {
-        id: newId, label: '',
-        img: makeBlankAvatar(),
-        x: svgX, y: svgY,
-        interactionScore: STARTING_SCORE, pinned: false, type: 'friend',
-      }]);
+      const newNode = { id: newId, label: '', img: makeBlankAvatar(), x: svgX, y: svgY,
+        interactionScore: STARTING_SCORE, pinned: false, type: 'friend' };
+      const newNodesArray = [...nodesRef.current, newNode];
+      setNodes(prev => [...prev, newNode]);
+      doSaveNodes(newNodesArray);
       setSelectedNodeId(newId);
     }
   };
