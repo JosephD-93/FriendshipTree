@@ -461,6 +461,7 @@ function FabMenu(props) {
 
 const KEYFRAMES_CSS = [
   '@keyframes spin{to{transform:rotate(360deg)}}',
+  '@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.35}}',
   '@keyframes fadein{from{opacity:0}to{opacity:1}}',
   '@keyframes leafGrowIn{from{transform:scale(0)}to{transform:scale(1)}}',
   '@keyframes vineGrow{from{stroke-dasharray:100;stroke-dashoffset:100}to{stroke-dasharray:100;stroke-dashoffset:0}}',
@@ -2203,6 +2204,9 @@ function AppInner() {
   // a second, independent finger scrolls; lifting the holding finger drops it).
   const [feedCarrying, setFeedCarrying] = useState(null); // {dimKey, nodeId, branchIds, pageX, pageY, dropMode, holdPointerId}
   const [feedScrollTop, setFeedScrollTop] = useState(0);
+  // 'saved' | 'pending' | 'error' -- drives the save status dot in the corner
+  const [saveStatus, setSaveStatus] = useState('saved');
+
   // Google Calendar integration state
   const [gCalToken, setGCalToken] = useState(() => {
     try {
@@ -2742,6 +2746,29 @@ function AppInner() {
   // Note: the old browser-redirect OAuth startup check has been removed --
   // Google Calendar sign-in now uses the native plugin (gCalSignIn), which
   // shows an in-app account picker with no browser or redirect involved.
+
+  // On startup, check the native Preferences backup (written alongside every
+  // localStorage save) for anyone present there but missing from the primary
+  // copy -- this is the safety net for the specific failure mode where a
+  // hard app kill on Android lost a recent WebView localStorage write that
+  // had already made it into the more durable native backup.
+  useEffect(() => {
+    (async () => {
+      try {
+        const Prefs = window.Capacitor?.Plugins?.Preferences;
+        if (!Prefs || typeof Prefs.get !== 'function') return;
+        const result = await Prefs.get({ key: 'ft_nodes_backup' });
+        if (!result || !result.value) return;
+        const backupNodes = JSON.parse(result.value);
+        const currentIds = new Set(nodesRef.current.map(n => n.id));
+        const missing = backupNodes.filter(n => !currentIds.has(n.id));
+        if (missing.length > 0) {
+          setNodes(prev => [...prev, ...missing]);
+          showToast(`🔄 Recovered ${missing.length} ${missing.length===1?'entry':'entries'} from backup`);
+        }
+      } catch(e) { console.warn('Preferences recovery check failed:', e); }
+    })();
+  }, []); // eslint-disable-line
 
   // After every Feed render, measure whether any minimised flower has actually
   // rendered past the bottom edge of its own section -- if so, grow that
@@ -5007,12 +5034,26 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
         }
         return n;
       });
-      localStorage.setItem('ft_nodes', JSON.stringify(nodesWithoutPhotos));
+      const json = JSON.stringify(nodesWithoutPhotos);
+      localStorage.setItem('ft_nodes', json);
+      // Also write through Capacitor's native Preferences plugin (backed by
+      // Android's own SharedPreferences) as a more durable backup --
+      // WebView localStorage writes can be buffered internally and aren't
+      // always guaranteed to be flushed to disk immediately even though the
+      // JS call itself returns synchronously, which a hard-killed process
+      // can lose. Preferences writes go through the native bridge directly.
+      const Prefs = window.Capacitor?.Plugins?.Preferences;
+      if (Prefs && typeof Prefs.set === 'function') {
+        Prefs.set({ key: 'ft_nodes_backup', value: json }).catch(() => {});
+      }
+      setSaveStatus('saved');
     } catch(e) {
       console.warn('localStorage save failed:', e);
+      setSaveStatus('error');
     }
   };
   useEffect(() => {
+    setSaveStatus('pending');
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(doSaveNodes, 500);
   }, [nodes]);
@@ -6588,6 +6629,12 @@ Return only the JSON array. If nothing trackable is found, return [].`;
   return (
     <>
     <style>{KEYFRAMES_CSS}</style>
+    <div title={saveStatus === 'saved' ? 'Saved' : 'Not saved yet'}
+      style={{position:'fixed', top:'calc(env(safe-area-inset-top, 0px) + 8px)', left:10, zIndex:9999,
+        width:10, height:10, borderRadius:'50%', pointerEvents:'none',
+        background: saveStatus === 'saved' ? '#10b981' : '#ef4444',
+        boxShadow: '0 0 0 2px rgba(0,0,0,0.15)',
+        animation: saveStatus !== 'saved' ? 'pulse 1s ease-in-out infinite' : 'none'}}/>
     {photosRestoring && (
       <div style={{position:'fixed', top:12, left:'50%', transform:'translateX(-50%)', zIndex:9999,
         background:'rgba(15,23,42,0.9)', color:'white', padding:'6px 14px', borderRadius:99,
