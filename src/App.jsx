@@ -157,7 +157,6 @@ const INITIAL_NODES = [
   { id: 'health_sleep',     type: 'health_metric', metric: 'sleep',     label: 'Sleep',      x: 330,  y: 381,  pinned: false, shape: 'pill'   },
   { id: 'health_heartrate', type: 'health_metric', metric: 'heartRate', label: 'Heart Rate', x: 165,  y: 476,  pinned: false, shape: 'pill'   },
   { id: 'health_workouts',  type: 'health_metric', metric: 'workouts',  label: 'Workouts',   x: 495,  y: 286,  pinned: false, shape: 'card'   },
-  { id: 'health_list_list_hntd', type: 'health_list', listId: 'list_hntd', label: 'How Not to Die', x: 660, y: 191, pinned: false },
 ];
 
 
@@ -171,7 +170,6 @@ const INITIAL_LINKS = [
   { source: 'flower_health', target: 'health_sleep'     },
   { source: 'flower_health', target: 'health_heartrate' },
   { source: 'flower_health', target: 'health_workouts'  },
-  { source: 'flower_health', target: 'health_list_list_hntd' },
 ];
 
 
@@ -1316,7 +1314,6 @@ function AppInner() {
         { id: 'health_sleep',     type: 'health_metric', metric: 'sleep',     label: 'Sleep',      x: 330,  y: 381,  pinned: false, shape: 'pill' },
         { id: 'health_heartrate', type: 'health_metric', metric: 'heartRate', label: 'Heart Rate', x: 165,  y: 476,  pinned: false, shape: 'pill' },
         { id: 'health_workouts',  type: 'health_metric', metric: 'workouts',  label: 'Workouts',   x: 495,  y: 286,  pinned: false, shape: 'card' },
-        { id: 'health_list_list_hntd', type: 'health_list', listId: 'list_hntd', label: 'How Not to Die', x: 660, y: 191, pinned: false },
       ];
       healthMetrics.forEach(hm => {
         if (!loaded.find(n => n.id === hm.id)) loaded.push(hm);
@@ -1334,7 +1331,6 @@ function AppInner() {
         { source: 'flower_health', target: 'health_sleep'     },
         { source: 'flower_health', target: 'health_heartrate' },
         { source: 'flower_health', target: 'health_workouts'  },
-        { source: 'flower_health', target: 'health_list_list_hntd' },
       ];
       healthLinks.forEach(hl => {
         if (!loaded.find(l => l.source === hl.source && l.target === hl.target)) loaded.push(hl);
@@ -2230,23 +2226,29 @@ function AppInner() {
   // ── Health Lists (multiple named habit checklists, e.g. "How Not to Die",
   //    "How Not to Age") -- each is its own draggable node on the map,
   //    reusing the same node/link infrastructure as health_metric nodes.
-  const DEFAULT_HEALTH_LISTS = [
-    {
-      id: 'list_hntd', name: 'How Not to Die', icon: '🥗', color: '#10b981',
-      categories: [
-        { id: 'beans',       label: 'Beans/legumes',   icon: '🫘', target: 3, unit: 'servings', pointsPerServing: 5, pointsPerOverServing: 2 },
-        { id: 'berries',     label: 'Berries',         icon: '🫐', target: 1, unit: 'servings', pointsPerServing: 5, pointsPerOverServing: 2 },
-        { id: 'otherFruits', label: 'Other fruits',    icon: '🍎', target: 3, unit: 'servings', pointsPerServing: 5, pointsPerOverServing: 2 },
-        { id: 'cruciferous', label: 'Cruciferous veg', icon: '🥦', target: 1, unit: 'servings', pointsPerServing: 5, pointsPerOverServing: 2 },
-        { id: 'greens',      label: 'Greens',          icon: '🥬', target: 2, unit: 'servings', pointsPerServing: 5, pointsPerOverServing: 2 },
-        { id: 'otherVeg',    label: 'Other vegetables',icon: '🥕', target: 2, unit: 'servings', pointsPerServing: 5, pointsPerOverServing: 2 },
-        { id: 'nuts',        label: 'Nuts/seeds',      icon: '🌰', target: 1, unit: 'servings', pointsPerServing: 5, pointsPerOverServing: 2 },
-        { id: 'grains',      label: 'Whole grains',    icon: '🌾', target: 3, unit: 'servings', pointsPerServing: 5, pointsPerOverServing: 2 },
-        { id: 'water',       label: 'Water',           icon: '💧', target: 5, unit: 'cups',     pointsPerServing: 3, pointsPerOverServing: 1 },
-        { id: 'exercise',    label: 'Exercise',        icon: '🏃', target: 30, unit: 'minutes',  pointsPerServing: 1, pointsPerOverServing: 1 },
-      ],
-    },
-  ];
+  // Suggested TEMPLATE, not auto-loaded -- offered as a starting point when
+  // the user creates a new tracker, alongside the option to build a fully
+  // custom list from scratch. Matches Dr. Greger's actual Daily Dozen from
+  // "How Not to Die", corrected to include Flaxseeds and Spices which were
+  // missing from an earlier draft of this list.
+  const HNTD_TEMPLATE = {
+    id: 'list_hntd', name: 'How Not to Die', icon: '🥗', color: '#10b981',
+    categories: [
+      { id: 'beans',       label: 'Beans/legumes',   icon: '🫘', target: 3, unit: 'servings', pointsPerServing: 5, pointsPerOverServing: 2 },
+      { id: 'berries',     label: 'Berries',         icon: '🫐', target: 1, unit: 'servings', pointsPerServing: 5, pointsPerOverServing: 2 },
+      { id: 'otherFruits', label: 'Other fruits',    icon: '🍎', target: 3, unit: 'servings', pointsPerServing: 5, pointsPerOverServing: 2 },
+      { id: 'cruciferous', label: 'Cruciferous veg', icon: '🥦', target: 1, unit: 'servings', pointsPerServing: 5, pointsPerOverServing: 2 },
+      { id: 'greens',      label: 'Greens',          icon: '🥬', target: 2, unit: 'servings', pointsPerServing: 5, pointsPerOverServing: 2 },
+      { id: 'otherVeg',    label: 'Other vegetables',icon: '🥕', target: 2, unit: 'servings', pointsPerServing: 5, pointsPerOverServing: 2 },
+      { id: 'flaxseeds',   label: 'Flaxseeds',       icon: '🌱', target: 1, unit: 'servings', pointsPerServing: 5, pointsPerOverServing: 2 },
+      { id: 'nuts',        label: 'Nuts/seeds',      icon: '🌰', target: 1, unit: 'servings', pointsPerServing: 5, pointsPerOverServing: 2 },
+      { id: 'spices',      label: 'Spices (turmeric)',icon: '🧂', target: 1, unit: 'servings', pointsPerServing: 5, pointsPerOverServing: 2 },
+      { id: 'grains',      label: 'Whole grains',    icon: '🌾', target: 3, unit: 'servings', pointsPerServing: 5, pointsPerOverServing: 2 },
+      { id: 'water',       label: 'Water',           icon: '💧', target: 5, unit: 'cups',     pointsPerServing: 3, pointsPerOverServing: 1 },
+      { id: 'exercise',    label: 'Exercise',        icon: '🏃', target: 30, unit: 'minutes',  pointsPerServing: 1, pointsPerOverServing: 1 },
+    ],
+  };
+  const HEALTH_LIST_TEMPLATES = [HNTD_TEMPLATE]; // more templates can be added here later
   const [healthLists, setHealthLists] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem('ft_health_lists') || 'null');
@@ -2257,8 +2259,10 @@ function AppInner() {
         return [{ id: 'list_hntd', name: 'My Habits', icon: '🥗', color: '#10b981',
           categories: oldCats.map(c => ({ ...c, pointsPerServing: 5, pointsPerOverServing: 2 })) }];
       }
-      return DEFAULT_HEALTH_LISTS;
-    } catch(e) { return DEFAULT_HEALTH_LISTS; }
+      // Fresh installs start with NO lists -- the user creates their own
+      // trackers via the map/stack, optionally starting from a template.
+      return [];
+    } catch(e) { return []; }
   });
   // habitToday: { [listId]: { [categoryId]: count } }
   const [habitToday, setHabitToday] = useState(() => {
@@ -2288,6 +2292,18 @@ function AppInner() {
     try { return JSON.parse(localStorage.getItem('ft_list_scores') || '{}'); } catch(e) { return {}; }
   });
   const [showHabitEditor, setShowHabitEditor] = useState(false);
+  // ── Food Diary (AI ingredient estimation + USDA nutrition lookup) ────────
+  // Replace with your own free key from https://fdc.nal.usda.gov/api-key-signup
+  const USDA_API_KEY_PLACEHOLDER = 'DEMO_KEY'; // DEMO_KEY works but is rate-limited to ~30 req/hour -- get a real free key for regular use
+  const [foodDiaryEntries, setFoodDiaryEntries] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('ft_food_diary') || '[]'); } catch(e) { return []; }
+  });
+  const [showFoodDiaryAdd, setShowFoodDiaryAdd] = useState(false);
+  const [foodDiaryProcessing, setFoodDiaryProcessing] = useState(false);
+  const [foodDiaryDraft, setFoodDiaryDraft] = useState(null); // parsed-but-unsaved entry, editable before confirming
+  const [showFoodDiaryList, setShowFoodDiaryList] = useState(false);
+  // ───────────────────────────────────────────────────────────────────────
+
   const [showBirthdayPicker, setShowBirthdayPicker] = useState(false);
   const [pickDay, setPickDay] = useState(1);
   const [pickMonth, setPickMonth] = useState(0);
@@ -2296,6 +2312,8 @@ function AppInner() {
 
   const [showHealthListDetail, setShowHealthListDetail] = useState(null); // listId or null
   const [showListPointsEditor, setShowListPointsEditor] = useState(null); // listId or null
+  const listItemDragRef = useRef({ draggingId: null, startY: 0, itemHeights: {} });
+
   const habitTodayRef = useRef(habitToday);
   habitTodayRef.current = habitToday;
 
@@ -2313,6 +2331,23 @@ function AppInner() {
     (list.categories || []).reduce((sum, c) => sum + (c.target || 1) * (c.pointsPerServing || 0), 0);
   const computeListDayPoints = (list, dayCounts) =>
     (list.categories || []).reduce((sum, c) => sum + computeCategoryPoints((dayCounts||{})[c.id] || 0, c), 0);
+  // Completion rate for a single category over the last N recorded days --
+  // used to sort a list so the categories you struggle with most rise to
+  // the top, making them harder to overlook.
+  const computeCategoryCompletionRate = (listId, category, days = 14) => {
+    const dates = Array.from({length: days}, (_, i) => {
+      const d = new Date(); d.setDate(d.getDate() - (i + 1));
+      return d.toISOString().slice(0, 10);
+    });
+    let hit = 0, logged = 0;
+    dates.forEach(d => {
+      const dayData = habitHistory[d]?.[listId];
+      if (!dayData) return;
+      logged++;
+      if ((dayData[category.id] || 0) >= (category.target || 1)) hit++;
+    });
+    return logged > 0 ? hit / logged : 1; // no history yet -- treat as fine, don't flag as struggling
+  };
 
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -4170,11 +4205,149 @@ function AppInner() {
   };
 
   const healthConnect = async () => {
-    showToast('🔍 Checking Health Connect…');
-    console.log('[FT] All registered Capacitor plugins:', Object.keys(window.Capacitor?.Plugins || {}));
-    showToast('🔍 Plugins: ' + Object.keys(window.Capacitor?.Plugins || {}).join(', ').slice(0, 100));
     const granted = await healthRequestPermission();
     if (granted) await healthFetchData();
+  };
+
+  // ── Food Diary: AI ingredient extraction + real USDA nutrition lookup ───
+  // Stage 1: send the free-text meal description to Claude, asking for a
+  // structured breakdown into individual ingredients with realistic estimated
+  // quantities (in grams) and, where relevant, which Daily Habits category
+  // each ingredient counts toward (e.g. "beans" ingredient -> 'beans' category).
+  // This is the "smart" part -- genuine language understanding of what a
+  // typical version of the described meal actually contains.
+  const parseIngredientsWithAI = async (description) => {
+    const habitCategoryList = healthLists.flatMap(l => l.categories.map(c => `${c.id} (${c.label})`)).join(', ');
+    const prompt = `A person logged this meal in their food diary: "${description}"
+
+Break this down into individual ingredients with realistic estimated quantities in grams, as if estimating a typical home-cooked or restaurant version of this meal. Be reasonable and concrete -- don't be overly conservative or overly generous with portions.
+
+Available habit tracking categories (only use these exact ids, or null if none apply): ${habitCategoryList || 'none configured'}
+
+Respond with ONLY a JSON object in this exact shape, no markdown formatting, no other text:
+{"ingredients":[{"name":"chicken breast, cooked","grams":150,"habitCategory":null},{"name":"white rice, cooked","grams":200,"habitCategory":"grains"}]}`;
+
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-6",
+        max_tokens: 1000,
+        messages: [{ role: "user", content: prompt }],
+      })
+    });
+    const data = await response.json();
+    const textBlock = (data.content || []).find(b => b.type === 'text');
+    if (!textBlock) throw new Error('No response from ingredient parser');
+    const cleaned = textBlock.text.replace(/```json|```/g, '').trim();
+    const parsed = JSON.parse(cleaned);
+    return parsed.ingredients || [];
+  };
+
+  // Stage 2: look up each AI-estimated ingredient against the real USDA
+  // FoodData Central database, and scale its per-100g nutrients by the
+  // estimated gram quantity -- this is what makes the final numbers real,
+  // verified data rather than an AI guessing calories directly.
+  const lookupUsdaNutrition = async (ingredientName, grams) => {
+    const searchUrl = `https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(ingredientName)}&pageSize=1&api_key=${USDA_API_KEY_PLACEHOLDER}`;
+    const searchResp = await fetch(searchUrl);
+    const searchData = await searchResp.json();
+    const food = searchData.foods && searchData.foods[0];
+    if (!food) return null;
+    const NUTRIENT_IDS = { calories: 1008, protein: 1003, fat: 1004, carbs: 1005, fiber: 1079, sugar: 2000, sodium: 1093 };
+    const getNutrient = (id) => {
+      const n = (food.foodNutrients || []).find(fn => fn.nutrientId === id);
+      return n ? n.value : 0;
+    };
+    const scale = grams / 100; // USDA values are per 100g
+    return {
+      name: ingredientName,
+      matchedName: food.description,
+      grams,
+      calories: Math.round(getNutrient(NUTRIENT_IDS.calories) * scale),
+      protein: Math.round(getNutrient(NUTRIENT_IDS.protein) * scale * 10) / 10,
+      fat: Math.round(getNutrient(NUTRIENT_IDS.fat) * scale * 10) / 10,
+      carbs: Math.round(getNutrient(NUTRIENT_IDS.carbs) * scale * 10) / 10,
+      fiber: Math.round(getNutrient(NUTRIENT_IDS.fiber) * scale * 10) / 10,
+      sugar: Math.round(getNutrient(NUTRIENT_IDS.sugar) * scale * 10) / 10,
+      sodium: Math.round(getNutrient(NUTRIENT_IDS.sodium) * scale),
+    };
+  };
+
+  // Full pipeline: text description -> AI ingredient breakdown -> real
+  // nutrition lookup per ingredient -> summed totals + habit category tags
+  const analyzeFoodEntry = async (description) => {
+    setFoodDiaryProcessing(true);
+    try {
+      const aiIngredients = await parseIngredientsWithAI(description);
+      if (aiIngredients.length === 0) {
+        showToast('⚠️ Could not identify any ingredients — try being more specific');
+        setFoodDiaryProcessing(false);
+        return null;
+      }
+      const lookups = await Promise.all(
+        aiIngredients.map(ing => lookupUsdaNutrition(ing.name, ing.grams).catch(() => null))
+      );
+      const validLookups = lookups.filter(Boolean);
+      const habitTags = aiIngredients.map(ing => ing.habitCategory).filter(Boolean);
+      const totals = validLookups.reduce((acc, ing) => ({
+        calories: acc.calories + ing.calories,
+        protein: acc.protein + ing.protein,
+        fat: acc.fat + ing.fat,
+        carbs: acc.carbs + ing.carbs,
+        fiber: acc.fiber + ing.fiber,
+        sugar: acc.sugar + ing.sugar,
+        sodium: acc.sodium + ing.sodium,
+      }), { calories:0, protein:0, fat:0, carbs:0, fiber:0, sugar:0, sodium:0 });
+      const draft = {
+        id: Date.now().toString(),
+        description,
+        date: new Date().toISOString().slice(0,10),
+        timestamp: new Date().toISOString(),
+        ingredients: validLookups,
+        unmatchedCount: aiIngredients.length - validLookups.length,
+        habitTags,
+        totals: {
+          calories: Math.round(totals.calories),
+          protein: Math.round(totals.protein * 10) / 10,
+          fat: Math.round(totals.fat * 10) / 10,
+          carbs: Math.round(totals.carbs * 10) / 10,
+          fiber: Math.round(totals.fiber * 10) / 10,
+          sugar: Math.round(totals.sugar * 10) / 10,
+          sodium: Math.round(totals.sodium),
+        },
+      };
+      setFoodDiaryProcessing(false);
+      return draft;
+    } catch(e) {
+      console.warn('Food diary analysis failed:', e);
+      showToast('❌ Analysis failed: ' + e.message);
+      setFoodDiaryProcessing(false);
+      return null;
+    }
+  };
+
+  // Confirm and save a draft entry -- also auto-increments any matched
+  // Daily Habits categories for today (e.g. an ingredient tagged 'beans'
+  // ticks up today's beans serving count automatically)
+  const confirmFoodDiaryEntry = (draft) => {
+    setFoodDiaryEntries(prev => [draft, ...prev]);
+    if (draft.habitTags && draft.habitTags.length > 0) {
+      // Figure out which list each tagged category belongs to, and bump it
+      draft.habitTags.forEach(catId => {
+        const owningList = healthLists.find(l => l.categories.some(c => c.id === catId));
+        if (!owningList) return;
+        setHabitToday(prev => ({
+          ...prev,
+          [owningList.id]: { ...(prev[owningList.id]||{}), [catId]: ((prev[owningList.id]||{})[catId]||0) + 1 }
+        }));
+      });
+      showToast(`🍽️ Meal logged — ${draft.habitTags.length} habit${draft.habitTags.length>1?'s':''} updated`);
+    } else {
+      showToast('🍽️ Meal logged');
+    }
+    setFoodDiaryDraft(null);
+    setShowFoodDiaryAdd(false);
   };
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -4839,6 +5012,7 @@ function AppInner() {
   useEffect(() => { try { localStorage.setItem('ft_health_lists', JSON.stringify(healthLists)); } catch(e) {} }, [healthLists]);
   useEffect(() => { try { localStorage.setItem('ft_habit_today_v2', JSON.stringify(habitToday)); } catch(e) {} }, [habitToday]);
   useEffect(() => { try { localStorage.setItem('ft_habit_history_v2', JSON.stringify(habitHistory)); } catch(e) {} }, [habitHistory]);
+  useEffect(() => { try { localStorage.setItem('ft_food_diary', JSON.stringify(foodDiaryEntries)); } catch(e) {} }, [foodDiaryEntries]);
   useEffect(() => { try { localStorage.setItem('ft_list_scores', JSON.stringify(listScores)); } catch(e) {} }, [listScores]);
   const healthListsRef = useRef(healthLists);
   healthListsRef.current = healthLists;
@@ -12933,7 +13107,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             ← Calendar
           </button>
         )}
-        {viewMode === 'map' && (
+        {viewMode === 'canvas' && mapStyle !== 'feed' && mapStyle !== 'feedDetailed' && (
         <div className={`absolute bottom-6 right-6 flex items-center space-x-2 p-2 rounded-xl shadow-lg border ${theme.darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`} style={{zIndex:120}}>
           <button onClick={() => setTransform(p => ({ ...p, scale: Math.max(0.01, p.scale / 1.3) }))} className={`p-2 rounded-lg transition-colors ${theme.darkMode ? 'hover:bg-slate-700 text-slate-300' : 'hover:bg-slate-100 text-slate-600'}`}><ZoomOut className="w-5 h-5" /></button>
           <button onClick={() => { const rect = svgRef.current ? svgRef.current.getBoundingClientRect() : { width: window.innerWidth, height: window.innerHeight }; setTransform({ x: rect.width/2, y: rect.height/2, scale: 0.5 }); }} title="Recenter" className={`p-2 rounded-lg transition-colors ${theme.darkMode ? 'hover:bg-slate-700 text-slate-300' : 'hover:bg-slate-100 text-slate-600'}`}><Home className="w-5 h-5" /></button>
@@ -12942,447 +13116,6 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         )}
 
         {/* ── Health Panel ─────────────────────────────────────────────── */}
-        {showHealthPanel && viewMode !== 'calendar' && viewMode !== 'me' && (() => {
-          const dm = theme.darkMode;
-          const METRICS = [
-            { key: 'steps',     label: 'Steps',      icon: '👟', color: '#10b981', value: healthData.steps,     unit: 'steps today',  format: v => v?.toLocaleString() || '—' },
-            { key: 'sleep',     label: 'Sleep',      icon: '😴', color: '#8b5cf6', value: healthData.sleep,     unit: 'minutes',      format: v => v != null ? `${Math.floor(v/60)}h ${v%60}m` : '—' },
-            { key: 'heartRate', label: 'Heart Rate', icon: '❤️', color: '#ef4444', value: healthData.heartRate, unit: 'bpm',          format: v => v?.toString() || '—' },
-            { key: 'workouts',  label: 'Workouts',   icon: '💪', color: '#f59e0b', value: healthData.workouts?.length, unit: 'this week', format: v => v?.toString() || '—' },
-            { key: 'distance',  label: 'Distance',   icon: '🚶', color: '#06b6d4', value: healthData.distanceKm, unit: 'km today',   format: v => v != null ? `${v}` : '—' },
-            { key: 'calories',  label: 'Active Cal',  icon: '🔥', color: '#f97316', value: healthData.activeCalories, unit: 'kcal today', format: v => v != null ? Math.round(v).toLocaleString() : '—' },
-            { key: 'flights',   label: 'Flights',    icon: '🏢', color: '#84cc16', value: healthData.flights, unit: 'climbed today', format: v => v != null ? Math.round(v).toString() : '—' },
-            { key: 'restingHR', label: 'Resting HR', icon: '💤', color: '#ec4899', value: healthData.restingHeartRate, unit: 'bpm',   format: v => v?.toString() || '—' },
-          ];
-          return (
-            <div style={{position:'fixed', inset:0, zIndex:300, display:'flex', alignItems:'flex-end',
-              background:'rgba(0,0,0,0.5)', paddingBottom:'calc(68px + env(safe-area-inset-bottom, 0px))'}}>
-              <div style={{width:'100%', background:dm?'#0f172a':'white', borderRadius:'16px 16px 0 0',
-                padding:'20px 16px', maxHeight:'80vh', overflowY:'auto', boxSizing:'border-box'}}>
-                {/* Header */}
-                <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:16}}>
-                  <div style={{display:'flex', alignItems:'center', gap:10}}>
-                    <span style={{fontSize:22}}>💪</span>
-                    <div>
-                      <div style={{fontSize:15, fontWeight:800, color:dm?'white':'#0f172a'}}>Health Connect</div>
-                      <div style={{fontSize:11, color:dm?'#64748b':'#94a3b8'}}>
-                        {healthData.lastFetched ? `Last updated ${new Date(healthData.lastFetched).toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'})}` : 'Not connected'}
-                      </div>
-                    </div>
-                  </div>
-                  <button onClick={() => setShowHealthPanel(false)}
-                    style={{background:'none', border:'none', fontSize:22, color:dm?'#64748b':'#94a3b8', cursor:'pointer'}}>×</button>
-                </div>
-                {/* Connect / Refresh buttons */}
-                <div style={{display:'flex', gap:8, marginBottom:16}}>
-                  <button onClick={healthConnect} disabled={healthLoading}
-                    style={{flex:1, padding:'9px 0', borderRadius:8, border:'none',
-                      background:'#10b981', color:'white', fontSize:13, fontWeight:700,
-                      cursor:healthLoading?'wait':'pointer', opacity:healthLoading?0.7:1}}>
-                    {healthLoading ? '⏳ Loading…' : healthPermission === 'granted' ? '🔄 Refresh' : '🔗 Connect Health'}
-                  </button>
-                  {healthPermission === 'granted' && (
-                    <button onClick={() => { if (window.Capacitor?.Plugins?.CapgoHealth?.openHealthConnectSettings) window.Capacitor.Plugins.CapgoHealth.openHealthConnectSettings(); }}
-                      style={{padding:'9px 14px', borderRadius:8, border:`1px solid ${dm?'#334155':'#e2e8f0'}`,
-                        background:'none', color:dm?'#94a3b8':'#64748b', fontSize:12, fontWeight:600, cursor:'pointer'}}>
-                      Settings
-                    </button>
-                  )}
-                </div>
-                {/* Metric cards */}
-                <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:16}}>
-                  {METRICS.map(m => (
-                    <div key={m.key} style={{borderRadius:12, padding:'12px 14px',
-                      background:dm?'#1e293b':'#f8fafc', border:`1px solid ${m.color}30`}}>
-                      <div style={{display:'flex', alignItems:'center', gap:6, marginBottom:6}}>
-                        <span style={{fontSize:16}}>{m.icon}</span>
-                        <span style={{fontSize:10, fontWeight:700, color:m.color, textTransform:'uppercase', letterSpacing:0.5}}>{m.label}</span>
-                      </div>
-                      <div style={{fontSize:24, fontWeight:800, color:dm?'white':'#0f172a', lineHeight:1}}>
-                        {m.format(m.value)}
-                      </div>
-                      <div style={{fontSize:10, color:dm?'#64748b':'#94a3b8', marginTop:2}}>{m.unit}</div>
-                    </div>
-                  ))}
-                </div>
-                {/* Sleep quality breakdown -- deep/light/REM/awake stages */}
-                {healthData.sleepStages && (
-                  <div style={{marginBottom:16, borderRadius:12, padding:'12px 14px',
-                    background:dm?'#1e293b':'#f8fafc', border:`1px solid ${dm?'#334155':'#e2e8f0'}`}}>
-                    <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10}}>
-                      <div style={{fontSize:12, fontWeight:700, color:dm?'white':'#0f172a'}}>😴 Sleep Quality</div>
-                      {healthData.sleepQualityPct != null && (
-                        <div style={{fontSize:12, fontWeight:800, color:'#8b5cf6'}}>{healthData.sleepQualityPct}% restorative</div>
-                      )}
-                    </div>
-                    {/* Stacked bar showing proportion of each stage */}
-                    {(() => {
-                      const stages = healthData.sleepStages;
-                      const total = (stages.deep||0) + (stages.light||0) + (stages.rem||0) + (stages.awake||0);
-                      if (total === 0) return null;
-                      const segs = [
-                        { key:'deep', label:'Deep', color:'#5b21b6', mins:stages.deep },
-                        { key:'rem', label:'REM', color:'#8b5cf6', mins:stages.rem },
-                        { key:'light', label:'Light', color:'#c4b5fd', mins:stages.light },
-                        { key:'awake', label:'Awake', color:'#fbbf24', mins:stages.awake },
-                      ];
-                      return (
-                        <>
-                          <div style={{display:'flex', height:10, borderRadius:6, overflow:'hidden', marginBottom:8}}>
-                            {segs.map(s => s.mins > 0 && (
-                              <div key={s.key} style={{width:`${(s.mins/total)*100}%`, background:s.color}}/>
-                            ))}
-                          </div>
-                          <div style={{display:'flex', flexWrap:'wrap', gap:10}}>
-                            {segs.map(s => (
-                              <div key={s.key} style={{display:'flex', alignItems:'center', gap:5}}>
-                                <div style={{width:8, height:8, borderRadius:2, background:s.color}}/>
-                                <span style={{fontSize:11, color:dm?'#94a3b8':'#64748b'}}>
-                                  {s.label} {Math.floor(s.mins/60)}h{s.mins%60}m
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        </>
-                      );
-                    })()}
-                  </div>
-                )}
-                {/* Heart rate variability -- recovery/stress indicator */}
-                {healthData.hrv != null && (
-                  <div style={{marginBottom:16, borderRadius:12, padding:'10px 14px',
-                    background:dm?'#1e293b':'#f8fafc', border:`1px solid ${dm?'#334155':'#e2e8f0'}`,
-                    display:'flex', alignItems:'center', justifyContent:'space-between'}}>
-                    <div style={{fontSize:12, color:dm?'#94a3b8':'#64748b'}}>
-                      💓 Heart Rate Variability <span style={{fontSize:10}}>(higher = better recovery)</span>
-                    </div>
-                    <div style={{fontSize:14, fontWeight:800, color:'#ec4899'}}>{healthData.hrv} ms</div>
-                  </div>
-                )}
-                {/* Health Lists -- summary of each named habit checklist,
-                    tap to open its full detail/logging view */}
-                <div style={{marginBottom:16, borderRadius:12, padding:'12px 14px',
-                  background:dm?'#1e293b':'#f8fafc', border:`1px solid ${dm?'#334155':'#e2e8f0'}`}}>
-                  <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10}}>
-                    <div style={{fontSize:12, fontWeight:700, color:dm?'white':'#0f172a'}}>✅ Health Lists</div>
-                    <div style={{fontSize:12, fontWeight:800, color:'#10b981'}}>
-                      Total: {Math.round(healthLists.reduce((s,l)=>s+(listScores[l.id]||0),0))} pts
-                    </div>
-                  </div>
-                  <div style={{display:'flex', flexDirection:'column', gap:6}}>
-                    {healthLists.map(list => {
-                      const todayCounts = habitToday[list.id] || {};
-                      const hitCount = list.categories.filter(c => (todayCounts[c.id]||0) >= c.target).length;
-                      const score = Math.round(listScores[list.id] || 0);
-                      return (
-                        <div key={list.id} onClick={() => setShowHealthListDetail(list.id)}
-                          style={{display:'flex', alignItems:'center', gap:10, padding:'8px 10px',
-                            borderRadius:8, cursor:'pointer', background:dm?'#0f172a':'white',
-                            border:`1px solid ${dm?'#334155':'#e2e8f0'}`}}>
-                          <div style={{fontSize:18}}>{list.icon}</div>
-                          <div style={{flex:1, minWidth:0}}>
-                            <div style={{fontSize:13, fontWeight:600, color:dm?'white':'#0f172a'}}>{list.name}</div>
-                            <div style={{fontSize:11, color:dm?'#64748b':'#94a3b8'}}>{hitCount}/{list.categories.length} targets hit today</div>
-                          </div>
-                          <div style={{fontSize:13, fontWeight:800, color:score>=0?'#10b981':'#ef4444'}}>⭐ {score}</div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <button onClick={() => setShowHabitEditor(true)}
-                    style={{width:'100%', marginTop:10, padding:'7px 0', borderRadius:8,
-                      border:`1px dashed ${dm?'#334155':'#e2e8f0'}`, background:'none',
-                      color:dm?'#64748b':'#94a3b8', fontSize:12, fontWeight:600, cursor:'pointer'}}>
-                    Manage lists & categories
-                  </button>
-                </div>
-                {/* Recent workouts */}
-                {(healthData.workouts?.length || 0) > 0 && (
-                  <div>
-                    <div style={{fontSize:11, fontWeight:700, color:dm?'#64748b':'#94a3b8',
-                      textTransform:'uppercase', letterSpacing:0.5, marginBottom:8}}>Recent workouts</div>
-                    {healthData.workouts.slice(0,5).map((w,wi) => (
-                      <div key={wi} style={{display:'flex', alignItems:'center', justifyContent:'space-between',
-                        padding:'8px 0', borderBottom:`1px solid ${dm?'#1e293b':'#f1f5f9'}`}}>
-                        <div>
-                          <div style={{fontSize:13, fontWeight:600, color:dm?'white':'#0f172a'}}>{w.type}</div>
-                          <div style={{fontSize:11, color:dm?'#64748b':'#94a3b8'}}>
-                            {new Date(w.date).toLocaleDateString('en',{weekday:'short',month:'short',day:'numeric'})}
-                          </div>
-                        </div>
-                        <div style={{textAlign:'right'}}>
-                          <div style={{fontSize:13, fontWeight:700, color:'#f59e0b'}}>{w.duration} min</div>
-                          {w.calories > 0 && <div style={{fontSize:11, color:dm?'#64748b':'#94a3b8'}}>{w.calories} kcal</div>}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {/* Link workouts to recurring activities */}
-                <div style={{marginTop:12, padding:'10px 12px', borderRadius:8,
-                  background:dm?'#1e293b':'#f8fafc', border:`1px solid ${dm?'#334155':'#e2e8f0'}`}}>
-                  <div style={{fontSize:12, fontWeight:600, color:dm?'white':'#0f172a', marginBottom:4}}>
-                    💡 Link workouts to friend scores
-                  </div>
-                  <div style={{fontSize:11, color:dm?'#64748b':'#94a3b8', lineHeight:1.5}}>
-                    Add recurring activities in the Calendar tab (e.g. "Climbing with James, every Wednesday") — confirming them boosts friendship scores automatically.
-                  </div>
-                  <button onClick={() => { setShowHealthPanel(false); setViewMode('calendar'); setCalViewMode('monthly'); setShowAddRecurring(true); }}
-                    style={{marginTop:8, padding:'6px 14px', borderRadius:8, border:'none',
-                      background:'#10b981', color:'white', fontSize:12, fontWeight:700, cursor:'pointer'}}>
-                    + Add recurring activity
-                  </button>
-                </div>
-              </div>
-            </div>
-          );
-        })()}
-        {/* ──────────────────────────────────────────────────────────────── */}
-
-        {/* ── Health List Detail (checklist + logging for one list) ──────── */}
-        {showHealthListDetail && (() => {
-          const dm = theme.darkMode;
-          const list = healthLists.find(l => l.id === showHealthListDetail);
-          if (!list) { setShowHealthListDetail(null); return null; }
-          const todayCounts = habitToday[list.id] || {};
-          const dayPoints = computeListDayPoints(list, todayCounts);
-          const baseline = computeListBaselinePoints(list);
-          return (
-            <div style={{position:'fixed', inset:0, zIndex:320, display:'flex', alignItems:'flex-end',
-              background:'rgba(0,0,0,0.5)', paddingBottom:'calc(68px + env(safe-area-inset-bottom, 0px))'}}
-              onClick={e => { if (e.target === e.currentTarget) setShowHealthListDetail(null); }}>
-              <div style={{width:'100%', background:dm?'#0f172a':'white', borderRadius:'16px 16px 0 0',
-                padding:'20px 16px', maxHeight:'80vh', overflowY:'auto', boxSizing:'border-box'}}>
-                <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:4}}>
-                  <div style={{fontSize:16, fontWeight:800, color:dm?'white':'#0f172a'}}>{list.icon} {list.name}</div>
-                  <button onClick={() => setShowHealthListDetail(null)}
-                    style={{background:'none', border:'none', fontSize:22, color:dm?'#64748b':'#94a3b8', cursor:'pointer'}}>×</button>
-                </div>
-                <div style={{fontSize:12, color:dm?'#64748b':'#94a3b8', marginBottom:16}}>
-                  Today: {dayPoints} pts {dayPoints >= baseline ? '(at or above your daily baseline 🎉)' : `(baseline is ${baseline} pts)`}
-                  &nbsp;·&nbsp; Score: <span style={{fontWeight:800, color:(listScores[list.id]||0)>=0?'#10b981':'#ef4444'}}>
-                    {Math.round(listScores[list.id]||0)} pts
-                  </span>
-                </div>
-                <div style={{display:'flex', flexDirection:'column', gap:10}}>
-                  {list.categories.map(cat => {
-                    const count = todayCounts[cat.id] || 0;
-                    const pct = Math.min(100, (count / cat.target) * 100);
-                    const hit = count >= cat.target;
-                    const over = count > cat.target;
-                    return (
-                      <div key={cat.id} style={{display:'flex', alignItems:'center', gap:10}}>
-                        <div style={{fontSize:16, width:22, textAlign:'center'}}>{cat.icon}</div>
-                        <div style={{flex:1, minWidth:0}}>
-                          <div style={{display:'flex', justifyContent:'space-between', marginBottom:3}}>
-                            <span style={{fontSize:12, fontWeight:600, color:dm?'white':'#0f172a',
-                              overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{cat.label}</span>
-                            <span style={{fontSize:11, fontWeight:700, color:over?'#f59e0b':hit?'#10b981':(dm?'#64748b':'#94a3b8')}}>
-                              {count}/{cat.target} {cat.unit}{over ? ' 🔥' : ''}
-                            </span>
-                          </div>
-                          <div style={{height:5, borderRadius:99, background:dm?'#334155':'#e2e8f0', overflow:'hidden'}}>
-                            <div style={{height:'100%', width:`${pct}%`, background:over?'#f59e0b':hit?'#10b981':'#8b5cf6',
-                              transition:'width 0.2s'}}/>
-                          </div>
-                        </div>
-                        <button onClick={() => setHabitToday(prev => ({ ...prev,
-                          [list.id]: { ...(prev[list.id]||{}), [cat.id]: (prev[list.id]?.[cat.id]||0) + 1 } }))}
-                          style={{width:28, height:28, borderRadius:8, border:'none', flexShrink:0,
-                            background:'#10b981', color:'white', fontSize:16, fontWeight:700, cursor:'pointer',
-                            display:'flex', alignItems:'center', justifyContent:'center'}}>
-                          +
-                        </button>
-                        {count > 0 && (
-                          <button onClick={() => setHabitToday(prev => ({ ...prev,
-                            [list.id]: { ...(prev[list.id]||{}), [cat.id]: Math.max(0,(prev[list.id]?.[cat.id]||0) - 1) } }))}
-                            style={{width:22, height:22, borderRadius:6, border:`1px solid ${dm?'#334155':'#e2e8f0'}`, flexShrink:0,
-                              background:'none', color:dm?'#64748b':'#94a3b8', fontSize:13, cursor:'pointer',
-                              display:'flex', alignItems:'center', justifyContent:'center'}}>
-                            −
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-                <button onClick={() => setShowListPointsEditor(list.id)}
-                  style={{width:'100%', marginTop:14, padding:'8px 0', borderRadius:8,
-                    border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:'none',
-                    color:dm?'#94a3b8':'#64748b', fontSize:12, fontWeight:600, cursor:'pointer'}}>
-                  ⚙️ Edit points per item
-                </button>
-              </div>
-            </div>
-          );
-        })()}
-        {/* ──────────────────────────────────────────────────────────────── */}
-
-        {/* ── Health Lists Manager (add/remove lists, edit categories) ───── */}
-        {/* ── Birthday Wheel Picker ────────────────────────────────────── */}
-        {showBirthdayPicker && selectedNode && (() => {
-          const dm = theme.darkMode;
-          const ROW_H = 40;
-          const days = BIRTHDAY_DAYS_GLOBAL, MONTHS_SHORT = MONTHS_SHORT_GLOBAL, years = BIRTHDAY_YEARS_GLOBAL;
-
-          const makeWheel = (ref, list, current, onSelect, formatFn) => (
-            <div style={{position:'relative', flex:1, height:ROW_H*5}}>
-              <div style={{position:'absolute', top:ROW_H*2, left:0, right:0, height:ROW_H,
-                background:dm?'rgba(16,185,129,0.15)':'rgba(16,185,129,0.1)',
-                borderTop:'1.5px solid #10b981', borderBottom:'1.5px solid #10b981',
-                pointerEvents:'none', zIndex:1}}/>
-              <div ref={ref}
-                onScroll={e => {
-                  const idx = Math.round(e.target.scrollTop / ROW_H);
-                  const val = list[Math.max(0, Math.min(list.length-1, idx))];
-                  if (val !== undefined && val !== current) onSelect(val);
-                }}
-                style={{height:'100%', overflowY:'scroll', scrollSnapType:'y mandatory',
-                  paddingTop:ROW_H*2, paddingBottom:ROW_H*2,
-                  WebkitOverflowScrolling:'touch'}}>
-                {list.map((item, i) => (
-                  <div key={i} style={{height:ROW_H, display:'flex', alignItems:'center', justifyContent:'center',
-                    scrollSnapAlign:'start', fontSize:item===current?18:15,
-                    fontWeight:item===current?800:500,
-                    color:item===current?'#10b981':(dm?'#64748b':'#94a3b8')}}>
-                    {formatFn ? formatFn(item) : item}
-                  </div>
-                ))}
-              </div>
-            </div>
-          );
-
-          return (
-            <div style={{position:'fixed', inset:0, zIndex:400, display:'flex', alignItems:'flex-end',
-              background:'rgba(0,0,0,0.5)', paddingBottom:'calc(68px + env(safe-area-inset-bottom, 0px))'}}
-              onClick={e => { if (e.target === e.currentTarget) setShowBirthdayPicker(false); }}>
-              <div style={{width:'100%', background:dm?'#0f172a':'white', borderRadius:'16px 16px 0 0',
-                padding:'20px 16px', boxSizing:'border-box'}}>
-                <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:16}}>
-                  <div style={{fontSize:15, fontWeight:800, color:dm?'white':'#0f172a'}}>🎂 Set Birthday</div>
-                  <button onClick={() => setShowBirthdayPicker(false)}
-                    style={{background:'none', border:'none', fontSize:22, color:dm?'#64748b':'#94a3b8', cursor:'pointer'}}>×</button>
-                </div>
-                <div style={{display:'flex', gap:4}}>
-                  {makeWheel(birthdayDayRef, days, pickDay, setPickDay)}
-                  {makeWheel(birthdayMonthRef, MONTHS_SHORT, MONTHS_SHORT[pickMonth], v => setPickMonth(MONTHS_SHORT.indexOf(v)))}
-                  {makeWheel(birthdayYearRef, years, pickYear, setPickYear, y => `'${String(y).slice(-2)}`)}
-                </div>
-                <button onClick={() => {
-                  const dateStr = `${pickDay} ${MONTHS_SHORT[pickMonth]} ${pickYear}`;
-                  updateSelectedNode('birthday', dateStr);
-                  setShowBirthdayPicker(false);
-                  showToast(`🎂 Birthday set: ${dateStr}`);
-                }}
-                  style={{width:'100%', marginTop:16, padding:'11px 0', borderRadius:8, border:'none',
-                    background:'#10b981', color:'white', fontSize:14, fontWeight:700, cursor:'pointer'}}>
-                  Save
-                </button>
-              </div>
-            </div>
-          );
-        })()}
-        {/* ──────────────────────────────────────────────────────────────── */}
-
-        {showHabitEditor && (() => {
-          const dm = theme.darkMode;
-          return (
-            <div style={{position:'fixed', inset:0, zIndex:310, display:'flex', alignItems:'flex-end',
-              background:'rgba(0,0,0,0.5)', paddingBottom:'calc(68px + env(safe-area-inset-bottom, 0px))'}}>
-              <div style={{width:'100%', background:dm?'#0f172a':'white', borderRadius:'16px 16px 0 0',
-                padding:'20px 16px', maxHeight:'80vh', overflowY:'auto', boxSizing:'border-box'}}>
-                <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:14}}>
-                  <div style={{fontSize:15, fontWeight:800, color:dm?'white':'#0f172a'}}>Manage Health Lists</div>
-                  <button onClick={() => setShowHabitEditor(false)}
-                    style={{background:'none', border:'none', fontSize:22, color:dm?'#64748b':'#94a3b8', cursor:'pointer'}}>×</button>
-                </div>
-                {healthLists.map((list, li) => (
-                  <div key={list.id} style={{marginBottom:14, padding:'10px 12px', borderRadius:10,
-                    background:dm?'#1e293b':'#f8fafc', border:`1px solid ${dm?'#334155':'#e2e8f0'}`}}>
-                    <div style={{display:'flex', alignItems:'center', gap:8, marginBottom:10}}>
-                      <input value={list.icon} onChange={e => {
-                        const v = e.target.value;
-                        setHealthLists(prev => prev.map((l,i) => i===li ? {...l, icon:v} : l));
-                      }} style={{width:30, textAlign:'center', fontSize:16, border:'none', background:'none', color:dm?'white':'#0f172a'}}/>
-                      <input value={list.name} onChange={e => {
-                        const v = e.target.value;
-                        setHealthLists(prev => prev.map((l,i) => i===li ? {...l, name:v} : l));
-                      }} style={{flex:1, fontSize:13, fontWeight:700, padding:'6px 8px', borderRadius:6,
-                        border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#0f172a':'white', color:dm?'white':'#0f172a'}}/>
-                      {healthLists.length > 1 && (
-                        <button onClick={() => setHealthLists(prev => prev.filter((l,i) => i!==li))}
-                          style={{padding:'5px 9px', borderRadius:6, border:'none',
-                            background:'#fee2e2', color:'#dc2626', fontSize:11, cursor:'pointer'}}>
-                          Remove list
-                        </button>
-                      )}
-                    </div>
-                    <div style={{display:'flex', flexDirection:'column', gap:6}}>
-                      {list.categories.map((cat, ci) => (
-                        <div key={cat.id} style={{display:'flex', alignItems:'center', gap:6}}>
-                          <input value={cat.icon} onChange={e => {
-                            const v = e.target.value;
-                            setHealthLists(prev => prev.map((l,i) => i!==li ? l : {...l,
-                              categories: l.categories.map((c,ci2) => ci2===ci ? {...c, icon:v} : c)}));
-                          }} style={{width:26, textAlign:'center', fontSize:14, border:'none', background:'none', color:dm?'white':'#0f172a'}}/>
-                          <input value={cat.label} onChange={e => {
-                            const v = e.target.value;
-                            setHealthLists(prev => prev.map((l,i) => i!==li ? l : {...l,
-                              categories: l.categories.map((c,ci2) => ci2===ci ? {...c, label:v} : c)}));
-                          }} style={{flex:1, minWidth:0, fontSize:12, padding:'5px 6px', borderRadius:6,
-                            border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#0f172a':'white', color:dm?'white':'#0f172a'}}/>
-                          <input type="number" value={cat.target} onChange={e => {
-                            const v = parseInt(e.target.value)||0;
-                            setHealthLists(prev => prev.map((l,i) => i!==li ? l : {...l,
-                              categories: l.categories.map((c,ci2) => ci2===ci ? {...c, target:v} : c)}));
-                          }} style={{width:38, fontSize:12, padding:'5px 3px', borderRadius:6, textAlign:'center',
-                            border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#0f172a':'white', color:dm?'white':'#0f172a'}}/>
-                          <input value={cat.unit} onChange={e => {
-                            const v = e.target.value;
-                            setHealthLists(prev => prev.map((l,i) => i!==li ? l : {...l,
-                              categories: l.categories.map((c,ci2) => ci2===ci ? {...c, unit:v} : c)}));
-                          }} style={{width:56, fontSize:10, padding:'5px 4px', borderRadius:6,
-                            border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#0f172a':'white', color:dm?'white':'#0f172a'}}/>
-                          <button onClick={() => setHealthLists(prev => prev.map((l,i) => i!==li ? l : {...l,
-                            categories: l.categories.filter((c,ci2) => ci2!==ci)}))}
-                            style={{padding:'3px 7px', borderRadius:6, border:'none',
-                              background:'#fee2e2', color:'#dc2626', fontSize:10, cursor:'pointer'}}>
-                            ✕
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                    <button onClick={() => setHealthLists(prev => prev.map((l,i) => i!==li ? l : {...l,
-                      categories: [...l.categories, { id: 'cat_'+Date.now(), label:'New item', icon:'⭐', target:1, unit:'x', pointsPerServing:5, pointsPerOverServing:2 }]}))}
-                      style={{width:'100%', marginTop:8, padding:'6px 0', borderRadius:6,
-                        border:`1px dashed ${dm?'#334155':'#e2e8f0'}`, background:'none',
-                        color:dm?'#64748b':'#94a3b8', fontSize:11, fontWeight:600, cursor:'pointer'}}>
-                      + Add item to this list
-                    </button>
-                  </div>
-                ))}
-                <button onClick={() => {
-                  const newId = 'list_'+Date.now();
-                  setHealthLists(prev => [...prev, { id:newId, name:'New List', icon:'📋', color:'#10b981', categories:[] }]);
-                  // Also add a corresponding draggable node on the map
-                  setNodes(prev => [...prev, { id:'health_list_'+newId, type:'health_list', listId:newId,
-                    label:'New List', x: 400 + Math.random()*100, y: 400 + Math.random()*100, pinned:false }]);
-                  setLinks(prev => [...prev, { source:'flower_health', target:'health_list_'+newId }]);
-                }}
-                  style={{width:'100%', marginTop:4, padding:'9px 0', borderRadius:8,
-                    border:'none', background:'#10b981', color:'white', fontSize:13, fontWeight:700, cursor:'pointer'}}>
-                  + Add new list
-                </button>
-                <button onClick={() => setShowHabitEditor(false)}
-                  style={{width:'100%', marginTop:10, padding:'10px 0', borderRadius:8,
-                    border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:'none',
-                    color:dm?'#94a3b8':'#64748b', fontSize:13, cursor:'pointer'}}>
-                  Done
-                </button>
-              </div>
-            </div>
-          );
-        })()}
         {/* ──────────────────────────────────────────────────────────────── */}
 
         {/* ── Points Editor (per-category points-per-serving config) ─────── */}
@@ -13390,44 +13123,183 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           const dm = theme.darkMode;
           const list = healthLists.find(l => l.id === showListPointsEditor);
           if (!list) { setShowListPointsEditor(null); return null; }
+          const updateList = (fn) => setHealthLists(prev => prev.map(l => l.id!==list.id ? l : fn(l)));
+          const sortMode = list.sortMode || 'custom';
+          const alphaDir = list.alphaDir || 'asc';
+          const struggleDir = list.struggleDir || 'weak';
+
+          // Compute the DISPLAYED order based on current sort mode -- 'custom'
+          // shows list.categories as-is (the order dragging maintains),
+          // 'alpha'/'struggle' show a computed sort without altering the
+          // underlying saved custom order, so switching back to "My order"
+          // always restores whatever was last dragged.
+          let displayCats = list.categories;
+          if (sortMode === 'alpha') {
+            displayCats = [...list.categories].sort((a,b) =>
+              alphaDir === 'asc' ? a.label.localeCompare(b.label) : b.label.localeCompare(a.label));
+          } else if (sortMode === 'struggle') {
+            displayCats = [...list.categories].sort((a,b) => {
+              const ra = computeCategoryCompletionRate(list.id, a), rb = computeCategoryCompletionRate(list.id, b);
+              return struggleDir === 'weak' ? ra - rb : rb - ra;
+            });
+          }
+
+          // Dragging always operates on list.categories directly (the "My
+          // order" array) -- if the user drags while viewing an alpha/struggle
+          // sort, we first capture that visible order as the new baseline,
+          // then apply the drag on top of it and switch to custom mode.
+          const startDrag = (catId, clientY) => {
+            listItemDragRef.current = { draggingId: catId, startY: clientY, baseOrder: displayCats.map(c => c.id) };
+          };
+          const handleDragMove = (clientY) => {
+            const drag = listItemDragRef.current;
+            if (!drag.draggingId) return;
+            const container = document.getElementById('list-items-container');
+            if (!container) return;
+            const itemEls = Array.from(container.querySelectorAll('[data-cat-item]'));
+            let targetIdx = drag.baseOrder.indexOf(drag.draggingId);
+            for (let i = 0; i < itemEls.length; i++) {
+              const rect = itemEls[i].getBoundingClientRect();
+              if (clientY >= rect.top && clientY <= rect.bottom) {
+                targetIdx = i;
+                break;
+              }
+            }
+            const currentIdx = drag.baseOrder.indexOf(drag.draggingId);
+            if (targetIdx !== currentIdx) {
+              const newOrder = [...drag.baseOrder];
+              const [moved] = newOrder.splice(currentIdx, 1);
+              newOrder.splice(targetIdx, 0, moved);
+              drag.baseOrder = newOrder;
+              const reordered = newOrder.map(id => list.categories.find(c => c.id === id)).filter(Boolean);
+              updateList(l => ({ ...l, categories: reordered, sortMode: 'custom' }));
+            }
+          };
+          const endDrag = () => { listItemDragRef.current = { draggingId: null, startY: 0, baseOrder: [] }; };
+
           return (
             <div style={{position:'fixed', inset:0, zIndex:330, display:'flex', alignItems:'flex-end',
-              background:'rgba(0,0,0,0.5)', paddingBottom:'calc(68px + env(safe-area-inset-bottom, 0px))'}}>
+              background:'rgba(0,0,0,0.5)', paddingBottom:'calc(68px + env(safe-area-inset-bottom, 0px))'}}
+              onPointerMove={e => handleDragMove(e.clientY)}
+              onPointerUp={endDrag} onPointerCancel={endDrag}>
               <div style={{width:'100%', background:dm?'#0f172a':'white', borderRadius:'16px 16px 0 0',
-                padding:'20px 16px', maxHeight:'75vh', overflowY:'auto', boxSizing:'border-box'}}>
-                <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:4}}>
-                  <div style={{fontSize:15, fontWeight:800, color:dm?'white':'#0f172a'}}>Points — {list.name}</div>
+                padding:'20px 16px', maxHeight:'80vh', overflowY:'auto', boxSizing:'border-box'}}>
+                <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:14}}>
+                  <div style={{fontSize:15, fontWeight:800, color:dm?'white':'#0f172a'}}>⚙️ List Settings</div>
                   <button onClick={() => setShowListPointsEditor(null)}
                     style={{background:'none', border:'none', fontSize:22, color:dm?'#64748b':'#94a3b8', cursor:'pointer'}}>×</button>
                 </div>
-                <div style={{fontSize:11, color:dm?'#64748b':'#94a3b8', marginBottom:14, lineHeight:1.5}}>
-                  Points per serving up to your target, and a separate (usually lower) rate for anything logged beyond it.
+
+                {/* Rename group/list */}
+                <div style={{marginBottom:14}}>
+                  <label style={{fontSize:11, fontWeight:700, color:dm?'#64748b':'#94a3b8',
+                    textTransform:'uppercase', letterSpacing:0.5, display:'block', marginBottom:6}}>List name</label>
+                  <div style={{display:'flex', gap:8}}>
+                    <input value={list.icon} onChange={e => updateList(l => ({...l, icon:e.target.value}))}
+                      style={{width:40, textAlign:'center', fontSize:16, padding:'8px 0', borderRadius:8,
+                        border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#1e293b':'#f8fafc', color:dm?'white':'#0f172a'}}/>
+                    <input value={list.name} onChange={e => updateList(l => ({...l, name:e.target.value}))}
+                      style={{flex:1, fontSize:13, fontWeight:700, padding:'8px 10px', borderRadius:8,
+                        border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#1e293b':'#f8fafc', color:dm?'white':'#0f172a'}}/>
+                  </div>
                 </div>
-                <div style={{display:'flex', flexDirection:'column', gap:10}}>
-                  {list.categories.map((cat, ci) => (
-                    <div key={cat.id} style={{padding:'8px 10px', borderRadius:8, background:dm?'#1e293b':'#f8fafc'}}>
-                      <div style={{fontSize:12, fontWeight:600, color:dm?'white':'#0f172a', marginBottom:6}}>
-                        {cat.icon} {cat.label} <span style={{fontWeight:400, color:dm?'#64748b':'#94a3b8'}}>(target: {cat.target})</span>
+
+                {/* Sort mode: 3 toggle-style buttons */}
+                <div style={{marginBottom:14}}>
+                  <label style={{fontSize:11, fontWeight:700, color:dm?'#64748b':'#94a3b8',
+                    textTransform:'uppercase', letterSpacing:0.5, display:'block', marginBottom:6}}>Sort items</label>
+                  <div style={{display:'flex', gap:6}}>
+                    <button onClick={() => updateList(l => ({...l,
+                      sortMode: 'alpha', alphaDir: (l.sortMode==='alpha' && l.alphaDir==='asc') ? 'desc' : 'asc'}))}
+                      style={{flex:1, padding:'8px 0', borderRadius:8,
+                        border: sortMode==='alpha' ? '1.5px solid #10b981' : `1px solid ${dm?'#334155':'#e2e8f0'}`,
+                        background: sortMode==='alpha' ? (dm?'#064e3b':'#ecfdf5') : 'none',
+                        color: sortMode==='alpha' ? '#10b981' : (dm?'#94a3b8':'#64748b'),
+                        fontSize:12, fontWeight:700, cursor:'pointer'}}>
+                      {sortMode==='alpha' && alphaDir==='desc' ? 'Z→A' : 'A→Z'}
+                    </button>
+                    <button onClick={() => updateList(l => ({...l,
+                      sortMode: 'struggle', struggleDir: (l.sortMode==='struggle' && l.struggleDir==='weak') ? 'strong' : 'weak'}))}
+                      style={{flex:1, padding:'8px 0', borderRadius:8,
+                        border: sortMode==='struggle' ? '1.5px solid #10b981' : `1px solid ${dm?'#334155':'#e2e8f0'}`,
+                        background: sortMode==='struggle' ? (dm?'#064e3b':'#ecfdf5') : 'none',
+                        color: sortMode==='struggle' ? '#10b981' : (dm?'#94a3b8':'#64748b'),
+                        fontSize:14, fontWeight:700, cursor:'pointer'}}>
+                      {sortMode==='struggle' && struggleDir==='strong' ? '❄️' : '🔥'}
+                    </button>
+                    <button onClick={() => updateList(l => ({...l, sortMode: 'custom'}))}
+                      style={{flex:1, padding:'8px 0', borderRadius:8,
+                        border: sortMode==='custom' ? '1.5px solid #10b981' : `1px solid ${dm?'#334155':'#e2e8f0'}`,
+                        background: sortMode==='custom' ? (dm?'#064e3b':'#ecfdf5') : 'none',
+                        color: sortMode==='custom' ? '#10b981' : (dm?'#94a3b8':'#64748b'),
+                        fontSize:11, fontWeight:700, cursor:'pointer'}}>
+                      My order
+                    </button>
+                  </div>
+                  <div style={{fontSize:10, color:dm?'#475569':'#94a3b8', marginTop:6}}>
+                    Drag the ⠿ handle to reorder — this saves as "My order" automatically.
+                  </div>
+                </div>
+
+                {/* Items: drag handle, rename, points, remove */}
+                <label style={{fontSize:11, fontWeight:700, color:dm?'#64748b':'#94a3b8',
+                  textTransform:'uppercase', letterSpacing:0.5, display:'block', marginBottom:6}}>Items</label>
+                <div id="list-items-container" style={{display:'flex', flexDirection:'column', gap:8, marginBottom:12}}>
+                  {displayCats.map((cat) => {
+                    const ci = list.categories.findIndex(c => c.id === cat.id);
+                    return (
+                    <div key={cat.id} data-cat-item data-cat-id={cat.id}
+                      style={{padding:'8px 10px', borderRadius:8, background:dm?'#1e293b':'#f8fafc',
+                        opacity: listItemDragRef.current.draggingId === cat.id ? 0.5 : 1}}>
+                      <div style={{display:'flex', alignItems:'center', gap:6, marginBottom:6}}>
+                        <div
+                          onPointerDown={e => { e.currentTarget.setPointerCapture(e.pointerId); startDrag(cat.id, e.clientY); }}
+                          style={{cursor:'grab', fontSize:16, color:dm?'#64748b':'#94a3b8', padding:'0 4px', touchAction:'none'}}>
+                          ⠿
+                        </div>
+                        <input value={cat.icon} onChange={e => updateList(l => ({...l,
+                          categories: l.categories.map((c,ci2) => ci2===ci ? {...c, icon:e.target.value} : c)}))}
+                          style={{width:26, textAlign:'center', fontSize:14, border:'none', background:'none', color:dm?'white':'#0f172a'}}/>
+                        <input value={cat.label} onChange={e => updateList(l => ({...l,
+                          categories: l.categories.map((c,ci2) => ci2===ci ? {...c, label:e.target.value} : c)}))}
+                          style={{flex:1, minWidth:0, fontSize:12, padding:'5px 6px', borderRadius:6,
+                            border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#0f172a':'white', color:dm?'white':'#0f172a'}}/>
+                        <button onClick={() => updateList(l => ({...l, categories: l.categories.filter((c,ci2) => ci2!==ci)}))}
+                          style={{padding:'4px 8px', borderRadius:6, border:'none',
+                            background:'#fee2e2', color:'#dc2626', fontSize:11, cursor:'pointer'}}>
+                          ✕
+                        </button>
                       </div>
-                      <div style={{display:'flex', gap:10, alignItems:'center'}}>
-                        <label style={{fontSize:11, color:dm?'#94a3b8':'#64748b', flexShrink:0}}>Pts/serving:</label>
-                        <input type="number" value={cat.pointsPerServing} onChange={e => {
-                          const v = parseFloat(e.target.value)||0;
-                          setHealthLists(prev => prev.map(l => l.id!==list.id ? l : {...l,
-                            categories: l.categories.map((c,ci2) => ci2===ci ? {...c, pointsPerServing:v} : c)}));
-                        }} style={{width:50, fontSize:12, padding:'4px 6px', borderRadius:6, textAlign:'center',
-                          border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#0f172a':'white', color:dm?'white':'#0f172a'}}/>
-                        <label style={{fontSize:11, color:dm?'#94a3b8':'#64748b', flexShrink:0}}>Pts/over:</label>
-                        <input type="number" value={cat.pointsPerOverServing} onChange={e => {
-                          const v = parseFloat(e.target.value)||0;
-                          setHealthLists(prev => prev.map(l => l.id!==list.id ? l : {...l,
-                            categories: l.categories.map((c,ci2) => ci2===ci ? {...c, pointsPerOverServing:v} : c)}));
-                        }} style={{width:50, fontSize:12, padding:'4px 6px', borderRadius:6, textAlign:'center',
-                          border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#0f172a':'white', color:dm?'white':'#0f172a'}}/>
+                      <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap', paddingLeft:24}}>
+                        <label style={{fontSize:10, color:dm?'#94a3b8':'#64748b'}}>Target:</label>
+                        <input type="number" value={cat.target} onChange={e => updateList(l => ({...l,
+                          categories: l.categories.map((c,ci2) => ci2===ci ? {...c, target:parseInt(e.target.value)||0} : c)}))}
+                          style={{width:40, fontSize:11, padding:'4px 4px', borderRadius:6, textAlign:'center',
+                            border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#0f172a':'white', color:dm?'white':'#0f172a'}}/>
+                        <input value={cat.unit} onChange={e => updateList(l => ({...l,
+                          categories: l.categories.map((c,ci2) => ci2===ci ? {...c, unit:e.target.value} : c)}))}
+                          style={{width:52, fontSize:10, padding:'4px 4px', borderRadius:6,
+                            border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#0f172a':'white', color:dm?'white':'#0f172a'}}/>
+                        <label style={{fontSize:10, color:dm?'#94a3b8':'#64748b'}}>Pts:</label>
+                        <input type="number" value={cat.pointsPerServing} onChange={e => updateList(l => ({...l,
+                          categories: l.categories.map((c,ci2) => ci2===ci ? {...c, pointsPerServing:parseFloat(e.target.value)||0} : c)}))}
+                          style={{width:40, fontSize:11, padding:'4px 4px', borderRadius:6, textAlign:'center',
+                            border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#0f172a':'white', color:dm?'white':'#0f172a'}}/>
+                        <label style={{fontSize:10, color:dm?'#94a3b8':'#64748b'}}>/over:</label>
+                        <input type="number" value={cat.pointsPerOverServing} onChange={e => updateList(l => ({...l,
+                          categories: l.categories.map((c,ci2) => ci2===ci ? {...c, pointsPerOverServing:parseFloat(e.target.value)||0} : c)}))}
+                          style={{width:40, fontSize:11, padding:'4px 4px', borderRadius:6, textAlign:'center',
+                            border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#0f172a':'white', color:dm?'white':'#0f172a'}}/>
                       </div>
                     </div>
-                  ))}
+                  );})}
                 </div>
+                <button onClick={() => updateList(l => ({...l,
+                  categories: [...l.categories, { id:'cat_'+Date.now(), label:'New item', icon:'⭐', target:1, unit:'x', pointsPerServing:5, pointsPerOverServing:2 }]}))}
+                  style={{width:'100%', padding:'8px 0', borderRadius:8, border:`1px dashed ${dm?'#334155':'#e2e8f0'}`,
+                    background:'none', color:dm?'#64748b':'#94a3b8', fontSize:12, fontWeight:600, cursor:'pointer'}}>
+                  + Add item
+                </button>
                 <button onClick={() => setShowListPointsEditor(null)}
                   style={{width:'100%', marginTop:14, padding:'10px 0', borderRadius:8, border:'none',
                     background:'#10b981', color:'white', fontSize:13, fontWeight:700, cursor:'pointer'}}>
@@ -13706,6 +13578,711 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         )}
       </div>
       )}
+
+        {showHealthPanel && viewMode !== 'calendar' && viewMode !== 'me' && (() => {
+          const dm = theme.darkMode;
+          const METRICS = [
+            { key: 'steps',     label: 'Steps',      icon: '👟', color: '#10b981', value: healthData.steps,     unit: 'steps today',  format: v => v?.toLocaleString() || '—' },
+            { key: 'sleep',     label: 'Sleep',      icon: '😴', color: '#8b5cf6', value: healthData.sleep,     unit: 'minutes',      format: v => v != null ? `${Math.floor(v/60)}h ${v%60}m` : '—' },
+            { key: 'heartRate', label: 'Heart Rate', icon: '❤️', color: '#ef4444', value: healthData.heartRate, unit: 'bpm',          format: v => v?.toString() || '—' },
+            { key: 'workouts',  label: 'Workouts',   icon: '💪', color: '#f59e0b', value: healthData.workouts?.length, unit: 'this week', format: v => v?.toString() || '—' },
+            { key: 'distance',  label: 'Distance',   icon: '🚶', color: '#06b6d4', value: healthData.distanceKm, unit: 'km today',   format: v => v != null ? `${v}` : '—' },
+            { key: 'calories',  label: 'Active Cal',  icon: '🔥', color: '#f97316', value: healthData.activeCalories, unit: 'kcal today', format: v => v != null ? Math.round(v).toLocaleString() : '—' },
+            { key: 'flights',   label: 'Flights',    icon: '🏢', color: '#84cc16', value: healthData.flights, unit: 'climbed today', format: v => v != null ? Math.round(v).toString() : '—' },
+            { key: 'restingHR', label: 'Resting HR', icon: '💤', color: '#ec4899', value: healthData.restingHeartRate, unit: 'bpm',   format: v => v?.toString() || '—' },
+          ];
+          return (
+            <div style={{position:'fixed', inset:0, zIndex:300, display:'flex', alignItems:'flex-end',
+              background:'rgba(0,0,0,0.5)', paddingBottom:'calc(68px + env(safe-area-inset-bottom, 0px))'}}>
+              <div style={{width:'100%', background:dm?'#0f172a':'white', borderRadius:'16px 16px 0 0',
+                padding:'20px 16px', maxHeight:'80vh', overflowY:'auto', boxSizing:'border-box'}}>
+                {/* Header */}
+                <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:16}}>
+                  <div style={{display:'flex', alignItems:'center', gap:10}}>
+                    <span style={{fontSize:22}}>💪</span>
+                    <div>
+                      <div style={{fontSize:15, fontWeight:800, color:dm?'white':'#0f172a'}}>Health Connect</div>
+                      <div style={{fontSize:11, color:dm?'#64748b':'#94a3b8'}}>
+                        {healthData.lastFetched ? `Last updated ${new Date(healthData.lastFetched).toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'})}` : 'Not connected'}
+                      </div>
+                    </div>
+                  </div>
+                  <button onClick={() => setShowHealthPanel(false)}
+                    style={{background:'none', border:'none', fontSize:22, color:dm?'#64748b':'#94a3b8', cursor:'pointer'}}>×</button>
+                </div>
+                {/* Connect / Refresh buttons */}
+                <div style={{display:'flex', gap:8, marginBottom:16}}>
+                  <button onClick={healthConnect} disabled={healthLoading}
+                    style={{flex:1, padding:'9px 0', borderRadius:8, border:'none',
+                      background:'#10b981', color:'white', fontSize:13, fontWeight:700,
+                      cursor:healthLoading?'wait':'pointer', opacity:healthLoading?0.7:1}}>
+                    {healthLoading ? '⏳ Loading…' : healthPermission === 'granted' ? '🔄 Refresh' : '🔗 Connect Health'}
+                  </button>
+                  {healthPermission === 'granted' && (
+                    <button onClick={() => { if (window.Capacitor?.Plugins?.CapgoHealth?.openHealthConnectSettings) window.Capacitor.Plugins.CapgoHealth.openHealthConnectSettings(); }}
+                      style={{padding:'9px 14px', borderRadius:8, border:`1px solid ${dm?'#334155':'#e2e8f0'}`,
+                        background:'none', color:dm?'#94a3b8':'#64748b', fontSize:12, fontWeight:600, cursor:'pointer'}}>
+                      Settings
+                    </button>
+                  )}
+                </div>
+                {/* Metric cards */}
+                <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:16}}>
+                  {METRICS.map(m => (
+                    <div key={m.key} style={{borderRadius:12, padding:'12px 14px',
+                      background:dm?'#1e293b':'#f8fafc', border:`1px solid ${m.color}30`}}>
+                      <div style={{display:'flex', alignItems:'center', gap:6, marginBottom:6}}>
+                        <span style={{fontSize:16}}>{m.icon}</span>
+                        <span style={{fontSize:10, fontWeight:700, color:m.color, textTransform:'uppercase', letterSpacing:0.5}}>{m.label}</span>
+                      </div>
+                      <div style={{fontSize:24, fontWeight:800, color:dm?'white':'#0f172a', lineHeight:1}}>
+                        {m.format(m.value)}
+                      </div>
+                      <div style={{fontSize:10, color:dm?'#64748b':'#94a3b8', marginTop:2}}>{m.unit}</div>
+                    </div>
+                  ))}
+                </div>
+                {/* Sleep quality breakdown -- deep/light/REM/awake stages */}
+                {healthData.sleepStages && (
+                  <div style={{marginBottom:16, borderRadius:12, padding:'12px 14px',
+                    background:dm?'#1e293b':'#f8fafc', border:`1px solid ${dm?'#334155':'#e2e8f0'}`}}>
+                    <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10}}>
+                      <div style={{fontSize:12, fontWeight:700, color:dm?'white':'#0f172a'}}>😴 Sleep Quality</div>
+                      {healthData.sleepQualityPct != null && (
+                        <div style={{fontSize:12, fontWeight:800, color:'#8b5cf6'}}>{healthData.sleepQualityPct}% restorative</div>
+                      )}
+                    </div>
+                    {/* Stacked bar showing proportion of each stage */}
+                    {(() => {
+                      const stages = healthData.sleepStages;
+                      const total = (stages.deep||0) + (stages.light||0) + (stages.rem||0) + (stages.awake||0);
+                      if (total === 0) return null;
+                      const segs = [
+                        { key:'deep', label:'Deep', color:'#5b21b6', mins:stages.deep },
+                        { key:'rem', label:'REM', color:'#8b5cf6', mins:stages.rem },
+                        { key:'light', label:'Light', color:'#c4b5fd', mins:stages.light },
+                        { key:'awake', label:'Awake', color:'#fbbf24', mins:stages.awake },
+                      ];
+                      return (
+                        <>
+                          <div style={{display:'flex', height:10, borderRadius:6, overflow:'hidden', marginBottom:8}}>
+                            {segs.map(s => s.mins > 0 && (
+                              <div key={s.key} style={{width:`${(s.mins/total)*100}%`, background:s.color}}/>
+                            ))}
+                          </div>
+                          <div style={{display:'flex', flexWrap:'wrap', gap:10}}>
+                            {segs.map(s => (
+                              <div key={s.key} style={{display:'flex', alignItems:'center', gap:5}}>
+                                <div style={{width:8, height:8, borderRadius:2, background:s.color}}/>
+                                <span style={{fontSize:11, color:dm?'#94a3b8':'#64748b'}}>
+                                  {s.label} {Math.floor(s.mins/60)}h{s.mins%60}m
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
+                )}
+                {/* Heart rate variability -- recovery/stress indicator */}
+                {healthData.hrv != null && (
+                  <div style={{marginBottom:16, borderRadius:12, padding:'10px 14px',
+                    background:dm?'#1e293b':'#f8fafc', border:`1px solid ${dm?'#334155':'#e2e8f0'}`,
+                    display:'flex', alignItems:'center', justifyContent:'space-between'}}>
+                    <div style={{fontSize:12, color:dm?'#94a3b8':'#64748b'}}>
+                      💓 Heart Rate Variability <span style={{fontSize:10}}>(higher = better recovery)</span>
+                    </div>
+                    <div style={{fontSize:14, fontWeight:800, color:'#ec4899'}}>{healthData.hrv} ms</div>
+                  </div>
+                )}
+                {/* Health Lists -- summary of each named habit checklist,
+                    tap to open its full detail/logging view */}
+                <div style={{marginBottom:16, borderRadius:12, padding:'12px 14px',
+                  background:dm?'#1e293b':'#f8fafc', border:`1px solid ${dm?'#334155':'#e2e8f0'}`}}>
+                  <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10}}>
+                    <div style={{fontSize:12, fontWeight:700, color:dm?'white':'#0f172a'}}>✅ Health Lists</div>
+                    <div style={{fontSize:12, fontWeight:800, color:'#10b981'}}>
+                      Total: {Math.round(healthLists.reduce((s,l)=>s+(listScores[l.id]||0),0))} pts
+                    </div>
+                  </div>
+                  <div style={{display:'flex', flexDirection:'column', gap:6}}>
+                    {healthLists.map(list => {
+                      const todayCounts = habitToday[list.id] || {};
+                      const hitCount = list.categories.filter(c => (todayCounts[c.id]||0) >= c.target).length;
+                      const score = Math.round(listScores[list.id] || 0);
+                      return (
+                        <div key={list.id} onClick={() => setShowHealthListDetail(list.id)}
+                          style={{display:'flex', alignItems:'center', gap:10, padding:'8px 10px',
+                            borderRadius:8, cursor:'pointer', background:dm?'#0f172a':'white',
+                            border:`1px solid ${dm?'#334155':'#e2e8f0'}`}}>
+                          <div style={{fontSize:18}}>{list.icon}</div>
+                          <div style={{flex:1, minWidth:0}}>
+                            <div style={{fontSize:13, fontWeight:600, color:dm?'white':'#0f172a'}}>{list.name}</div>
+                            <div style={{fontSize:11, color:dm?'#64748b':'#94a3b8'}}>{hitCount}/{list.categories.length} targets hit today</div>
+                          </div>
+                          <div style={{fontSize:13, fontWeight:800, color:score>=0?'#10b981':'#ef4444'}}>⭐ {score}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <button onClick={() => setShowHabitEditor(true)}
+                    style={{width:'100%', marginTop:10, padding:'7px 0', borderRadius:8,
+                      border:`1px dashed ${dm?'#334155':'#e2e8f0'}`, background:'none',
+                      color:dm?'#64748b':'#94a3b8', fontSize:12, fontWeight:600, cursor:'pointer'}}>
+                    Manage lists & categories
+                  </button>
+                </div>
+                {/* Recent workouts */}
+                {(healthData.workouts?.length || 0) > 0 && (
+                  <div>
+                    <div style={{fontSize:11, fontWeight:700, color:dm?'#64748b':'#94a3b8',
+                      textTransform:'uppercase', letterSpacing:0.5, marginBottom:8}}>Recent workouts</div>
+                    {healthData.workouts.slice(0,5).map((w,wi) => (
+                      <div key={wi} style={{display:'flex', alignItems:'center', justifyContent:'space-between',
+                        padding:'8px 0', borderBottom:`1px solid ${dm?'#1e293b':'#f1f5f9'}`}}>
+                        <div>
+                          <div style={{fontSize:13, fontWeight:600, color:dm?'white':'#0f172a'}}>{w.type}</div>
+                          <div style={{fontSize:11, color:dm?'#64748b':'#94a3b8'}}>
+                            {new Date(w.date).toLocaleDateString('en',{weekday:'short',month:'short',day:'numeric'})}
+                          </div>
+                        </div>
+                        <div style={{textAlign:'right'}}>
+                          <div style={{fontSize:13, fontWeight:700, color:'#f59e0b'}}>{w.duration} min</div>
+                          {w.calories > 0 && <div style={{fontSize:11, color:dm?'#64748b':'#94a3b8'}}>{w.calories} kcal</div>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {/* Food Diary -- AI ingredient estimation + real USDA nutrition */}
+                <div style={{marginBottom:16, borderRadius:12, padding:'12px 14px',
+                  background:dm?'#1e293b':'#f8fafc', border:`1px solid ${dm?'#334155':'#e2e8f0'}`}}>
+                  <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10}}>
+                    <div style={{fontSize:12, fontWeight:700, color:dm?'white':'#0f172a'}}>🍽️ Food Diary</div>
+                    {foodDiaryEntries.length > 0 && (
+                      <button onClick={() => setShowFoodDiaryList(true)}
+                        style={{fontSize:11, padding:'3px 10px', borderRadius:99, border:'none',
+                          background:dm?'#334155':'#e2e8f0', color:dm?'#94a3b8':'#64748b', cursor:'pointer'}}>
+                        History
+                      </button>
+                    )}
+                  </div>
+                  {(() => {
+                    const todayStr = new Date().toISOString().slice(0,10);
+                    const todayEntries = foodDiaryEntries.filter(e => e.date === todayStr);
+                    if (todayEntries.length === 0) {
+                      return <div style={{fontSize:12, color:dm?'#64748b':'#94a3b8', fontStyle:'italic', marginBottom:10}}>
+                        No meals logged today
+                      </div>;
+                    }
+                    const todayTotals = todayEntries.reduce((acc, e) => ({
+                      calories: acc.calories + e.totals.calories,
+                      protein: acc.protein + e.totals.protein,
+                      carbs: acc.carbs + e.totals.carbs,
+                      fat: acc.fat + e.totals.fat,
+                    }), { calories:0, protein:0, carbs:0, fat:0 });
+                    return (
+                      <div style={{display:'flex', gap:8, marginBottom:10, flexWrap:'wrap'}}>
+                        <div style={{flex:'1 1 70px'}}>
+                          <div style={{fontSize:16, fontWeight:800, color:dm?'white':'#0f172a'}}>{Math.round(todayTotals.calories)}</div>
+                          <div style={{fontSize:9, color:dm?'#64748b':'#94a3b8'}}>kcal today</div>
+                        </div>
+                        <div style={{flex:'1 1 70px'}}>
+                          <div style={{fontSize:14, fontWeight:700, color:'#06b6d4'}}>{Math.round(todayTotals.protein)}g</div>
+                          <div style={{fontSize:9, color:dm?'#64748b':'#94a3b8'}}>protein</div>
+                        </div>
+                        <div style={{flex:'1 1 70px'}}>
+                          <div style={{fontSize:14, fontWeight:700, color:'#f59e0b'}}>{Math.round(todayTotals.carbs)}g</div>
+                          <div style={{fontSize:9, color:dm?'#64748b':'#94a3b8'}}>carbs</div>
+                        </div>
+                        <div style={{flex:'1 1 70px'}}>
+                          <div style={{fontSize:14, fontWeight:700, color:'#ef4444'}}>{Math.round(todayTotals.fat)}g</div>
+                          <div style={{fontSize:9, color:dm?'#64748b':'#94a3b8'}}>fat</div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  <button onClick={() => { setFoodDiaryDraft(null); setShowFoodDiaryAdd(true); }}
+                    style={{width:'100%', padding:'8px 0', borderRadius:8, border:'none',
+                      background:'#10b981', color:'white', fontSize:12, fontWeight:700, cursor:'pointer'}}>
+                    + Log a meal
+                  </button>
+                </div>
+                {/* Link workouts to recurring activities */}
+                <div style={{marginTop:12, padding:'10px 12px', borderRadius:8,
+                  background:dm?'#1e293b':'#f8fafc', border:`1px solid ${dm?'#334155':'#e2e8f0'}`}}>
+                  <div style={{fontSize:12, fontWeight:600, color:dm?'white':'#0f172a', marginBottom:4}}>
+                    💡 Link workouts to friend scores
+                  </div>
+                  <div style={{fontSize:11, color:dm?'#64748b':'#94a3b8', lineHeight:1.5}}>
+                    Add recurring activities in the Calendar tab (e.g. "Climbing with James, every Wednesday") — confirming them boosts friendship scores automatically.
+                  </div>
+                  <button onClick={() => { setShowHealthPanel(false); setViewMode('calendar'); setCalViewMode('monthly'); setShowAddRecurring(true); }}
+                    style={{marginTop:8, padding:'6px 14px', borderRadius:8, border:'none',
+                      background:'#10b981', color:'white', fontSize:12, fontWeight:700, cursor:'pointer'}}>
+                    + Add recurring activity
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+        {/* ──────────────────────────────────────────────────────────────── */}
+
+        {/* ── Add Meal / Food Diary Entry ─────────────────────────────────── */}
+        {showFoodDiaryAdd && (() => {
+          const dm = theme.darkMode;
+          return (
+            <div style={{position:'fixed', inset:0, zIndex:330, display:'flex', alignItems:'flex-end',
+              background:'rgba(0,0,0,0.5)', paddingBottom:'calc(68px + env(safe-area-inset-bottom, 0px))'}}>
+              <div style={{width:'100%', background:dm?'#0f172a':'white', borderRadius:'16px 16px 0 0',
+                padding:'20px 16px', maxHeight:'80vh', overflowY:'auto', boxSizing:'border-box'}}>
+                <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:14}}>
+                  <div style={{fontSize:15, fontWeight:800, color:dm?'white':'#0f172a'}}>🍽️ Log a Meal</div>
+                  <button onClick={() => { setShowFoodDiaryAdd(false); setFoodDiaryDraft(null); }}
+                    style={{background:'none', border:'none', fontSize:22, color:dm?'#64748b':'#94a3b8', cursor:'pointer'}}>×</button>
+                </div>
+
+                {!foodDiaryDraft ? (
+                  <>
+                    <div style={{fontSize:12, color:dm?'#64748b':'#94a3b8', marginBottom:10, lineHeight:1.5}}>
+                      Describe what you ate — the app will estimate ingredients and quantities, then look up real nutrition data for each.
+                    </div>
+                    <textarea id="food-diary-input" placeholder="e.g. Chicken stir fry with rice and mixed vegetables for dinner"
+                      rows={3}
+                      style={{width:'100%', padding:'10px 12px', borderRadius:8, border:`1px solid ${dm?'#334155':'#e2e8f0'}`,
+                        background:dm?'#1e293b':'#f8fafc', color:dm?'white':'#0f172a', fontSize:13, resize:'none',
+                        boxSizing:'border-box', fontFamily:'inherit'}}/>
+                    <button onClick={async () => {
+                      const text = document.getElementById('food-diary-input')?.value?.trim();
+                      if (!text) return;
+                      const draft = await analyzeFoodEntry(text);
+                      if (draft) setFoodDiaryDraft(draft);
+                    }}
+                      disabled={foodDiaryProcessing}
+                      style={{width:'100%', marginTop:10, padding:'10px 0', borderRadius:8, border:'none',
+                        background:'#10b981', color:'white', fontSize:13, fontWeight:700,
+                        cursor:foodDiaryProcessing?'wait':'pointer', opacity:foodDiaryProcessing?0.7:1}}>
+                      {foodDiaryProcessing ? '⏳ Analysing…' : '🔍 Analyse meal'}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <div style={{fontSize:12, color:dm?'#64748b':'#94a3b8', marginBottom:10, fontStyle:'italic'}}>
+                      "{foodDiaryDraft.description}"
+                    </div>
+                    {/* Ingredient breakdown, editable grams */}
+                    <div style={{display:'flex', flexDirection:'column', gap:8, marginBottom:12}}>
+                      {foodDiaryDraft.ingredients.map((ing, ii) => (
+                        <div key={ii} style={{display:'flex', alignItems:'center', gap:8,
+                          padding:'8px 10px', borderRadius:8, background:dm?'#1e293b':'#f8fafc'}}>
+                          <div style={{flex:1, minWidth:0}}>
+                            <div style={{fontSize:12, fontWeight:600, color:dm?'white':'#0f172a',
+                              overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{ing.matchedName || ing.name}</div>
+                            <div style={{fontSize:10, color:dm?'#64748b':'#94a3b8'}}>{ing.calories} kcal</div>
+                          </div>
+                          <input type="number" value={ing.grams}
+                            onChange={e => {
+                              const newGrams = parseFloat(e.target.value) || 0;
+                              const scale = ing.grams > 0 ? newGrams / ing.grams : 0;
+                              setFoodDiaryDraft(prev => {
+                                const newIngredients = prev.ingredients.map((x,xi) => xi !== ii ? x : {
+                                  ...x, grams: newGrams,
+                                  calories: Math.round(x.calories * scale),
+                                  protein: Math.round(x.protein * scale * 10)/10,
+                                  fat: Math.round(x.fat * scale * 10)/10,
+                                  carbs: Math.round(x.carbs * scale * 10)/10,
+                                  fiber: Math.round(x.fiber * scale * 10)/10,
+                                  sugar: Math.round(x.sugar * scale * 10)/10,
+                                  sodium: Math.round(x.sodium * scale),
+                                });
+                                const newTotals = newIngredients.reduce((acc,x) => ({
+                                  calories: acc.calories+x.calories, protein: acc.protein+x.protein,
+                                  fat: acc.fat+x.fat, carbs: acc.carbs+x.carbs,
+                                  fiber: acc.fiber+x.fiber, sugar: acc.sugar+x.sugar, sodium: acc.sodium+x.sodium,
+                                }), {calories:0,protein:0,fat:0,carbs:0,fiber:0,sugar:0,sodium:0});
+                                return { ...prev, ingredients: newIngredients, totals: {
+                                  calories: Math.round(newTotals.calories), protein: Math.round(newTotals.protein*10)/10,
+                                  fat: Math.round(newTotals.fat*10)/10, carbs: Math.round(newTotals.carbs*10)/10,
+                                  fiber: Math.round(newTotals.fiber*10)/10, sugar: Math.round(newTotals.sugar*10)/10,
+                                  sodium: Math.round(newTotals.sodium),
+                                }};
+                              });
+                            }}
+                            style={{width:56, fontSize:12, padding:'5px 6px', borderRadius:6, textAlign:'center',
+                              border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#0f172a':'white', color:dm?'white':'#0f172a'}}/>
+                          <span style={{fontSize:10, color:dm?'#64748b':'#94a3b8'}}>g</span>
+                        </div>
+                      ))}
+                      {foodDiaryDraft.unmatchedCount > 0 && (
+                        <div style={{fontSize:11, color:'#f59e0b', fontStyle:'italic'}}>
+                          {foodDiaryDraft.unmatchedCount} ingredient{foodDiaryDraft.unmatchedCount>1?'s':''} couldn't be matched in the database
+                        </div>
+                      )}
+                    </div>
+                    {/* Totals summary */}
+                    <div style={{display:'grid', gridTemplateColumns:'1fr 1fr 1fr 1fr', gap:8, marginBottom:14,
+                      padding:'10px', borderRadius:8, background:dm?'#1e293b':'#f8fafc'}}>
+                      <div style={{textAlign:'center'}}>
+                        <div style={{fontSize:15, fontWeight:800, color:dm?'white':'#0f172a'}}>{foodDiaryDraft.totals.calories}</div>
+                        <div style={{fontSize:9, color:dm?'#64748b':'#94a3b8'}}>kcal</div>
+                      </div>
+                      <div style={{textAlign:'center'}}>
+                        <div style={{fontSize:15, fontWeight:800, color:'#06b6d4'}}>{foodDiaryDraft.totals.protein}g</div>
+                        <div style={{fontSize:9, color:dm?'#64748b':'#94a3b8'}}>protein</div>
+                      </div>
+                      <div style={{textAlign:'center'}}>
+                        <div style={{fontSize:15, fontWeight:800, color:'#f59e0b'}}>{foodDiaryDraft.totals.carbs}g</div>
+                        <div style={{fontSize:9, color:dm?'#64748b':'#94a3b8'}}>carbs</div>
+                      </div>
+                      <div style={{textAlign:'center'}}>
+                        <div style={{fontSize:15, fontWeight:800, color:'#ef4444'}}>{foodDiaryDraft.totals.fat}g</div>
+                        <div style={{fontSize:9, color:dm?'#64748b':'#94a3b8'}}>fat</div>
+                      </div>
+                    </div>
+                    {foodDiaryDraft.habitTags && foodDiaryDraft.habitTags.length > 0 && (
+                      <div style={{fontSize:11, color:'#10b981', marginBottom:12}}>
+                        ✅ Will count toward: {foodDiaryDraft.habitTags.join(', ')}
+                      </div>
+                    )}
+                    <div style={{display:'flex', gap:8}}>
+                      <button onClick={() => confirmFoodDiaryEntry(foodDiaryDraft)}
+                        style={{flex:1, padding:'10px 0', borderRadius:8, border:'none',
+                          background:'#10b981', color:'white', fontSize:13, fontWeight:700, cursor:'pointer'}}>
+                        Save entry
+                      </button>
+                      <button onClick={() => setFoodDiaryDraft(null)}
+                        style={{padding:'10px 16px', borderRadius:8, border:`1px solid ${dm?'#334155':'#e2e8f0'}`,
+                          background:'none', color:dm?'#94a3b8':'#64748b', fontSize:13, cursor:'pointer'}}>
+                        Redo
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          );
+        })()}
+        {/* ──────────────────────────────────────────────────────────────── */}
+
+        {/* ── Food Diary History ──────────────────────────────────────────── */}
+        {showFoodDiaryList && (() => {
+          const dm = theme.darkMode;
+          return (
+            <div style={{position:'fixed', inset:0, zIndex:330, display:'flex', alignItems:'flex-end',
+              background:'rgba(0,0,0,0.5)', paddingBottom:'calc(68px + env(safe-area-inset-bottom, 0px))'}}>
+              <div style={{width:'100%', background:dm?'#0f172a':'white', borderRadius:'16px 16px 0 0',
+                padding:'20px 16px', maxHeight:'75vh', overflowY:'auto', boxSizing:'border-box'}}>
+                <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:14}}>
+                  <div style={{fontSize:15, fontWeight:800, color:dm?'white':'#0f172a'}}>🍽️ Food Diary History</div>
+                  <button onClick={() => setShowFoodDiaryList(false)}
+                    style={{background:'none', border:'none', fontSize:22, color:dm?'#64748b':'#94a3b8', cursor:'pointer'}}>×</button>
+                </div>
+                {foodDiaryEntries.length === 0 ? (
+                  <div style={{textAlign:'center', padding:'30px 0', color:dm?'#64748b':'#94a3b8', fontSize:13}}>
+                    No meals logged yet
+                  </div>
+                ) : foodDiaryEntries.map(entry => (
+                  <div key={entry.id} style={{marginBottom:10, padding:'10px 12px', borderRadius:10,
+                    background:dm?'#1e293b':'#f8fafc', border:`1px solid ${dm?'#334155':'#e2e8f0'}`}}>
+                    <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:4}}>
+                      <div style={{fontSize:12, fontWeight:600, color:dm?'white':'#0f172a', flex:1}}>{entry.description}</div>
+                      <button onClick={() => setFoodDiaryEntries(prev => prev.filter(e => e.id !== entry.id))}
+                        style={{padding:'2px 8px', borderRadius:99, border:'none', background:'#fee2e2',
+                          color:'#dc2626', fontSize:10, cursor:'pointer', flexShrink:0, marginLeft:8}}>
+                        Remove
+                      </button>
+                    </div>
+                    <div style={{fontSize:10, color:dm?'#64748b':'#94a3b8', marginBottom:4}}>
+                      {new Date(entry.timestamp).toLocaleDateString('en',{weekday:'short',month:'short',day:'numeric'})}
+                      {' at '}{new Date(entry.timestamp).toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'})}
+                    </div>
+                    <div style={{display:'flex', gap:10, fontSize:11}}>
+                      <span style={{fontWeight:700, color:dm?'white':'#0f172a'}}>{entry.totals.calories} kcal</span>
+                      <span style={{color:'#06b6d4'}}>{entry.totals.protein}g protein</span>
+                      <span style={{color:'#f59e0b'}}>{entry.totals.carbs}g carbs</span>
+                      <span style={{color:'#ef4444'}}>{entry.totals.fat}g fat</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
+        {/* ──────────────────────────────────────────────────────────────── */}
+
+        {/* ── Health List Detail (checklist + logging for one list) ──────── */}
+        {showHealthListDetail && (() => {
+          const dm = theme.darkMode;
+          const list = healthLists.find(l => l.id === showHealthListDetail);
+          if (!list) { setShowHealthListDetail(null); return null; }
+          const todayCounts = habitToday[list.id] || {};
+          const dayPoints = computeListDayPoints(list, todayCounts);
+          const baseline = computeListBaselinePoints(list);
+          return (
+            <div style={{position:'fixed', inset:0, zIndex:320, display:'flex', alignItems:'flex-end',
+              background:'rgba(0,0,0,0.5)', paddingBottom:'calc(68px + env(safe-area-inset-bottom, 0px))'}}
+              onClick={e => { if (e.target === e.currentTarget) setShowHealthListDetail(null); }}>
+              <div style={{width:'100%', background:dm?'#0f172a':'white', borderRadius:'16px 16px 0 0',
+                padding:'20px 16px', maxHeight:'80vh', overflowY:'auto', boxSizing:'border-box'}}>
+                <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:4}}>
+                  <div style={{fontSize:16, fontWeight:800, color:dm?'white':'#0f172a'}}>{list.icon} {list.name}</div>
+                  <button onClick={() => setShowHealthListDetail(null)}
+                    style={{background:'none', border:'none', fontSize:22, color:dm?'#64748b':'#94a3b8', cursor:'pointer'}}>×</button>
+                </div>
+                <div style={{fontSize:12, color:dm?'#64748b':'#94a3b8', marginBottom:16}}>
+                  Today: {dayPoints} pts {dayPoints >= baseline ? '(at or above your daily baseline 🎉)' : `(baseline is ${baseline} pts)`}
+                  &nbsp;·&nbsp; Score: <span style={{fontWeight:800, color:(listScores[list.id]||0)>=0?'#10b981':'#ef4444'}}>
+                    {Math.round(listScores[list.id]||0)} pts
+                  </span>
+                </div>
+                <div style={{display:'flex', flexDirection:'column', gap:10}}>
+                  {list.categories.map(cat => {
+                    const count = todayCounts[cat.id] || 0;
+                    const pct = Math.min(100, (count / cat.target) * 100);
+                    const hit = count >= cat.target;
+                    const over = count > cat.target;
+                    return (
+                      <div key={cat.id} style={{display:'flex', alignItems:'center', gap:10}}>
+                        <div style={{fontSize:16, width:22, textAlign:'center'}}>{cat.icon}</div>
+                        <div style={{flex:1, minWidth:0}}>
+                          <div style={{display:'flex', justifyContent:'space-between', marginBottom:3}}>
+                            <span style={{fontSize:12, fontWeight:600, color:dm?'white':'#0f172a',
+                              overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{cat.label}</span>
+                            <span style={{fontSize:11, fontWeight:700, color:over?'#f59e0b':hit?'#10b981':(dm?'#64748b':'#94a3b8')}}>
+                              {count}/{cat.target} {cat.unit}{over ? ' 🔥' : ''}
+                            </span>
+                          </div>
+                          <div style={{height:5, borderRadius:99, background:dm?'#334155':'#e2e8f0', overflow:'hidden'}}>
+                            <div style={{height:'100%', width:`${pct}%`, background:over?'#f59e0b':hit?'#10b981':'#8b5cf6',
+                              transition:'width 0.2s'}}/>
+                          </div>
+                        </div>
+                        <button onClick={() => setHabitToday(prev => ({ ...prev,
+                          [list.id]: { ...(prev[list.id]||{}), [cat.id]: (prev[list.id]?.[cat.id]||0) + 1 } }))}
+                          style={{width:28, height:28, borderRadius:8, border:'none', flexShrink:0,
+                            background:'#10b981', color:'white', fontSize:16, fontWeight:700, cursor:'pointer',
+                            display:'flex', alignItems:'center', justifyContent:'center'}}>
+                          +
+                        </button>
+                        {count > 0 && (
+                          <button onClick={() => setHabitToday(prev => ({ ...prev,
+                            [list.id]: { ...(prev[list.id]||{}), [cat.id]: Math.max(0,(prev[list.id]?.[cat.id]||0) - 1) } }))}
+                            style={{width:22, height:22, borderRadius:6, border:`1px solid ${dm?'#334155':'#e2e8f0'}`, flexShrink:0,
+                              background:'none', color:dm?'#64748b':'#94a3b8', fontSize:13, cursor:'pointer',
+                              display:'flex', alignItems:'center', justifyContent:'center'}}>
+                            −
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <button onClick={() => setShowListPointsEditor(list.id)}
+                  style={{width:'100%', marginTop:14, padding:'8px 0', borderRadius:8,
+                    border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:'none',
+                    color:dm?'#94a3b8':'#64748b', fontSize:12, fontWeight:600, cursor:'pointer'}}>
+                  ⚙️ List settings
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+        {/* ──────────────────────────────────────────────────────────────── */}
+
+        {/* ── Health Lists Manager (add/remove lists, edit categories) ───── */}
+        {/* ── Birthday Wheel Picker ────────────────────────────────────── */}
+        {showBirthdayPicker && selectedNode && (() => {
+          const dm = theme.darkMode;
+          const ROW_H = 40;
+          const days = BIRTHDAY_DAYS_GLOBAL, MONTHS_SHORT = MONTHS_SHORT_GLOBAL, years = BIRTHDAY_YEARS_GLOBAL;
+
+          const makeWheel = (ref, list, current, onSelect, formatFn) => (
+            <div style={{position:'relative', flex:1, height:ROW_H*5}}>
+              <div style={{position:'absolute', top:ROW_H*2, left:0, right:0, height:ROW_H,
+                background:dm?'rgba(16,185,129,0.15)':'rgba(16,185,129,0.1)',
+                borderTop:'1.5px solid #10b981', borderBottom:'1.5px solid #10b981',
+                pointerEvents:'none', zIndex:1}}/>
+              <div ref={ref}
+                onScroll={e => {
+                  const idx = Math.round(e.target.scrollTop / ROW_H);
+                  const val = list[Math.max(0, Math.min(list.length-1, idx))];
+                  if (val !== undefined && val !== current) onSelect(val);
+                }}
+                style={{height:'100%', overflowY:'scroll', scrollSnapType:'y mandatory',
+                  paddingTop:ROW_H*2, paddingBottom:ROW_H*2,
+                  WebkitOverflowScrolling:'touch'}}>
+                {list.map((item, i) => (
+                  <div key={i} style={{height:ROW_H, display:'flex', alignItems:'center', justifyContent:'center',
+                    scrollSnapAlign:'start', fontSize:item===current?18:15,
+                    fontWeight:item===current?800:500,
+                    color:item===current?'#10b981':(dm?'#64748b':'#94a3b8')}}>
+                    {formatFn ? formatFn(item) : item}
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+
+          return (
+            <div style={{position:'fixed', inset:0, zIndex:400, display:'flex', alignItems:'flex-end',
+              background:'rgba(0,0,0,0.5)', paddingBottom:'calc(68px + env(safe-area-inset-bottom, 0px))'}}
+              onClick={e => { if (e.target === e.currentTarget) setShowBirthdayPicker(false); }}>
+              <div style={{width:'100%', background:dm?'#0f172a':'white', borderRadius:'16px 16px 0 0',
+                padding:'20px 16px', boxSizing:'border-box'}}>
+                <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:16}}>
+                  <div style={{fontSize:15, fontWeight:800, color:dm?'white':'#0f172a'}}>🎂 Set Birthday</div>
+                  <button onClick={() => setShowBirthdayPicker(false)}
+                    style={{background:'none', border:'none', fontSize:22, color:dm?'#64748b':'#94a3b8', cursor:'pointer'}}>×</button>
+                </div>
+                <div style={{display:'flex', gap:4}}>
+                  {makeWheel(birthdayDayRef, days, pickDay, setPickDay)}
+                  {makeWheel(birthdayMonthRef, MONTHS_SHORT, MONTHS_SHORT[pickMonth], v => setPickMonth(MONTHS_SHORT.indexOf(v)))}
+                  {makeWheel(birthdayYearRef, years, pickYear, setPickYear, y => `'${String(y).slice(-2)}`)}
+                </div>
+                <button onClick={() => {
+                  const dateStr = `${pickDay} ${MONTHS_SHORT[pickMonth]} ${pickYear}`;
+                  updateSelectedNode('birthday', dateStr);
+                  setShowBirthdayPicker(false);
+                  showToast(`🎂 Birthday set: ${dateStr}`);
+                }}
+                  style={{width:'100%', marginTop:16, padding:'11px 0', borderRadius:8, border:'none',
+                    background:'#10b981', color:'white', fontSize:14, fontWeight:700, cursor:'pointer'}}>
+                  Save
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+        {/* ──────────────────────────────────────────────────────────────── */}
+
+        {showHabitEditor && (() => {
+          const dm = theme.darkMode;
+          return (
+            <div style={{position:'fixed', inset:0, zIndex:310, display:'flex', alignItems:'flex-end',
+              background:'rgba(0,0,0,0.5)', paddingBottom:'calc(68px + env(safe-area-inset-bottom, 0px))'}}>
+              <div style={{width:'100%', background:dm?'#0f172a':'white', borderRadius:'16px 16px 0 0',
+                padding:'20px 16px', maxHeight:'80vh', overflowY:'auto', boxSizing:'border-box'}}>
+                <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:14}}>
+                  <div style={{fontSize:15, fontWeight:800, color:dm?'white':'#0f172a'}}>Manage Health Lists</div>
+                  <button onClick={() => setShowHabitEditor(false)}
+                    style={{background:'none', border:'none', fontSize:22, color:dm?'#64748b':'#94a3b8', cursor:'pointer'}}>×</button>
+                </div>
+                {healthLists.map((list, li) => (
+                  <div key={list.id} style={{marginBottom:14, padding:'10px 12px', borderRadius:10,
+                    background:dm?'#1e293b':'#f8fafc', border:`1px solid ${dm?'#334155':'#e2e8f0'}`}}>
+                    <div style={{display:'flex', alignItems:'center', gap:8, marginBottom:10}}>
+                      <input value={list.icon} onChange={e => {
+                        const v = e.target.value;
+                        setHealthLists(prev => prev.map((l,i) => i===li ? {...l, icon:v} : l));
+                      }} style={{width:30, textAlign:'center', fontSize:16, border:'none', background:'none', color:dm?'white':'#0f172a'}}/>
+                      <input value={list.name} onChange={e => {
+                        const v = e.target.value;
+                        setHealthLists(prev => prev.map((l,i) => i===li ? {...l, name:v} : l));
+                      }} style={{flex:1, fontSize:13, fontWeight:700, padding:'6px 8px', borderRadius:6,
+                        border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#0f172a':'white', color:dm?'white':'#0f172a'}}/>
+                      <button onClick={() => {
+                        const listId = list.id;
+                        setHealthLists(prev => prev.filter((l,i) => i!==li));
+                        // Also remove the corresponding map/stack bubble and its
+                        // link, rather than leaving an orphaned node that does
+                        // nothing useful when tapped
+                        setNodes(prev => prev.filter(n => !(n.type === 'health_list' && n.listId === listId)));
+                        setLinks(prev => prev.filter(l2 => {
+                          const targetNode = nodes.find(n => n.id === l2.target);
+                          return !(targetNode?.type === 'health_list' && targetNode?.listId === listId);
+                        }));
+                        showToast(`🗑️ "${list.name}" removed`);
+                      }}
+                        style={{padding:'5px 9px', borderRadius:6, border:'none',
+                          background:'#fee2e2', color:'#dc2626', fontSize:11, cursor:'pointer'}}>
+                        Remove list
+                      </button>
+                    </div>
+                    <div style={{display:'flex', flexDirection:'column', gap:6}}>
+                      {list.categories.map((cat, ci) => (
+                        <div key={cat.id} style={{display:'flex', alignItems:'center', gap:6}}>
+                          <input value={cat.icon} onChange={e => {
+                            const v = e.target.value;
+                            setHealthLists(prev => prev.map((l,i) => i!==li ? l : {...l,
+                              categories: l.categories.map((c,ci2) => ci2===ci ? {...c, icon:v} : c)}));
+                          }} style={{width:26, textAlign:'center', fontSize:14, border:'none', background:'none', color:dm?'white':'#0f172a'}}/>
+                          <input value={cat.label} onChange={e => {
+                            const v = e.target.value;
+                            setHealthLists(prev => prev.map((l,i) => i!==li ? l : {...l,
+                              categories: l.categories.map((c,ci2) => ci2===ci ? {...c, label:v} : c)}));
+                          }} style={{flex:1, minWidth:0, fontSize:12, padding:'5px 6px', borderRadius:6,
+                            border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#0f172a':'white', color:dm?'white':'#0f172a'}}/>
+                          <input type="number" value={cat.target} onChange={e => {
+                            const v = parseInt(e.target.value)||0;
+                            setHealthLists(prev => prev.map((l,i) => i!==li ? l : {...l,
+                              categories: l.categories.map((c,ci2) => ci2===ci ? {...c, target:v} : c)}));
+                          }} style={{width:38, fontSize:12, padding:'5px 3px', borderRadius:6, textAlign:'center',
+                            border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#0f172a':'white', color:dm?'white':'#0f172a'}}/>
+                          <input value={cat.unit} onChange={e => {
+                            const v = e.target.value;
+                            setHealthLists(prev => prev.map((l,i) => i!==li ? l : {...l,
+                              categories: l.categories.map((c,ci2) => ci2===ci ? {...c, unit:v} : c)}));
+                          }} style={{width:56, fontSize:10, padding:'5px 4px', borderRadius:6,
+                            border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#0f172a':'white', color:dm?'white':'#0f172a'}}/>
+                          <button onClick={() => setHealthLists(prev => prev.map((l,i) => i!==li ? l : {...l,
+                            categories: l.categories.filter((c,ci2) => ci2!==ci)}))}
+                            style={{padding:'3px 7px', borderRadius:6, border:'none',
+                              background:'#fee2e2', color:'#dc2626', fontSize:10, cursor:'pointer'}}>
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    <button onClick={() => setHealthLists(prev => prev.map((l,i) => i!==li ? l : {...l,
+                      categories: [...l.categories, { id: 'cat_'+Date.now(), label:'New item', icon:'⭐', target:1, unit:'x', pointsPerServing:5, pointsPerOverServing:2 }]}))}
+                      style={{width:'100%', marginTop:8, padding:'6px 0', borderRadius:6,
+                        border:`1px dashed ${dm?'#334155':'#e2e8f0'}`, background:'none',
+                        color:dm?'#64748b':'#94a3b8', fontSize:11, fontWeight:600, cursor:'pointer'}}>
+                      + Add item to this list
+                    </button>
+                  </div>
+                ))}
+                <div style={{display:'flex', gap:8, marginTop:4}}>
+                  <button onClick={() => {
+                    const newId = 'list_'+Date.now();
+                    setHealthLists(prev => [...prev, { id:newId, name:'New List', icon:'📋', color:'#10b981', categories:[] }]);
+                    setNodes(prev => [...prev, { id:'health_list_'+newId, type:'health_list', listId:newId,
+                      label:'New List', x: 400 + Math.random()*100, y: 400 + Math.random()*100, pinned:false }]);
+                    setLinks(prev => [...prev, { source:'flower_health', target:'health_list_'+newId }]);
+                    showToast('📋 New blank list created — add your own categories below');
+                  }}
+                    style={{flex:1, padding:'9px 0', borderRadius:8,
+                      border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:'none',
+                      color:dm?'#94a3b8':'#64748b', fontSize:12, fontWeight:700, cursor:'pointer'}}>
+                    + Blank list
+                  </button>
+                  {HEALTH_LIST_TEMPLATES.map(template => (
+                    <button key={template.id} onClick={() => {
+                      const newId = 'list_'+Date.now();
+                      setHealthLists(prev => [...prev, { ...template, id:newId }]);
+                      setNodes(prev => [...prev, { id:'health_list_'+newId, type:'health_list', listId:newId,
+                        label:template.name, x: 400 + Math.random()*100, y: 400 + Math.random()*100, pinned:false }]);
+                      setLinks(prev => [...prev, { source:'flower_health', target:'health_list_'+newId }]);
+                      showToast(`${template.icon} "${template.name}" template added`);
+                    }}
+                      style={{flex:1, padding:'9px 0', borderRadius:8,
+                        border:'none', background:'#10b981', color:'white', fontSize:12, fontWeight:700, cursor:'pointer'}}>
+                      + {template.icon} {template.name}
+                    </button>
+                  ))}
+                </div>
+                <button onClick={() => setShowHabitEditor(false)}
+                  style={{width:'100%', marginTop:10, padding:'10px 0', borderRadius:8,
+                    border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:'none',
+                    color:dm?'#94a3b8':'#64748b', fontSize:13, cursor:'pointer'}}>
+                  Done
+                </button>
+              </div>
+            </div>
+          );
+        })()}
 
       {/* ============ FEED VIEW: dimension band + sideways tree, on the SAME fixed
           6-column grid as before, with the same drag-to-place / swap mechanics.
