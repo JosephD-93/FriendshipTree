@@ -4935,13 +4935,20 @@ function AppInner() {
     // the app process directly rather than gracefully backgrounding it.
     let appPauseListener = null;
     const CapApp = window.Capacitor?.Plugins?.App;
-    if (CapApp) {
-      CapApp.addListener('pause', flushNow).then(l => { appPauseListener = l; });
+    if (CapApp && typeof CapApp.addListener === 'function') {
+      try {
+        const result = CapApp.addListener('pause', flushNow);
+        if (result && typeof result.then === 'function') {
+          result.then(l => { appPauseListener = l; }).catch(() => {});
+        } else {
+          appPauseListener = result;
+        }
+      } catch(e) { console.warn('App pause listener setup failed:', e); }
     }
     return () => {
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('pagehide', flushNow);
-      if (appPauseListener) appPauseListener.remove();
+      if (appPauseListener && typeof appPauseListener.remove === 'function') appPauseListener.remove();
     };
   }, [links, dimensions]);
 
