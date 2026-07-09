@@ -5019,6 +5019,7 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
   // keep resetting the 500ms timer so it never actually fires before Android
   // kills the process, silently losing whatever was still pending.
   const saveTimer = useRef(null);
+  const firstPendingAt = useRef(null);
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
   const linksRef = useRef(links);
@@ -5054,8 +5055,24 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
   };
   useEffect(() => {
     setSaveStatus('pending');
+    const now = Date.now();
+    if (!firstPendingAt.current) firstPendingAt.current = now;
     clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(doSaveNodes, 500);
+    const elapsedSinceFirstPending = now - firstPendingAt.current;
+    const MAX_WAIT = 2500; // force a save at least this often, even under continuous changes
+    if (elapsedSinceFirstPending >= MAX_WAIT) {
+      // Already been pending too long -- save right now instead of waiting again
+      doSaveNodes();
+      firstPendingAt.current = null;
+    } else {
+      // Normal debounce, but capped so it can never wait past MAX_WAIT from
+      // the first change in this burst
+      const delay = Math.min(500, MAX_WAIT - elapsedSinceFirstPending);
+      saveTimer.current = setTimeout(() => {
+        doSaveNodes();
+        firstPendingAt.current = null;
+      }, delay);
+    }
   }, [nodes]);
   useEffect(() => { try { localStorage.setItem('ft_links', JSON.stringify(links)); } catch(e) {} }, [links]);
   useEffect(() => { try { localStorage.setItem('ft_cal_events', JSON.stringify(calEvents)); } catch(e) {} }, [calEvents]);
