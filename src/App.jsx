@@ -3854,8 +3854,9 @@ function AppInner() {
 
 
   const createFriendFromForm = async (formId, img, blob = null, nameOverride = null) => {
+    showToast('🔍 createFriendFromForm called');
     const form = addFriendForms.find(f => f.id === formId);
-    if (!form) return;
+    if (!form) { showToast('❌ form not found for id: ' + formId); return; }
     const resolvedName = nameOverride || form.name;
     const newId = `node_${Date.now()}`;
     // Place near parent if one set, otherwise random open space
@@ -3879,6 +3880,7 @@ function AppInner() {
     // timer or a close-event to fire -- a hard swipe-away kill on Android
     // can end the process with zero guaranteed time for either to run.
     await doSaveNodes(newNodesArray);
+    showToast('🔍 doSaveNodes await completed, friends now: ' + newNodesArray.filter(n=>n.type==='friend').length);
     // Link to parent or auto-link to flower_social if no parent
     const newLink = form.parentId
       ? { source: form.parentId, target: newId }
@@ -4490,7 +4492,7 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
 
 
   const addFriendsFromContacts = async () => {
-    const spawnNodes = (contactList) => {
+    const spawnNodes = async (contactList) => {
       // Determine parent — selected person/hub, else flower_social, else me
       const parentNode = selectedNodeId && selectedNodeId !== 'me'
         ? nodes.find(n => n.id === selectedNodeId && n.type !== 'flower')
@@ -4518,12 +4520,14 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
         };
       });
 
+      const newNodesArray = [...nodesRef.current, ...newNodes];
       setNodes(prev => [...prev, ...newNodes]);
+      const newLinksToAdd = newNodes.map(n => ({ source: parent.id, target: n.id }));
+      const newLinksArray = [...linksRef.current, ...newLinksToAdd];
       // Wire each new friend back to the parent node
-      setLinks(prev => [
-        ...prev,
-        ...newNodes.map(n => ({ source: parent.id, target: n.id })),
-      ]);
+      setLinks(prev => [...prev, ...newLinksToAdd]);
+      await doSaveNodes(newNodesArray);
+      try { localStorage.setItem('ft_links', JSON.stringify(newLinksArray)); } catch(e) {}
       setShowTutorial(false);
       showToast(`${newNodes.length} friend${newNodes.length !== 1 ? 's' : ''} added${parentNode && parentNode.id !== 'me' ? ` via ${parent.label}` : ''}!`);
     };
@@ -5042,6 +5046,7 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
   const linksRef = useRef(links);
   linksRef.current = links;
   const doSaveNodes = async (explicitNodes = null) => {
+    const debugSource = explicitNodes ? 'explicit-' + explicitNodes.length : 'ref-' + nodesRef.current.length;
     try {
       const source = explicitNodes || nodesRef.current;
       // Strip photo data from localStorage — photos are stored in IndexedDB separately
@@ -5066,7 +5071,10 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
           totalNodes: nodesWithoutPhotos.length,
           friendNodes: friendCount,
         }));
-      } catch(e) {}
+        showToast(`🔍 doSaveNodes(${debugSource}) wrote meta: ${friendCount} friends`);
+      } catch(e) {
+        showToast('❌ meta write threw: ' + e.message);
+      }
       // Also write through Capacitor's native Preferences plugin (backed by
       // Android's own SharedPreferences) as a more durable backup --
       // WebView localStorage writes can be buffered internally and aren't
@@ -11806,17 +11814,23 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   {/* Friend button — upper half */}
                   <g transform={`translate(${x - btnW/2}, ${y - totalH/2})`}
                     className="cursor-pointer"
-                    onClick={() => {
+                    onClick={async () => {
                       const newId = `node_${Date.now()}`;
                       snapshot();
-                      setNodes(prev => [...prev, {
+                      const newNode = {
                         id: newId, label: '',
                         img: makeBlankAvatar(),
                         x: spawnPopup.x, y: spawnPopup.y,
                         interactionScore: STARTING_SCORE, pinned: false, type: 'friend',
-                      }]);
+                      };
+                      const newNodesArray = [...nodesRef.current, newNode];
+                      setNodes(prev => [...prev, newNode]);
+                      await doSaveNodes(newNodesArray);
                       if (spawnPopup.sourceNodeId) {
-                        setLinks(prev => [...prev, { source: spawnPopup.sourceNodeId, target: newId }]);
+                        const newLink = { source: spawnPopup.sourceNodeId, target: newId };
+                        const newLinksArray = [...linksRef.current, newLink];
+                        setLinks(prev => [...prev, newLink]);
+                        try { localStorage.setItem('ft_links', JSON.stringify(newLinksArray)); } catch(e) {}
                       }
                       setSelectedNodeId(newId);
                       setSpawnPopup(null);
@@ -18348,6 +18362,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
           // Batch update nodes in one call
           if (newNodes.length > 0 || Object.keys(photoUpdates).length > 0) {
+            let finalNodesArray = null;
             setNodes(prev => {
               let updated = prev.map(n => {
                 if (photoUpdates[n.id]) {
@@ -18358,16 +18373,19 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 return n;
               });
               // Link new nodes to origin hub if applicable
-              return [...updated, ...newNodes];
+              finalNodesArray = [...updated, ...newNodes];
+              return finalNodesArray;
             });
             if (groupPhotoOriginNode) {
-              setLinks(prev => [
-                ...prev,
-                ...newNodes
-                  .filter(n => !prev.some(l => (l.source===groupPhotoOriginNode&&l.target===n.id)||(l.target===groupPhotoOriginNode&&l.source===n.id)))
-                  .map(n => ({source: groupPhotoOriginNode, target: n.id}))
-              ]);
+              const currentLinks = linksRef.current;
+              const newLinksToAdd = newNodes
+                .filter(n => !currentLinks.some(l => (l.source===groupPhotoOriginNode&&l.target===n.id)||(l.target===groupPhotoOriginNode&&l.source===n.id)))
+                .map(n => ({source: groupPhotoOriginNode, target: n.id}));
+              const newLinksArray = [...currentLinks, ...newLinksToAdd];
+              setLinks(prev => [...prev, ...newLinksToAdd]);
+              try { localStorage.setItem('ft_links', JSON.stringify(newLinksArray)); } catch(e) {}
             }
+            if (finalNodesArray) await doSaveNodes(finalNodesArray);
           }
 
 
