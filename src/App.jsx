@@ -10,6 +10,25 @@ import {
 
 const APP_VERSION = '3.1';
 
+// ─── FT-DIAG: runs at script parse time, before React renders anything ─────
+(function() {
+  try {
+    const raw = localStorage.getItem('ft_nodes');
+    const meta = localStorage.getItem('ft_save_meta');
+    const parsed = raw ? JSON.parse(raw) : [];
+    const friendIds = parsed.filter(n => n.type === 'friend').map(n => n.id);
+    console.log('[FT-DIAG] PRE-REACT startup check:');
+    console.log('[FT-DIAG]   ft_nodes raw length (chars):', raw ? raw.length : 0);
+    console.log('[FT-DIAG]   total nodes:', parsed.length, '| friend nodes:', friendIds.length);
+    console.log('[FT-DIAG]   last 5 friend IDs:', friendIds.slice(-5));
+    console.log('[FT-DIAG]   ft_save_meta:', meta);
+  } catch(e) {
+    console.log('[FT-DIAG] PRE-REACT startup check FAILED:', e.message);
+  }
+})();
+// ─────────────────────────────────────────────────────────────────────────
+
+
 // Shared birthday parser -- birthdays are stored as free-text (e.g. "15 March
 // 1993", "03/15/93") since that's what the input field accepts, not a
 // structured date. This is the single source of truth for interpreting that
@@ -3854,11 +3873,11 @@ function AppInner() {
 
 
   const createFriendFromForm = async (formId, img, blob = null, nameOverride = null) => {
-    showToast('🔍 createFriendFromForm called');
     const form = addFriendForms.find(f => f.id === formId);
-    if (!form) { showToast('❌ form not found for id: ' + formId); return; }
+    if (!form) { console.log('[FT-DIAG] createFriendFromForm: form not found for id', formId); return; }
     const resolvedName = nameOverride || form.name;
     const newId = `node_${Date.now()}`;
+    console.log('[FT-DIAG] STAGE 1: creating person, id=', newId, 'name=', resolvedName);
     // Place near parent if one set, otherwise random open space
     const anchor = form.parentId
       ? nodes.find(n => n.id === form.parentId) || { x: 0, y: 0 }
@@ -3875,12 +3894,27 @@ function AppInner() {
       syncDismissed: !!img,
     };
     const newNodesArray = [...nodesRef.current, newNode];
+    console.log('[FT-DIAG] STAGE 2: newNodesArray built, total=', newNodesArray.length,
+      'friends=', newNodesArray.filter(n=>n.type==='friend').length,
+      'includes new id?', newNodesArray.some(n=>n.id===newId));
     setNodes(prev => [...prev, newNode]);
+    console.log('[FT-DIAG] STAGE 3: setNodes(prev=>...) called');
     // Save immediately with the explicit array, not waiting for a debounce
     // timer or a close-event to fire -- a hard swipe-away kill on Android
     // can end the process with zero guaranteed time for either to run.
     await doSaveNodes(newNodesArray);
-    showToast('🔍 doSaveNodes await completed, friends now: ' + newNodesArray.filter(n=>n.type==='friend').length);
+    console.log('[FT-DIAG] STAGE 4: doSaveNodes await returned');
+    // Immediate readback -- confirms what's ACTUALLY in localStorage right
+    // now, not what we assume was written
+    try {
+      const readback = localStorage.getItem('ft_nodes');
+      const readbackParsed = readback ? JSON.parse(readback) : [];
+      console.log('[FT-DIAG] STAGE 5: readback from localStorage -- total=', readbackParsed.length,
+        'friends=', readbackParsed.filter(n=>n.type==='friend').length,
+        'includes new id?', readbackParsed.some(n=>n.id===newId));
+    } catch(e) {
+      console.log('[FT-DIAG] STAGE 5: readback FAILED:', e.message);
+    }
     // Link to parent or auto-link to flower_social if no parent
     const newLink = form.parentId
       ? { source: form.parentId, target: newId }
@@ -3888,6 +3922,7 @@ function AppInner() {
     const newLinksArray = [...linksRef.current, newLink];
     setLinks(prev => [...prev, newLink]);
     try { localStorage.setItem('ft_links', JSON.stringify(newLinksArray)); } catch(e) {}
+    console.log('[FT-DIAG] STAGE 6: link saved, complete for id=', newId);
     setAddFriendForms(prev => prev.filter(f => f.id !== formId));
     showToast(resolvedName.trim() ? `🌱 ${resolvedName.trim()} added` : '🌱 New friend added');
   };
@@ -5047,6 +5082,7 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
   linksRef.current = links;
   const doSaveNodes = async (explicitNodes = null) => {
     const debugSource = explicitNodes ? 'explicit-' + explicitNodes.length : 'ref-' + nodesRef.current.length;
+    console.log('[FT-DIAG] doSaveNodes CALLED, source=', debugSource);
     try {
       const source = explicitNodes || nodesRef.current;
       // Strip photo data from localStorage — photos are stored in IndexedDB separately
@@ -5058,7 +5094,10 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
         return n;
       });
       const json = JSON.stringify(nodesWithoutPhotos);
+      console.log('[FT-DIAG] doSaveNodes about to setItem, json length=', json.length, 'friend count=', nodesWithoutPhotos.filter(n=>n.type==='friend').length);
       localStorage.setItem('ft_nodes', json);
+      const immediateReadback = localStorage.getItem('ft_nodes');
+      console.log('[FT-DIAG] doSaveNodes IMMEDIATE readback length=', immediateReadback ? immediateReadback.length : 'NULL', 'matches written?', immediateReadback === json);
       // Record exactly what was saved and when, in a separate diagnostic key
       // -- this lets the startup diagnostic directly compare "what was last
       // saved" against "what actually got loaded", giving real ground-truth
@@ -5071,9 +5110,9 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
           totalNodes: nodesWithoutPhotos.length,
           friendNodes: friendCount,
         }));
-        showToast(`🔍 doSaveNodes(${debugSource}) wrote meta: ${friendCount} friends`);
+        console.log('[FT-DIAG] doSaveNodes wrote ft_save_meta, friendCount=', friendCount);
       } catch(e) {
-        showToast('❌ meta write threw: ' + e.message);
+        console.log('[FT-DIAG] doSaveNodes ft_save_meta write THREW:', e.message);
       }
       // Also write through Capacitor's native Preferences plugin (backed by
       // Android's own SharedPreferences) as a more durable backup --
