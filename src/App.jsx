@@ -1791,12 +1791,26 @@ function AppInner() {
       try {
         if (navigator.storage && navigator.storage.persist) {
           const already = navigator.storage.persisted ? await navigator.storage.persisted() : false;
-          if (!already) {
+          if (already) {
+            console.log('Persistent storage: already granted');
+          } else {
             const granted = await navigator.storage.persist();
             console.log('Persistent storage:', granted ? 'granted' : 'denied');
+            // Surface this directly -- if denied, Android can clear app
+            // storage (including localStorage, not just IndexedDB) under
+            // normal storage pressure, which would explain data loss that
+            // has nothing to do with the app-closing timing at all.
+            if (!granted) {
+              showToast('⚠️ Persistent storage denied by Android — data may be at risk of being cleared');
+            }
           }
+        } else {
+          showToast('⚠️ Persistent storage API not available on this device');
         }
-      } catch(e) { console.warn('storage.persist failed:', e); }
+      } catch(e) {
+        console.warn('storage.persist failed:', e);
+        showToast('⚠️ Storage persistence check failed: ' + e.message);
+      }
     })();
   }, []);
 
