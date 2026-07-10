@@ -1793,6 +1793,7 @@ function AppInner() {
           const already = navigator.storage.persisted ? await navigator.storage.persisted() : false;
           if (already) {
             console.log('Persistent storage: already granted');
+            showToast('✅ Persistent storage already granted');
           } else {
             const granted = await navigator.storage.persist();
             console.log('Persistent storage:', granted ? 'granted' : 'denied');
@@ -3850,7 +3851,7 @@ function AppInner() {
   };
 
 
-  const createFriendFromForm = (formId, img, blob = null, nameOverride = null) => {
+  const createFriendFromForm = async (formId, img, blob = null, nameOverride = null) => {
     const form = addFriendForms.find(f => f.id === formId);
     if (!form) return;
     const resolvedName = nameOverride || form.name;
@@ -3875,7 +3876,7 @@ function AppInner() {
     // Save immediately with the explicit array, not waiting for a debounce
     // timer or a close-event to fire -- a hard swipe-away kill on Android
     // can end the process with zero guaranteed time for either to run.
-    doSaveNodes(newNodesArray);
+    await doSaveNodes(newNodesArray);
     // Link to parent or auto-link to flower_social if no parent
     const newLink = form.parentId
       ? { source: form.parentId, target: newId }
@@ -5038,7 +5039,7 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
   nodesRef.current = nodes;
   const linksRef = useRef(links);
   linksRef.current = links;
-  const doSaveNodes = (explicitNodes = null) => {
+  const doSaveNodes = async (explicitNodes = null) => {
     try {
       const source = explicitNodes || nodesRef.current;
       // Strip photo data from localStorage — photos are stored in IndexedDB separately
@@ -5057,9 +5058,13 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
       // always guaranteed to be flushed to disk immediately even though the
       // JS call itself returns synchronously, which a hard-killed process
       // can lose. Preferences writes go through the native bridge directly.
+      // Genuinely AWAITED here (not fire-and-forget) so callers that need
+      // the write to actually complete -- like right after adding someone --
+      // can wait for it too, shrinking the vulnerability window as much as
+      // technically possible in a WebView environment.
       const Prefs = window.Capacitor?.Plugins?.Preferences;
       if (Prefs && typeof Prefs.set === 'function') {
-        Prefs.set({ key: 'ft_nodes_backup', value: json }).catch(() => {});
+        try { await Prefs.set({ key: 'ft_nodes_backup', value: json }); } catch(e) {}
       }
       setSaveStatus('saved');
     } catch(e) {
@@ -5342,7 +5347,7 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
 
   // Directly create a friend or group at a screen drop point -- used when the type is
   // already known (dragging the green person circle or brown group circle from the Add menu).
-  const spawnTypedNodeAtScreenPoint = (screenX, screenY, kind) => {
+  const spawnTypedNodeAtScreenPoint = async (screenX, screenY, kind) => {
     const rect = svgRef.current ? svgRef.current.getBoundingClientRect() : { left:0, top:0 };
     const svgX = (screenX - rect.left - transform.x) / transform.scale;
     const svgY = (screenY - rect.top - transform.y) / transform.scale;
@@ -5352,7 +5357,7 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
       const newNode = { id: newId, type: 'hub', label: 'New Group', x: svgX, y: svgY, pinned: false };
       const newNodesArray = [...nodesRef.current, newNode];
       setNodes(prev => [...prev, newNode]);
-      doSaveNodes(newNodesArray);
+      await doSaveNodes(newNodesArray);
       setSelectedNodeId(newId);
     } else {
       const newId = `node_${Date.now()}`;
@@ -5360,7 +5365,7 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
         interactionScore: STARTING_SCORE, pinned: false, type: 'friend' };
       const newNodesArray = [...nodesRef.current, newNode];
       setNodes(prev => [...prev, newNode]);
-      doSaveNodes(newNodesArray);
+      await doSaveNodes(newNodesArray);
       setSelectedNodeId(newId);
     }
   };
