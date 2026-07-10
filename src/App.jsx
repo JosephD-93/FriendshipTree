@@ -2221,6 +2221,8 @@ function AppInner() {
   const [feedScrollTop, setFeedScrollTop] = useState(0);
   // 'saved' | 'pending' | 'error' -- drives the save status dot in the corner
   const [saveStatus, setSaveStatus] = useState('saved');
+  const [showStartupDiagnostic, setShowStartupDiagnostic] = useState(true);
+
 
   // Google Calendar integration state
   const [gCalToken, setGCalToken] = useState(() => {
@@ -5052,6 +5054,19 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
       });
       const json = JSON.stringify(nodesWithoutPhotos);
       localStorage.setItem('ft_nodes', json);
+      // Record exactly what was saved and when, in a separate diagnostic key
+      // -- this lets the startup diagnostic directly compare "what was last
+      // saved" against "what actually got loaded", giving real ground-truth
+      // evidence instead of inferring from indirect behavior like the save
+      // indicator alone.
+      try {
+        const friendCount = nodesWithoutPhotos.filter(n => n.type === 'friend').length;
+        localStorage.setItem('ft_save_meta', JSON.stringify({
+          savedAt: new Date().toISOString(),
+          totalNodes: nodesWithoutPhotos.length,
+          friendNodes: friendCount,
+        }));
+      } catch(e) {}
       // Also write through Capacitor's native Preferences plugin (backed by
       // Android's own SharedPreferences) as a more durable backup --
       // WebView localStorage writes can be buffered internally and aren't
@@ -6671,6 +6686,36 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         background: saveStatus === 'saved' ? '#10b981' : '#ef4444',
         boxShadow: '0 0 0 2px rgba(0,0,0,0.15)',
         animation: saveStatus !== 'saved' ? 'pulse 1s ease-in-out infinite' : 'none'}}/>
+    {showStartupDiagnostic && (() => {
+      let meta = null;
+      try { meta = JSON.parse(localStorage.getItem('ft_save_meta') || 'null'); } catch(e) {}
+      const liveFriendCount = nodes.filter(n => n.type === 'friend').length;
+      const liveTotalCount = nodes.length;
+      return (
+        <div style={{position:'fixed', top:'calc(env(safe-area-inset-top, 0px) + 24px)', left:10, right:10, zIndex:9998,
+          background:'#0f172a', color:'white', borderRadius:10, padding:'10px 12px',
+          fontSize:11, fontFamily:'monospace', boxShadow:'0 4px 20px rgba(0,0,0,0.4)',
+          border:'1px solid #334155'}}>
+          <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6}}>
+            <span style={{fontWeight:700, color:'#f59e0b'}}>🔍 STARTUP DIAGNOSTIC</span>
+            <button onClick={() => setShowStartupDiagnostic(false)}
+              style={{background:'none', border:'none', color:'#94a3b8', fontSize:16, cursor:'pointer', padding:0}}>×</button>
+          </div>
+          <div>Loaded RIGHT NOW: {liveFriendCount} friends, {liveTotalCount} total nodes</div>
+          {meta ? (
+            <>
+              <div>Last save recorded: {meta.friendNodes} friends, {meta.totalNodes} total</div>
+              <div>Last save time: {new Date(meta.savedAt).toLocaleString()}</div>
+              <div style={{marginTop:4, fontWeight:700, color: meta.friendNodes === liveFriendCount ? '#10b981' : '#ef4444'}}>
+                {meta.friendNodes === liveFriendCount ? '✅ MATCH — loaded data matches last save' : '❌ MISMATCH — loaded data does NOT match last save'}
+              </div>
+            </>
+          ) : (
+            <div style={{color:'#94a3b8'}}>No save metadata found yet (first run, or metadata never written)</div>
+          )}
+        </div>
+      );
+    })()}
     {photosRestoring && (
       <div style={{position:'fixed', top:12, left:'50%', transform:'translateX(-50%)', zIndex:9999,
         background:'rgba(15,23,42,0.9)', color:'white', padding:'6px 14px', borderRadius:99,
