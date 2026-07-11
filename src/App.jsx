@@ -5133,15 +5133,40 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
     window.ftDiagLog('[FT-DIAG] doSaveNodes CALLED, source=', debugSource);
     try {
       const source = explicitNodes || nodesRef.current;
-      // Strip photo data from localStorage — photos are stored in IndexedDB separately
+      // Strip ALL base64 image data from localStorage — photos are stored in
+      // IndexedDB separately. This must cover BOTH the single current `img`
+      // field AND the `photos` array (which accumulates every photo ever
+      // added per person, in full base64) -- previously only `img` was
+      // stripped, letting the saved payload balloon to 60MB+ as photo
+      // history grew, which is far beyond what Android's WebView storage
+      // can handle reliably and caused exactly the kind of race condition
+      // (a newer save silently clobbered by an older, still-in-flight
+      // oversized write finishing late) seen in the diagnostic log.
       const nodesWithoutPhotos = source.map(n => {
-        if (n.img && n.img.startsWith('data:image')) {
-          const { img, ...rest } = n;
-          return rest;
+        let clean = n;
+        if (clean.img && clean.img.startsWith('data:image')) {
+          const { img, ...rest } = clean;
+          clean = rest;
         }
-        return n;
+        if (clean.photos) {
+          // Drop entirely rather than keep broken placeholders -- this
+          // matches exactly what the existing restore-on-startup logic
+          // already produces on load (a fresh array containing just the
+          // restored single `img`), so there's no mismatch or dead data.
+          // KNOWN LIMITATION: only the single most-recent photo per person
+          // is durably backed up (via IndexedDB); additional photos beyond
+          // the first, if added via the multi-photo carousel, are not yet
+          // separately persisted and won't survive an app restart. Worth a
+          // proper follow-up fix if that carousel is actively used.
+          const { photos, activePhotoIdx, ...rest } = clean;
+          clean = rest;
+        }
+        return clean;
       });
       const json = JSON.stringify(nodesWithoutPhotos);
+      if (json.length > 2000000) {
+        window.ftDiagLog('[FT-DIAG] ⚠️ WARNING: save payload unexpectedly large:', json.length, 'chars -- check for un-stripped base64 data');
+      }
       window.ftDiagLog('[FT-DIAG] doSaveNodes about to setItem, json length=', json.length, 'friend count=', nodesWithoutPhotos.filter(n=>n.type==='friend').length);
       localStorage.setItem('ft_nodes', json);
       const immediateReadback = localStorage.getItem('ft_nodes');
