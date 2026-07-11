@@ -1295,7 +1295,53 @@ function MoleCards({ slides, left, top, cardWidth, cardHeight, pillLeft, pillTop
 
 // Small circular thumbnails of group photos where this person is tagged,
 // shown in the profile pictures row so they can be cropped to a profile pic.
-function TaggedProfilePics({ nodeId, openPhotoDB, currentImg, onSelect }) {
+// Wraps a single photo with real per-image load/error tracking, so photos
+// in a collection appear individually as each one actually finishes
+// decoding rather than all popping in together once the whole batch is
+// ready. On failure, shows the actual image format (extracted from the
+// data URI itself) so problem file types can be identified directly.
+function PhotoWithLoadState({ src, size = 72, onClick, cornerButton, active, onError }) {
+  const [status, setStatus] = React.useState('loading'); // 'loading' | 'loaded' | 'error'
+  React.useEffect(() => { setStatus('loading'); }, [src]);
+  const formatMatch = /^data:image\/([a-zA-Z0-9.+-]+);/.exec(src || '');
+  const format = formatMatch ? formatMatch[1] : 'unknown';
+  const handleError = () => { setStatus('error'); if (onError) onError(format); };
+  return (
+    <div style={{position:'relative', width:size, height:size}}>
+      <button onClick={status === 'error' ? undefined : onClick}
+        style={{padding:0, border:`3px solid ${active ? '#10b981' : 'transparent'}`, borderRadius:'50%',
+          cursor: status === 'error' ? 'default' : 'pointer', background:'none', width:size, height:size,
+          display:'block'}}>
+        {status === 'error' ? (
+          <div style={{width:size, height:size, borderRadius:'50%', background:'rgba(239,68,68,0.15)',
+            border:'1.5px solid rgba(239,68,68,0.5)', display:'flex', flexDirection:'column',
+            alignItems:'center', justifyContent:'center', gap:2}}>
+            <span style={{fontSize:size*0.28}}>⚠️</span>
+            <span style={{fontSize:9, color:'#fca5a5', fontWeight:700}}>.{format}</span>
+          </div>
+        ) : (
+          <>
+            {status === 'loading' && (
+              <div style={{position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center',
+                background:'rgba(255,255,255,0.06)', borderRadius:'50%'}}>
+                <div style={{width:size*0.28, height:size*0.28, border:'2.5px solid rgba(255,255,255,0.2)',
+                  borderTopColor:'#10b981', borderRadius:'50%', animation:'spin 0.8s linear infinite'}}/>
+              </div>
+            )}
+            <img src={src} decoding="async"
+              onLoad={() => setStatus('loaded')}
+              onError={handleError}
+              style={{width:size, height:size, borderRadius:'50%', objectFit:'cover', display:'block',
+                opacity: status === 'loaded' ? 1 : 0, transition:'opacity 0.3s ease'}}/>
+          </>
+        )}
+      </button>
+      {status !== 'error' && cornerButton}
+    </div>
+  );
+}
+
+function TaggedProfilePics({ nodeId, openPhotoDB, currentImg, onSelect, onError }) {
   const [pics, setPics] = React.useState([]);
   React.useEffect(() => {
     openPhotoDB().then(db => new Promise((res, rej) => {
@@ -1313,21 +1359,16 @@ function TaggedProfilePics({ nodeId, openPhotoDB, currentImg, onSelect }) {
   }, [nodeId]); // eslint-disable-line
 
   return pics.map(item => (
-    <div key={item.key} style={{position:'relative'}}>
-      <button
-        onClick={() => onSelect(item.dataUrl)}
-        title="Use as profile picture"
-        style={{padding:0,border:`3px solid ${currentImg===item.dataUrl?'#10b981':'rgba(16,185,129,0.4)'}`,
-          borderRadius:'50%',cursor:'pointer',background:'none',position:'relative'}}>
-        <img src={item.dataUrl} style={{width:72,height:72,borderRadius:'50%',objectFit:'cover',display:'block'}}/>
-      </button>
-      {/* Group badge */}
-      <div style={{position:'absolute',bottom:2,right:2,width:18,height:18,borderRadius:'50%',
-        background:'#10b981',display:'flex',alignItems:'center',justifyContent:'center',
-        fontSize:10,border:'1.5px solid rgba(0,0,0,0.4)',pointerEvents:'none'}}>
-        👥
-      </div>
-    </div>
+    <PhotoWithLoadState key={item.key} src={item.dataUrl} size={72} active={currentImg===item.dataUrl}
+      onClick={() => onSelect(item.dataUrl)}
+      onError={onError}
+      cornerButton={
+        <div style={{position:'absolute',bottom:2,right:2,width:18,height:18,borderRadius:'50%',
+          background:'#10b981',display:'flex',alignItems:'center',justifyContent:'center',
+          fontSize:10,border:'1.5px solid rgba(0,0,0,0.4)',pointerEvents:'none'}}>
+          👥
+        </div>
+      }/>
   ));
 }
 
@@ -1505,6 +1546,7 @@ function AppInner() {
   const [slideIdx, setSlideIdx] = useState(0);
   const [photoCrop, setPhotoCrop] = useState(null);
   const [profilePhotosViewer, setProfilePhotosViewer] = useState(null); // nodeId when open
+  const [failedPhotoFormats, setFailedPhotoFormats] = useState([]); // formats that failed to load in the currently-open gallery
   // Group photo tagger
   const [groupPhotoSrc, setGroupPhotoSrc] = useState(null);   // base64 of the group photo
   const [faceRings, setFaceRings] = useState([]);              // [{id,x,y,r,name,assignedNodeId}]
@@ -8227,7 +8269,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           border:`4px solid ${lvl.color}`,
                           boxShadow:`0 0 0 2px ${theme.darkMode?'#0f172a':'white'}, 0 4px 16px ${lvl.color}55`,
                         }}
-                          onClick={()=>setProfilePhotosViewer(selectedNodeId)}>
+                          onClick={()=>{ setFailedPhotoFormats([]); setProfilePhotosViewer(selectedNodeId); }}>
                           <img src={selectedNode.img} alt="Profile"
                             style={{width:'100%',height:'100%',borderRadius:'50%',objectFit:'cover'}}/>
                         </div>
@@ -15346,6 +15388,24 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 if (isDescendantOfMinimised(oid)) return;
                 orphans.push(oNode);
               });
+              // Genuinely unconnected people (no link to anything at all,
+              // never even placed in a stack grid before) have no signal
+              // telling us which dimension they belong to -- surfaced under
+              // Social specifically, the default catch-all, so a person
+              // added via the map isn't invisible here just because they
+              // haven't been linked to anyone yet.
+              if (dimKey === 'social') {
+                const linkedIds = new Set();
+                links.forEach(l => { linkedIds.add(l.source); linkedIds.add(l.target); });
+                const alreadyIncluded = new Set([...reachableIds, ...orphans.map(o => o.id)]);
+                nodes.forEach(n => {
+                  if (alreadyIncluded.has(n.id)) return;
+                  if (linkedIds.has(n.id)) return; // has a link, belongs to whatever dimension that connects to
+                  if (n.hidden || n.type === 'flower' || n.id === 'me') return;
+                  if (n.type !== 'friend' && n.type !== 'hub') return;
+                  orphans.push(n);
+                });
+              }
               const allMembers = [...allMembersRaw, ...orphans].filter(n => n.type !== 'health_metric');
               const minimisedSet = new Set(minimisedHere);
               // In Detailed mode, a group's direct people-members move off the grid
@@ -18094,36 +18154,39 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               <button onClick={()=>setProfilePhotosViewer(null)} style={{background:'rgba(255,255,255,0.1)',border:'none',borderRadius:'50%',width:32,height:32,fontSize:18,cursor:'pointer',color:'white'}}>✕</button>
             </div>
             <div style={{padding:'8px 18px 24px'}} onClick={e=>e.stopPropagation()}>
+              {failedPhotoFormats.length > 0 && (
+                <div style={{background:'rgba(239,68,68,0.12)', border:'1px solid rgba(239,68,68,0.4)',
+                  borderRadius:8, padding:'10px 12px', marginBottom:12, fontSize:12, color:'#fca5a5'}}>
+                  ⚠️ {failedPhotoFormats.length} photo format{failedPhotoFormats.length>1?'s':''} not loading: {failedPhotoFormats.map(f=>'.'+f).join(', ')}
+                </div>
+              )}
               {/* Profile pictures used in the past */}
               <div style={{fontSize:12,fontWeight:700,color:'rgba(255,255,255,0.6)',textTransform:'uppercase',letterSpacing:0.5,margin:'8px 0'}}>Profile pictures</div>
               <div style={{display:'flex',flexWrap:'wrap',gap:10}}>
                 {profilePics.map((p,idx)=>(
-                  <div key={idx} style={{position:'relative'}}>
-                    <button onClick={()=>{setNodes(prev=>prev.map(n=>n.id===sn.id?{...n,img:p.cropped,activePhotoIdx:idx}:n));}}
-                      style={{padding:0,border:`3px solid ${activeIdx===idx?'#10b981':'transparent'}`,borderRadius:'50%',cursor:'pointer',background:'none'}}>
-                      <img src={p.cropped} style={{width:72,height:72,borderRadius:'50%',objectFit:'cover',display:'block'}}/>
-                    </button>
-                    {/* Re-crop button -- reopens the cropper on this photo's original
-                        (uncropped) source, so framing/zoom can be adjusted after the
-                        fact instead of being locked in the moment it was first cropped. */}
-                    <button
-                      onClick={(e)=>{
-                        e.stopPropagation();
-                        setProfilePhotosViewer(null);
-                        setPhotoCrop({nodeId: sn.id, src: p.orig || p.cropped, originalSrc: p.orig || p.cropped, crop:{x:0,y:0,scale:1}});
-                      }}
-                      title="Re-crop this photo"
-                      style={{position:'absolute',bottom:-2,right:-2,width:24,height:24,borderRadius:'50%',
-                        background:'rgba(0,0,0,0.7)',border:'1.5px solid rgba(255,255,255,0.6)',
-                        color:'white',fontSize:12,cursor:'pointer',display:'flex',
-                        alignItems:'center',justifyContent:'center',lineHeight:1,padding:0}}>
-                      ✏️
-                    </button>
-                  </div>
+                  <PhotoWithLoadState key={idx} src={p.cropped} size={72} active={activeIdx===idx}
+                    onClick={()=>{setNodes(prev=>prev.map(n=>n.id===sn.id?{...n,img:p.cropped,activePhotoIdx:idx}:n));}}
+                    onError={(fmt) => setFailedPhotoFormats(prev => prev.includes(fmt) ? prev : [...prev, fmt])}
+                    cornerButton={
+                      <button
+                        onClick={(e)=>{
+                          e.stopPropagation();
+                          setProfilePhotosViewer(null);
+                          setPhotoCrop({nodeId: sn.id, src: p.orig || p.cropped, originalSrc: p.orig || p.cropped, crop:{x:0,y:0,scale:1}});
+                        }}
+                        title="Re-crop this photo"
+                        style={{position:'absolute',bottom:-2,right:-2,width:24,height:24,borderRadius:'50%',
+                          background:'rgba(0,0,0,0.7)',border:'1.5px solid rgba(255,255,255,0.6)',
+                          color:'white',fontSize:12,cursor:'pointer',display:'flex',
+                          alignItems:'center',justifyContent:'center',lineHeight:1,padding:0}}>
+                        ✏️
+                      </button>
+                    }/>
                 ))}
                 {/* Tagged group photos shown as circles - tap to use as profile pic */}
                 <TaggedProfilePics nodeId={sn.id} openPhotoDB={openPhotoDB}
                   currentImg={sn.img}
+                  onError={(fmt) => setFailedPhotoFormats(prev => prev.includes(fmt) ? prev : [...prev, fmt])}
                   onSelect={dataUrl => {
                     setProfilePhotosViewer(null);
                     setPhotoCrop({nodeId: sn.id, src: dataUrl, originalSrc: dataUrl, crop:{x:0,y:0,scale:1}});
