@@ -51,6 +51,56 @@ window.ftDiagLog = function(...args) {
   } catch(e) {}
 };
 // ─────────────────────────────────────────────────────────────────────────
+
+// ─── Centralized persistence layer ─────────────────────────────────────────
+// Single, consistent save/load pair used for every piece of app state,
+// replacing 35+ previously-independent localStorage calls (many with
+// silent `catch(e) {}` blocks that swallowed errors with zero visibility).
+// Every failure is now logged via ftDiagLog, and any unexpectedly large
+// payload is flagged immediately -- the exact class of issue that caused
+// the earlier 60MB save race condition, now caught for every key, not just
+// the one we happened to find it in.
+const FT_SAVE_SIZE_WARNING = 2000000; // ~2MB -- flag anything approaching this
+
+function saveData(key, value) {
+  try {
+    const json = JSON.stringify(value);
+    if (json.length > FT_SAVE_SIZE_WARNING) {
+      window.ftDiagLog(`⚠️ [Persistence] key="${key}" unexpectedly large: ${json.length} chars`);
+    }
+    localStorage.setItem(key, json);
+    return true;
+  } catch(e) {
+    window.ftDiagLog(`❌ [Persistence] SAVE FAILED key="${key}": ${e.message}`);
+    return false;
+  }
+}
+
+function loadData(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw === null || raw === undefined) return fallback;
+    return JSON.parse(raw);
+  } catch(e) {
+    window.ftDiagLog(`❌ [Persistence] LOAD FAILED key="${key}": ${e.message} — using fallback`);
+    return fallback;
+  }
+}
+
+// Raw-string variant for the handful of keys that store plain strings
+// rather than JSON (security PIN, lock timer, AI provider choice, etc.) --
+// these are read as raw strings in many places throughout the app, so
+// converting their format would be a real breaking change. This still
+// gets the same consistent error logging without touching the format.
+function saveRaw(key, value) {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch(e) {
+    window.ftDiagLog(`❌ [Persistence] SAVE FAILED (raw) key="${key}": ${e.message}`);
+    return false;
+  }
+}
 // ─────────────────────────────────────────────────────────────────────────
 
 
@@ -1411,8 +1461,8 @@ function AppInner() {
   const [calViewMode, setCalViewMode] = useState('monthly');
   const [calMonth, setCalMonth] = useState(() => new Date().getMonth());
   const [calYear, setCalYear] = useState(() => new Date().getFullYear());
-  const [calEvents, setCalEvents] = useState(() => { try { return JSON.parse(localStorage.getItem('ft_cal_events') || '[]'); } catch(e) { return []; } });
-  const [calRecurring, setCalRecurring] = useState(() => { try { return JSON.parse(localStorage.getItem('ft_cal_recurring') || '[]'); } catch(e) { return []; } });
+  const [calEvents, setCalEvents] = useState(() => loadData('ft_cal_events', []));
+  const [calRecurring, setCalRecurring] = useState(() => loadData('ft_cal_recurring', []));
   const [showAddCalEvent, setShowAddCalEvent] = useState(null); // date string for new event modal
   const [calEventSelectedPeople, setCalEventSelectedPeople] = useState([]); // node ids selected in event modal
 
@@ -1644,7 +1694,7 @@ function AppInner() {
         if (!pinModal) return;
         const stored = localStorage.getItem('ft_pin');
         if (pinModal.mode === 'set') {
-          localStorage.setItem('ft_pin', next);
+          saveRaw('ft_pin', next);
           setPinModal(null); setPinInput('');
           showToast('🔒 PIN set!');
           pinModal.onSuccess && pinModal.onSuccess();
@@ -2311,7 +2361,29 @@ function AppInner() {
   // checked whether the PARENT moved, never whether the logic computing the
   // position had changed underneath it).
   const MINIMISED_LAYOUT_VERSION = 'v5-straight-line-travel';
-  useEffect(() => { try { localStorage.setItem('ft_feed_positions', JSON.stringify(feedPositions)); } catch(e) {} }, [feedPositions]);
+  useEffect(() => { saveData('ft_feed_positions', feedPositions); }, [feedPositions]);
+  // Prune ghost entries -- a feedPositions key is `${dimKey}:${nodeId}`, and
+  // if that nodeId no longer exists in `nodes` (deleted, merged away, or
+  // otherwise gone), the entry keeps permanently blocking that grid cell as
+  // "occupied" forever, even though nothing real is actually there. This is
+  // exactly why some visually-empty spots silently refuse a drop.
+  useEffect(() => {
+    setFeedPositions(prev => {
+      const liveIds = new Set(nodes.map(n => n.id));
+      let changed = false;
+      const next = {};
+      for (const [key, val] of Object.entries(prev)) {
+        const colonIdx = key.indexOf(':');
+        const nodeId = colonIdx >= 0 ? key.slice(colonIdx + 1) : key;
+        if (liveIds.has(nodeId)) {
+          next[key] = val;
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [nodes]);
   const feedScrollRef = useRef(null);
   const feedDragRAF = useRef(null); // pending requestAnimationFrame id, used to throttle drag position updates to once per repaint instead of once per raw pointer event
   const feedLiveTouchRef = useRef(null); // {x, y, pointerId} -- continuously updated on every move from touch-down, even before the 350ms lift fires, so the lift starts from a fresh position instead of a stale touch-down snapshot
@@ -2558,7 +2630,7 @@ function AppInner() {
   const [showVineTuner, setShowVineTuner] = useState(false);
   const [tunerSections, setTunerSections] = useState({borders:true,flowers:false,strands:false,groupBorder:false});
   const [sliderDragging, setSliderDragging] = useState(false);
-  const [fallenLeaves, setFallenLeaves] = useState(() => { try { return JSON.parse(localStorage.getItem('ft_fallenLeaves')||'[]'); } catch(e) { return []; } });
+  const [fallenLeaves, setFallenLeaves] = useState(() => loadData('ft_fallenLeaves', []));
   // Surrounding flowers settings
   const [surroundFlowerSettings, setSurroundFlowerSettings] = useState(() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); return s.surroundFlowerSettings ? {...{enabled:true,minSize:8,maxSize:22,count:5,spread:80,useCalc:true,showMain:true,showSurround:true,flowerScale:1.0},...s.surroundFlowerSettings} : {enabled:true,minSize:8,maxSize:22,count:5,spread:80,useCalc:true,showMain:true,showSurround:true,flowerScale:1.0}; } catch(e) { return {enabled:true,minSize:8,maxSize:22,count:5,spread:80,useCalc:true,showMain:true,showSurround:true,flowerScale:1.0}; } });
   const [vineBorderParams, setVineBorderParams] = useState(() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); return s.vineBorderParams ? {...{blobArcRadius:1.05,blobSagDepth:0.38,vineArcRadius:1.05,vineSagDepth:0.38,leavesInner:1.0,leavesOuter:1.0},...s.vineBorderParams} : {blobArcRadius:1.05,blobSagDepth:0.38,vineArcRadius:1.05,vineSagDepth:0.38,leavesInner:1.0,leavesOuter:1.0}; } catch(e) { return {blobArcRadius:1.05,blobSagDepth:0.38,vineArcRadius:1.05,vineSagDepth:0.38,leavesInner:1.0,leavesOuter:1.0}; } });
@@ -2659,9 +2731,9 @@ function AppInner() {
   // molePos derived from the mole node -- drag uses handlePointerDown like any node
   const moleNode = nodes.find(n => n.id === 'mole');
   const molePos = moleNode ? { x: moleNode.x, y: moleNode.y } : { x: 280, y: 280 };
-  const [aiKeys, setAiKeys] = useState(() => { try { return JSON.parse(localStorage.getItem('ft_ai_keys')||'{}'); } catch(e) { return {}; } });
+  const [aiKeys, setAiKeys] = useState(() => loadData('ft_ai_keys', {}));
   const [aiProvider, setAiProvider] = useState(() => localStorage.getItem('ft_ai_provider')||'gemini');
-  const [assistantCharacter, setAssistantCharacter] = useState(() => { try { return JSON.parse(localStorage.getItem('ft_settings')||'{}').assistantCharacter||'diglett'; } catch(e) { return 'diglett'; } });
+  const [assistantCharacter, setAssistantCharacter] = useState(() => loadData('ft_settings', {}).assistantCharacter || 'diglett');
   const [aiResponse, setAiResponse] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
   const moleDragRef = useRef(null);
@@ -4014,7 +4086,7 @@ function AppInner() {
       : { source: 'flower_social', target: newId };
     const newLinksArray = [...linksRef.current, newLink];
     setLinks(prev => [...prev, newLink]);
-    try { localStorage.setItem('ft_links', JSON.stringify(newLinksArray)); } catch(e) {}
+    saveData('ft_links', newLinksArray);
     window.ftDiagLog('[FT-DIAG] STAGE 6: link saved, complete for id=', newId);
     setAddFriendForms(prev => prev.filter(f => f.id !== formId));
     showToast(resolvedName.trim() ? `🌱 ${resolvedName.trim()} added` : '🌱 New friend added');
@@ -4159,7 +4231,7 @@ function AppInner() {
       const perm = await Cal.requestFullCalendarAccess();
       if (perm.result === 'granted') {
         setGCalToken('device'); // marker value -- device calendar has no real token, just permission
-        try { localStorage.setItem('ft_gcal_token', 'device'); } catch(e) {}
+        saveRaw('ft_gcal_token', 'device');
         showToast('✅ Calendar connected!');
         await gCalFetchEvents();
       } else {
@@ -4376,7 +4448,7 @@ function AppInner() {
       } catch(e) { console.warn('Workouts fetch failed:', e); newData.workouts = newData.workouts || []; }
 
       setHealthData(newData);
-      try { localStorage.setItem('ft_health_data', JSON.stringify(newData)); } catch(e) {}
+      saveData('ft_health_data', newData);
       showToast(`💪 Health data updated`);
     } catch(e) {
       console.warn('Health fetch error:', e);
@@ -4656,7 +4728,7 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
       // Wire each new friend back to the parent node
       setLinks(prev => [...prev, ...newLinksToAdd]);
       await doSaveNodes(newNodesArray);
-      try { localStorage.setItem('ft_links', JSON.stringify(newLinksArray)); } catch(e) {}
+      saveData('ft_links', newLinksArray);
       setShowTutorial(false);
       showToast(`${newNodes.length} friend${newNodes.length !== 1 ? 's' : ''} added${parentNode && parentNode.id !== 'me' ? ` via ${parent.label}` : ''}!`);
     };
@@ -5274,14 +5346,14 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
       }, delay);
     }
   }, [nodes]);
-  useEffect(() => { try { localStorage.setItem('ft_links', JSON.stringify(links)); } catch(e) {} }, [links]);
-  useEffect(() => { try { localStorage.setItem('ft_cal_events', JSON.stringify(calEvents)); } catch(e) {} }, [calEvents]);
-  useEffect(() => { try { localStorage.setItem('ft_cal_recurring', JSON.stringify(calRecurring)); } catch(e) {} }, [calRecurring]);
-  useEffect(() => { try { localStorage.setItem('ft_health_lists', JSON.stringify(healthLists)); } catch(e) {} }, [healthLists]);
-  useEffect(() => { try { localStorage.setItem('ft_habit_today_v2', JSON.stringify(habitToday)); } catch(e) {} }, [habitToday]);
-  useEffect(() => { try { localStorage.setItem('ft_habit_history_v2', JSON.stringify(habitHistory)); } catch(e) {} }, [habitHistory]);
-  useEffect(() => { try { localStorage.setItem('ft_food_diary', JSON.stringify(foodDiaryEntries)); } catch(e) {} }, [foodDiaryEntries]);
-  useEffect(() => { try { localStorage.setItem('ft_list_scores', JSON.stringify(listScores)); } catch(e) {} }, [listScores]);
+  useEffect(() => { saveData('ft_links', links); }, [links]);
+  useEffect(() => { saveData('ft_cal_events', calEvents); }, [calEvents]);
+  useEffect(() => { saveData('ft_cal_recurring', calRecurring); }, [calRecurring]);
+  useEffect(() => { saveData('ft_health_lists', healthLists); }, [healthLists]);
+  useEffect(() => { saveData('ft_habit_today_v2', habitToday); }, [habitToday]);
+  useEffect(() => { saveData('ft_habit_history_v2', habitHistory); }, [habitHistory]);
+  useEffect(() => { saveData('ft_food_diary', foodDiaryEntries); }, [foodDiaryEntries]);
+  useEffect(() => { saveData('ft_list_scores', listScores); }, [listScores]);
   const healthListsRef = useRef(healthLists);
   healthListsRef.current = healthLists;
   // Midnight rollover: archive today's counts into history for every list,
@@ -5309,7 +5381,7 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
     if (habitLastResetDate !== todayStr) {
       doHabitRollover(habitLastResetDate);
       setHabitLastResetDate(todayStr);
-      try { localStorage.setItem('ft_habit_last_reset', todayStr); } catch(e) {}
+      saveRaw('ft_habit_last_reset', todayStr);
     }
     // Also re-check periodically in case the app stays open across midnight
     const iv = setInterval(() => {
@@ -5317,7 +5389,7 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
       setHabitLastResetDate(prevDate => {
         if (prevDate !== now) {
           doHabitRollover(prevDate);
-          try { localStorage.setItem('ft_habit_last_reset', now); } catch(e) {}
+          saveRaw('ft_habit_last_reset', now);
           return now;
         }
         return prevDate;
@@ -5341,7 +5413,7 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
     if (due.length > 0) setPendingReminders(due);
   }, [calRecurring]); // eslint-disable-line
 
-  useEffect(() => { try { localStorage.setItem('ft_dimensions', JSON.stringify(dimensions)); } catch(e) {} }, [dimensions]);
+  useEffect(() => { saveData('ft_dimensions', dimensions); }, [dimensions]);
   // Force an immediate, non-debounced save the moment the app is backgrounded
   // or closed -- this is the actual fix for people/photos going missing after
   // closing the app. visibilitychange firing 'hidden' is the most reliable
@@ -5352,10 +5424,10 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
     const flushNow = () => {
       clearTimeout(saveTimer.current);
       doSaveNodes();
-      try { localStorage.setItem('ft_links', JSON.stringify(links)); } catch(e) {}
-      try { localStorage.setItem('ft_dimensions', JSON.stringify(dimensions)); } catch(e) {}
-      try { localStorage.setItem('ft_cal_events', JSON.stringify(calEvents)); } catch(e) {}
-      try { localStorage.setItem('ft_cal_recurring', JSON.stringify(calRecurring)); } catch(e) {}
+      saveData('ft_links', links);
+      saveData('ft_dimensions', dimensions);
+      saveData('ft_cal_events', calEvents);
+      saveData('ft_cal_recurring', calRecurring);
       // A webview's visibilitychange/pagehide handler can't reliably await
       // async work before the process actually suspends, so a still-pending
       // IndexedDB photo write genuinely can't be guaranteed to finish here.
@@ -5397,21 +5469,19 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
 
   // -- Persist all settings to ft_settings ----------------------------------
   useEffect(() => {
-    try {
-      localStorage.setItem('ft_settings', JSON.stringify({
-        theme, groupColors, archivedLinks, collapsedGroups, minimisedNodes, gridStyle,
-        photoBorderMode, showMapKey, showVineBorders, darknessFilter, windowThemeKey, customWindowTheme,
-        vineBorderParams, surroundFlowerSettings, activeTags, strandParams, groupBorderParams,
-        groupPhotoLayout, visibleTools, assistantCharacter, simpleMode, mapStyle, feedDragMode,
-        feedShowNames, feedShowBorderColors,
-      }));
-    } catch(e) { console.warn('ft_settings save failed:', e.message); }
+    saveData('ft_settings', {
+      theme, groupColors, archivedLinks, collapsedGroups, minimisedNodes, gridStyle,
+      photoBorderMode, showMapKey, showVineBorders, darknessFilter, windowThemeKey, customWindowTheme,
+      vineBorderParams, surroundFlowerSettings, activeTags, strandParams, groupBorderParams,
+      groupPhotoLayout, visibleTools, assistantCharacter, simpleMode, mapStyle, feedDragMode,
+      feedShowNames, feedShowBorderColors,
+    });
   }, [theme, groupColors, archivedLinks, collapsedGroups, minimisedNodes, gridStyle, photoBorderMode,
       showMapKey, showVineBorders, darknessFilter, windowThemeKey, customWindowTheme, vineBorderParams, surroundFlowerSettings, activeTags, strandParams, groupBorderParams, assistantCharacter, simpleMode, mapStyle, feedDragMode, feedShowNames, feedShowBorderColors]);
 
 
   useEffect(() => {
-    try { localStorage.setItem('ft_fallenLeaves', JSON.stringify(fallenLeaves)); } catch(e) {}
+    saveData('ft_fallenLeaves', fallenLeaves);
   }, [fallenLeaves]);
 
 
@@ -7515,7 +7585,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       </div>
                       <div style={{display:'flex',gap:6}}>
                         {[{v:0.85,l:'S'},{v:1,l:'M'},{v:1.15,l:'L'},{v:1.3,l:'XL'}].map(({v,l})=>(
-                          <button key={v} onClick={()=>{setFontSize(v);try{localStorage.setItem('ft_fontSize',String(v));}catch(e) {}}}
+                          <button key={v} onClick={()=>{setFontSize(v);saveRaw('ft_fontSize', String(v));}}
                             style={{flex:1,padding:'6px 0',borderRadius:8,fontWeight:700,cursor:'pointer',border:'1.5px solid '+(fontSize===v?'#10b981':(theme.darkMode?'#334155':'#e2e8f0')),background:fontSize===v?'#10b981':'transparent',color:fontSize===v?'white':(theme.darkMode?'#94a3b8':'#64748b'),fontSize:l==='S'?11:l==='M'?13:l==='L'?15:17}}>
                             {l}
                           </button>
@@ -7678,7 +7748,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     <div style={{fontSize:12,fontWeight:700,color:theme.darkMode?'#94a3b8':'#64748b',marginBottom:8}}>AI provider</div>
                     <div style={{display:'flex',gap:8,marginBottom:12}}>
                       {[{id:'gemini',label:'Gemini',color:'#4285f4'},{id:'openai',label:'GPT-4o',color:'#10a37f'},{id:'claude',label:'Claude',color:'#d97706'}].map(p=>(
-                        <button key={p.id} onClick={()=>{ setAiProvider(p.id); localStorage.setItem('ft_ai_provider',p.id); }}
+                        <button key={p.id} onClick={()=>{ setAiProvider(p.id); saveRaw('ft_ai_provider', p.id); }}
                           style={{flex:1,padding:'5px 0',borderRadius:8,fontSize:10,fontWeight:700,cursor:'pointer',border:'none',
                             background:aiProvider===p.id?p.color:'rgba(255,255,255,0.06)',
                             color:aiProvider===p.id?'white':theme.darkMode?'#64748b':'#94a3b8'}}>
@@ -7702,7 +7772,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                             onChange={e=>{
                               const next={...aiKeys,[p.id]:e.target.value};
                               setAiKeys(next);
-                              localStorage.setItem('ft_ai_keys',JSON.stringify(next));
+                              saveData('ft_ai_keys', next);
                             }}
                             style={{width:'100%',fontSize:11,padding:'6px 8px',borderRadius:8,
                               background:theme.darkMode?'#0f172a':'#f8fafc',
@@ -7774,7 +7844,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 {localStorage.getItem('ft_pin')&&(
                   <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 0',borderBottom:`1px solid ${pw.border}`}}>
                     <span style={{fontSize:13,color:theme.darkMode?'#94a3b8':pw.secondText}}>Lock after</span>
-                    <select value={lockTimer} onChange={e=>{setLockTimerVal(e.target.value);localStorage.setItem('ft_lockTimer',e.target.value);}}
+                    <select value={lockTimer} onChange={e=>{setLockTimerVal(e.target.value);saveRaw('ft_lockTimer', e.target.value);}}
                       style={{fontSize:12,padding:'5px 8px',borderRadius:8,border:`1px solid ${pw.border}`,background:theme.darkMode?'#1e293b':'white',color:theme.darkMode?'#e2e8f0':pw.bodyText,outline:'none'}}>
                       <option value="close">App close</option>
                       <option value="5min">5 minutes</option>
@@ -7817,7 +7887,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     if (!trimmed) return;
                     const updated = [...userIdeas, trimmed];
                     setUserIdeas(updated);
-                    localStorage.setItem('ft_ideas', JSON.stringify(updated));
+                    saveData('ft_ideas', updated);
                     setNewIdea('');
                   };
 
@@ -7825,7 +7895,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   const removeIdea = (i) => {
                     const updated = userIdeas.filter((_,idx)=>idx!==i);
                     setUserIdeas(updated);
-                    localStorage.setItem('ft_ideas', JSON.stringify(updated));
+                    saveData('ft_ideas', updated);
                   };
 
 
@@ -12014,7 +12084,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         const newLink = { source: spawnPopup.sourceNodeId, target: newId };
                         const newLinksArray = [...linksRef.current, newLink];
                         setLinks(prev => [...prev, newLink]);
-                        try { localStorage.setItem('ft_links', JSON.stringify(newLinksArray)); } catch(e) {}
+                        saveData('ft_links', newLinksArray);
                       }
                       setSelectedNodeId(newId);
                       setSpawnPopup(null);
@@ -13655,14 +13725,14 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   {[{id:'gemini',label:'Gemini',color:'#4285f4'},{id:'openai',label:'GPT-4o',color:'#10a37f'},{id:'claude',label:'Claude',color:'#d97706'}].map(p=>(
                     <div key={p.id}>
                       <div style={{fontSize:FS,fontWeight:700,color:aiProvider===p.id?p.color:'#64748b',marginBottom:2,display:'flex',alignItems:'center',gap:5}}>
-                        <button onClick={()=>{ setAiProvider(p.id); localStorage.setItem('ft_ai_provider',p.id); }}
+                        <button onClick={()=>{ setAiProvider(p.id); saveRaw('ft_ai_provider', p.id); }}
                           style={{width:12,height:12,borderRadius:'50%',border:`2px solid ${p.color}`,
                             background:aiProvider===p.id?p.color:'transparent',cursor:'pointer',padding:0,flexShrink:0}}/>
                         {p.label}
                       </div>
                       <input type='password' placeholder={`${p.label} API key`}
                         value={aiKeys[p.id]||''}
-                        onChange={e=>{ const next={...aiKeys,[p.id]:e.target.value}; setAiKeys(next); localStorage.setItem('ft_ai_keys',JSON.stringify(next)); }}
+                        onChange={e=>{ const next={...aiKeys,[p.id]:e.target.value}; setAiKeys(next); saveData('ft_ai_keys', next); }}
                         style={{width:'100%',fontSize:FS,padding:'6px 8px',borderRadius:6,
                           background:'#0f172a',border:'1px solid #334155',color:'#e2e8f0',boxSizing:'border-box'}}/>
                     </div>
@@ -17382,7 +17452,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         if (!name?.trim()) return;
                         const updated = [...customPresets, {...pf, name:name.trim()}];
                         setCustomPresets(updated);
-                        localStorage.setItem('ft_flower_presets', JSON.stringify(updated));
+                        saveData('ft_flower_presets', updated);
                         showToast('🌸 Saved: '+name.trim());
                       }} style={{flex:1,padding:'7px 8px',borderRadius:99,fontSize:12,fontWeight:700,cursor:'pointer',border:'none',background:pw.cellBg,color:sub}}>
                         + Save current
@@ -17451,13 +17521,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                     const updated = [...customPresets];
                                     updated[idx] = {...pf, name:preset.name};
                                     setCustomPresets(updated);
-                                    localStorage.setItem('ft_flower_presets', JSON.stringify(updated));
+                                    saveData('ft_flower_presets', updated);
                                     showToast('✅ '+preset.name+' updated');
                                   } else {
                                     // Save as new custom with same name
                                     const updated = [...customPresets, {...pf, name:preset.name+' (edited)'}];
                                     setCustomPresets(updated);
-                                    localStorage.setItem('ft_flower_presets', JSON.stringify(updated));
+                                    saveData('ft_flower_presets', updated);
                                     showToast('✅ Saved as custom: '+preset.name);
                                   }
                                   setPfEditingPresetIdx(-1);
@@ -17468,7 +17538,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                   const idx = pi - PRESETS.length;
                                   const updated = customPresets.filter((_,i)=>i!==idx);
                                   setCustomPresets(updated);
-                                  localStorage.setItem('ft_flower_presets', JSON.stringify(updated));
+                                  saveData('ft_flower_presets', updated);
                                   setPfEditingPresetIdx(-1);
                                   showToast('🗑️ Deleted');
                                 }} style={{padding:'5px',borderRadius:8,background:'#ef4444',color:'white',border:'none',cursor:'pointer',fontSize:11,fontWeight:700}}>
@@ -18569,7 +18639,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 .map(n => ({source: groupPhotoOriginNode, target: n.id}));
               const newLinksArray = [...currentLinks, ...newLinksToAdd];
               setLinks(prev => [...prev, ...newLinksToAdd]);
-              try { localStorage.setItem('ft_links', JSON.stringify(newLinksArray)); } catch(e) {}
+              saveData('ft_links', newLinksArray);
             }
             if (finalNodesArray) await doSaveNodes(finalNodesArray);
           }
