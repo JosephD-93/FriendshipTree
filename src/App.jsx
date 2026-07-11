@@ -1847,6 +1847,28 @@ function AppInner() {
     } catch(e) {}
   };
 
+  // Save every photo in a person's carousel array durably, not just the
+  // single current one -- uses a composite key per index so all of them
+  // survive an app restart, fixing the gap where only the first photo per
+  // person was ever backed up.
+  const savePhotoArrayToDB = async (nodeId, photosArray) => {
+    if (!Array.isArray(photosArray) || photosArray.length === 0) return;
+    const writes = photosArray.map((p, i) => {
+      const dataUrl = p?.cropped || p?.orig;
+      if (!dataUrl) return Promise.resolve();
+      return savePhotoToDB(`${nodeId}_photo_${i}`, dataUrl);
+    });
+    await Promise.all(writes);
+    // Also record how many entries exist, so restore knows where to stop
+    // looking without needing to probe indefinitely
+    try {
+      const Prefs = window.Capacitor?.Plugins?.Preferences;
+      if (Prefs && typeof Prefs.set === 'function') {
+        await Prefs.set({ key: `ft_photo_count_${nodeId}`, value: String(photosArray.length) });
+      }
+    } catch(e) {}
+  };
+
 
   // On mount — ask the OS to PERSIST our storage so Android doesn't evict
   // IndexedDB (which is why photos vanished after closing the native app).
@@ -1985,6 +2007,29 @@ function AppInner() {
           // Small pause between batches so the update genuinely renders as a
           // visible step rather than all batches collapsing into one paint.
           if (i + BATCH_SIZE < all.length) await new Promise(r => setTimeout(r, 60));
+        }
+        // Second pass: reconstruct full multi-photo carousels from the
+        // composite-keyed entries (${nodeId}_photo_${i}) written by
+        // savePhotoArrayToDB -- these are already in `all` since they share
+        // the same IndexedDB store, we just need to group and order them.
+        const arrayEntryPattern = /^(.+)_photo_(\d+)$/;
+        const byNode = {};
+        all.forEach(({ nodeId, dataUrl }) => {
+          const m = nodeId.match(arrayEntryPattern);
+          if (m && dataUrl) {
+            const [, realNodeId, idxStr] = m;
+            (byNode[realNodeId] = byNode[realNodeId] || [])[parseInt(idxStr, 10)] = dataUrl;
+          }
+        });
+        const nodesWithArrays = Object.keys(byNode);
+        if (nodesWithArrays.length > 0) {
+          setNodes(prev => prev.map(n => {
+            const entries = byNode[n.id];
+            if (!entries) return n;
+            const photos = entries.filter(Boolean).map(dataUrl => ({ orig: dataUrl, cropped: dataUrl }));
+            if (photos.length === 0) return n;
+            return { ...n, photos, activePhotoIdx: photos.length - 1, img: photos[photos.length-1].cropped };
+          }));
         }
       } catch(e) { console.warn('Photo restore failed:', e); }
       setPhotosRestoring(false);
@@ -4529,6 +4574,7 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
           if (n.id !== selectedNodeId) return n;
           if (!updates.img) return { ...n, ...updates };
           const photos = [...(n.photos || []), { orig: updates.img, cropped: updates.img }];
+          savePhotoArrayToDB(selectedNodeId, photos);
           return { ...n, ...updates, photos, activePhotoIdx: photos.length - 1 };
         }));
         if (updates.img && typeof savePhotoToDB === 'function') savePhotoToDB(selectedNodeId, updates.img);
@@ -18274,6 +18320,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             const newPhotos = existingPhotos.find(p => p.orig === origSrc)
               ? existingPhotos.map(p => p.orig === origSrc ? { ...p, cropped: base64 } : p)
               : [...existingPhotos, { orig: origSrc, cropped: base64 }];
+            savePhotoArrayToDB(photoCrop.nodeId, newPhotos);
             return { ...n, img: base64, photos: newPhotos, activePhotoIdx: newPhotos.length - 1 };
           }));
           setPhotoCrop(null);
@@ -18506,6 +18553,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 if (photoUpdates[n.id]) {
                   const cropped = photoUpdates[n.id];
                   const photos = [...(n.photos||[]), {cropped, orig:cropped}];
+                  savePhotoArrayToDB(n.id, photos);
                   return {...n, img:cropped, photos, activePhotoIdx:photos.length-1};
                 }
                 return n;
