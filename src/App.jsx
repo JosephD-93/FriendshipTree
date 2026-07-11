@@ -17,6 +17,14 @@ const APP_VERSION = '3.1';
 // debugging (which had persistent connection issues on this machine).
 // Pull the file afterward with:
 //   adb pull /sdcard/Documents/ft_diag.txt
+// ─── FT-DIAG logger ─────────────────────────────────────────────────────
+// Stores diagnostic lines via Capacitor's Preferences plugin (already
+// confirmed working on this device earlier in the session) rather than
+// Filesystem (which isn't properly configured/permissioned for this
+// project) or logcat/console.log (which weren't reliably reaching adb or
+// Chrome remote debugging on this machine). Read back in-app via the
+// Diagnostic Log viewer -- no adb, no USB debugging cooperation needed.
+let ftDiagBuffer = null; // lazy-loaded cache of the accumulated log string
 window.ftDiagLog = function(...args) {
   const msg = args.map(a => {
     if (a === undefined) return 'undefined';
@@ -26,18 +34,23 @@ window.ftDiagLog = function(...args) {
   const line = `[${new Date().toISOString()}] ${msg}`;
   console.log(line);
   try {
-    const Filesystem = window.Capacitor?.Plugins?.Filesystem;
-    if (Filesystem && typeof Filesystem.writeFile === 'function') {
-      Filesystem.writeFile({
-        path: 'ft_diag.txt',
-        data: line + '\n',
-        directory: 'DOCUMENTS',
-        encoding: 'utf8',
-        append: true,
-      }).catch(() => {});
+    const Prefs = window.Capacitor?.Plugins?.Preferences;
+    if (!Prefs || typeof Prefs.set !== 'function') return;
+    const append = (existing) => {
+      const next = (existing || '') + line + '\n';
+      // Cap growth -- keep roughly the last 800 lines worth of characters
+      const capped = next.length > 200000 ? next.slice(next.length - 200000) : next;
+      ftDiagBuffer = capped;
+      Prefs.set({ key: 'ft_diag_log', value: capped }).catch(() => {});
+    };
+    if (ftDiagBuffer !== null) {
+      append(ftDiagBuffer);
+    } else {
+      Prefs.get({ key: 'ft_diag_log' }).then(r => append(r?.value || '')).catch(() => append(''));
     }
   } catch(e) {}
 };
+// ─────────────────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────
 
 
@@ -2273,6 +2286,9 @@ function AppInner() {
   // 'saved' | 'pending' | 'error' -- drives the save status dot in the corner
   const [saveStatus, setSaveStatus] = useState('saved');
   const [showStartupDiagnostic, setShowStartupDiagnostic] = useState(true);
+  const [showDiagLogViewer, setShowDiagLogViewer] = useState(false);
+  const [diagLogText, setDiagLogText] = useState('Loading...');
+
 
 
   // Google Calendar integration state
@@ -6792,9 +6808,35 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           ) : (
             <div style={{color:'#94a3b8'}}>No save metadata found yet (first run, or metadata never written)</div>
           )}
+          <button onClick={async () => {
+            try {
+              const Prefs = window.Capacitor?.Plugins?.Preferences;
+              const r = Prefs ? await Prefs.get({ key: 'ft_diag_log' }) : null;
+              setDiagLogText(r?.value || '(log is empty)');
+            } catch(e) { setDiagLogText('Error reading log: ' + e.message); }
+            setShowDiagLogViewer(true);
+          }}
+            style={{marginTop:8, width:'100%', padding:'6px 0', borderRadius:6, border:'1px solid #334155',
+              background:'none', color:'#94a3b8', fontSize:11, cursor:'pointer'}}>
+            📄 View Full Diagnostic Log
+          </button>
         </div>
       );
     })()}
+    {showDiagLogViewer && (
+      <div style={{position:'fixed', inset:0, zIndex:10000, background:'rgba(0,0,0,0.85)',
+        display:'flex', flexDirection:'column', padding:12}}>
+        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8}}>
+          <span style={{color:'white', fontWeight:700, fontSize:13}}>Diagnostic Log</span>
+          <button onClick={() => setShowDiagLogViewer(false)}
+            style={{background:'#334155', border:'none', color:'white', borderRadius:6, padding:'6px 14px', fontSize:13}}>Close</button>
+        </div>
+        <textarea readOnly value={diagLogText}
+          style={{flex:1, background:'#0f172a', color:'#10b981', fontFamily:'monospace', fontSize:10,
+            border:'1px solid #334155', borderRadius:8, padding:10, whiteSpace:'pre-wrap'}}/>
+        <div style={{color:'#94a3b8', fontSize:10, marginTop:6}}>Tap and hold the text above to select all, then copy.</div>
+      </div>
+    )}
     {photosRestoring && (
       <div style={{position:'fixed', top:12, left:'50%', transform:'translateX(-50%)', zIndex:9999,
         background:'rgba(15,23,42,0.9)', color:'white', padding:'6px 14px', borderRadius:99,
