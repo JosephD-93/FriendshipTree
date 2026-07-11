@@ -15577,7 +15577,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     })()}
 
                     {/* Fixed 6-column hex strip (offset right of the band), unlimited rows */}
-                    <div data-feed-strip
+                    <div data-feed-strip={dimKey}
                       onPointerUp={e=>{
                         if (!feedCarrying || feedCarrying.dimKey !== dimKey) return;
                         if (feedCarrying.dropMode === 'twohand') return;
@@ -15633,12 +15633,37 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                             cells.push({ cx, cy });
                           }
                         }
+                        // Work out which specific cell the drag would land on
+                        // right now, so it can be highlighted solid -- same
+                        // visual language as the "held cell" preview already
+                        // used while dragging on the map.
+                        let targetCell = null;
+                        if (feedCarrying && feedCarrying.dimKey === dimKey && feedCarrying.dropMode !== 'twohand') {
+                          const stripEl = document.querySelector(`[data-feed-strip="${dimKey}"]`);
+                          if (stripEl) {
+                            const rect = stripEl.getBoundingClientRect();
+                            const localX = feedCarrying.screenX - rect.left, localY = feedCarrying.screenY - rect.top;
+                            const yOffsetForDrop = dimKey === 'health' ? 148 : 50;
+                            let tCol = Math.round((localX - FEED_HEX) / (FEED_HEX * 1.5));
+                            let tRow = Math.round((localY - yOffsetForDrop) / ROW_STEP);
+                            tCol = Math.max(0, Math.min(COLS - 1, tCol));
+                            tRow = Math.max(0, tRow);
+                            const rowShift = (tRow % 2 === 1) ? FEED_HEX * 0.75 : 0;
+                            targetCell = { cx: colOffsets[tCol] + rowShift + FEED_HEX, cy: tRow * ROW_STEP + 50 };
+                          }
+                        }
                         return (
                           <svg style={{position:'absolute', left:0, top:0, width:stripW, height:sectionH, pointerEvents:'none'}}>
-                            {cells.map((cell, ci) => (
-                              <circle key={ci} cx={cell.cx} cy={cell.cy} r={FEED_HEX*0.5}
-                                fill="none" stroke={strokeCol} strokeWidth={1} strokeDasharray="6 4"/>
-                            ))}
+                            {cells.map((cell, ci) => {
+                              const isTarget = targetCell && Math.abs(cell.cx-targetCell.cx)<1 && Math.abs(cell.cy-targetCell.cy)<1;
+                              return (
+                                <circle key={ci} cx={cell.cx} cy={cell.cy} r={FEED_HEX*0.5}
+                                  fill={isTarget ? (dm?'rgba(16,185,129,0.18)':'rgba(16,185,129,0.14)') : 'none'}
+                                  stroke={strokeCol} strokeWidth={isTarget ? 2 : 1}
+                                  strokeDasharray={isTarget ? 'none' : '6 4'}/>
+                              );
+                            })}
+                            {targetCell && <circle cx={targetCell.cx} cy={targetCell.cy} r={5} fill="#10b981" opacity={0.7}/>}
                           </svg>
                         );
                       })()}
