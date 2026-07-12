@@ -1335,8 +1335,27 @@ function MoleCards({ slides, left, top, cardWidth, cardHeight, pillLeft, pillTop
 // night, connected with a step-line the way most real sleep trackers show it.
 function SleepTimelineChart({ segments, darkMode }) {
   if (!segments || segments.length === 0) return null;
-  const STAGE_LEVELS = { awake: 3, rem: 2, light: 1, deep: 0 };
-  const STAGE_COLORS = { awake: '#fbbf24', rem: '#8b5cf6', light: '#c4b5fd', deep: '#5b21b6' };
+  // Whether this data source actually reports fine-grained stages (rem/light/deep)
+  // or just broad asleep/inBed/awake blocks -- not every sync source provides
+  // real stage detail, and silently defaulting unrecognized states to "Light"
+  // (as this used to do) produced a misleading chart that looked like real
+  // stage data when it wasn't.
+  const hasFineGrainedStages = segments.some(s => s.state === 'rem' || s.state === 'light' || s.state === 'deep');
+  if (!hasFineGrainedStages) {
+    const start = new Date(segments[0].start).getTime();
+    const end = new Date(segments[segments.length - 1].end).getTime();
+    const fmtTime = (ms) => new Date(ms).toLocaleTimeString('en', { hour: 'numeric', minute: '2-digit' });
+    return (
+      <div style={{padding:'10px 12px', borderRadius:8, background:darkMode?'#0f172a':'#f1f5f9',
+        fontSize:11, color:darkMode?'#94a3b8':'#64748b'}}>
+        ℹ️ Your sleep data source doesn't report detailed stages (deep/light/REM) for last night —
+        only that you were asleep from {fmtTime(start)} to {fmtTime(end)}. The stage breakdown below will
+        fill in automatically on nights where your device provides it.
+      </div>
+    );
+  }
+  const STAGE_LEVELS = { awake: 3, inBed: 3, asleep: 1.5, rem: 2, light: 1, deep: 0 };
+  const STAGE_COLORS = { awake: '#fbbf24', inBed: '#fbbf24', asleep: '#94a3b8', rem: '#8b5cf6', light: '#c4b5fd', deep: '#5b21b6' };
   const STAGE_LABELS = { awake: 'Awake', rem: 'REM', light: 'Light', deep: 'Deep' };
   const start = new Date(segments[0].start).getTime();
   const end = new Date(segments[segments.length - 1].end).getTime();
@@ -4698,6 +4717,32 @@ function AppInner() {
           return { date: dayStr, value: Math.round(minutesByNight[dayStr] || 0) };
         });
       } catch(e) { console.warn('Sleep history fetch failed:', e); }
+
+      // Generic 7-day history for the remaining metrics, matching the same
+      // pattern already used for steps -- sum for cumulative metrics,
+      // average for heart-rate-style metrics where summing daily readings
+      // wouldn't make sense.
+      const fetchGenericHistory = async (dataType, aggregation) => {
+        try {
+          const res = await Health.queryAggregated({
+            dataType, startDate: startOf7Days.toISOString(), endDate: now.toISOString(),
+            bucket: 'day', aggregation,
+          });
+          const samples = res?.samples || [];
+          return Array.from({length: 7}, (_, i) => {
+            const d = new Date(now); d.setDate(d.getDate() - (6 - i));
+            const dayStr = getLocalDateStr(d);
+            const match = samples.find(s => getLocalDateStr(new Date(s.startDate || s.date)) === dayStr);
+            return { date: dayStr, value: match ? Math.round(match.value * 10) / 10 : 0 };
+          });
+        } catch(e) { console.warn(`${dataType} history fetch failed:`, e); return null; }
+      };
+      newData.heartRateHistory = await fetchGenericHistory('heartRate', 'average');
+      newData.distanceHistory = (await fetchGenericHistory('distance', 'sum'))
+        ?.map(d => ({ ...d, value: Math.round((d.value/1000) * 10) / 10 })); // m -> km
+      newData.caloriesHistory = await fetchGenericHistory('calories', 'sum');
+      newData.flightsHistory = await fetchGenericHistory('flightsClimbed', 'sum');
+      newData.restingHRHistory = await fetchGenericHistory('restingHeartRate', 'average');
 
       setHealthData(newData);
       saveData('ft_health_data', newData);
@@ -14220,14 +14265,14 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         {showHealthPanel && viewMode !== 'calendar' && viewMode !== 'me' && (() => {
           const dm = theme.darkMode;
           const METRICS = [
-            { key: 'steps',     label: 'Steps',      icon: '👟', color: '#10b981', value: healthData.steps,     unit: 'steps today',  format: v => v?.toLocaleString() || '—' },
-            { key: 'sleep',     label: 'Sleep',      icon: '😴', color: '#8b5cf6', value: healthData.sleep,     unit: 'minutes',      format: v => v != null ? `${Math.floor(v/60)}h ${v%60}m` : '—' },
-            { key: 'heartRate', label: 'Heart Rate', icon: '❤️', color: '#ef4444', value: healthData.heartRate, unit: 'bpm',          format: v => v?.toString() || '—' },
-            { key: 'workouts',  label: 'Workouts',   icon: '💪', color: '#f59e0b', value: healthData.workouts?.length, unit: 'this week', format: v => v?.toString() || '—' },
-            { key: 'distance',  label: 'Distance',   icon: '🚶', color: '#06b6d4', value: healthData.distanceKm, unit: 'km today',   format: v => v != null ? `${v}` : '—' },
-            { key: 'calories',  label: 'Active Cal',  icon: '🔥', color: '#f97316', value: healthData.activeCalories, unit: 'kcal today', format: v => v != null ? Math.round(v).toLocaleString() : '—' },
-            { key: 'flights',   label: 'Flights',    icon: '🏢', color: '#84cc16', value: healthData.flights, unit: 'climbed today', format: v => v != null ? Math.round(v).toString() : '—' },
-            { key: 'restingHR', label: 'Resting HR', icon: '💤', color: '#ec4899', value: healthData.restingHeartRate, unit: 'bpm',   format: v => v?.toString() || '—' },
+            { key: 'steps',     dataType: 'steps',     label: 'Steps',      icon: '👟', color: '#10b981', value: healthData.steps,     unit: 'steps today',  format: v => v?.toLocaleString() || '—' },
+            { key: 'sleep',     dataType: null,         label: 'Sleep',      icon: '😴', color: '#8b5cf6', value: healthData.sleep,     unit: 'minutes',      format: v => v != null ? `${Math.floor(v/60)}h ${v%60}m` : '—' },
+            { key: 'heartRate', dataType: 'heartRate',  label: 'Heart Rate', icon: '❤️', color: '#ef4444', value: healthData.heartRate, unit: 'bpm',          format: v => v?.toString() || '—' },
+            { key: 'workouts',  dataType: null,         label: 'Workouts',   icon: '💪', color: '#f59e0b', value: healthData.workouts?.length, unit: 'this week', format: v => v?.toString() || '—' },
+            { key: 'distance',  dataType: 'distance',   label: 'Distance',   icon: '🚶', color: '#06b6d4', value: healthData.distanceKm, unit: 'km today',   format: v => v != null ? `${v}` : '—' },
+            { key: 'calories',  dataType: 'calories',   label: 'Active Cal',  icon: '🔥', color: '#f97316', value: healthData.activeCalories, unit: 'kcal today', format: v => v != null ? Math.round(v).toLocaleString() : '—' },
+            { key: 'flights',   dataType: 'flightsClimbed', label: 'Flights', icon: '🏢', color: '#84cc16', value: healthData.flights, unit: 'climbed today', format: v => v != null ? Math.round(v).toString() : '—' },
+            { key: 'restingHR', dataType: 'restingHeartRate', label: 'Resting HR', icon: '💤', color: '#ec4899', value: healthData.restingHeartRate, unit: 'bpm',   format: v => v?.toString() || '—' },
           ];
           return (
             <div style={{position:'fixed', inset:0, zIndex:300, display:'flex', alignItems:'flex-end',
@@ -14267,8 +14312,15 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 {/* Metric cards */}
                 <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:16}}>
                   {METRICS.map(m => {
-                    const history = m.key === 'steps' ? healthData.stepsHistory
-                      : m.key === 'sleep' ? healthData.sleepHistory : null;
+                    const historyKey = m.key === 'steps' ? 'stepsHistory'
+                      : m.key === 'sleep' ? 'sleepHistory'
+                      : m.key === 'heartRate' ? 'heartRateHistory'
+                      : m.key === 'distance' ? 'distanceHistory'
+                      : m.key === 'calories' ? 'caloriesHistory'
+                      : m.key === 'flights' ? 'flightsHistory'
+                      : m.key === 'restingHR' ? 'restingHRHistory'
+                      : null;
+                    const history = historyKey ? healthData[historyKey] : null;
                     const avg = history && history.length > 0
                       ? Math.round(history.reduce((s,d) => s+d.value, 0) / history.length) : null;
                     const vsAvg = avg && m.value != null && avg > 0
@@ -14293,49 +14345,37 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     </div>
                   );})}
                 </div>
-                {/* Weekly trends -- steps and sleep over the last 7 days */}
-                {(healthData.stepsHistory || healthData.sleepHistory) && (
+                {/* Weekly trends -- every metric with 7-day history, not just steps and sleep */}
+                {METRICS.some(m => {
+                  const hk = m.key === 'steps' ? 'stepsHistory' : m.key === 'sleep' ? 'sleepHistory'
+                    : m.key === 'heartRate' ? 'heartRateHistory' : m.key === 'distance' ? 'distanceHistory'
+                    : m.key === 'calories' ? 'caloriesHistory' : m.key === 'flights' ? 'flightsHistory'
+                    : m.key === 'restingHR' ? 'restingHRHistory' : null;
+                  return hk && healthData[hk];
+                }) && (
                   <div style={{marginBottom:16, borderRadius:12, padding:'14px', 
                     background:dm?'#1e293b':'#f8fafc', border:`1px solid ${dm?'#334155':'#e2e8f0'}`}}>
                     <div style={{fontSize:12, fontWeight:700, color:dm?'white':'#0f172a', marginBottom:12}}>📊 This Week</div>
-                    {healthData.stepsHistory && (() => {
-                      const hist = healthData.stepsHistory;
+                    {METRICS.map(m => {
+                      const hk = m.key === 'steps' ? 'stepsHistory' : m.key === 'sleep' ? 'sleepHistory'
+                        : m.key === 'heartRate' ? 'heartRateHistory' : m.key === 'distance' ? 'distanceHistory'
+                        : m.key === 'calories' ? 'caloriesHistory' : m.key === 'flights' ? 'flightsHistory'
+                        : m.key === 'restingHR' ? 'restingHRHistory' : null;
+                      const hist = hk ? healthData[hk] : null;
+                      if (!hist) return null;
                       const maxVal = Math.max(...hist.map(d=>d.value), 1);
                       return (
-                        <div style={{marginBottom:14}}>
-                          <div style={{fontSize:10, color:dm?'#94a3b8':'#64748b', marginBottom:6}}>👟 Steps</div>
+                        <div key={m.key} style={{marginBottom:14}}>
+                          <div style={{fontSize:10, color:dm?'#94a3b8':'#64748b', marginBottom:6}}>{m.icon} {m.label}</div>
                           <div style={{display:'flex', alignItems:'flex-end', gap:4, height:50}}>
                             {hist.map((d,i) => {
                               const dayLabel = new Date(d.date+'T12:00:00').toLocaleDateString('en',{weekday:'narrow'});
                               const isToday = i === hist.length-1;
-                              return (
-                                <div key={i} style={{flex:1, display:'flex', flexDirection:'column', alignItems:'center', gap:2}}>
-                                  <div style={{width:'100%', height:Math.max(3, (d.value/maxVal)*40), borderRadius:3,
-                                    background: isToday ? '#10b981' : (dm?'#334155':'#e2e8f0')}}/>
-                                  <span style={{fontSize:8, color:dm?'#64748b':'#94a3b8'}}>{dayLabel}</span>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      );
-                    })()}
-                    {healthData.sleepHistory && (() => {
-                      const hist = healthData.sleepHistory;
-                      const maxVal = Math.max(...hist.map(d=>d.value), 60);
-                      return (
-                        <div>
-                          <div style={{fontSize:10, color:dm?'#94a3b8':'#64748b', marginBottom:6}}>😴 Sleep</div>
-                          <div style={{display:'flex', alignItems:'flex-end', gap:4, height:50}}>
-                            {hist.map((d,i) => {
-                              const dayLabel = new Date(d.date+'T12:00:00').toLocaleDateString('en',{weekday:'narrow'});
-                              const isToday = i === hist.length-1;
-                              const hrs = Math.floor(d.value/60), mins = d.value%60;
                               return (
                                 <div key={i} style={{flex:1, display:'flex', flexDirection:'column', alignItems:'center', gap:2}}
-                                  title={`${hrs}h ${mins}m`}>
+                                  title={m.format(d.value)}>
                                   <div style={{width:'100%', height:Math.max(3, (d.value/maxVal)*40), borderRadius:3,
-                                    background: isToday ? '#8b5cf6' : (dm?'#334155':'#e2e8f0')}}/>
+                                    background: isToday ? m.color : (dm?'#334155':'#e2e8f0')}}/>
                                   <span style={{fontSize:8, color:dm?'#64748b':'#94a3b8'}}>{dayLabel}</span>
                                 </div>
                               );
@@ -14343,7 +14383,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           </div>
                         </div>
                       );
-                    })()}
+                    })}
                   </div>
                 )}
                 {/* Sleep quality breakdown -- deep/light/REM/awake stages */}
