@@ -1333,6 +1333,109 @@ function MoleCards({ slides, left, top, cardWidth, cardHeight, pillLeft, pillTop
 // sleep stages, not just totals. Y axis is sleep depth (Awake top, then
 // REM, Light, Deep at the bottom), X axis is real clock time across the
 // night, connected with a step-line the way most real sleep trackers show it.
+// Age from a free-text birthday string, using the same parser the birthday
+// wheel picker writes in that format.
+function calculateAgeFromBirthday(birthdayStr) {
+  const parsed = parseBirthdayDateGlobal(birthdayStr);
+  if (!parsed || !parsed.year) return null;
+  const today = new Date();
+  let age = today.getFullYear() - parsed.year;
+  const hasHadBirthdayThisYear = (today.getMonth() > parsed.month) ||
+    (today.getMonth() === parsed.month && today.getDate() >= parsed.day);
+  if (!hasHadBirthdayThisYear) age--;
+  return age > 0 && age < 130 ? age : null;
+}
+
+// Heart rate training zones -- Tanaka formula for estimated max HR
+// (208 - 0.7*age; validated across 351 studies, more accurate than the
+// traditional 220-age rule of thumb, especially past 40) combined with the
+// Karvonen heart rate reserve method, which personalizes zones using
+// resting HR rather than age alone: Target = ((MaxHR - RestHR) * intensity) + RestHR
+function computeHeartRateZones(age, restingHR) {
+  if (!age) return null;
+  const maxHR = Math.round(208 - 0.7 * age);
+  const rhr = restingHR || 60; // reasonable population-average fallback if unknown
+  const hrr = maxHR - rhr;
+  const zoneBounds = [0, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0];
+  const ZONE_INFO = [
+    { label: 'Recovery',  color: '#64748b' },
+    { label: 'Warm-up',   color: '#38bdf8' },
+    { label: 'Fat burn',  color: '#10b981' },
+    { label: 'Cardio',    color: '#f59e0b' },
+    { label: 'Threshold', color: '#f97316' },
+    { label: 'Peak',      color: '#ef4444' },
+  ];
+  const zones = ZONE_INFO.map((z, i) => ({
+    ...z,
+    min: Math.round(rhr + hrr * zoneBounds[i]),
+    max: Math.round(rhr + hrr * zoneBounds[i+1]),
+  }));
+  return { maxHR, restingHR: rhr, hrr, zones };
+}
+
+// Heart rate scatter plot with a smoothed trend line and validated
+// training zone bands in the background (Karvonen method, see
+// computeHeartRateZones above).
+function HeartRateScatterChart({ readings, zones, darkMode }) {
+  if (!readings || readings.length === 0) return null;
+  const W = 320, H = 160, padL = 34, padR = 6, padT = 8, padB = 20;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const times = readings.map(r => new Date(r.time).getTime());
+  const start = Math.min(...times), end = Math.max(...times);
+  const totalMs = Math.max(1, end - start);
+  const values = readings.map(r => r.value);
+  const yMin = zones ? Math.min(zones.zones[0].min, ...values) - 5 : Math.min(...values) - 5;
+  const yMax = zones ? Math.max(zones.maxHR, ...values) + 5 : Math.max(...values) + 5;
+  const xFor = (t) => padL + ((t - start) / totalMs) * plotW;
+  const yFor = (v) => padT + plotH - ((v - yMin) / (yMax - yMin)) * plotH;
+
+  // Simple moving-average smoother for the trend line -- averages each
+  // point with its nearby neighbours in time order, giving a genuine
+  // curve of best fit through the scatter rather than connecting raw dots.
+  const sorted = [...readings].sort((a,b) => new Date(a.time) - new Date(b.time));
+  const windowSize = Math.max(3, Math.round(sorted.length / 8));
+  const smoothed = sorted.map((r, i) => {
+    const lo = Math.max(0, i - Math.floor(windowSize/2));
+    const hi = Math.min(sorted.length, i + Math.ceil(windowSize/2));
+    const slice = sorted.slice(lo, hi);
+    const avg = slice.reduce((s,p) => s + p.value, 0) / slice.length;
+    return { time: r.time, value: avg };
+  });
+  const trendPath = smoothed.map((p, i) =>
+    `${i === 0 ? 'M' : 'L'}${xFor(new Date(p.time).getTime())},${yFor(p.value)}`
+  ).join(' ');
+
+  return (
+    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{display:'block'}}>
+      {/* Zone background bands */}
+      {zones && zones.zones.map((z, i) => (
+        <rect key={i} x={padL} width={plotW}
+          y={Math.max(padT, yFor(z.max))} height={Math.max(0, yFor(z.min) - yFor(z.max))}
+          fill={z.color} opacity={0.08}/>
+      ))}
+      {/* Zone boundary labels on the left */}
+      {zones && zones.zones.map((z, i) => (
+        <text key={i} x={padL-4} y={yFor(z.max)+8} textAnchor="end" fontSize="6.5"
+          fill={darkMode?'#475569':'#94a3b8'}>{z.label}</text>
+      ))}
+      {/* Scatter points */}
+      {readings.map((r, i) => (
+        <circle key={i} cx={xFor(new Date(r.time).getTime())} cy={yFor(r.value)} r={2}
+          fill={darkMode?'#64748b':'#94a3b8'} opacity={0.55}/>
+      ))}
+      {/* Smoothed trend line */}
+      <path d={trendPath} fill="none" stroke="#ef4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+      {/* X-axis time labels */}
+      <text x={padL} y={H-4} fontSize="8" fill={darkMode ? '#64748b' : '#94a3b8'}>
+        {new Date(start).toLocaleTimeString('en',{hour:'numeric',minute:'2-digit'})}
+      </text>
+      <text x={W-padR} y={H-4} textAnchor="end" fontSize="8" fill={darkMode ? '#64748b' : '#94a3b8'}>
+        {new Date(end).toLocaleTimeString('en',{hour:'numeric',minute:'2-digit'})}
+      </text>
+    </svg>
+  );
+}
+
 function SleepTimelineChart({ segments, darkMode }) {
   if (!segments || segments.length === 0) return null;
   // Whether this data source actually reports fine-grained stages (rem/light/deep)
@@ -2642,21 +2745,29 @@ function AppInner() {
   const [healthSectionMinimized, setHealthSectionMinimized] = useState({}); // { sleepQuality: true, ... }
   const [showMetricDetail, setShowMetricDetail] = useState(null); // metric key or null
   const [metricDetailHourly, setMetricDetailHourly] = useState(null); // today's hourly breakdown for the open metric
+  const [heartRateReadings, setHeartRateReadings] = useState(null);
+  const [showMetricInfo, setShowMetricInfo] = useState(false);
   const [metricDetailLoading, setMetricDetailLoading] = useState(false);
   useEffect(() => {
     if (!showMetricDetail) return;
+    setShowMetricInfo(false);
     const dataTypeMap = {
       steps: ['steps', 'sum'], heartRate: ['heartRate', 'average'],
       distance: ['distance', 'sum'], calories: ['calories', 'sum'],
       flights: ['flightsClimbed', 'sum'], restingHR: ['restingHeartRate', 'average'],
     };
     const cfg = dataTypeMap[showMetricDetail];
-    if (!cfg) return; // sleep and workouts don't have an hourly breakdown
-    setMetricDetailLoading(true);
-    fetchMetricHourly(cfg[0], cfg[1]).then(data => {
-      setMetricDetailHourly(data);
-      setMetricDetailLoading(false);
-    });
+    if (cfg) {
+      setMetricDetailLoading(true);
+      fetchMetricHourly(cfg[0], cfg[1]).then(data => {
+        setMetricDetailHourly(data);
+        setMetricDetailLoading(false);
+      });
+    }
+    if (showMetricDetail === 'heartRate') {
+      setHeartRateReadings(null);
+      fetchHeartRateReadingsToday().then(setHeartRateReadings);
+    }
   }, [showMetricDetail]); // eslint-disable-line
 
   const [showHealthPanel, setShowHealthPanel] = useState(false);
@@ -4777,6 +4888,24 @@ function AppInner() {
   // Fetch today's hourly breakdown for a metric -- the data behind an
   // "hourly steps" style view, showing which hours of the day were most
   // active rather than just a single daily total.
+  // Raw individual heart rate readings for today -- for a genuine scatter
+  // plot, not just hourly averages, so the actual variability through the
+  // day is visible rather than smoothed away.
+  const fetchHeartRateReadingsToday = async () => {
+    const Health = getHealthPlugin();
+    if (!Health) return null;
+    try {
+      const now = new Date();
+      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const res = await Health.readSamples({
+        dataType: 'heartRate', startDate: startOfDay.toISOString(), endDate: now.toISOString(),
+        limit: 300, ascending: true,
+      });
+      const samples = res?.samples || [];
+      return samples.map(s => ({ time: s.startDate, value: Math.round(s.value) })).filter(r => r.value > 0);
+    } catch(e) { console.warn('Heart rate readings fetch failed:', e); return null; }
+  };
+
   const fetchMetricHourly = async (dataType, aggregation = 'sum') => {
     const Health = getHealthPlugin();
     if (!Health || !dataType) return null;
@@ -8498,8 +8627,10 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
                   {/* Birthday */}
                   <div className="flex flex-col gap-1">
-                    <label className={`text-xs font-semibold uppercase tracking-wider ${theme.darkMode?'text-slate-400':'text-slate-500'}`}>🎂 Your Birthday</label>
-                    <button onClick={() => { showToast('🔍 Opening birthday picker...'); setShowBirthdayPicker(true); }}
+                    <label className={`text-xs font-semibold uppercase tracking-wider ${theme.darkMode?'text-slate-400':'text-slate-500'}`}>
+                      🎂 {selectedNode.id === 'me' ? 'Your Birthday' : `${selectedNode.label || 'Their'} Birthday`}
+                    </label>
+                    <button onClick={() => setShowBirthdayPicker(true)}
                       className="px-3 py-2 rounded-lg text-sm outline-none text-left"
                       style={{background:pw.cellBg,border:`1px solid ${pw.border}`,color:selectedNode.birthday?pw.bodyText:pw.secondText}}>
                       {selectedNode.birthday || 'Tap to set birthday'}
@@ -14671,6 +14802,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           const def = METRIC_DEFS[showMetricDetail];
           if (!def) { setShowMetricDetail(null); return null; }
           const hourlyMax = metricDetailHourly ? Math.max(...metricDetailHourly.map(h => h.value), 1) : 1;
+          const meNode = nodes.find(n => n.id === 'me');
+          const userAge = meNode ? calculateAgeFromBirthday(meNode.birthday) : null;
+          const hrZones = showMetricDetail === 'heartRate' ? computeHeartRateZones(userAge, healthData.restingHeartRate) : null;
           return (
             <div style={{position:'fixed', inset:0, zIndex:340, display:'flex', alignItems:'flex-end',
               background:'rgba(0,0,0,0.5)', paddingBottom:'calc(68px + env(safe-area-inset-bottom, 0px))'}}
@@ -14682,19 +14816,77 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     <span style={{fontSize:22}}>{def.icon}</span>
                     <div style={{fontSize:15, fontWeight:800, color:dm?'white':'#0f172a'}}>{def.label}</div>
                   </div>
-                  <button onClick={() => setShowMetricDetail(null)}
-                    style={{background:'none', border:'none', fontSize:22, color:dm?'#64748b':'#94a3b8', cursor:'pointer'}}>×</button>
+                  <div style={{display:'flex', alignItems:'center', gap:6}}>
+                    <button onClick={() => setShowMetricInfo(p => !p)}
+                      title="How this is calculated"
+                      style={{background:'none', border:'none', fontSize:18, color:dm?'#64748b':'#94a3b8', cursor:'pointer', padding:4}}>⋯</button>
+                    <button onClick={() => setShowMetricDetail(null)}
+                      style={{background:'none', border:'none', fontSize:22, color:dm?'#64748b':'#94a3b8', cursor:'pointer'}}>×</button>
+                  </div>
                 </div>
+                {showMetricInfo && (
+                  <div style={{marginBottom:16, padding:'12px 14px', borderRadius:10, fontSize:11, lineHeight:1.6,
+                    background:dm?'#1e293b':'#f1f5f9', color:dm?'#94a3b8':'#64748b'}}>
+                    {showMetricDetail === 'heartRate' && (
+                      <>
+                        <div style={{fontWeight:700, color:dm?'white':'#0f172a', marginBottom:4}}>How the training zones are worked out</div>
+                        Estimated max heart rate uses the <b>Tanaka formula</b>: 208 − (0.7 × age) — validated across
+                        351 published studies and more accurate than the older "220 − age" rule, especially past 40.
+                        {userAge ? ` Using your age (${userAge}), that's an estimated max of ${hrZones?.maxHR} bpm.` : ' Set your birthday on your own profile to personalize this — showing population-average estimates for now.'}
+                        {'\n\n'}Zones then use the <b>Karvonen method</b> (heart rate reserve), which factors in your
+                        resting heart rate rather than just age — a fitter resting heart rate gives a wider working
+                        range: Target = ((Max HR − Resting HR) × intensity%) + Resting HR.
+                        {'\n\n'}These are population-average formulas with a standard error of roughly ±10–12 bpm — not
+                        a clinical measurement. A supervised max exercise test is the only way to know your true max HR.
+                      </>
+                    )}
+                    {showMetricDetail === 'restingHR' && (
+                      <>
+                        <div style={{fontWeight:700, color:dm?'white':'#0f172a', marginBottom:4}}>How resting heart rate is worked out</div>
+                        This isn't measured at one fixed time of day — it's a daily aggregate. Your device's motion
+                        sensor flags every period where you've been still for several minutes (no steps detected),
+                        throughout the whole day and night, and weighs sleep most heavily since that's the most
+                        reliable sustained-rest window. Only high-confidence, low-motion readings are included.
+                        It's finalized once per day, typically right after your main sleep period ends — so today's
+                        figure often reflects last night specifically, not necessarily this exact moment.
+                      </>
+                    )}
+                    {showMetricDetail !== 'heartRate' && showMetricDetail !== 'restingHR' && (
+                      <>This is today's total, pulled directly from Health Connect. The 7-day chart compares each day's total to help spot trends.</>
+                    )}
+                  </div>
+                )}
                 {/* Big today value */}
                 <div style={{marginBottom:20}}>
                   <div style={{fontSize:36, fontWeight:800, color:def.color, lineHeight:1}}>{def.format(def.value)}</div>
                   <div style={{fontSize:12, color:dm?'#64748b':'#94a3b8', marginTop:4}}>{def.unit}</div>
                 </div>
+                {/* Heart rate gets a scatter chart with zones + trend line
+                    instead of the plain hourly bar chart */}
+                {showMetricDetail === 'heartRate' && heartRateReadings === null && (
+                  <div style={{textAlign:'center', padding:'20px 0', color:dm?'#64748b':'#94a3b8', fontSize:12}}>Loading readings…</div>
+                )}
+                {showMetricDetail === 'heartRate' && heartRateReadings && heartRateReadings.length > 0 && (
+                  <div style={{marginBottom:20}}>
+                    <div style={{fontSize:12, fontWeight:700, color:dm?'white':'#0f172a', marginBottom:10}}>Today's readings</div>
+                    <HeartRateScatterChart readings={heartRateReadings} zones={hrZones} darkMode={dm}/>
+                    {hrZones && (
+                      <div style={{display:'flex', flexWrap:'wrap', gap:8, marginTop:8}}>
+                        {hrZones.zones.map((z,i) => (
+                          <div key={i} style={{display:'flex', alignItems:'center', gap:4}}>
+                            <div style={{width:8, height:8, borderRadius:2, background:z.color}}/>
+                            <span style={{fontSize:9, color:dm?'#64748b':'#94a3b8'}}>{z.label} {z.min}-{z.max}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
                 {/* Hourly breakdown -- like Apple Health's Step Hours */}
-                {metricDetailLoading && (
+                {showMetricDetail !== 'heartRate' && metricDetailLoading && (
                   <div style={{textAlign:'center', padding:'20px 0', color:dm?'#64748b':'#94a3b8', fontSize:12}}>Loading hourly breakdown…</div>
                 )}
-                {!metricDetailLoading && metricDetailHourly && metricDetailHourly.some(h => h.value > 0) && (
+                {showMetricDetail !== 'heartRate' && !metricDetailLoading && metricDetailHourly && metricDetailHourly.some(h => h.value > 0) && (
                   <div style={{marginBottom:20}}>
                     <div style={{fontSize:12, fontWeight:700, color:dm?'white':'#0f172a', marginBottom:10}}>Today by hour</div>
                     <div style={{display:'flex', alignItems:'flex-end', gap:1, height:70}}>
