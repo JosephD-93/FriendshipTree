@@ -2639,6 +2639,26 @@ function AppInner() {
   });
   const [healthPermission, setHealthPermission] = useState(null); // null | 'granted' | 'denied' | 'unavailable'
   const [healthLoading, setHealthLoading] = useState(false);
+  const [healthSectionMinimized, setHealthSectionMinimized] = useState({}); // { sleepQuality: true, ... }
+  const [showMetricDetail, setShowMetricDetail] = useState(null); // metric key or null
+  const [metricDetailHourly, setMetricDetailHourly] = useState(null); // today's hourly breakdown for the open metric
+  const [metricDetailLoading, setMetricDetailLoading] = useState(false);
+  useEffect(() => {
+    if (!showMetricDetail) return;
+    const dataTypeMap = {
+      steps: ['steps', 'sum'], heartRate: ['heartRate', 'average'],
+      distance: ['distance', 'sum'], calories: ['calories', 'sum'],
+      flights: ['flightsClimbed', 'sum'], restingHR: ['restingHeartRate', 'average'],
+    };
+    const cfg = dataTypeMap[showMetricDetail];
+    if (!cfg) return; // sleep and workouts don't have an hourly breakdown
+    setMetricDetailLoading(true);
+    fetchMetricHourly(cfg[0], cfg[1]).then(data => {
+      setMetricDetailHourly(data);
+      setMetricDetailLoading(false);
+    });
+  }, [showMetricDetail]); // eslint-disable-line
+
   const [showHealthPanel, setShowHealthPanel] = useState(false);
   // ── Health Lists (multiple named habit checklists, e.g. "How Not to Die",
   //    "How Not to Age") -- each is its own draggable node on the map,
@@ -4752,6 +4772,27 @@ function AppInner() {
       showToast('Health data fetch failed');
     }
     setHealthLoading(false);
+  };
+
+  // Fetch today's hourly breakdown for a metric -- the data behind an
+  // "hourly steps" style view, showing which hours of the day were most
+  // active rather than just a single daily total.
+  const fetchMetricHourly = async (dataType, aggregation = 'sum') => {
+    const Health = getHealthPlugin();
+    if (!Health || !dataType) return null;
+    try {
+      const now = new Date();
+      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const res = await Health.queryAggregated({
+        dataType, startDate: startOfDay.toISOString(), endDate: now.toISOString(),
+        bucket: 'hour', aggregation,
+      });
+      const samples = res?.samples || [];
+      return Array.from({length: 24}, (_, hour) => {
+        const match = samples.find(s => new Date(s.startDate || s.date).getHours() === hour);
+        return { hour, value: match ? Math.round(match.value * 10) / 10 : 0 };
+      });
+    } catch(e) { console.warn(`${dataType} hourly fetch failed:`, e); return null; }
   };
 
   const healthConnect = async () => {
@@ -14326,7 +14367,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     const vsAvg = avg && m.value != null && avg > 0
                       ? Math.round(((m.value - avg) / avg) * 100) : null;
                     return (
-                    <div key={m.key} style={{borderRadius:12, padding:'12px 14px',
+                    <div key={m.key} onClick={() => { setShowMetricDetail(m.key); setMetricDetailHourly(null); }}
+                      style={{borderRadius:12, padding:'12px 14px', cursor:'pointer',
                       background:dm?'#1e293b':'#f8fafc', border:`1px solid ${m.color}30`}}>
                       <div style={{display:'flex', alignItems:'center', gap:6, marginBottom:6}}>
                         <span style={{fontSize:16}}>{m.icon}</span>
@@ -14392,10 +14434,18 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     background:dm?'#1e293b':'#f8fafc', border:`1px solid ${dm?'#334155':'#e2e8f0'}`}}>
                     <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10}}>
                       <div style={{fontSize:12, fontWeight:700, color:dm?'white':'#0f172a'}}>😴 Sleep Quality</div>
-                      {healthData.sleepQualityPct != null && (
-                        <div style={{fontSize:12, fontWeight:800, color:'#8b5cf6'}}>{healthData.sleepQualityPct}% restorative</div>
-                      )}
+                      <div style={{display:'flex', alignItems:'center', gap:8}}>
+                        {healthData.sleepQualityPct != null && (
+                          <div style={{fontSize:12, fontWeight:800, color:'#8b5cf6'}}>{healthData.sleepQualityPct}% restorative</div>
+                        )}
+                        <button onClick={() => setHealthSectionMinimized(prev => ({...prev, sleepQuality: !prev.sleepQuality}))}
+                          style={{background:'none', border:'none', cursor:'pointer', padding:2,
+                            color:dm?'#64748b':'#94a3b8', fontSize:14, lineHeight:1}}>
+                          {healthSectionMinimized.sleepQuality ? '▸' : '▾'}
+                        </button>
+                      </div>
                     </div>
+                    {!healthSectionMinimized.sleepQuality && (<>
                     {/* Full-night timeline -- exactly when each stage happened,
                         not just totals */}
                     {healthData.sleepSegments && healthData.sleepSegments.length > 0 && (
@@ -14458,6 +14508,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         </>
                       );
                     })()}
+                    </>)}
                   </div>
                 )}
                 {/* Heart rate variability -- recovery/stress indicator */}
@@ -14599,6 +14650,114 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     + Add recurring activity
                   </button>
                 </div>
+              </div>
+            </div>
+          );
+        })()}
+        {/* ──────────────────────────────────────────────────────────────── */}
+
+        {/* ── Health Metric Detail ─────────────────────────────────────── */}
+        {showMetricDetail && (() => {
+          const dm = theme.darkMode;
+          const METRIC_DEFS = {
+            steps:     { label: 'Steps',      icon: '👟', color: '#10b981', value: healthData.steps, unit: 'steps today', history: healthData.stepsHistory, format: v => v?.toLocaleString() || '—' },
+            heartRate: { label: 'Heart Rate', icon: '❤️', color: '#ef4444', value: healthData.heartRate, unit: 'bpm', history: healthData.heartRateHistory, format: v => v?.toString() || '—' },
+            workouts:  { label: 'Workouts',   icon: '💪', color: '#f59e0b', value: healthData.workouts?.length, unit: 'this week', history: null, format: v => v?.toString() || '—' },
+            distance:  { label: 'Distance',   icon: '🚶', color: '#06b6d4', value: healthData.distanceKm, unit: 'km today', history: healthData.distanceHistory, format: v => v != null ? `${v} km` : '—' },
+            calories:  { label: 'Active Calories', icon: '🔥', color: '#f97316', value: healthData.activeCalories, unit: 'kcal today', history: healthData.caloriesHistory, format: v => v != null ? Math.round(v).toLocaleString() : '—' },
+            flights:   { label: 'Flights Climbed', icon: '🏢', color: '#84cc16', value: healthData.flights, unit: 'climbed today', history: healthData.flightsHistory, format: v => v != null ? Math.round(v).toString() : '—' },
+            restingHR: { label: 'Resting Heart Rate', icon: '💤', color: '#ec4899', value: healthData.restingHeartRate, unit: 'bpm', history: healthData.restingHRHistory, format: v => v?.toString() || '—' },
+          };
+          const def = METRIC_DEFS[showMetricDetail];
+          if (!def) { setShowMetricDetail(null); return null; }
+          const hourlyMax = metricDetailHourly ? Math.max(...metricDetailHourly.map(h => h.value), 1) : 1;
+          return (
+            <div style={{position:'fixed', inset:0, zIndex:340, display:'flex', alignItems:'flex-end',
+              background:'rgba(0,0,0,0.5)', paddingBottom:'calc(68px + env(safe-area-inset-bottom, 0px))'}}
+              onClick={e => { if (e.target === e.currentTarget) setShowMetricDetail(null); }}>
+              <div style={{width:'100%', background:dm?'#0f172a':'white', borderRadius:'16px 16px 0 0',
+                padding:'20px 16px', maxHeight:'85vh', overflowY:'auto', boxSizing:'border-box'}}>
+                <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:16}}>
+                  <div style={{display:'flex', alignItems:'center', gap:10}}>
+                    <span style={{fontSize:22}}>{def.icon}</span>
+                    <div style={{fontSize:15, fontWeight:800, color:dm?'white':'#0f172a'}}>{def.label}</div>
+                  </div>
+                  <button onClick={() => setShowMetricDetail(null)}
+                    style={{background:'none', border:'none', fontSize:22, color:dm?'#64748b':'#94a3b8', cursor:'pointer'}}>×</button>
+                </div>
+                {/* Big today value */}
+                <div style={{marginBottom:20}}>
+                  <div style={{fontSize:36, fontWeight:800, color:def.color, lineHeight:1}}>{def.format(def.value)}</div>
+                  <div style={{fontSize:12, color:dm?'#64748b':'#94a3b8', marginTop:4}}>{def.unit}</div>
+                </div>
+                {/* Hourly breakdown -- like Apple Health's Step Hours */}
+                {metricDetailLoading && (
+                  <div style={{textAlign:'center', padding:'20px 0', color:dm?'#64748b':'#94a3b8', fontSize:12}}>Loading hourly breakdown…</div>
+                )}
+                {!metricDetailLoading && metricDetailHourly && metricDetailHourly.some(h => h.value > 0) && (
+                  <div style={{marginBottom:20}}>
+                    <div style={{fontSize:12, fontWeight:700, color:dm?'white':'#0f172a', marginBottom:10}}>Today by hour</div>
+                    <div style={{display:'flex', alignItems:'flex-end', gap:1, height:70}}>
+                      {metricDetailHourly.map((h,i) => (
+                        <div key={i} style={{flex:1, height:'100%', display:'flex', alignItems:'flex-end'}} title={`${h.hour}:00 — ${def.format(h.value)}`}>
+                          <div style={{width:'100%', height:`${Math.max(2, (h.value/hourlyMax)*100)}%`, borderRadius:'2px 2px 0 0',
+                            background: h.value > 0 ? def.color : (dm?'#1e293b':'#f1f5f9')}}/>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{display:'flex', justifyContent:'space-between', fontSize:9, color:dm?'#64748b':'#94a3b8', marginTop:4}}>
+                      <span>12am</span><span>6am</span><span>12pm</span><span>6pm</span><span>Now</span>
+                    </div>
+                  </div>
+                )}
+                {/* 7-day trend */}
+                {def.history && (
+                  <div>
+                    <div style={{fontSize:12, fontWeight:700, color:dm?'white':'#0f172a', marginBottom:10}}>Last 7 days</div>
+                    {(() => {
+                      const hist = def.history;
+                      const maxVal = Math.max(...hist.map(d=>d.value), 1);
+                      const avg = Math.round(hist.reduce((s,d)=>s+d.value,0) / hist.length);
+                      return (
+                        <>
+                          <div style={{display:'flex', alignItems:'flex-end', gap:6, height:80, marginBottom:8}}>
+                            {hist.map((d,i) => {
+                              const dayLabel = new Date(d.date+'T12:00:00').toLocaleDateString('en',{weekday:'short'});
+                              const isToday = i === hist.length-1;
+                              return (
+                                <div key={i} style={{flex:1, display:'flex', flexDirection:'column', alignItems:'center', gap:4}}>
+                                  <div style={{width:'100%', height:Math.max(4, (d.value/maxVal)*60), borderRadius:4,
+                                    background: isToday ? def.color : (dm?'#334155':'#e2e8f0')}}
+                                    title={def.format(d.value)}/>
+                                  <span style={{fontSize:9, color:dm?'#64748b':'#94a3b8'}}>{dayLabel}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                          <div style={{fontSize:11, color:dm?'#64748b':'#94a3b8'}}>7-day average: {def.format(avg)}</div>
+                        </>
+                      );
+                    })()}
+                  </div>
+                )}
+                {showMetricDetail === 'workouts' && healthData.workouts && healthData.workouts.length > 0 && (
+                  <div>
+                    <div style={{fontSize:12, fontWeight:700, color:dm?'white':'#0f172a', marginBottom:10}}>This week's workouts</div>
+                    {healthData.workouts.map((w, i) => (
+                      <div key={i} style={{display:'flex', justifyContent:'space-between', padding:'8px 0',
+                        borderBottom:`1px solid ${dm?'#1e293b':'#f1f5f9'}`}}>
+                        <div>
+                          <div style={{fontSize:12, fontWeight:600, color:dm?'white':'#0f172a'}}>{w.type}</div>
+                          <div style={{fontSize:10, color:dm?'#64748b':'#94a3b8'}}>{new Date(w.date).toLocaleDateString('en',{weekday:'short',month:'short',day:'numeric'})}</div>
+                        </div>
+                        <div style={{textAlign:'right'}}>
+                          <div style={{fontSize:12, fontWeight:700, color:'#f59e0b'}}>{w.duration} min</div>
+                          <div style={{fontSize:10, color:dm?'#64748b':'#94a3b8'}}>{w.calories} kcal</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           );
