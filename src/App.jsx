@@ -14710,6 +14710,40 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     </div>
                   </div>
                 )}
+                {/* Active Hours -- Apple Stand Hours equivalent, built from the
+                    same hourly step data: did you move at all this hour? */}
+                {showMetricDetail === 'steps' && !metricDetailLoading && metricDetailHourly && (() => {
+                  const MOVE_THRESHOLD = 15; // small step count to filter out incidental fidgeting
+                  const currentHour = new Date().getHours();
+                  const relevantHours = metricDetailHourly.filter(h => h.hour <= currentHour);
+                  const activeCount = relevantHours.filter(h => h.value >= MOVE_THRESHOLD).length;
+                  return (
+                    <div style={{marginBottom:20}}>
+                      <div style={{display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:10}}>
+                        <div style={{fontSize:12, fontWeight:700, color:dm?'white':'#0f172a'}}>🧍 Active Hours</div>
+                        <div style={{fontSize:12, fontWeight:700, color:'#10b981'}}>{activeCount}/{relevantHours.length} hours so far</div>
+                      </div>
+                      <div style={{display:'grid', gridTemplateColumns:'repeat(12, 1fr)', gap:3}}>
+                        {metricDetailHourly.map((h,i) => {
+                          const isFuture = h.hour > currentHour;
+                          const isActive = h.value >= MOVE_THRESHOLD;
+                          return (
+                            <div key={i} title={`${h.hour}:00 — ${isFuture ? 'upcoming' : isActive ? 'moved' : 'no movement'}`}
+                              style={{aspectRatio:'1', borderRadius:4, display:'flex', alignItems:'center', justifyContent:'center',
+                                background: isFuture ? 'transparent' : isActive ? '#10b981' : (dm?'#1e293b':'#f1f5f9'),
+                                border: isFuture ? `1px dashed ${dm?'#334155':'#e2e8f0'}` : 'none',
+                                fontSize:9, color: isActive ? 'white' : (dm?'#475569':'#cbd5e1')}}>
+                              {isFuture ? '' : isActive ? '✓' : '·'}
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div style={{fontSize:9, color:dm?'#475569':'#94a3b8', marginTop:8}}>
+                        Counted as active if you took at least {MOVE_THRESHOLD} steps within the hour.
+                      </div>
+                    </div>
+                  );
+                })()}
                 {/* 7-day trend */}
                 {def.history && (
                   <div>
