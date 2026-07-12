@@ -1329,6 +1329,69 @@ function MoleCards({ slides, left, top, cardWidth, cardHeight, pillLeft, pillTop
 // decoding rather than all popping in together once the whole batch is
 // ready. On failure, shows the actual image format (extracted from the
 // data URI itself) so problem file types can be identified directly.
+// Sleep timeline (hypnogram) -- shows exactly when the night moved between
+// sleep stages, not just totals. Y axis is sleep depth (Awake top, then
+// REM, Light, Deep at the bottom), X axis is real clock time across the
+// night, connected with a step-line the way most real sleep trackers show it.
+function SleepTimelineChart({ segments, darkMode }) {
+  if (!segments || segments.length === 0) return null;
+  const STAGE_LEVELS = { awake: 3, rem: 2, light: 1, deep: 0 };
+  const STAGE_COLORS = { awake: '#fbbf24', rem: '#8b5cf6', light: '#c4b5fd', deep: '#5b21b6' };
+  const STAGE_LABELS = { awake: 'Awake', rem: 'REM', light: 'Light', deep: 'Deep' };
+  const start = new Date(segments[0].start).getTime();
+  const end = new Date(segments[segments.length - 1].end).getTime();
+  const totalMs = Math.max(1, end - start);
+  const W = 320, H = 120, padL = 34, padR = 6, padT = 8, padB = 20;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const xFor = (t) => padL + ((t - start) / totalMs) * plotW;
+  const yFor = (level) => padT + plotH - (level / 3) * plotH;
+
+  let pathD = '';
+  segments.forEach((s, i) => {
+    const x1 = xFor(new Date(s.start).getTime());
+    const x2 = xFor(new Date(s.end).getTime());
+    const y = yFor(STAGE_LEVELS[s.state] ?? 1);
+    pathD += (i === 0 ? `M${x1},${y} ` : `L${x1},${y} `) + `L${x2},${y} `;
+    // step down/up to the next segment's level
+    if (i < segments.length - 1) {
+      const nextY = yFor(STAGE_LEVELS[segments[i+1].state] ?? 1);
+      pathD += `L${x2},${nextY} `;
+    }
+  });
+
+  const fmtTime = (ms) => new Date(ms).toLocaleTimeString('en', { hour: 'numeric', minute: '2-digit' });
+
+  return (
+    <div>
+      <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{display:'block'}}>
+        {/* Y-axis stage labels */}
+        {Object.entries(STAGE_LEVELS).map(([state, level]) => (
+          <text key={state} x={padL - 6} y={yFor(level) + 3} textAnchor="end" fontSize="8"
+            fill={darkMode ? '#64748b' : '#94a3b8'}>{STAGE_LABELS[state]}</text>
+        ))}
+        {/* Horizontal guide lines */}
+        {Object.values(STAGE_LEVELS).map(level => (
+          <line key={level} x1={padL} x2={W-padR} y1={yFor(level)} y2={yFor(level)}
+            stroke={darkMode ? '#1e293b' : '#f1f5f9'} strokeWidth="1"/>
+        ))}
+        {/* The actual step-line path, colored by segment */}
+        {segments.map((s, i) => {
+          const x1 = xFor(new Date(s.start).getTime());
+          const x2 = xFor(new Date(s.end).getTime());
+          const y = yFor(STAGE_LEVELS[s.state] ?? 1);
+          return <line key={i} x1={x1} x2={x2} y1={y} y2={y}
+            stroke={STAGE_COLORS[s.state] || '#94a3b8'} strokeWidth="3" strokeLinecap="round"/>;
+        })}
+        {/* Connecting vertical steps, thin and muted */}
+        <path d={pathD} fill="none" stroke={darkMode ? '#334155' : '#cbd5e1'} strokeWidth="1" opacity="0.5"/>
+        {/* X-axis time labels */}
+        <text x={padL} y={H-4} fontSize="8" fill={darkMode ? '#64748b' : '#94a3b8'}>{fmtTime(start)}</text>
+        <text x={W-padR} y={H-4} textAnchor="end" fontSize="8" fill={darkMode ? '#64748b' : '#94a3b8'}>{fmtTime(end)}</text>
+      </svg>
+    </div>
+  );
+}
+
 function PhotoWithLoadState({ src, size = 72, onClick, cornerButton, active, onError, onRepair }) {
   const [status, setStatus] = React.useState('loading'); // 'loading' | 'loaded' | 'error'
   const loadStartRef = React.useRef(Date.now());
@@ -4526,12 +4589,14 @@ function AppInner() {
         const samples = sleepRes?.samples || [];
         if (samples.length > 0) {
           const stageMinutes = { deep: 0, light: 0, rem: 0, awake: 0, asleep: 0 };
-          samples.forEach(s => {
-            const start = new Date(s.startDate).getTime();
-            const end = new Date(s.endDate).getTime();
-            const mins = Math.max(0, (end - start) / (1000 * 60));
-            const state = s.sleepState || 'asleep';
-            stageMinutes[state] = (stageMinutes[state] || 0) + mins;
+          const segments = samples.map(s => ({
+            start: s.startDate,
+            end: s.endDate,
+            state: s.sleepState || 'asleep',
+          })).sort((a, b) => new Date(a.start) - new Date(b.start));
+          segments.forEach(s => {
+            const mins = Math.max(0, (new Date(s.end) - new Date(s.start)) / (1000 * 60));
+            stageMinutes[s.state] = (stageMinutes[s.state] || 0) + mins;
           });
           const totalAsleep = stageMinutes.deep + stageMinutes.light + stageMinutes.rem + stageMinutes.asleep;
           newData.sleep = Math.round(totalAsleep);
@@ -4541,14 +4606,26 @@ function AppInner() {
             rem: Math.round(stageMinutes.rem),
             awake: Math.round(stageMinutes.awake),
           };
+          newData.sleepSegments = segments;
+          newData.sleepBedtime = segments[0]?.start || null;
+          newData.sleepWaketime = segments[segments.length - 1]?.end || null;
           // Simple quality indicator: deep + REM as a share of total time asleep --
           // these are the restorative stages, so a higher share is generally better
           const restorative = stageMinutes.deep + stageMinutes.rem;
           newData.sleepQualityPct = totalAsleep > 0 ? Math.round((restorative / totalAsleep) * 100) : null;
+          // Sleep efficiency: time actually asleep vs total time in bed
+          const totalInBed = segments.length > 0
+            ? (new Date(segments[segments.length-1].end) - new Date(segments[0].start)) / (1000 * 60)
+            : 0;
+          newData.sleepEfficiencyPct = totalInBed > 0 ? Math.round((totalAsleep / totalInBed) * 100) : null;
         } else {
           newData.sleep = null;
           newData.sleepStages = null;
           newData.sleepQualityPct = null;
+          newData.sleepSegments = null;
+          newData.sleepBedtime = null;
+          newData.sleepWaketime = null;
+          newData.sleepEfficiencyPct = null;
         }
       } catch(e) { console.warn('Sleep fetch failed:', e); }
 
@@ -5572,8 +5649,7 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
       setHabitLastResetDate(todayStr);
       saveRaw('ft_habit_last_reset', todayStr);
     }
-    // Also re-check periodically in case the app stays open across midnight
-    const iv = setInterval(() => {
+    const checkAndRollover = () => {
       const now = getLocalDateStr();
       setHabitLastResetDate(prevDate => {
         if (prevDate !== now) {
@@ -5583,8 +5659,31 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
         }
         return prevDate;
       });
-    }, 60000); // check every minute
-    return () => clearInterval(iv);
+    };
+    // Also re-check periodically in case the app stays open across midnight
+    const iv = setInterval(checkAndRollover, 60000); // check every minute
+    // AND re-check the moment the app comes back to the foreground -- Android
+    // commonly suspends setInterval timers while an app is backgrounded (not
+    // force-closed, just switched away from) to save battery, so the interval
+    // above may simply never get a chance to fire if the app sat in the
+    // background overnight. The native 'resume' event fires reliably even
+    // then, since it's tied to Android's own app lifecycle, not a JS timer.
+    let resumeListener = null;
+    const CapApp = window.Capacitor?.Plugins?.App;
+    if (CapApp && typeof CapApp.addListener === 'function') {
+      try {
+        const result = CapApp.addListener('resume', checkAndRollover);
+        if (result && typeof result.then === 'function') {
+          result.then(l => { resumeListener = l; }).catch(() => {});
+        } else {
+          resumeListener = result;
+        }
+      } catch(e) {}
+    }
+    return () => {
+      clearInterval(iv);
+      if (resumeListener && typeof resumeListener.remove === 'function') resumeListener.remove();
+    };
   }, []); // eslint-disable-line
   useEffect(() => {
     if (calRecurring.length === 0) return;
@@ -14257,6 +14356,37 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         <div style={{fontSize:12, fontWeight:800, color:'#8b5cf6'}}>{healthData.sleepQualityPct}% restorative</div>
                       )}
                     </div>
+                    {/* Full-night timeline -- exactly when each stage happened,
+                        not just totals */}
+                    {healthData.sleepSegments && healthData.sleepSegments.length > 0 && (
+                      <div style={{marginBottom:12}}>
+                        <SleepTimelineChart segments={healthData.sleepSegments} darkMode={dm}/>
+                      </div>
+                    )}
+                    {/* Bedtime / waketime range + sleep efficiency */}
+                    {(healthData.sleepBedtime || healthData.sleepEfficiencyPct != null) && (
+                      <div style={{display:'flex', gap:16, marginBottom:12, flexWrap:'wrap'}}>
+                        {healthData.sleepBedtime && healthData.sleepWaketime && (
+                          <div>
+                            <div style={{fontSize:13, fontWeight:800, color:dm?'white':'#0f172a'}}>
+                              {new Date(healthData.sleepBedtime).toLocaleTimeString('en',{hour:'numeric',minute:'2-digit'})}
+                              {' – '}
+                              {new Date(healthData.sleepWaketime).toLocaleTimeString('en',{hour:'numeric',minute:'2-digit'})}
+                            </div>
+                            <div style={{fontSize:9, color:dm?'#64748b':'#94a3b8'}}>Sleep schedule</div>
+                          </div>
+                        )}
+                        {healthData.sleepEfficiencyPct != null && (
+                          <div>
+                            <div style={{fontSize:13, fontWeight:800,
+                              color: healthData.sleepEfficiencyPct >= 85 ? '#10b981' : '#f59e0b'}}>
+                              {healthData.sleepEfficiencyPct}%
+                            </div>
+                            <div style={{fontSize:9, color:dm?'#64748b':'#94a3b8'}}>Sleep efficiency</div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                     {/* Stacked bar showing proportion of each stage */}
                     {(() => {
                       const stages = healthData.sleepStages;
