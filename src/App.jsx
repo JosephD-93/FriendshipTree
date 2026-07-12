@@ -10,6 +10,35 @@ import {
 
 const APP_VERSION = '3.1';
 
+// Detects the real image format from raw base64 data by checking the
+// encoded byte signature, rather than assuming a fixed format -- this is
+// what fixes contact-imported photos that silently failed to display,
+// since Android's Contacts Provider doesn't guarantee JPEG and the import
+// code previously hardcoded that MIME type regardless of the actual bytes.
+function detectImageMimeFromBase64(base64String) {
+  if (!base64String) return 'image/jpeg';
+  if (base64String.startsWith('/9j/')) return 'image/jpeg';
+  if (base64String.startsWith('iVBORw0KG')) return 'image/png';
+  if (base64String.startsWith('R0lGOD')) return 'image/gif';
+  if (base64String.startsWith('UklGR')) return 'image/webp';
+  if (base64String.startsWith('Qk')) return 'image/bmp';
+  // Fallback -- most contact photos are JPEG in practice, so this remains
+  // a reasonable default for anything not matching a known signature
+  return 'image/jpeg';
+}
+
+// Returns YYYY-MM-DD in the user's LOCAL timezone, not UTC -- Date's own
+// toISOString() always returns UTC, which caused daily resets (habits, food
+// diary, calendar markers) to lag behind the user's actual local calendar
+// day by up to an hour right after midnight in any timezone ahead of UTC
+// (e.g. UK summer time), making "today" silently still look like yesterday.
+function getLocalDateStr(date = new Date()) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 // ─── FT-DIAG file logger ─────────────────────────────────────────────────
 // Writes diagnostic lines directly to a text file on the device via
 // Capacitor's Filesystem plugin, completely bypassing logcat (which wasn't
@@ -1300,12 +1329,43 @@ function MoleCards({ slides, left, top, cardWidth, cardHeight, pillLeft, pillTop
 // decoding rather than all popping in together once the whole batch is
 // ready. On failure, shows the actual image format (extracted from the
 // data URI itself) so problem file types can be identified directly.
-function PhotoWithLoadState({ src, size = 72, onClick, cornerButton, active, onError }) {
+function PhotoWithLoadState({ src, size = 72, onClick, cornerButton, active, onError, onRepair }) {
   const [status, setStatus] = React.useState('loading'); // 'loading' | 'loaded' | 'error'
-  React.useEffect(() => { setStatus('loading'); }, [src]);
+  const loadStartRef = React.useRef(Date.now());
+  const pendingResultRef = React.useRef(null); // holds 'loaded' or an error format if it resolved before the minimum time was up
+  React.useEffect(() => { setStatus('loading'); loadStartRef.current = Date.now(); pendingResultRef.current = null; }, [src]);
   const formatMatch = /^data:image\/([a-zA-Z0-9.+-]+);/.exec(src || '');
   const format = formatMatch ? formatMatch[1] : 'unknown';
-  const handleError = () => { setStatus('error'); if (onError) onError(format); };
+  // Already-in-memory data URIs can decode fast enough that onLoad fires
+  // within the same paint cycle the component mounts in -- meaning the
+  // loading state technically exists but is never actually visible on
+  // screen. Enforcing a short minimum display time makes it genuinely
+  // perceptible instead of silently skipped for anything that resolves
+  // near-instantly, while still reflecting true load time for slower ones.
+  const MIN_LOADING_MS = 220;
+  const resolveWithMinDelay = (result) => {
+    const elapsed = Date.now() - loadStartRef.current;
+    if (elapsed >= MIN_LOADING_MS) {
+      if (result === 'loaded') setStatus('loaded');
+      else setStatus('error');
+    } else {
+      pendingResultRef.current = result;
+      setTimeout(() => {
+        if (result === 'loaded') setStatus('loaded');
+        else setStatus('error');
+      }, MIN_LOADING_MS - elapsed);
+    }
+  };
+  const handleError = () => { resolveWithMinDelay('error'); if (onError) onError(format); };
+  const handleLoad = () => { resolveWithMinDelay('loaded'); };
+  const tryRepair = () => {
+    const commaIdx = (src || '').indexOf(',');
+    if (commaIdx === -1) return;
+    const base64Part = src.slice(commaIdx + 1);
+    const correctMime = detectImageMimeFromBase64(base64Part);
+    const correctedUrl = `data:${correctMime};base64,${base64Part}`;
+    if (onRepair) onRepair(correctedUrl);
+  };
   return (
     <div style={{position:'relative', width:size, height:size}}>
       <button onClick={status === 'error' ? undefined : onClick}
@@ -1315,9 +1375,11 @@ function PhotoWithLoadState({ src, size = 72, onClick, cornerButton, active, onE
         {status === 'error' ? (
           <div style={{width:size, height:size, borderRadius:'50%', background:'rgba(239,68,68,0.15)',
             border:'1.5px solid rgba(239,68,68,0.5)', display:'flex', flexDirection:'column',
-            alignItems:'center', justifyContent:'center', gap:2}}>
-            <span style={{fontSize:size*0.28}}>⚠️</span>
-            <span style={{fontSize:9, color:'#fca5a5', fontWeight:700}}>.{format}</span>
+            alignItems:'center', justifyContent:'center', gap:1, cursor: onRepair ? 'pointer' : 'default'}}
+            onClick={onRepair ? (e) => { e.stopPropagation(); tryRepair(); } : undefined}>
+            <span style={{fontSize:size*0.24}}>⚠️</span>
+            <span style={{fontSize:8, color:'#fca5a5', fontWeight:700}}>.{format}</span>
+            {onRepair && <span style={{fontSize:7, color:'#93c5fd', fontWeight:700, textDecoration:'underline'}}>Fix</span>}
           </div>
         ) : (
           <>
@@ -1329,7 +1391,7 @@ function PhotoWithLoadState({ src, size = 72, onClick, cornerButton, active, onE
               </div>
             )}
             <img src={src} decoding="async"
-              onLoad={() => setStatus('loaded')}
+              onLoad={handleLoad}
               onError={handleError}
               style={{width:size, height:size, borderRadius:'50%', objectFit:'cover', display:'block',
                 opacity: status === 'loaded' ? 1 : 0, transition:'opacity 0.3s ease'}}/>
@@ -1344,24 +1406,53 @@ function PhotoWithLoadState({ src, size = 72, onClick, cornerButton, active, onE
 function TaggedProfilePics({ nodeId, openPhotoDB, currentImg, onSelect, onError }) {
   const [pics, setPics] = React.useState([]);
   React.useEffect(() => {
+    let cancelled = false;
+    setPics([]); // clear immediately on switch, rather than briefly showing the previous person's photos
     openPhotoDB().then(db => new Promise((res, rej) => {
       const tx = db.transaction('gallery', 'readonly');
       const req = tx.objectStore('gallery').getAll();
       req.onsuccess = e => res(e.target.result || []);
       req.onerror = rej;
     })).then(all => {
+      // If nodeId changed again before this fetch finished (e.g. the user
+      // quickly switched from one person's gallery to another's), this
+      // response is stale -- applying it would show the WRONG person's
+      // photos, since a slower/earlier fetch can resolve after a newer one.
+      if (cancelled) return;
       setPics(all.filter(item =>
         item.sourceType === 'group' &&
         Array.isArray(item.taggedNodeIds) &&
         item.taggedNodeIds.includes(nodeId)
       ));
     }).catch(() => {});
+    return () => { cancelled = true; };
   }, [nodeId]); // eslint-disable-line
+
+  const repairItem = async (key, correctedUrl) => {
+    try {
+      const db = await openPhotoDB();
+      const existing = await new Promise((res, rej) => {
+        const tx = db.transaction('gallery', 'readonly');
+        const req = tx.objectStore('gallery').get(key);
+        req.onsuccess = e => res(e.target.result);
+        req.onerror = rej;
+      });
+      if (!existing) return;
+      const updated = { ...existing, dataUrl: correctedUrl };
+      await new Promise((res, rej) => {
+        const tx = db.transaction('gallery', 'readwrite');
+        tx.objectStore('gallery').put(updated);
+        tx.oncomplete = res; tx.onerror = rej;
+      });
+      setPics(prev => prev.map(p => p.key === key ? { ...p, dataUrl: correctedUrl } : p));
+    } catch(e) {}
+  };
 
   return pics.map(item => (
     <PhotoWithLoadState key={item.key} src={item.dataUrl} size={72} active={currentImg===item.dataUrl}
       onClick={() => onSelect(item.dataUrl)}
       onError={onError}
+      onRepair={(correctedUrl) => repairItem(item.key, correctedUrl)}
       cornerButton={
         <div style={{position:'absolute',bottom:2,right:2,width:18,height:18,borderRadius:'50%',
           background:'#10b981',display:'flex',alignItems:'center',justifyContent:'center',
@@ -2444,9 +2535,6 @@ function AppInner() {
   const [feedScrollTop, setFeedScrollTop] = useState(0);
   // 'saved' | 'pending' | 'error' -- drives the save status dot in the corner
   const [saveStatus, setSaveStatus] = useState('saved');
-  const [showStartupDiagnostic, setShowStartupDiagnostic] = useState(true);
-  const [showDiagLogViewer, setShowDiagLogViewer] = useState(false);
-  const [diagLogText, setDiagLogText] = useState('Loading...');
 
 
 
@@ -2522,8 +2610,8 @@ function AppInner() {
     } catch(e) { return {}; }
   });
   const [habitLastResetDate, setHabitLastResetDate] = useState(() => {
-    try { return localStorage.getItem('ft_habit_last_reset') || new Date().toISOString().slice(0,10); }
-    catch(e) { return new Date().toISOString().slice(0,10); }
+    try { return localStorage.getItem('ft_habit_last_reset') || getLocalDateStr(); }
+    catch(e) { return getLocalDateStr(); }
   });
   // habitHistory: { [dateStr]: { [listId]: { [categoryId]: count } } }
   const [habitHistory, setHabitHistory] = useState(() => {
@@ -2584,7 +2672,7 @@ function AppInner() {
   const computeCategoryCompletionRate = (listId, category, days = 14) => {
     const dates = Array.from({length: days}, (_, i) => {
       const d = new Date(); d.setDate(d.getDate() - (i + 1));
-      return d.toISOString().slice(0, 10);
+      return getLocalDateStr(d);
     });
     let hit = 0, logged = 0;
     dates.forEach(d => {
@@ -4489,6 +4577,51 @@ function AppInner() {
         }));
       } catch(e) { console.warn('Workouts fetch failed:', e); newData.workouts = newData.workouts || []; }
 
+      // 7-day history for trend charts -- one bucketed value per day, matching
+      // the "today's number + weekly trend" presentation used across
+      // Health Connect-integrated apps (Fit, Samsung Health, etc.)
+      try {
+        const stepsHistRes = await Health.queryAggregated({
+          dataType: 'steps', startDate: startOf7Days.toISOString(), endDate: now.toISOString(),
+          bucket: 'day', aggregation: 'sum',
+        });
+        const stepsSamples = stepsHistRes?.samples || [];
+        newData.stepsHistory = Array.from({length: 7}, (_, i) => {
+          const d = new Date(now); d.setDate(d.getDate() - (6 - i));
+          const dayStr = getLocalDateStr(d);
+          const match = stepsSamples.find(s => getLocalDateStr(new Date(s.startDate || s.date)) === dayStr);
+          return { date: dayStr, value: match ? Math.round(match.value) : 0 };
+        });
+      } catch(e) { console.warn('Steps history fetch failed:', e); }
+
+      try {
+        // Sleep sessions don't aggregate as cleanly by simple day-bucket
+        // (a night's sleep spans two calendar days), so fetch raw samples
+        // across the week and group by the night they belong to.
+        const sleepWeekStart = new Date(startOf7Days); sleepWeekStart.setDate(sleepWeekStart.getDate() - 1);
+        const sleepHistRes = await Health.readSamples({
+          dataType: 'sleep', startDate: sleepWeekStart.toISOString(), endDate: now.toISOString(), limit: 300,
+        });
+        const sleepSamples = sleepHistRes?.samples || [];
+        const minutesByNight = {};
+        sleepSamples.forEach(s => {
+          const start = new Date(s.startDate); const end = new Date(s.endDate);
+          const mins = Math.max(0, (end - start) / 60000);
+          const state = s.sleepState || 'asleep';
+          if (state === 'awake') return;
+          // Attribute to the night it started (evening) rather than the
+          // calendar day it ends on, matching how sleep is normally shown
+          const nightOf = start.getHours() < 14 ? new Date(start.getTime() - 86400000) : start;
+          const key = getLocalDateStr(nightOf);
+          minutesByNight[key] = (minutesByNight[key] || 0) + mins;
+        });
+        newData.sleepHistory = Array.from({length: 7}, (_, i) => {
+          const d = new Date(now); d.setDate(d.getDate() - (6 - i));
+          const dayStr = getLocalDateStr(d);
+          return { date: dayStr, value: Math.round(minutesByNight[dayStr] || 0) };
+        });
+      } catch(e) { console.warn('Sleep history fetch failed:', e); }
+
       setHealthData(newData);
       saveData('ft_health_data', newData);
       showToast(`💪 Health data updated`);
@@ -4597,7 +4730,7 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
       const draft = {
         id: Date.now().toString(),
         description,
-        date: new Date().toISOString().slice(0,10),
+        date: getLocalDateStr(),
         timestamp: new Date().toISOString(),
         ingredients: validLookups,
         unmatchedCount: aiIngredients.length - validLookups.length,
@@ -4673,15 +4806,29 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
           c = (wanted && list.find(x => ((x.name && x.name.display) || '').toLowerCase().includes(wanted))) || list[0];
         }
         if (!c) return;
+        window.ftDiagLog('[FT-DIAG] Contact fetched:', JSON.stringify({
+          hasImage: !!c.image, hasBase64: !!(c.image && c.image.base64String),
+          base64Length: c.image && c.image.base64String ? c.image.base64String.length : 0,
+          keys: Object.keys(c),
+        }));
         const updates = { syncDismissed: true };
         if (c.name && c.name.display) updates.label = c.name.display;
         if (c.phones && c.phones.length) updates.phone = c.phones[0].number;
         if (c.image && c.image.base64String) {
-          const rawImg = 'data:image/jpeg;base64,' + c.image.base64String;
+          const detectedMime = detectImageMimeFromBase64(c.image.base64String);
+          const rawImg = `data:${detectedMime};base64,` + c.image.base64String;
+          window.ftDiagLog('[FT-DIAG] Contact photo detected mime:', detectedMime, 'rawImg length:', rawImg.length);
           // Contact photos from Android's Contacts API are typically small
           // thumbnails -- resize to the app's standard quality before saving
           // permanently, rather than storing that low resolution forever.
-          updates.img = await resizeImageDataUrl(rawImg, 800);
+          try {
+            updates.img = await resizeImageDataUrl(rawImg, 800);
+            window.ftDiagLog('[FT-DIAG] Contact photo resize succeeded, result length:', updates.img ? updates.img.length : 0);
+          } catch(resizeErr) {
+            window.ftDiagLog('[FT-DIAG] Contact photo resize THREW:', resizeErr.message);
+          }
+        } else {
+          window.ftDiagLog('[FT-DIAG] Contact has NO image/base64String at all');
         }
         if (c.contactId) updates.contactId = c.contactId; // remember so we can re-open it
         setNodes(prev => prev.map(n => {
@@ -4793,7 +4940,7 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
             label: firstName,
             contactName: fullName !== firstName ? fullName : null,
             phone: (c.phones && c.phones[0] && c.phones[0].number) || '',
-            img: (c.image && c.image.base64String) ? ('data:image/jpeg;base64,' + c.image.base64String) : makeBlankAvatar(),
+            img: (c.image && c.image.base64String) ? (`data:${detectImageMimeFromBase64(c.image.base64String)};base64,` + c.image.base64String) : makeBlankAvatar(),
           };
         });
         spawnNodes(mapped);
@@ -5419,7 +5566,7 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
     setHabitToday({});
   };
   useEffect(() => {
-    const todayStr = new Date().toISOString().slice(0,10);
+    const todayStr = getLocalDateStr();
     if (habitLastResetDate !== todayStr) {
       doHabitRollover(habitLastResetDate);
       setHabitLastResetDate(todayStr);
@@ -5427,7 +5574,7 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
     }
     // Also re-check periodically in case the app stays open across midnight
     const iv = setInterval(() => {
-      const now = new Date().toISOString().slice(0,10);
+      const now = getLocalDateStr();
       setHabitLastResetDate(prevDate => {
         if (prevDate !== now) {
           doHabitRollover(prevDate);
@@ -5442,7 +5589,7 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
   useEffect(() => {
     if (calRecurring.length === 0) return;
     const today = new Date();
-    const todayStr = today.toISOString().slice(0,10);
+    const todayStr = getLocalDateStr(today);
     const dayOfWeek = today.getDay();
     const dayOfMonth = today.getDate();
     const due = calRecurring.filter(r => {
@@ -6964,62 +7111,6 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         background: saveStatus === 'saved' ? '#10b981' : '#ef4444',
         boxShadow: '0 0 0 2px rgba(0,0,0,0.15)',
         animation: saveStatus !== 'saved' ? 'pulse 1s ease-in-out infinite' : 'none'}}/>
-    {showStartupDiagnostic && (() => {
-      let meta = null;
-      try { meta = JSON.parse(localStorage.getItem('ft_save_meta') || 'null'); } catch(e) {}
-      const liveFriendCount = nodes.filter(n => n.type === 'friend').length;
-      const liveTotalCount = nodes.length;
-      return (
-        <div style={{position:'fixed', top:'calc(env(safe-area-inset-top, 0px) + 24px)', left:10, right:10, zIndex:9998,
-          background:'#0f172a', color:'white', borderRadius:10, padding:'10px 12px',
-          fontSize:11, fontFamily:'monospace', boxShadow:'0 4px 20px rgba(0,0,0,0.4)',
-          border:'1px solid #334155'}}>
-          <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6}}>
-            <span style={{fontWeight:700, color:'#f59e0b'}}>🔍 STARTUP DIAGNOSTIC</span>
-            <button onClick={() => setShowStartupDiagnostic(false)}
-              style={{background:'none', border:'none', color:'#94a3b8', fontSize:16, cursor:'pointer', padding:0}}>×</button>
-          </div>
-          <div>Loaded RIGHT NOW: {liveFriendCount} friends, {liveTotalCount} total nodes</div>
-          {meta ? (
-            <>
-              <div>Last save recorded: {meta.friendNodes} friends, {meta.totalNodes} total</div>
-              <div>Last save time: {new Date(meta.savedAt).toLocaleString()}</div>
-              <div style={{marginTop:4, fontWeight:700, color: meta.friendNodes === liveFriendCount ? '#10b981' : '#ef4444'}}>
-                {meta.friendNodes === liveFriendCount ? '✅ MATCH — loaded data matches last save' : '❌ MISMATCH — loaded data does NOT match last save'}
-              </div>
-            </>
-          ) : (
-            <div style={{color:'#94a3b8'}}>No save metadata found yet (first run, or metadata never written)</div>
-          )}
-          <button onClick={async () => {
-            try {
-              const Prefs = window.Capacitor?.Plugins?.Preferences;
-              const r = Prefs ? await Prefs.get({ key: 'ft_diag_log' }) : null;
-              setDiagLogText(r?.value || '(log is empty)');
-            } catch(e) { setDiagLogText('Error reading log: ' + e.message); }
-            setShowDiagLogViewer(true);
-          }}
-            style={{marginTop:8, width:'100%', padding:'6px 0', borderRadius:6, border:'1px solid #334155',
-              background:'none', color:'#94a3b8', fontSize:11, cursor:'pointer'}}>
-            📄 View Full Diagnostic Log
-          </button>
-        </div>
-      );
-    })()}
-    {showDiagLogViewer && (
-      <div style={{position:'fixed', inset:0, zIndex:10000, background:'rgba(0,0,0,0.85)',
-        display:'flex', flexDirection:'column', padding:12}}>
-        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8}}>
-          <span style={{color:'white', fontWeight:700, fontSize:13}}>Diagnostic Log</span>
-          <button onClick={() => setShowDiagLogViewer(false)}
-            style={{background:'#334155', border:'none', color:'white', borderRadius:6, padding:'6px 14px', fontSize:13}}>Close</button>
-        </div>
-        <textarea readOnly value={diagLogText}
-          style={{flex:1, background:'#0f172a', color:'#10b981', fontFamily:'monospace', fontSize:10,
-            border:'1px solid #334155', borderRadius:8, padding:10, whiteSpace:'pre-wrap'}}/>
-        <div style={{color:'#94a3b8', fontSize:10, marginTop:6}}>Tap and hold the text above to select all, then copy.</div>
-      </div>
-    )}
     {photosRestoring && (
       <div style={{position:'fixed', top:12, left:'50%', transform:'translateX(-50%)', zIndex:9999,
         background:'rgba(15,23,42,0.9)', color:'white', padding:'6px 14px', borderRadius:99,
@@ -12958,7 +13049,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         {viewMode === 'calendar' && calViewMode === 'monthly' && (() => {
           const dm = theme.darkMode;
           const today = new Date();
-          const todayStr = today.toISOString().slice(0,10);
+          const todayStr = getLocalDateStr(today);
           const firstDay = new Date(calYear, calMonth, 1);
           const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
           const startDow = firstDay.getDay();
@@ -14076,7 +14167,14 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 </div>
                 {/* Metric cards */}
                 <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:16}}>
-                  {METRICS.map(m => (
+                  {METRICS.map(m => {
+                    const history = m.key === 'steps' ? healthData.stepsHistory
+                      : m.key === 'sleep' ? healthData.sleepHistory : null;
+                    const avg = history && history.length > 0
+                      ? Math.round(history.reduce((s,d) => s+d.value, 0) / history.length) : null;
+                    const vsAvg = avg && m.value != null && avg > 0
+                      ? Math.round(((m.value - avg) / avg) * 100) : null;
+                    return (
                     <div key={m.key} style={{borderRadius:12, padding:'12px 14px',
                       background:dm?'#1e293b':'#f8fafc', border:`1px solid ${m.color}30`}}>
                       <div style={{display:'flex', alignItems:'center', gap:6, marginBottom:6}}>
@@ -14087,9 +14185,68 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         {m.format(m.value)}
                       </div>
                       <div style={{fontSize:10, color:dm?'#64748b':'#94a3b8', marginTop:2}}>{m.unit}</div>
+                      {vsAvg != null && (
+                        <div style={{fontSize:10, fontWeight:700, marginTop:4,
+                          color: vsAvg >= 0 ? '#10b981' : '#f59e0b'}}>
+                          {vsAvg >= 0 ? '▲' : '▼'} {Math.abs(vsAvg)}% vs 7-day avg
+                        </div>
+                      )}
                     </div>
-                  ))}
+                  );})}
                 </div>
+                {/* Weekly trends -- steps and sleep over the last 7 days */}
+                {(healthData.stepsHistory || healthData.sleepHistory) && (
+                  <div style={{marginBottom:16, borderRadius:12, padding:'14px', 
+                    background:dm?'#1e293b':'#f8fafc', border:`1px solid ${dm?'#334155':'#e2e8f0'}`}}>
+                    <div style={{fontSize:12, fontWeight:700, color:dm?'white':'#0f172a', marginBottom:12}}>📊 This Week</div>
+                    {healthData.stepsHistory && (() => {
+                      const hist = healthData.stepsHistory;
+                      const maxVal = Math.max(...hist.map(d=>d.value), 1);
+                      return (
+                        <div style={{marginBottom:14}}>
+                          <div style={{fontSize:10, color:dm?'#94a3b8':'#64748b', marginBottom:6}}>👟 Steps</div>
+                          <div style={{display:'flex', alignItems:'flex-end', gap:4, height:50}}>
+                            {hist.map((d,i) => {
+                              const dayLabel = new Date(d.date+'T12:00:00').toLocaleDateString('en',{weekday:'narrow'});
+                              const isToday = i === hist.length-1;
+                              return (
+                                <div key={i} style={{flex:1, display:'flex', flexDirection:'column', alignItems:'center', gap:2}}>
+                                  <div style={{width:'100%', height:Math.max(3, (d.value/maxVal)*40), borderRadius:3,
+                                    background: isToday ? '#10b981' : (dm?'#334155':'#e2e8f0')}}/>
+                                  <span style={{fontSize:8, color:dm?'#64748b':'#94a3b8'}}>{dayLabel}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })()}
+                    {healthData.sleepHistory && (() => {
+                      const hist = healthData.sleepHistory;
+                      const maxVal = Math.max(...hist.map(d=>d.value), 60);
+                      return (
+                        <div>
+                          <div style={{fontSize:10, color:dm?'#94a3b8':'#64748b', marginBottom:6}}>😴 Sleep</div>
+                          <div style={{display:'flex', alignItems:'flex-end', gap:4, height:50}}>
+                            {hist.map((d,i) => {
+                              const dayLabel = new Date(d.date+'T12:00:00').toLocaleDateString('en',{weekday:'narrow'});
+                              const isToday = i === hist.length-1;
+                              const hrs = Math.floor(d.value/60), mins = d.value%60;
+                              return (
+                                <div key={i} style={{flex:1, display:'flex', flexDirection:'column', alignItems:'center', gap:2}}
+                                  title={`${hrs}h ${mins}m`}>
+                                  <div style={{width:'100%', height:Math.max(3, (d.value/maxVal)*40), borderRadius:3,
+                                    background: isToday ? '#8b5cf6' : (dm?'#334155':'#e2e8f0')}}/>
+                                  <span style={{fontSize:8, color:dm?'#64748b':'#94a3b8'}}>{dayLabel}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
                 {/* Sleep quality breakdown -- deep/light/REM/awake stages */}
                 {healthData.sleepStages && (
                   <div style={{marginBottom:16, borderRadius:12, padding:'12px 14px',
@@ -14217,7 +14374,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     )}
                   </div>
                   {(() => {
-                    const todayStr = new Date().toISOString().slice(0,10);
+                    const todayStr = getLocalDateStr();
                     const todayEntries = foodDiaryEntries.filter(e => e.date === todayStr);
                     if (todayEntries.length === 0) {
                       return <div style={{fontSize:12, color:dm?'#64748b':'#94a3b8', fontStyle:'italic', marginBottom:10}}>
@@ -18167,6 +18324,16 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   <PhotoWithLoadState key={idx} src={p.cropped} size={72} active={activeIdx===idx}
                     onClick={()=>{setNodes(prev=>prev.map(n=>n.id===sn.id?{...n,img:p.cropped,activePhotoIdx:idx}:n));}}
                     onError={(fmt) => setFailedPhotoFormats(prev => prev.includes(fmt) ? prev : [...prev, fmt])}
+                    onRepair={(correctedUrl) => {
+                      setNodes(prev => prev.map(n => {
+                        if (n.id !== sn.id) return n;
+                        const newPhotos = (n.photos || []).map((ph, phi) => phi === idx ? { ...ph, cropped: correctedUrl } : ph);
+                        const wasActive = n.img === p.cropped;
+                        savePhotoArrayToDB(sn.id, newPhotos);
+                        return { ...n, photos: newPhotos, img: wasActive ? correctedUrl : n.img };
+                      }));
+                      showToast('🔧 Photo format corrected');
+                    }}
                     cornerButton={
                       <button
                         onClick={(e)=>{
@@ -20050,7 +20217,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 const dm = theme.darkMode;
                 const last7Dates = Array.from({length:7}, (_,i) => {
                   const d = new Date(); d.setDate(d.getDate() - (i+1));
-                  return d.toISOString().slice(0,10);
+                  return getLocalDateStr(d);
                 });
                 return (
                   <div>
