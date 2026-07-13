@@ -4819,6 +4819,7 @@ function AppInner() {
           const match = stepsSamples.find(s => getLocalDateStr(new Date(s.startDate || s.date)) === dayStr);
           return { date: dayStr, value: match ? Math.round(match.value) : 0 };
         });
+        window.ftDiagLog('[FT-DIAG] stepsHistory computed:', JSON.stringify(newData.stepsHistory), 'raw samples count:', stepsSamples.length);
       } catch(e) { console.warn('Steps history fetch failed:', e); }
 
       try {
@@ -8684,23 +8685,37 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
                         {/* Right: 2×2 grid */}
                         <div style={{flex:1,display:'grid',gridTemplateColumns:'1fr',gap:4,minWidth:0}}>
-                          {/* Birthday */}
-                          <label style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:2,background:pw.cellBg,cursor:'pointer',borderRadius:8,position:'relative',border:`1.5px solid ${pw.border}`}}>
-                            {bd ? (
-                              <>
+                          {/* Birthday: date on the left, colour-coded countdown on the right */}
+                          <div style={{display:'flex', gap:4}}>
+                            <label style={{flex:1.3,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:2,background:pw.cellBg,cursor:'pointer',borderRadius:8,position:'relative',border:`1.5px solid ${pw.border}`,minHeight:40,padding:'4px 2px'}}>
+                              {bd ? (
                                 <span style={{fontSize:10,fontWeight:700,color:theme.darkMode?'#e2e8f0':pw.bodyText,textAlign:'center',lineHeight:1.2,maxWidth:'90%',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{bd}</span>
-                                {daysUntil!==null&&<span style={{fontSize:9,fontWeight:700,color:daysUntil===0?'#f43f5e':daysUntil<=7?'#f59e0b':'#94a3b8'}}>{daysUntil===0?'Today!':daysUntil===1?'Tmrw!':daysUntil+'d'}</span>}
-                              </>
-                            ) : (
-                              <span style={{fontSize:9,color:theme.darkMode?'#64748b':'#475569',fontWeight:600}}>Birthday</span>
-                            )}
-                            <input type="text" defaultValue={bd}
-                              onBlur={e=>updateSelectedNode('birthday',normaliseBirthday(e.target.value))}
-                              onKeyDown={e=>{if(e.key==='Enter'){updateSelectedNode('birthday',normaliseBirthday(e.target.value));e.target.blur();}}}
-                              placeholder="11 Mar 93"
-                              style={{position:'absolute',top:0,left:0,right:0,bottom:0,opacity:0,cursor:'pointer',width:'100%',border:'none',background:'none'}}
-                              onClick={e=>e.stopPropagation()}/>
-                          </label>
+                              ) : (
+                                <span style={{fontSize:9,color:theme.darkMode?'#64748b':'#475569',fontWeight:600}}>Birthday</span>
+                              )}
+                              <div onClick={e=>{ e.stopPropagation(); setShowBirthdayPicker(true); }}
+                                style={{position:'absolute',top:0,left:0,right:0,bottom:0,cursor:'pointer'}}/>
+                            </label>
+                            {daysUntil!==null && (() => {
+                              // Months while it's 10-12 months out, weeks while
+                              // it's between 2 weeks and 10 months out, days
+                              // for the final 2 weeks -- each with its own
+                              // colour so the countdown reads at a glance.
+                              const TEN_MONTHS_DAYS = 304, TWO_WEEKS_DAYS = 14;
+                              let display, bg, color;
+                              if (daysUntil === 0) { display = 'Today!'; bg = '#ef4444'; color = '#000'; }
+                              else if (daysUntil === 1) { display = 'Tmrw!'; bg = '#ef4444'; color = '#000'; }
+                              else if (daysUntil <= TWO_WEEKS_DAYS) { display = daysUntil + 'd'; bg = '#ef4444'; color = '#000'; }
+                              else if (daysUntil <= TEN_MONTHS_DAYS) { display = Math.round(daysUntil/7) + 'w'; bg = '#10b981'; color = '#000'; }
+                              else { display = Math.round(daysUntil/30.44) + 'mo'; bg = '#3b82f6'; color = '#fff'; }
+                              return (
+                                <div style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',
+                                  borderRadius:8, background:bg, minHeight:40}}>
+                                  <span style={{fontSize:12,fontWeight:800,color}}>{display}</span>
+                                </div>
+                              );
+                            })()}
+                          </div>
 
 
                           {/* Bottom: Tier badge — spans both columns, rounded, shorter */}
@@ -14792,6 +14807,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           const dm = theme.darkMode;
           const METRIC_DEFS = {
             steps:     { label: 'Steps',      icon: '👟', color: '#10b981', value: healthData.steps, unit: 'steps today', history: healthData.stepsHistory, format: v => v?.toLocaleString() || '—' },
+            sleep:     { label: 'Sleep',      icon: '😴', color: '#8b5cf6', value: healthData.sleep, unit: 'minutes', history: healthData.sleepHistory, format: v => v != null ? `${Math.floor(v/60)}h ${v%60}m` : '—' },
             heartRate: { label: 'Heart Rate', icon: '❤️', color: '#ef4444', value: healthData.heartRate, unit: 'bpm', history: healthData.heartRateHistory, format: v => v?.toString() || '—' },
             workouts:  { label: 'Workouts',   icon: '💪', color: '#f59e0b', value: healthData.workouts?.length, unit: 'this week', history: null, format: v => v?.toString() || '—' },
             distance:  { label: 'Distance',   icon: '🚶', color: '#06b6d4', value: healthData.distanceKm, unit: 'km today', history: healthData.distanceHistory, format: v => v != null ? `${v} km` : '—' },
@@ -14964,6 +14980,41 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         </>
                       );
                     })()}
+                  </div>
+                )}
+                {showMetricDetail === 'sleep' && healthData.sleepSegments && healthData.sleepSegments.length > 0 && (
+                  <div style={{marginBottom:20}}>
+                    <div style={{fontSize:12, fontWeight:700, color:dm?'white':'#0f172a', marginBottom:10}}>Last night's timeline</div>
+                    <SleepTimelineChart segments={healthData.sleepSegments} darkMode={dm}/>
+                    {(healthData.sleepBedtime || healthData.sleepEfficiencyPct != null) && (
+                      <div style={{display:'flex', gap:16, marginTop:12, flexWrap:'wrap'}}>
+                        {healthData.sleepBedtime && healthData.sleepWaketime && (
+                          <div>
+                            <div style={{fontSize:13, fontWeight:800, color:dm?'white':'#0f172a'}}>
+                              {new Date(healthData.sleepBedtime).toLocaleTimeString('en',{hour:'numeric',minute:'2-digit'})}
+                              {' – '}
+                              {new Date(healthData.sleepWaketime).toLocaleTimeString('en',{hour:'numeric',minute:'2-digit'})}
+                            </div>
+                            <div style={{fontSize:9, color:dm?'#64748b':'#94a3b8'}}>Sleep schedule</div>
+                          </div>
+                        )}
+                        {healthData.sleepEfficiencyPct != null && (
+                          <div>
+                            <div style={{fontSize:13, fontWeight:800,
+                              color: healthData.sleepEfficiencyPct >= 85 ? '#10b981' : '#f59e0b'}}>
+                              {healthData.sleepEfficiencyPct}%
+                            </div>
+                            <div style={{fontSize:9, color:dm?'#64748b':'#94a3b8'}}>Sleep efficiency</div>
+                          </div>
+                        )}
+                        {healthData.sleepQualityPct != null && (
+                          <div>
+                            <div style={{fontSize:13, fontWeight:800, color:'#8b5cf6'}}>{healthData.sleepQualityPct}%</div>
+                            <div style={{fontSize:9, color:dm?'#64748b':'#94a3b8'}}>Restorative</div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
                 {showMetricDetail === 'workouts' && healthData.workouts && healthData.workouts.length > 0 && (
@@ -15275,7 +15326,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   WebkitOverflowScrolling:'touch'}}>
                 {list.map((item, i) => (
                   <div key={i} style={{height:ROW_H, display:'flex', alignItems:'center', justifyContent:'center',
-                    scrollSnapAlign:'start', fontSize:item===current?18:15,
+                    scrollSnapAlign:'center', fontSize:item===current?18:15,
                     fontWeight:item===current?800:500,
                     color:item===current?'#10b981':(dm?'#64748b':'#94a3b8')}}>
                     {formatFn ? formatFn(item) : item}
