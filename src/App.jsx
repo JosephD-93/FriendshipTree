@@ -1373,19 +1373,91 @@ function computeHeartRateZones(age, restingHR) {
   return { maxHR, restingHR: rhr, hrr, zones };
 }
 
+// ─── Longevity estimates ────────────────────────────────────────────────
+// Lifetime heartbeat count: since we only have real tracked data for
+// however long the app has been connected to Health Connect, the years
+// before that are filled in using real age-banded average resting heart
+// rate data from the CDC's National Health Statistics Report (Fleming et
+// al. 2011, analysing 143,346 children in The Lancet, and NHSR No. 41,
+// 2011, analysing US population data 1999-2008) -- heart rate is
+// naturally much higher in infancy and childhood than adulthood, so a
+// single flat adult average would meaningfully underestimate the total
+// for anyone who isn't a newborn today.
+//   Age <1: ~129 bpm · Age 2: ~113 bpm · Age 4-5: ~96 bpm ·
+//   Age 12-15: ~78 bpm · Age 20+ (adult plateau): ~72 bpm
+// Source for the underlying "beats per lifetime" concept: Levine HJ,
+// "Rest heart rate and life expectancy", American Journal of Cardiology,
+// 1997 (PubMed 9316546) -- established the cross-species pattern this
+// estimate is built on, and why humans are a notable outlier at 2.5-3
+// billion beats/lifetime versus ~1 billion for most other mammals.
+function estimateAgeBandRestingHR(ageAtYear) {
+  // Piecewise-linear interpolation between the CDC reference points above
+  const points = [
+    [0, 129], [1, 113], [2, 113], [4.5, 96], [8.5, 88], [13.5, 78], [20, 72],
+  ];
+  if (ageAtYear <= points[0][0]) return points[0][1];
+  if (ageAtYear >= points[points.length-1][0]) return points[points.length-1][1];
+  for (let i = 0; i < points.length - 1; i++) {
+    const [a1, r1] = points[i], [a2, r2] = points[i+1];
+    if (ageAtYear >= a1 && ageAtYear <= a2) {
+      const frac = (ageAtYear - a1) / (a2 - a1);
+      return r1 + (r2 - r1) * frac;
+    }
+  }
+  return 72;
+}
+
+function estimateLifetimeHeartbeats(birthdayStr, actualAvgRestingHR) {
+  const parsed = parseBirthdayDateGlobal(birthdayStr);
+  if (!parsed || !parsed.year) return null;
+  const birthDate = new Date(parsed.year, parsed.month, parsed.day);
+  const now = new Date();
+  const ageYears = (now - birthDate) / (1000*60*60*24*365.25);
+  if (ageYears <= 0) return null;
+  // Integrate day-by-day average HR across the person's actual age so far,
+  // using the age-band curve -- far more accurate than a single flat
+  // average for anyone who isn't already an adult by the time they're
+  // using this app.
+  let totalBeats = 0;
+  const daysAlive = Math.floor(ageYears * 365.25);
+  const STEP_DAYS = 30; // integrate in monthly steps for reasonable performance
+  for (let d = 0; d < daysAlive; d += STEP_DAYS) {
+    const ageAtStep = d / 365.25;
+    const hrAtStep = actualAvgRestingHR && ageAtStep >= 18 ? actualAvgRestingHR : estimateAgeBandRestingHR(ageAtStep);
+    const daysThisStep = Math.min(STEP_DAYS, daysAlive - d);
+    totalBeats += hrAtStep * 24 * 60 * daysThisStep;
+  }
+  return { totalBeats: Math.round(totalBeats), ageYears, daysAlive };
+}
+
+// VO2 max non-exercise estimate via the Heart Rate Ratio method (Uth,
+// Sorensen, Overgaard & Pedersen, "Estimation of VO2max from the ratio
+// between HRmax and HRrest -- the Heart Rate Ratio Method", European
+// Journal of Applied Physiology, 2004; PubMed 14624296). Validated in
+// well-trained adults with a standard error of ~4.5% against lab-measured
+// VO2max -- the simplest reliable non-exercise estimate available, since
+// it only needs data we already have (max HR estimate + resting HR),
+// without requiring a body-composition figure we can't verify.
+function estimateVO2Max(maxHR, restingHR) {
+  if (!maxHR || !restingHR) return null;
+  return Math.round((maxHR / restingHR) * 15.3 * 10) / 10;
+}
+
 // Heart rate scatter plot with a smoothed trend line and validated
 // training zone bands in the background (Karvonen method, see
 // computeHeartRateZones above).
-function HeartRateScatterChart({ readings, zones, darkMode }) {
+function HeartRateScatterChart({ readings, zones, darkMode, dayStart }) {
   if (!readings || readings.length === 0) return null;
   const W = 320, H = 160, padL = 34, padR = 6, padT = 8, padB = 20;
   const plotW = W - padL - padR, plotH = H - padT - padB;
-  const times = readings.map(r => new Date(r.time).getTime());
-  const start = Math.min(...times), end = Math.max(...times);
-  const totalMs = Math.max(1, end - start);
-  const values = readings.map(r => r.value);
-  const yMin = zones ? Math.min(zones.zones[0].min, ...values) - 5 : Math.min(...values) - 5;
-  const yMax = zones ? Math.max(zones.maxHR, ...values) + 5 : Math.max(...values) + 5;
+  // Always span the FULL calendar day (midnight to midnight), not just the
+  // range of readings collected so far -- this keeps the chart's shape and
+  // the zone bands consistent no matter what time of day you check it,
+  // rather than the axis silently rescaling as the day goes on.
+  const start = dayStart ? dayStart.getTime() : (() => { const d = new Date(readings[0].time); d.setHours(0,0,0,0); return d.getTime(); })();
+  const end = start + 24*60*60*1000;
+  const totalMs = end - start;
+  const yMin = 0, yMax = 220; // fixed physiological range, not data-dependent
   const xFor = (t) => padL + ((t - start) / totalMs) * plotW;
   const yFor = (v) => padT + plotH - ((v - yMin) / (yMax - yMin)) * plotH;
 
@@ -1425,13 +1497,85 @@ function HeartRateScatterChart({ readings, zones, darkMode }) {
       ))}
       {/* Smoothed trend line */}
       <path d={trendPath} fill="none" stroke="#ef4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-      {/* X-axis time labels */}
-      <text x={padL} y={H-4} fontSize="8" fill={darkMode ? '#64748b' : '#94a3b8'}>
-        {new Date(start).toLocaleTimeString('en',{hour:'numeric',minute:'2-digit'})}
-      </text>
-      <text x={W-padR} y={H-4} textAnchor="end" fontSize="8" fill={darkMode ? '#64748b' : '#94a3b8'}>
-        {new Date(end).toLocaleTimeString('en',{hour:'numeric',minute:'2-digit'})}
-      </text>
+      {/* "Now" marker -- shows where in the day the current moment sits,
+          useful context now that the axis always spans the full 24 hours
+          rather than stopping at the most recent reading. */}
+      {(() => {
+        const now = Date.now();
+        if (now < start || now > end) return null;
+        const nowX = xFor(now);
+        return (
+          <line x1={nowX} x2={nowX} y1={padT} y2={padT+plotH} stroke={darkMode?'#f8fafc':'#0f172a'}
+            strokeWidth="1" strokeDasharray="2 2" opacity={0.4}/>
+        );
+      })()}
+      {/* X-axis time labels -- fixed midnight/noon/midnight, since the axis
+          always spans the full day regardless of when readings exist */}
+      <text x={padL} y={H-4} fontSize="8" fill={darkMode ? '#64748b' : '#94a3b8'}>12am</text>
+      <text x={padL + plotW/2} y={H-4} textAnchor="middle" fontSize="8" fill={darkMode ? '#64748b' : '#94a3b8'}>12pm</text>
+      <text x={W-padR} y={H-4} textAnchor="end" fontSize="8" fill={darkMode ? '#64748b' : '#94a3b8'}>12am</text>
+    </svg>
+  );
+}
+
+// Day-of-week colour, following ROYGBIV starting from Monday as red -- used
+// consistently for the weekly heart rate overlay chart and its toggle chips.
+const DAY_OF_WEEK_COLOR = {
+  1: '#ef4444', // Monday - Red
+  2: '#f97316', // Tuesday - Orange
+  3: '#eab308', // Wednesday - Yellow
+  4: '#22c55e', // Thursday - Green
+  5: '#3b82f6', // Friday - Blue
+  6: '#6366f1', // Saturday - Indigo
+  0: '#a855f7', // Sunday - Violet
+};
+
+// Overlays each visible day's heart rate as its own coloured line against a
+// shared, fixed 24-hour axis (midnight to midnight, 0-220bpm) -- lets you
+// directly compare the SHAPE of different days (when you woke up, when you
+// exercised, etc.) rather than just their raw numbers side by side.
+function HeartRateWeekOverlayChart({ byDay, visible, darkMode }) {
+  const days = Object.keys(byDay || {}).sort();
+  if (days.length === 0) return null;
+  const W = 320, H = 160, padL = 34, padR = 6, padT = 8, padB = 20;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const dayMs = 24*60*60*1000;
+  const yMin = 0, yMax = 220;
+  const xFor = (msIntoDay) => padL + (msIntoDay / dayMs) * plotW;
+  const yFor = (v) => padT + plotH - ((v - yMin) / (yMax - yMin)) * plotH;
+
+  return (
+    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{display:'block'}}>
+      {/* Horizontal gridlines every 50bpm for reference against the fixed scale */}
+      {[50,100,150,200].map(v => (
+        <line key={v} x1={padL} x2={W-padR} y1={yFor(v)} y2={yFor(v)}
+          stroke={darkMode?'#1e293b':'#f1f5f9'} strokeWidth="1"/>
+      ))}
+      {days.map(dayStr => {
+        if (!visible[dayStr]) return null;
+        const readings = byDay[dayStr];
+        if (!readings || readings.length === 0) return null;
+        const dow = new Date(dayStr+'T12:00:00').getDay();
+        const color = DAY_OF_WEEK_COLOR[dow];
+        const dayStart = new Date(dayStr+'T00:00:00').getTime();
+        const sorted = [...readings].sort((a,b) => new Date(a.time) - new Date(b.time));
+        const windowSize = Math.max(3, Math.round(sorted.length / 8));
+        const smoothed = sorted.map((r, i) => {
+          const lo = Math.max(0, i - Math.floor(windowSize/2));
+          const hi = Math.min(sorted.length, i + Math.ceil(windowSize/2));
+          const slice = sorted.slice(lo, hi);
+          const avg = slice.reduce((s,p) => s + p.value, 0) / slice.length;
+          return { time: r.time, value: avg };
+        });
+        const path = smoothed.map((p, i) => {
+          const msIntoDay = new Date(p.time).getTime() - dayStart;
+          return `${i === 0 ? 'M' : 'L'}${xFor(msIntoDay)},${yFor(p.value)}`;
+        }).join(' ');
+        return <path key={dayStr} d={path} fill="none" stroke={color} strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" opacity={0.85}/>;
+      })}
+      <text x={padL} y={H-4} fontSize="8" fill={darkMode ? '#64748b' : '#94a3b8'}>12am</text>
+      <text x={padL + plotW/2} y={H-4} textAnchor="middle" fontSize="8" fill={darkMode ? '#64748b' : '#94a3b8'}>12pm</text>
+      <text x={W-padR} y={H-4} textAnchor="end" fontSize="8" fill={darkMode ? '#64748b' : '#94a3b8'}>12am</text>
     </svg>
   );
 }
@@ -1584,6 +1728,63 @@ function PhotoWithLoadState({ src, size = 72, onClick, cornerButton, active, onE
         )}
       </button>
       {status !== 'error' && cornerButton}
+    </div>
+  );
+}
+
+// Full-screen slideshow's main image -- same real load/error tracking as
+// PhotoWithLoadState, but rectangular and contain-fit rather than a round
+// avatar, matching this view's actual layout.
+function SlideshowMainImage({ src }) {
+  const [status, setStatus] = React.useState('loading');
+  React.useEffect(() => { setStatus('loading'); }, [src]);
+  const formatMatch = /^data:image\/([a-zA-Z0-9.+-]+);/.exec(src || '');
+  const format = formatMatch ? formatMatch[1] : 'unknown';
+  return (
+    <>
+      {status === 'loading' && (
+        <div style={{position:'absolute', width:60, height:60, display:'flex', alignItems:'center', justifyContent:'center'}}>
+          <div style={{width:36, height:36, border:'3px solid rgba(255,255,255,0.2)',
+            borderTopColor:'#10b981', borderRadius:'50%', animation:'spin 0.8s linear infinite'}}/>
+        </div>
+      )}
+      {status === 'error' ? (
+        <div style={{display:'flex', flexDirection:'column', alignItems:'center', gap:8, color:'white'}}>
+          <span style={{fontSize:40}}>⚠️</span>
+          <span style={{fontSize:13, opacity:0.8}}>Couldn't load this photo (format: .{format})</span>
+        </div>
+      ) : (
+        <img src={src} alt="" decoding="async"
+          onLoad={() => setStatus('loaded')} onError={() => setStatus('error')}
+          style={{maxWidth:'100%', maxHeight:'100%', objectFit:'contain',
+            opacity: status === 'loaded' ? 1 : 0, transition:'opacity 0.3s ease'}}/>
+      )}
+    </>
+  );
+}
+
+// Filmstrip thumbnail for the slideshow -- same idea, smaller and simpler
+// since a broken thumbnail just needs a plain fallback square, not a full
+// error message.
+function SlideshowThumb({ src }) {
+  const [status, setStatus] = React.useState('loading');
+  React.useEffect(() => { setStatus('loading'); }, [src]);
+  return (
+    <div style={{position:'relative', width:'100%', height:'100%', background:'#1e293b'}}>
+      {status === 'loading' && (
+        <div style={{position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center'}}>
+          <div style={{width:14, height:14, border:'2px solid rgba(255,255,255,0.2)',
+            borderTopColor:'#10b981', borderRadius:'50%', animation:'spin 0.8s linear infinite'}}/>
+        </div>
+      )}
+      {status === 'error' ? (
+        <div style={{width:'100%', height:'100%', display:'flex', alignItems:'center', justifyContent:'center', fontSize:16}}>⚠️</div>
+      ) : (
+        <img src={src} decoding="async"
+          onLoad={() => setStatus('loaded')} onError={() => setStatus('error')}
+          style={{width:'100%', height:'100%', objectFit:'cover',
+            opacity: status === 'loaded' ? 1 : 0, transition:'opacity 0.25s ease'}}/>
+      )}
     </div>
   );
 }
@@ -2746,6 +2947,8 @@ function AppInner() {
   const [showMetricDetail, setShowMetricDetail] = useState(null); // metric key or null
   const [metricDetailHourly, setMetricDetailHourly] = useState(null); // today's hourly breakdown for the open metric
   const [heartRateReadings, setHeartRateReadings] = useState(null);
+  const [heartRateWeek, setHeartRateWeek] = useState(null); // { 'YYYY-MM-DD': [{time,value}] }
+  const [heartRateWeekVisible, setHeartRateWeekVisible] = useState({}); // { 'YYYY-MM-DD': true/false }
   const [showMetricInfo, setShowMetricInfo] = useState(false);
   const [metricDetailLoading, setMetricDetailLoading] = useState(false);
   useEffect(() => {
@@ -2767,6 +2970,15 @@ function AppInner() {
     if (showMetricDetail === 'heartRate') {
       setHeartRateReadings(null);
       fetchHeartRateReadingsToday().then(setHeartRateReadings);
+      setHeartRateWeek(null);
+      fetchHeartRateReadingsWeek().then(data => {
+        setHeartRateWeek(data);
+        if (data) {
+          const allVisible = {};
+          Object.keys(data).forEach(d => { allVisible[d] = true; });
+          setHeartRateWeekVisible(allVisible);
+        }
+      });
     }
   }, [showMetricDetail]); // eslint-disable-line
 
@@ -4351,6 +4563,8 @@ function AppInner() {
           label: ACTIVITY_LABELS[type] || 'Interaction',
           pts: additionalPoints,
           date: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }),
+          ts: Date.now(),
+          type,
         };
         const newLog = [...(n.interactionLog || []), logEntry].slice(-50);
         const prevScore = n.interactionScore || 0;
@@ -4365,6 +4579,35 @@ function AppInner() {
       }
       return n;
     }));
+  };
+
+  // Returns 'today' | 'recent' | 'default' for an interaction button, based on
+  // when that specific activity type was last logged for this person --
+  // higher-point activities (Trip Away, Meaningful Gesture etc.) stay
+  // highlighted for a full week since they're inherently less frequent,
+  // while lower-point everyday activities (Message, Hangout) only stay
+  // highlighted for 2 days, reflecting how recent "recent" really means.
+  const getActivityRecencyState = (node, type, points) => {
+    if (!node) return 'default';
+    const entries = (node.interactionLog || []).filter(e => e.type === type && e.ts);
+    if (entries.length === 0) return 'default';
+    const lastTs = Math.max(...entries.map(e => e.ts));
+    const now = Date.now();
+    const isToday = new Date(lastTs).toDateString() === new Date(now).toDateString();
+    if (isToday) return 'today';
+    const windowMs = (points >= 40 ? 7 : 2) * 24 * 60 * 60 * 1000;
+    if (now - lastTs <= windowMs) return 'recent';
+    return 'default';
+  };
+  // Tailwind class strings for each recency state, dark/light aware
+  const activityButtonClasses = (state, dm) => {
+    if (state === 'today') {
+      return `border-emerald-500 ${dm ? 'bg-emerald-900/60 hover:bg-emerald-900/80' : 'bg-emerald-100 hover:bg-emerald-200'}`;
+    }
+    if (state === 'recent') {
+      return `border-emerald-500/50 ${dm ? 'bg-emerald-900/20 hover:bg-emerald-900/40' : 'bg-emerald-50 hover:bg-emerald-100'}`;
+    }
+    return dm ? 'border-slate-600 hover:bg-slate-700' : 'border-slate-200 hover:bg-emerald-50';
   };
 
 
@@ -4905,6 +5148,31 @@ function AppInner() {
       const samples = res?.samples || [];
       return samples.map(s => ({ time: s.startDate, value: Math.round(s.value) })).filter(r => r.value > 0);
     } catch(e) { console.warn('Heart rate readings fetch failed:', e); return null; }
+  };
+
+  // Full week of raw heart rate readings, grouped by calendar day (keyed by
+  // the ISO date string) -- needed for the day-by-day overlay comparison,
+  // where each day's readings get plotted as their own line against the
+  // same 24-hour axis so patterns at the same time of day are comparable.
+  const fetchHeartRateReadingsWeek = async () => {
+    const Health = getHealthPlugin();
+    if (!Health) return null;
+    try {
+      const now = new Date();
+      const weekStart = new Date(now); weekStart.setDate(weekStart.getDate() - 6); weekStart.setHours(0,0,0,0);
+      const res = await Health.readSamples({
+        dataType: 'heartRate', startDate: weekStart.toISOString(), endDate: now.toISOString(),
+        limit: 2000, ascending: true,
+      });
+      const samples = res?.samples || [];
+      const byDay = {};
+      samples.forEach(s => {
+        if (!(s.value > 0)) return;
+        const dayStr = getLocalDateStr(new Date(s.startDate));
+        (byDay[dayStr] = byDay[dayStr] || []).push({ time: s.startDate, value: Math.round(s.value) });
+      });
+      return byDay;
+    } catch(e) { console.warn('Heart rate week fetch failed:', e); return null; }
   };
 
   const fetchMetricHourly = async (dataType, aggregation = 'sum') => {
@@ -8659,10 +8927,12 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     const bd = selectedNode.birthday||'';
                     let daysUntil = null;
                     if(bd){
-                      const MONTHS={Jan:1,Feb:2,Mar:3,Apr:4,May:5,Jun:6,Jul:7,Aug:8,Sep:9,Oct:10,Nov:11,Dec:12};
-                      const parts=bd.split(' ');let day=null,month=null;
-                      parts.forEach(p=>{const n=parseInt(p.replace(/\D/g,''));if(MONTHS[p.replace(/\d/g,'').trim()])month=MONTHS[p.replace(/\d/g,'').trim()];else if(!isNaN(n)&&n>=1&&n<=31&&day===null)day=n;});
-                      if(day&&month){const now=new Date(),next=new Date(now.getFullYear(),month-1,day);if(next<now)next.setFullYear(next.getFullYear()+1);daysUntil=Math.round((next-now)/(1000*60*60*24));}
+                      const parsedBd = parseBirthdayDateGlobal(bd);
+                      if(parsedBd && parsedBd.day && parsedBd.month != null){
+                        const now=new Date(),next=new Date(now.getFullYear(),parsedBd.month,parsedBd.day);
+                        if(next<now)next.setFullYear(next.getFullYear()+1);
+                        daysUntil=Math.round((next-now)/(1000*60*60*24));
+                      }
                     }
                     const photos = selectedNode.photos||[];
                     const div = '2px solid '+(theme.darkMode?'#0f172a':'white');
@@ -9025,23 +9295,23 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 <div className={`pt-4 border-t ${theme.darkMode ? 'border-slate-700' : 'border-slate-200'}`}>
                   <h3 className="text-xs font-semibold uppercase tracking-wider mb-3 flex items-center text-emerald-600"><Activity className="w-4 h-4 mr-1" /> Log Interaction</h3>
                   <div className="grid grid-cols-2 gap-2">
-                    <button onClick={() => logActivity(1, 'message')} className={`flex flex-col items-center p-2 rounded-lg border transition-colors ${theme.darkMode ? 'border-slate-600 hover:bg-slate-700' : 'border-slate-200 hover:bg-emerald-50'}`}>
+                    <button onClick={() => logActivity(1, 'message')} className={`flex flex-col items-center p-2 rounded-lg border transition-colors ${activityButtonClasses(getActivityRecencyState(selectedNode, 'message', 1), theme.darkMode)}`}>
                       <MessageCircle className="w-5 h-5 mb-1 text-slate-400" />
                       <span className="text-[10px] font-bold">Message (+{nextMessagePoints})</span>
                     </button>
-                    <button onClick={() => logActivity(50, 'hangout')} className={`flex flex-col items-center p-2 rounded-lg border transition-colors ${theme.darkMode ? 'border-slate-600 hover:bg-slate-700' : 'border-slate-200 hover:bg-emerald-50'}`}>
+                    <button onClick={() => logActivity(50, 'hangout')} className={`flex flex-col items-center p-2 rounded-lg border transition-colors ${activityButtonClasses(getActivityRecencyState(selectedNode, 'hangout', 50), theme.darkMode)}`}>
                       <Coffee className="w-5 h-5 mb-1 text-amber-500" />
                       <span className="text-[10px] font-bold">Hangout (+50)</span>
                     </button>
-                    <button onClick={() => logActivity(80, 'nightout')} className={`flex flex-col items-center p-2 rounded-lg border transition-colors ${theme.darkMode ? 'border-slate-600 hover:bg-slate-700' : 'border-slate-200 hover:bg-emerald-50'}`}>
+                    <button onClick={() => logActivity(80, 'nightout')} className={`flex flex-col items-center p-2 rounded-lg border transition-colors ${activityButtonClasses(getActivityRecencyState(selectedNode, 'nightout', 80), theme.darkMode)}`}>
                       <PartyPopper className="w-5 h-5 mb-1 text-purple-500" />
                       <span className="text-[10px] font-bold">Night Out (+80)</span>
                     </button>
-                    <button onClick={() => logActivity(150, 'trip')} className={`flex flex-col items-center p-2 rounded-lg border border-emerald-500 transition-colors ${theme.darkMode ? 'bg-emerald-900/40 hover:bg-emerald-900/60' : 'bg-emerald-50 hover:bg-emerald-100'}`}>
+                    <button onClick={() => logActivity(150, 'trip')} className={`flex flex-col items-center p-2 rounded-lg border transition-colors ${activityButtonClasses(getActivityRecencyState(selectedNode, 'trip', 150), theme.darkMode)}`}>
                       <Plane className="w-5 h-5 mb-1 text-emerald-500" />
                       <span className="text-[10px] font-bold">Trip Away (+150)</span>
                     </button>
-                    <button onClick={() => logActivity(80, 'gesture')} className={`col-span-2 flex flex-col items-center p-2 rounded-lg border transition-colors ${theme.darkMode ? 'border-slate-600 hover:bg-slate-700' : 'border-slate-200 hover:bg-emerald-50'}`}>
+                    <button onClick={() => logActivity(80, 'gesture')} className={`col-span-2 flex flex-col items-center p-2 rounded-lg border transition-colors ${activityButtonClasses(getActivityRecencyState(selectedNode, 'gesture', 80), theme.darkMode)}`}>
                       <HeartHandshake className="w-5 h-5 mb-1 text-rose-500" />
                       <span className="text-[10px] font-bold">Meaningful Gesture (+80)</span>
                     </button>
@@ -14460,6 +14730,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             { key: 'calories',  dataType: 'calories',   label: 'Active Cal',  icon: '🔥', color: '#f97316', value: healthData.activeCalories, unit: 'kcal today', format: v => v != null ? Math.round(v).toLocaleString() : '—' },
             { key: 'flights',   dataType: 'flightsClimbed', label: 'Flights', icon: '🏢', color: '#84cc16', value: healthData.flights, unit: 'climbed today', format: v => v != null ? Math.round(v).toString() : '—' },
             { key: 'restingHR', dataType: 'restingHeartRate', label: 'Resting HR', icon: '💤', color: '#ec4899', value: healthData.restingHeartRate, unit: 'bpm',   format: v => v?.toString() || '—' },
+            { key: 'longevity', dataType: null, label: 'Longevity', icon: '⏳', color: '#a855f7',
+              value: (() => {
+                const meNode = nodes.find(n => n.id === 'me');
+                const est = meNode ? estimateLifetimeHeartbeats(meNode.birthday, healthData.restingHeartRate) : null;
+                return est ? est.totalBeats : null;
+              })(),
+              unit: 'beats so far', format: v => v != null ? (v/1e9).toFixed(2) + 'B' : '—' },
           ];
           return (
             <div style={{position:'fixed', inset:0, zIndex:300, display:'flex', alignItems:'flex-end',
@@ -14814,13 +15091,16 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             calories:  { label: 'Active Calories', icon: '🔥', color: '#f97316', value: healthData.activeCalories, unit: 'kcal today', history: healthData.caloriesHistory, format: v => v != null ? Math.round(v).toLocaleString() : '—' },
             flights:   { label: 'Flights Climbed', icon: '🏢', color: '#84cc16', value: healthData.flights, unit: 'climbed today', history: healthData.flightsHistory, format: v => v != null ? Math.round(v).toString() : '—' },
             restingHR: { label: 'Resting Heart Rate', icon: '💤', color: '#ec4899', value: healthData.restingHeartRate, unit: 'bpm', history: healthData.restingHRHistory, format: v => v?.toString() || '—' },
+            longevity: { label: 'Longevity', icon: '⏳', color: '#a855f7', value: null, unit: '', history: null, format: () => '' },
           };
           const def = METRIC_DEFS[showMetricDetail];
           if (!def) { setShowMetricDetail(null); return null; }
           const hourlyMax = metricDetailHourly ? Math.max(...metricDetailHourly.map(h => h.value), 1) : 1;
           const meNode = nodes.find(n => n.id === 'me');
           const userAge = meNode ? calculateAgeFromBirthday(meNode.birthday) : null;
-          const hrZones = showMetricDetail === 'heartRate' ? computeHeartRateZones(userAge, healthData.restingHeartRate) : null;
+          const hrZones = (showMetricDetail === 'heartRate' || showMetricDetail === 'longevity') ? computeHeartRateZones(userAge, healthData.restingHeartRate) : null;
+          const longevityEst = showMetricDetail === 'longevity' && meNode ? estimateLifetimeHeartbeats(meNode.birthday, healthData.restingHeartRate) : null;
+          const vo2max = showMetricDetail === 'longevity' && hrZones ? estimateVO2Max(hrZones.maxHR, healthData.restingHeartRate) : null;
           return (
             <div style={{position:'fixed', inset:0, zIndex:340, display:'flex', alignItems:'flex-end',
               background:'rgba(0,0,0,0.5)', paddingBottom:'calc(68px + env(safe-area-inset-bottom, 0px))'}}
@@ -14867,16 +15147,91 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         figure often reflects last night specifically, not necessarily this exact moment.
                       </>
                     )}
-                    {showMetricDetail !== 'heartRate' && showMetricDetail !== 'restingHR' && (
+                    {showMetricDetail === 'longevity' && (
+                      <>
+                        <div style={{fontWeight:700, color:dm?'white':'#0f172a', marginBottom:4}}>Lifetime heartbeats</div>
+                        Calculated by integrating your estimated average heart rate across every day you've been
+                        alive. Heart rate is naturally much higher in infancy and childhood than adulthood, so a
+                        single flat average would be wrong for anyone who isn't already an adult — instead this
+                        uses real age-banded reference data from the CDC's National Health Statistics Report
+                        (NHSR No. 41, analysing US population data 1999–2008) and a 2011 Lancet systematic review
+                        by Fleming et al. analysing 143,346 children: roughly 129 bpm under age 1, 96 bpm around
+                        age 4–5, 78 bpm around age 12–15, settling to the adult plateau of ~72 bpm by early
+                        adulthood. Once you're an adult, your own tracked resting heart rate replaces the
+                        population estimate wherever it's available.
+                        {'\n\n'}The underlying idea — that lifetime heartbeats is a meaningful biological figure —
+                        comes from Levine HJ, "Rest heart rate and life expectancy", American Journal of
+                        Cardiology, 1997 (PubMed 9316546), which found most mammals cluster around ~1 billion
+                        beats/lifetime, with humans a notable outlier at 2.5–3 billion thanks to modern medicine
+                        and lifestyle rather than any fixed biological limit.
+                        {'\n\n'}<span style={{fontWeight:700, color:dm?'white':'#0f172a'}}>Estimated VO2 max</span>
+                        {'\n'}Uses the Heart Rate Ratio method (Uth, Sorensen, Overgaard & Pedersen, European
+                        Journal of Applied Physiology, 2004; PubMed 14624296): VO2max ≈ (MaxHR ÷ RestingHR) × 15.3.
+                        Validated in well-trained adults with a standard error of roughly ±4.5% against real
+                        lab-measured VO2max — the most reliable non-exercise estimate available using only data
+                        we already have, without needing a body-fat percentage we can't verify.
+                        {'\n\n'}<span style={{fontWeight:700, color:dm?'white':'#0f172a'}}>Want more accuracy?</span>
+                        {'\n'}A few real tests would sharpen these considerably:
+                        {'\n'}• Rockport 1-mile walk test or a 1.5-mile timed run — both have validated VO2max
+                        formulas more accurate than the resting-HR method
+                        {'\n'}• An actual max-effort exercise test (e.g. a supervised treadmill test) — the only
+                        way to know your true max heart rate rather than the age-based estimate
+                        {'\n'}• Consistent daily resting HR tracking over months, so the "actual data" portion of
+                        the lifetime estimate covers more of your history accurately
+                      </>
+                    )}
+                    {showMetricDetail !== 'heartRate' && showMetricDetail !== 'restingHR' && showMetricDetail !== 'longevity' && (
                       <>This is today's total, pulled directly from Health Connect. The 7-day chart compares each day's total to help spot trends.</>
                     )}
                   </div>
                 )}
                 {/* Big today value */}
-                <div style={{marginBottom:20}}>
-                  <div style={{fontSize:36, fontWeight:800, color:def.color, lineHeight:1}}>{def.format(def.value)}</div>
-                  <div style={{fontSize:12, color:dm?'#64748b':'#94a3b8', marginTop:4}}>{def.unit}</div>
-                </div>
+                {showMetricDetail !== 'longevity' && (
+                  <div style={{marginBottom:20}}>
+                    <div style={{fontSize:36, fontWeight:800, color:def.color, lineHeight:1}}>{def.format(def.value)}</div>
+                    <div style={{fontSize:12, color:dm?'#64748b':'#94a3b8', marginTop:4}}>{def.unit}</div>
+                  </div>
+                )}
+                {showMetricDetail === 'longevity' && (
+                  <div style={{marginBottom:20}}>
+                    {!meNode?.birthday ? (
+                      <div style={{fontSize:12, color:dm?'#94a3b8':'#64748b', lineHeight:1.6}}>
+                        Set your birthday on your own "Me" profile to see your longevity estimates — these need
+                        to know your age to work at all.
+                      </div>
+                    ) : (
+                      <>
+                        <div style={{marginBottom:20}}>
+                          <div style={{fontSize:30, fontWeight:800, color:'#a855f7', lineHeight:1}}>
+                            {longevityEst ? (longevityEst.totalBeats/1e9).toFixed(3) + ' billion' : '—'}
+                          </div>
+                          <div style={{fontSize:12, color:dm?'#64748b':'#94a3b8', marginTop:4}}>
+                            estimated heartbeats since birth ({longevityEst ? longevityEst.ageYears.toFixed(1) : '—'} years old)
+                          </div>
+                        </div>
+                        <div style={{display:'flex', gap:20, marginBottom:20, flexWrap:'wrap'}}>
+                          <div>
+                            <div style={{fontSize:22, fontWeight:800, color:'#06b6d4'}}>
+                              {vo2max != null ? vo2max : '—'}
+                            </div>
+                            <div style={{fontSize:10, color:dm?'#64748b':'#94a3b8'}}>ml/kg/min — estimated VO2 max</div>
+                          </div>
+                          {hrZones && (
+                            <div>
+                              <div style={{fontSize:22, fontWeight:800, color:'#ef4444'}}>{hrZones.maxHR}</div>
+                              <div style={{fontSize:10, color:dm?'#64748b':'#94a3b8'}}>bpm — estimated max heart rate</div>
+                            </div>
+                          )}
+                        </div>
+                        <div style={{padding:'10px 12px', borderRadius:8, background:dm?'#1e293b':'#f1f5f9',
+                          fontSize:11, color:dm?'#94a3b8':'#64748b', lineHeight:1.6, marginBottom:12}}>
+                          These are estimates, not measurements — see "⋯" above for exactly how they're calculated,
+                          the real studies behind the formulas, and other tests you could do for more accuracy.
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
                 {/* Heart rate gets a scatter chart with zones + trend line
                     instead of the plain hourly bar chart */}
                 {showMetricDetail === 'heartRate' && heartRateReadings === null && (
@@ -14895,6 +15250,37 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           </div>
                         ))}
                       </div>
+                    )}
+                  </div>
+                )}
+                {showMetricDetail === 'heartRate' && (
+                  <div style={{marginBottom:20}}>
+                    <div style={{fontSize:12, fontWeight:700, color:dm?'white':'#0f172a', marginBottom:10}}>Weekly comparison</div>
+                    {!heartRateWeek ? (
+                      <div style={{textAlign:'center', padding:'20px 0', color:dm?'#64748b':'#94a3b8', fontSize:12}}>Loading week…</div>
+                    ) : Object.keys(heartRateWeek).length === 0 ? (
+                      <div style={{fontSize:11, color:dm?'#64748b':'#94a3b8'}}>No readings found for the past week yet.</div>
+                    ) : (
+                      <>
+                        <div style={{display:'flex', flexWrap:'wrap', gap:6, marginBottom:10}}>
+                          {Object.keys(heartRateWeek).sort().map(dayStr => {
+                            const dow = new Date(dayStr+'T12:00:00').getDay();
+                            const color = DAY_OF_WEEK_COLOR[dow];
+                            const isOn = heartRateWeekVisible[dayStr];
+                            const label = new Date(dayStr+'T12:00:00').toLocaleDateString('en',{weekday:'short'});
+                            return (
+                              <button key={dayStr}
+                                onClick={() => setHeartRateWeekVisible(prev => ({...prev, [dayStr]: !prev[dayStr]}))}
+                                style={{padding:'5px 10px', borderRadius:99, border:`1.5px solid ${color}`,
+                                  background: isOn ? color : 'transparent',
+                                  color: isOn ? '#000' : color, fontSize:11, fontWeight:700, cursor:'pointer'}}>
+                                {label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <HeartRateWeekOverlayChart byDay={heartRateWeek} visible={heartRateWeekVisible} darkMode={dm}/>
+                      </>
                     )}
                   </div>
                 )}
@@ -16823,26 +17209,40 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                   let diff = Math.abs(((awayAngle - p + 540) % 360) - 180);
                                   if (diff < bestDiff) { bestDiff = diff; best = p; }
                                 });
-                                const arcR = r + 7;
-                                // Always draw the underlying arc across the TOP half
-                                // (so letters sit upright, never upside-down), then
-                                // rotate the whole group to wherever it actually needs
-                                // to visually sit -- top, bottom, or a diagonal corner.
-                                const pathId = `feednamearc-${node.id}`;
-                                const startX = r - arcR, startY = r, endX = r + arcR, endY = r;
+                                // Genuine curved text, built by positioning EACH
+                                // CHARACTER individually along an arc around the
+                                // node, rather than relying on SVG's textPath
+                                // (which doesn't resolve its href reference
+                                // reliably in this rendering environment) -- the
+                                // same proven technique already used for mini
+                                // flower names.
+                                let label = node.label || '';
+                                const charArcR = r + 9;
+                                const fontSize = Math.max(8, r * 0.32);
+                                const degPerChar = Math.min(18, (fontSize * 0.62) / charArcR * (180 / Math.PI));
+                                const totalSpan = degPerChar * (label.length - 1);
+                                const isLowerHalf = best > 0 && best < 180;
+                                const chars = isLowerHalf ? label.split('').reverse() : label.split('');
                                 return (
-                                  <g transform={`rotate(${best + 90}, ${r}, ${r})`}>
-                                    <defs>
-                                      <path id={pathId} d={`M ${startX} ${startY} A ${arcR} ${arcR} 0 0 1 ${endX} ${endY}`} fill="none"/>
-                                    </defs>
-                                    <text fontSize={Math.max(8, r*0.32)} fontWeight="600"
-                                      fill={dm?'#cbd5e1':'#334155'} style={{userSelect:'none'}}
-                                      transform={`rotate(${-(best + 90)}, ${r}, ${r})`}>
-                                      <textPath href={`#${pathId}`} startOffset="50%" textAnchor="middle">
-                                        {node.label}
-                                      </textPath>
-                                    </text>
-                                  </g>
+                                  <>
+                                    {chars.map((ch, i) => {
+                                      const charAngleDeg = best - totalSpan / 2 + i * degPerChar;
+                                      const rad = charAngleDeg * Math.PI / 180;
+                                      const cx2 = r + Math.cos(rad) * charArcR;
+                                      const cy2 = r + Math.sin(rad) * charArcR;
+                                      const tangentDeg = charAngleDeg + 90 + (isLowerHalf ? 180 : 0);
+                                      return (
+                                        <text key={i}
+                                          x={cx2} y={cy2}
+                                          fontSize={fontSize} fontWeight="600"
+                                          fill={dm?'#cbd5e1':'#334155'} style={{userSelect:'none'}}
+                                          textAnchor="middle" dominantBaseline="middle"
+                                          transform={`rotate(${tangentDeg}, ${cx2}, ${cy2})`}>
+                                          {ch}
+                                        </text>
+                                      );
+                                    })}
+                                  </>
                                 );
                               })()}
                             </svg>
@@ -18927,7 +19327,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               <div style={{fontSize:12,fontWeight:700,color:'rgba(255,255,255,0.6)',textTransform:'uppercase',letterSpacing:0.5,margin:'8px 0'}}>Profile pictures</div>
               <div style={{display:'flex',flexWrap:'wrap',gap:10}}>
                 {profilePics.map((p,idx)=>(
-                  <PhotoWithLoadState key={idx} src={p.cropped} size={72} active={activeIdx===idx}
+                  <PhotoWithLoadState key={sn.id+'_'+idx} src={p.cropped} size={72} active={activeIdx===idx}
                     onClick={()=>{setNodes(prev=>prev.map(n=>n.id===sn.id?{...n,img:p.cropped,activePhotoIdx:idx}:n));}}
                     onError={(fmt) => setFailedPhotoFormats(prev => prev.includes(fmt) ? prev : [...prev, fmt])}
                     onRepair={(correctedUrl) => {
@@ -19116,7 +19516,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
             {/* Main image */}
             <div style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',position:'relative'}} onClick={e=>e.stopPropagation()}>
-              <img src={photos[safeIdx].cropped} alt="" style={{maxWidth:'100%',maxHeight:'100%',objectFit:'contain'}}/>
+              <SlideshowMainImage key={photoSlideshow+'_main_'+safeIdx} src={photos[safeIdx].cropped}/>
 
 
               {/* Prev/Next */}
@@ -19131,10 +19531,10 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             <div style={{flexShrink:0,display:'flex',gap:4,padding:'12px 16px',overflowX:'auto',background:'linear-gradient(to top,rgba(0,0,0,0.8),transparent)'}}
               onClick={e=>e.stopPropagation()}>
               {photos.map((p,pi)=>(
-                <div key={pi} style={{position:'relative',flexShrink:0}}>
+                <div key={photoSlideshow+'_'+pi} style={{position:'relative',flexShrink:0}}>
                   <button onClick={()=>setSlideIdx(pi)}
                     style={{width:52,height:52,borderRadius:6,overflow:'hidden',padding:0,border:'2.5px solid '+(pi===safeIdx?'white':'transparent'),cursor:'pointer',display:'block',background:'none'}}>
-                    <img src={p.cropped} style={{width:'100%',height:'100%',objectFit:'cover'}}/>
+                    <SlideshowThumb src={p.cropped}/>
                   </button>
                   <button onClick={()=>{
                     const updated=photos.filter((_,i)=>i!==pi);
