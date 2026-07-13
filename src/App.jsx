@@ -2942,6 +2942,8 @@ function AppInner() {
     }; } catch(e) { return { steps: null, sleep: null, heartRate: null, workouts: [], lastFetched: null }; }
   });
   const [healthPermission, setHealthPermission] = useState(null); // null | 'granted' | 'denied' | 'unavailable'
+  const [healthAuthorizedTypes, setHealthAuthorizedTypes] = useState([]);
+  const healthAuthorizedTypesRef = useRef([]);
   const [healthLoading, setHealthLoading] = useState(false);
   const [healthSectionMinimized, setHealthSectionMinimized] = useState({}); // { sleepQuality: true, ... }
   const [showMetricDetail, setShowMetricDetail] = useState(null); // metric key or null
@@ -4915,6 +4917,9 @@ function AppInner() {
       // Verify what was actually granted rather than guessing at
       // requestAuthorization's return shape, which isn't fully documented
       const status = await Health.checkAuthorization({ read: readTypes, write: [] });
+      window.ftDiagLog('[FT-DIAG] Health permission check - requested:', JSON.stringify(readTypes), 'actually authorized:', JSON.stringify(status?.readAuthorized || status));
+      healthAuthorizedTypesRef.current = status?.readAuthorized || [];
+      setHealthAuthorizedTypes(status?.readAuthorized || []);
       const granted = (status?.readAuthorized?.length || 0) > 0;
       setHealthPermission(granted ? 'granted' : 'denied');
       return granted;
@@ -4942,9 +4947,10 @@ function AppInner() {
             dataType, startDate: startOfDay.toISOString(), endDate: now.toISOString(),
             bucket: 'day', aggregation: 'sum',
           });
+          window.ftDiagLog(`[FT-DIAG] sumAggregated('${dataType}') raw response:`, JSON.stringify(res));
           const samples = res?.samples || [];
           return samples.length > 0 ? samples.reduce((sum, s) => sum + (s.value || 0), 0) : null;
-        } catch(e) { console.warn(`${dataType} fetch failed:`, e); return null; }
+        } catch(e) { console.warn(`${dataType} fetch failed:`, e); window.ftDiagLog(`[FT-DIAG] sumAggregated('${dataType}') THREW:`, e.message, JSON.stringify(e)); return null; }
       };
       const latestSample = async (dataType, days = 7) => {
         try {
@@ -5104,13 +5110,16 @@ function AppInner() {
             bucket: 'day', aggregation,
           });
           const samples = res?.samples || [];
-          return Array.from({length: 7}, (_, i) => {
+          window.ftDiagLog(`[FT-DIAG] ${dataType} history RAW samples:`, JSON.stringify(samples.map(s => ({start:s.startDate, end:s.endDate, value:s.value}))));
+          const result = Array.from({length: 7}, (_, i) => {
             const d = new Date(now); d.setDate(d.getDate() - (6 - i));
             const dayStr = getLocalDateStr(d);
             const match = samples.find(s => getLocalDateStr(new Date(s.startDate || s.date)) === dayStr);
             return { date: dayStr, value: match ? Math.round(match.value * 10) / 10 : 0 };
           });
-        } catch(e) { console.warn(`${dataType} history fetch failed:`, e); return null; }
+          window.ftDiagLog(`[FT-DIAG] ${dataType} history COMPUTED:`, JSON.stringify(result));
+          return result;
+        } catch(e) { console.warn(`${dataType} history fetch failed:`, e); window.ftDiagLog(`[FT-DIAG] ${dataType} history fetch THREW:`, e.message); return null; }
       };
       newData.heartRateHistory = await fetchGenericHistory('heartRate', 'average');
       newData.distanceHistory = (await fetchGenericHistory('distance', 'sum'))
@@ -5195,7 +5204,14 @@ function AppInner() {
 
   const healthConnect = async () => {
     const granted = await healthRequestPermission();
-    if (granted) await healthFetchData();
+    if (granted) {
+      await healthFetchData();
+      const readTypes = ['steps', 'sleep', 'heartRate', 'workouts', 'distance', 'calories', 'totalCalories', 'flightsClimbed', 'restingHeartRate', 'heartRateVariability'];
+      const missing = readTypes.filter(t => !healthAuthorizedTypesRef.current.includes(t));
+      if (missing.length > 0) {
+        showToast(`⚠️ Not authorized for: ${missing.join(', ')} — check Health Connect app permissions`);
+      }
+    }
   };
 
   // ── Food Diary: AI ingredient extraction + real USDA nutrition lookup ───
@@ -13896,23 +13912,30 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         boxShadow:isSelected?'0 0 0 2px #10b981':undefined}}>
                       <div style={{fontSize:12,fontWeight:isToday||isSelected?800:600,
                         color:isToday||isSelected?'#10b981':(dm?'white':'#0f172a'),marginBottom:2}}>{day}</div>
-                      {/* Birthday photo badge - shown prominently since a face is
-                          more recognisable at a glance than text */}
+                      {/* Birthday photo badge(s) - shown prominently since a face is
+                          more recognisable at a glance than text. Shows every
+                          person sharing that birthday side by side, not just
+                          the first one found. */}
                       {(() => {
-                        const bday = items.find(x => x._birthday);
-                        if (!bday) return null;
+                        const bdays = items.filter(x => x._birthday);
+                        if (bdays.length === 0) return null;
+                        const size = bdays.length > 1 ? 20 : 26;
                         return (
                           <div style={{position:'absolute', bottom:3, left:'50%', transform:'translateX(-50%)',
-                            width:26, height:26,
-                            borderRadius:'50%', overflow:'hidden', border:'2px solid #f59e0b',
-                            background:dm?'#334155':'#e2e8f0',
-                            display:'flex', alignItems:'center', justifyContent:'center'}}>
-                            {bday.img
-                              ? <img src={bday.img} style={{width:'100%',height:'100%',objectFit:'cover'}}/>
-                              : <span style={{fontSize:11,fontWeight:800,color:dm?'white':'#475569'}}>
-                                  {(bday.label||'?').slice(0,1).toUpperCase()}
-                                </span>
-                            }
+                            display:'flex', gap:2}}>
+                            {bdays.slice(0,3).map((bday, bi) => (
+                              <div key={bi} style={{width:size, height:size,
+                                borderRadius:'50%', overflow:'hidden', border:'2px solid #f59e0b',
+                                background:dm?'#334155':'#e2e8f0',
+                                display:'flex', alignItems:'center', justifyContent:'center'}}>
+                                {bday.img
+                                  ? <img src={bday.img} style={{width:'100%',height:'100%',objectFit:'cover'}}/>
+                                  : <span style={{fontSize:size*0.42,fontWeight:800,color:dm?'white':'#475569'}}>
+                                      {(bday.label||'?').slice(0,1).toUpperCase()}
+                                    </span>
+                                }
+                              </div>
+                            ))}
                           </div>
                         );
                       })()}
@@ -14829,16 +14852,47 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       const hist = hk ? healthData[hk] : null;
                       if (!hist) return null;
                       const maxVal = Math.max(...hist.map(d=>d.value), 1);
+                      // Heart-rate-style metrics are naturally continuous, so a
+                      // smooth line reads better than discrete daily bars.
+                      if (m.key === 'heartRate' || m.key === 'restingHR') {
+                        const validPts = hist.map((d,i) => ({...d, i})).filter(d => d.value > 0);
+                        const lineMin = Math.min(...validPts.map(d=>d.value), maxVal*0.8) - 5;
+                        const lineMax = Math.max(...validPts.map(d=>d.value), maxVal) + 5;
+                        const lw = 300, lh = 46;
+                        const xFor = (i) => (i/6) * lw;
+                        const yFor = (v) => lh - ((v-lineMin)/(lineMax-lineMin || 1)) * lh;
+                        const path = validPts.map((d,idx) => `${idx===0?'M':'L'}${xFor(d.i)},${yFor(d.value)}`).join(' ');
+                        return (
+                          <div key={m.key} style={{marginBottom:14}}>
+                            <div style={{fontSize:10, color:dm?'#94a3b8':'#64748b', marginBottom:6}}>{m.icon} {m.label}</div>
+                            <svg width="100%" viewBox={`0 0 ${lw} ${lh+14}`} style={{display:'block'}}>
+                              <path d={path} fill="none" stroke={m.color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                              {validPts.map(d => (
+                                <circle key={d.i} cx={xFor(d.i)} cy={yFor(d.value)} r={d.i===6?3:2}
+                                  fill={d.i===6?m.color:(dm?'#64748b':'#94a3b8')}/>
+                              ))}
+                              {hist.map((d,i) => (
+                                <text key={i} x={xFor(i)} y={lh+12} textAnchor="middle" fontSize="7" fill={dm?'#64748b':'#94a3b8'}>
+                                  {new Date(d.date+'T12:00:00').toLocaleDateString('en',{weekday:'narrow'})}
+                                </text>
+                              ))}
+                            </svg>
+                          </div>
+                        );
+                      }
                       return (
                         <div key={m.key} style={{marginBottom:14}}>
                           <div style={{fontSize:10, color:dm?'#94a3b8':'#64748b', marginBottom:6}}>{m.icon} {m.label}</div>
-                          <div style={{display:'flex', alignItems:'flex-end', gap:4, height:50}}>
+                          <div style={{display:'flex', alignItems:'flex-end', gap:4, height:64}}>
                             {hist.map((d,i) => {
                               const dayLabel = new Date(d.date+'T12:00:00').toLocaleDateString('en',{weekday:'narrow'});
                               const isToday = i === hist.length-1;
                               return (
-                                <div key={i} style={{flex:1, display:'flex', flexDirection:'column', alignItems:'center', gap:2}}
-                                  title={m.format(d.value)}>
+                                <div key={i} style={{flex:1, display:'flex', flexDirection:'column', alignItems:'center', gap:2}}>
+                                  <span style={{fontSize:7, color: isToday ? m.color : (dm?'#64748b':'#94a3b8'),
+                                    fontWeight: isToday ? 700 : 400, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', maxWidth:'100%'}}>
+                                    {d.value > 0 ? m.format(d.value) : '–'}
+                                  </span>
                                   <div style={{width:'100%', height:Math.max(3, (d.value/maxVal)*40), borderRadius:3,
                                     background: isToday ? m.color : (dm?'#334155':'#e2e8f0')}}/>
                                   <span style={{fontSize:8, color:dm?'#64748b':'#94a3b8'}}>{dayLabel}</span>
@@ -15941,7 +15995,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             .filter(l => l.source === nodeId || l.target === nodeId)
             .map(l => l.source === nodeId ? l.target : l.source)
             .map(id => nodes.find(n => n.id === id))
-            .filter(n => n && !n.hidden && n.type !== 'flower' && n.id !== 'me' && !visited.has(n.id));
+            .filter(n => n && !n.hidden && n.type !== 'flower' && (n.id !== 'me' || flowerId === 'flower_social') && !visited.has(n.id));
           const walk = (nodeId) => {
             const kids = childrenOf(nodeId);
             kids.forEach(k => {
@@ -16550,8 +16604,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 nodes.forEach(n => {
                   if (alreadyIncluded.has(n.id)) return;
                   if (linkedIds.has(n.id)) return; // has a link, belongs to whatever dimension that connects to
-                  if (n.hidden || n.type === 'flower' || n.id === 'me') return;
-                  if (n.type !== 'friend' && n.type !== 'hub') return;
+                  if (n.hidden || n.type === 'flower') return;
+                  if (n.id !== 'me' && n.type !== 'friend' && n.type !== 'hub') return;
                   orphans.push(n);
                 });
               }
