@@ -17430,7 +17430,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         </div>
                       ) : members.map((node) => {
                         const posInfo = positions[node.id];
-                        let px, py;
+                        let px, py, col, row;
                         if (posInfo.isHealthListGrid) {
                           // Health lists use their own dedicated grid, sized
                           // for 6-per-row, entirely independent of the
@@ -17438,10 +17438,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           // own band below the people grid area.
                           const hlColSpacing = HEALTH_CARD_W + 10;
                           const hlRowSpacing = 90;
+                          col = posInfo.col; row = posInfo.row;
                           px = posInfo.col * hlColSpacing + hlColSpacing/2;
                           py = 600 + posInfo.row * hlRowSpacing;
                         } else {
-                          const { col, row } = posInfo;
+                          ({ col, row } = posInfo);
                           const rowShift = (row % 2 === 1) ? FEED_HEX * 0.75 : 0;
                           px = colOffsets[col] + rowShift + FEED_HEX;
                           const yOffset = dimKey === 'health' ? 148 : 50;
@@ -20721,6 +20722,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             svgRef.current.style.transform = `translate(${vv.x}px,${vv.y}px) scale(${vv.scale})`;
           }
         };
+        const onSvgTouchEnd = (e) => {
+          if (e.touches.length <= 1) pinchRef.current = null;
+          if (e.touches.length === 0) panRef.current = null;
+          onUp();
+        };
 
 
 
@@ -21108,6 +21114,20 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
 
         // Drag reorder handlers
+        const onDragStart = (actId) => setDragActivity({ dimKey: flowerPanel, actId });
+        const onDragOver  = (e, overId) => {
+          e.preventDefault();
+          if (!dragActivity || dragActivity.actId === overId) return;
+          setDimensions(prev => {
+            const acts = [...prev[flowerPanel].activities];
+            const fromIdx = acts.findIndex(a => a.id === dragActivity.actId);
+            const toIdx   = acts.findIndex(a => a.id === overId);
+            if (fromIdx <= -1 || toIdx <= -1) return prev;
+            const [moved] = acts.splice(fromIdx, 1);
+            acts.splice(toIdx, 0, moved);
+            return { ...prev, [flowerPanel]: { ...prev[flowerPanel], activities: acts } };
+          });
+        };
         const onDragEnd = () => setDragActivity(null);
 
 
@@ -22612,30 +22632,6 @@ const getTrend = (node) => {
   if (diff < -10) return 'down1';
   return 'stable';
 };
-
-
-const onDragStart = (actId) => setDragActivity({ dimKey: flowerPanel, actId });
-const onDragOver  = (e, overId) => {
-  e.preventDefault();
-  if (!dragActivity || dragActivity.actId === overId) return;
-  setDimensions(prev => {
-    const acts = [...prev[flowerPanel].activities];
-    const fromIdx = acts.findIndex(a => a.id === dragActivity.actId);
-    const toIdx   = acts.findIndex(a => a.id === overId);
-    if (fromIdx <= -1 || toIdx <= -1) return prev;
-    const [moved] = acts.splice(fromIdx, 1);
-    acts.splice(toIdx, 0, moved);
-    return { ...prev, [flowerPanel]: { ...prev[flowerPanel], activities: acts } };
-  });
-};
-
-
-const onSvgTouchEnd = (e) => {
-  if (e.touches.length <= 1) pinchRef.current = null;
-  if (e.touches.length === 0) panRef.current = null;
-  onUp();
-};
-
 
 
 
