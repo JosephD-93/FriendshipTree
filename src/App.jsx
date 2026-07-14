@@ -2908,6 +2908,7 @@ function AppInner() {
   const feedLiveTouchRef = useRef(null); // {x, y, pointerId} -- continuously updated on every move from touch-down, even before the 350ms lift fires, so the lift starts from a fresh position instead of a stale touch-down snapshot
   const feedHoldTimer = useRef(null);
   const feedLiftTimer = useRef(null);
+  const listTitleLastTapRef = useRef({}); // { [nodeId]: timestamp } for double-tap-to-open on health list titles
   const feedLastTapRef = useRef(new Map()); // nodeId -> timestamp, for double-tap-to-minimise detection in Feed
   const feedSingleTapTimersRef = useRef(new Map()); // nodeId -> timer, one independent pending-open timer PER node (a single shared slot was the actual bug: tapping a different node mid-sequence stomped on it)
   const feedJustPlaced = useRef(new Set()); // node ids that were just placed via hold-to-place, so the resulting click on THAT specific node doesn't open its detail panel
@@ -12175,8 +12176,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     const rows = Math.ceil(list.categories.length / perRow);
                     const cellSize = bubbleR * 2 + gap;
                     const cardPad = bubbleR * 0.6;
-                    const cardW = perRow * cellSize - gap + cardPad*2;
-                    const cardH = rows * cellSize - gap + cardPad*2;
+                    const headerH = 22;
+                    const cardW = Math.max(perRow * cellSize - gap + cardPad*2, 100);
+                    const isCollapsed2 = !!list.itemsCollapsed;
+                    const gridH = rows * cellSize - gap + cardPad*2;
+                    const cardH = headerH + (isCollapsed2 ? 0 : gridH);
                     return [(
                       <g key={node.id} transform={`translate(${nx},${ny})`} style={{cursor:'pointer'}}
                         onPointerDown={e => handlePointerDown(e, node)}>
@@ -12184,10 +12188,30 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           fill={dm?'#1e293b':'white'} stroke={baseColor}
                           strokeWidth={isLifted2?3:2}
                           filter={isLifted2?'drop-shadow(0 4px 12px rgba(0,0,0,0.4))':undefined}/>
-                        {list.categories.map((cat, ci) => {
+                        <foreignObject x={-cardW/2} y={-cardH/2} width={cardW-24} height={headerH} style={{overflow:'visible'}}>
+                          <div onClick={() => {
+                              const now = Date.now();
+                              const lastTap = listTitleLastTapRef.current[node.id] || 0;
+                              if (now - lastTap < 350) { setShowHealthListDetail(list.id); listTitleLastTapRef.current[node.id] = 0; }
+                              else { listTitleLastTapRef.current[node.id] = now; }
+                            }}
+                            style={{height:'100%', display:'flex', alignItems:'center', paddingLeft:8, cursor:'pointer',
+                              fontSize:14, fontWeight:800, color:dm?'white':'#0f172a',
+                              overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>
+                            {list.icon} {list.name}
+                          </div>
+                        </foreignObject>
+                        <foreignObject x={cardW/2-24} y={-cardH/2} width={24} height={headerH} style={{overflow:'visible'}}>
+                          <div onClick={(e) => { e.stopPropagation(); setHealthLists(prev => prev.map(l => l.id === list.id ? {...l, itemsCollapsed: !l.itemsCollapsed} : l)); }}
+                            style={{height:'100%', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer',
+                              fontSize:12, color:dm?'#64748b':'#94a3b8'}}>
+                            {isCollapsed2 ? '▾' : '▸'}
+                          </div>
+                        </foreignObject>
+                        {!isCollapsed2 && list.categories.map((cat, ci) => {
                           const row = Math.floor(ci / perRow), col = ci % perRow;
                           const bx = -cardW/2 + cardPad + bubbleR + col*cellSize;
-                          const by = -cardH/2 + cardPad + bubbleR + row*cellSize;
+                          const by = -cardH/2 + headerH + cardPad + bubbleR + row*cellSize;
                           const count = todayCounts[cat.id] || 0;
                           const progress = Math.min(1, count / (cat.target || 1));
                           return (
@@ -17272,21 +17296,68 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                             const perRow = list.gridCols || 3;
                             const rows = Math.ceil(list.categories.length / perRow);
                             const cardPad = bubbleSize * 0.3;
-                            const headerH = 26;
-                            const cardW = Math.max(perRow * bubbleSize + (perRow-1) * gap + cardPad*2, 90);
+                            const headerH = 30;
+                            const cardW = Math.max(perRow * bubbleSize + (perRow-1) * gap + cardPad*2, 110);
                             const gridH = rows * bubbleSize + (rows-1) * gap + cardPad*2;
                             const isCollapsed = !!list.itemsCollapsed;
                             const cardH = headerH + (isCollapsed ? 0 : gridH);
                             const baseColor = list.color || '#10b981';
+                            const isCarried = feedCarrying?.nodeId === node.id;
                             return (
                               <div key={node.id} style={{position:'absolute', left:px-cardW/2, top:py-cardH/2,
                                 width:cardW, height:cardH, borderRadius:10,
-                                background:dm?'#1e293b':'white', border:`2px solid ${baseColor}`,
-                                overflow:'hidden', boxSizing:'border-box'}}>
-                                <div onClick={() => setShowHealthListDetail(list.id)}
+                                background:dm?'#1e293b':'white', border:`2px solid ${isCarried?baseColor+'aa':baseColor}`,
+                                overflow:'hidden', boxSizing:'border-box', opacity:isCarried?0.5:1, touchAction:'none'}}
+                                onPointerDown={e=>{
+                                  if (feedCarrying) return;
+                                  const pointerId = e.pointerId;
+                                  const targetEl = e.currentTarget;
+                                  const startX = e.clientX, startY = e.clientY;
+                                  feedLiveTouchRef.current = { x: startX, y: startY, pointerId };
+                                  feedLiftTimer.current = setTimeout(() => {
+                                    try { targetEl.setPointerCapture(pointerId); } catch(err) {}
+                                    const live = feedLiveTouchRef.current;
+                                    const liveX = (live && live.pointerId === pointerId) ? live.x : startX;
+                                    const liveY = (live && live.pointerId === pointerId) ? live.y : startY;
+                                    setFeedCarrying({ dimKey, nodeId: node.id, branchIds: new Set([node.id]),
+                                      screenX: liveX, screenY: liveY,
+                                      dropMode: feedDragMode, holdPointerId: feedDragMode === 'twohand' ? pointerId : null });
+                                  }, 350);
+                                }}
+                                onPointerUp={e=>{
+                                  clearTimeout(feedLiftTimer.current);
+                                  feedLiveTouchRef.current = null;
+                                  try { e.currentTarget.releasePointerCapture(e.pointerId); } catch(err) {}
+                                }}
+                                onPointerMove={e=>{
+                                  if (feedLiveTouchRef.current && feedLiveTouchRef.current.pointerId === e.pointerId) {
+                                    feedLiveTouchRef.current.x = e.clientX;
+                                    feedLiveTouchRef.current.y = e.clientY;
+                                  }
+                                  if (!feedCarrying || feedCarrying.nodeId !== node.id) return;
+                                  if (feedCarrying.dropMode === 'twohand' && feedCarrying.holdPointerId !== e.pointerId) return;
+                                  const x = e.clientX, y = e.clientY;
+                                  if (feedDragRAF.current) cancelAnimationFrame(feedDragRAF.current);
+                                  feedDragRAF.current = requestAnimationFrame(() => {
+                                    setFeedCarrying(d => d ? { ...d, screenX: x, screenY: y } : d);
+                                    feedDragRAF.current = null;
+                                  });
+                                }}
+                                onPointerLeave={()=>{ clearTimeout(feedLiftTimer.current); }}>
+                                <div onClick={() => {
+                                    if (feedCarrying || feedJustPlaced.current.has(node.id)) return;
+                                    const now = Date.now();
+                                    const lastTap = listTitleLastTapRef.current[node.id] || 0;
+                                    if (now - lastTap < 350) {
+                                      setShowHealthListDetail(list.id);
+                                      listTitleLastTapRef.current[node.id] = 0;
+                                    } else {
+                                      listTitleLastTapRef.current[node.id] = now;
+                                    }
+                                  }}
                                   style={{height:headerH, display:'flex', alignItems:'center', justifyContent:'space-between',
                                     padding:'0 6px', cursor:'pointer', borderBottom: isCollapsed ? 'none' : `1px solid ${baseColor}40`}}>
-                                  <span style={{fontSize:11, fontWeight:800, color:dm?'white':'#0f172a',
+                                  <span style={{fontSize:15, fontWeight:800, color:dm?'white':'#0f172a',
                                     overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>
                                     {list.icon} {list.name}
                                   </span>
@@ -17314,7 +17385,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                             display:'flex', alignItems:'center', justifyContent:'center',
                                             border:`2px solid ${baseColor}`,
                                             background: progress >= 1 ? baseColor : `${baseColor}${Math.round(progress*255).toString(16).padStart(2,'0')}`,
-                                            fontSize: bubbleSize*0.5, transition:'background 0.2s'}}>
+                                            fontSize: bubbleSize*0.75, transition:'background 0.2s'}}>
                                           {cat.icon}
                                         </div>
                                       );
