@@ -12165,19 +12165,67 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   const todayCounts = habitToday[list.id] || {};
                   const hitCount = list.categories.filter(c => (todayCounts[c.id]||0) >= c.target).length;
                   const score = Math.round(listScores[list.id] || 0);
+                  const baseColor = list.color || '#10b981';
+                  const displayMode = list.displayMode || 'percent';
+
+                  if (displayMode === 'items') {
+                    const bubbleR = (list.itemBubbleSize || 28) / 2;
+                    const gap = bubbleR * 0.5;
+                    const perRow = list.gridCols || 3;
+                    const rows = Math.ceil(list.categories.length / perRow);
+                    const cellSize = bubbleR * 2 + gap;
+                    const cardPad = bubbleR * 0.6;
+                    const cardW = perRow * cellSize - gap + cardPad*2;
+                    const cardH = rows * cellSize - gap + cardPad*2;
+                    return [(
+                      <g key={node.id} transform={`translate(${nx},${ny})`} style={{cursor:'pointer'}}
+                        onPointerDown={e => handlePointerDown(e, node)}>
+                        <rect x={-cardW/2} y={-cardH/2} width={cardW} height={cardH} rx={10}
+                          fill={dm?'#1e293b':'white'} stroke={baseColor}
+                          strokeWidth={isLifted2?3:2}
+                          filter={isLifted2?'drop-shadow(0 4px 12px rgba(0,0,0,0.4))':undefined}/>
+                        {list.categories.map((cat, ci) => {
+                          const row = Math.floor(ci / perRow), col = ci % perRow;
+                          const bx = -cardW/2 + cardPad + bubbleR + col*cellSize;
+                          const by = -cardH/2 + cardPad + bubbleR + row*cellSize;
+                          const count = todayCounts[cat.id] || 0;
+                          const progress = Math.min(1, count / (cat.target || 1));
+                          return (
+                            <foreignObject key={cat.id} x={bx-bubbleR} y={by-bubbleR} width={bubbleR*2} height={bubbleR*2} style={{overflow:'visible'}}>
+                              <div onClick={() => setHabitToday(prev => ({
+                                  ...prev,
+                                  [list.id]: { ...(prev[list.id]||{}), [cat.id]: ((prev[list.id]||{})[cat.id]||0) + 1 }
+                                }))}
+                                title={`${cat.label}: ${count}/${cat.target}`}
+                                style={{width:'100%', height:'100%', borderRadius:'50%', cursor:'pointer',
+                                  display:'flex', alignItems:'center', justifyContent:'center',
+                                  border:`2px solid ${baseColor}`,
+                                  background: progress >= 1 ? baseColor : `${baseColor}${Math.round(progress*255).toString(16).padStart(2,'0')}`,
+                                  fontSize: bubbleR*0.9, transition:'background 0.2s'}}>
+                                {cat.icon}
+                              </div>
+                            </foreignObject>
+                          );
+                        })}
+                      </g>
+                    )];
+                  }
+
                   const cw = 120, ch = 66;
+                  const percentComplete = list.categories.length > 0 ? Math.round((hitCount/list.categories.length)*100) : 0;
+                  const dayPointsSoFar = Math.round(computeListDayPoints(list, todayCounts));
                   return [(
                     <g key={node.id} transform={`translate(${nx},${ny})`}
                       style={{cursor:'pointer'}}
                       onPointerDown={e => handlePointerDown(e, node)}
                       onClick={() => setShowHealthListDetail(list.id)}>
                       <rect x={-cw/2} y={-ch/2} width={cw} height={ch} rx={12}
-                        fill={dm?'#1e293b':'white'} stroke={list.color||'#10b981'} strokeWidth={isLifted2?3:1.5}
+                        fill={dm?'#1e293b':'white'} stroke={baseColor} strokeWidth={isLifted2?3:1.5}
                         filter={isLifted2?'drop-shadow(0 4px 12px rgba(0,0,0,0.4))':undefined}/>
                       <text x={0} y={-ch/2+16} textAnchor="middle" fontSize={9} fontWeight={700}
-                        fill={list.color||'#10b981'}>{list.icon} {list.name}</text>
+                        fill={baseColor}>{list.icon} {list.name}</text>
                       <text x={0} y={-ch/2+32} textAnchor="middle" fontSize={13} fontWeight={800}
-                        fill={dm?'white':'#0f172a'}>{hitCount}/{list.categories.length} hit today</text>
+                        fill={dm?'white':'#0f172a'}>{displayMode === 'points' ? `${dayPointsSoFar} pts today` : `${percentComplete}% today`}</text>
                       <text x={0} y={-ch/2+47} textAnchor="middle" fontSize={11} fontWeight={700}
                         fill={score >= 0 ? '#10b981' : '#ef4444'}>⭐ {score} pts</text>
                     </g>
@@ -14820,8 +14868,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         </label>
                         <label style={{flex:1}}>
                           <div style={{fontSize:10, color:dm?'#94a3b8':'#64748b', marginBottom:3}}>Bubble size (px)</div>
-                          <input type="number" min={20} max={80} value={list.itemBubbleSize || 36}
-                            onChange={e => updateList(l => ({...l, itemBubbleSize: Math.max(20, Math.min(80, parseInt(e.target.value)||36))}))}
+                          <input type="number" min={20} max={80} value={list.itemBubbleSize || 28}
+                            onChange={e => updateList(l => ({...l, itemBubbleSize: Math.max(20, Math.min(80, parseInt(e.target.value)||28))}))}
                             style={{width:'100%', padding:'6px 8px', borderRadius:6, fontSize:12,
                               border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#1e293b':'white', color:dm?'white':'#0f172a'}}/>
                         </label>
@@ -17211,48 +17259,48 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           const isCarried = feedCarrying?.nodeId === node.id;
 
                           // Items mode: one small tappable bubble per category,
-                          // icon only, no drag -- laid out in a small cluster
-                          // around the node's anchor point.
+                          // icon only, no drag -- laid out in a grid inside a
+                          // single shared card. Plain HTML/CSS, matching the
+                          // rest of this feed view (SVG elements like <rect>
+                          // and <foreignObject> don't work here since this
+                          // whole area is a regular positioned div, not an
+                          // actual <svg> -- that mismatch was the real bug
+                          // behind the broken 1-column/oversized rendering.
                           if (displayMode === 'items') {
-                            const bubbleR = (list.itemBubbleSize || 36) / 2;
-                            const gap = bubbleR * 0.5;
+                            const bubbleSize = list.itemBubbleSize || 28;
+                            const gap = bubbleSize * 0.25;
                             const perRow = list.gridCols || 3;
                             const rows = Math.ceil(list.categories.length / perRow);
-                            const cellSize = bubbleR * 2 + gap;
-                            const cardPad = bubbleR * 0.6;
-                            const cardW = perRow * cellSize - gap + cardPad*2;
-                            const cardH = rows * cellSize - gap + cardPad*2;
-                            const cardX = px - cardW/2, cardY = py - cardH/2;
+                            const cardPad = bubbleSize * 0.3;
+                            const cardW = perRow * bubbleSize + (perRow-1) * gap + cardPad*2;
+                            const cardH = rows * bubbleSize + (rows-1) * gap + cardPad*2;
                             const baseColor = list.color || '#10b981';
-                            const cornerRadius = 10; // fixed, modest radius so this reads as a rounded rectangle at any size, not an oversized oval
                             return (
-                              <g key={node.id}>
-                                <rect x={cardX} y={cardY} width={cardW} height={cardH} rx={cornerRadius}
-                                  fill={dm?'#1e293b':'white'} stroke={baseColor} strokeWidth={2}/>
-                                {list.categories.map((cat, ci) => {
-                                  const row = Math.floor(ci / perRow), col = ci % perRow;
-                                  const bx = cardX + cardPad + bubbleR + col*cellSize;
-                                  const by = cardY + cardPad + bubbleR + row*cellSize;
+                              <div key={node.id} style={{position:'absolute', left:px-cardW/2, top:py-cardH/2,
+                                width:cardW, height:cardH, borderRadius:10,
+                                background:dm?'#1e293b':'white', border:`2px solid ${baseColor}`,
+                                display:'grid', gridTemplateColumns:`repeat(${perRow}, ${bubbleSize}px)`,
+                                gap:gap, padding:cardPad, boxSizing:'border-box'}}>
+                                {list.categories.map((cat) => {
                                   const count = todayCounts[cat.id] || 0;
                                   const progress = Math.min(1, count / (cat.target || 1));
                                   return (
-                                    <foreignObject key={cat.id} x={bx-bubbleR} y={by-bubbleR} width={bubbleR*2} height={bubbleR*2} style={{overflow:'visible'}}>
-                                      <div onClick={() => setHabitToday(prev => ({
+                                    <div key={cat.id}
+                                      onClick={() => setHabitToday(prev => ({
                                           ...prev,
                                           [list.id]: { ...(prev[list.id]||{}), [cat.id]: ((prev[list.id]||{})[cat.id]||0) + 1 }
                                         }))}
-                                        title={`${cat.label}: ${count}/${cat.target}`}
-                                        style={{width:'100%', height:'100%', borderRadius:'50%', cursor:'pointer',
-                                          display:'flex', alignItems:'center', justifyContent:'center',
-                                          border:`2px solid ${baseColor}`,
-                                          background: progress >= 1 ? baseColor : `${baseColor}${Math.round(progress*255).toString(16).padStart(2,'0')}`,
-                                          fontSize: bubbleR*0.9, transition:'background 0.2s'}}>
-                                        {cat.icon}
-                                      </div>
-                                    </foreignObject>
+                                      title={`${cat.label}: ${count}/${cat.target}`}
+                                      style={{width:bubbleSize, height:bubbleSize, borderRadius:'50%', cursor:'pointer',
+                                        display:'flex', alignItems:'center', justifyContent:'center',
+                                        border:`2px solid ${baseColor}`,
+                                        background: progress >= 1 ? baseColor : `${baseColor}${Math.round(progress*255).toString(16).padStart(2,'0')}`,
+                                        fontSize: bubbleSize*0.5, transition:'background 0.2s'}}>
+                                      {cat.icon}
+                                    </div>
                                   );
                                 })}
-                              </g>
+                              </div>
                             );
                           }
 
