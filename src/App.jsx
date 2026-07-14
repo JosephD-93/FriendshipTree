@@ -17272,34 +17272,55 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                             const perRow = list.gridCols || 3;
                             const rows = Math.ceil(list.categories.length / perRow);
                             const cardPad = bubbleSize * 0.3;
-                            const cardW = perRow * bubbleSize + (perRow-1) * gap + cardPad*2;
-                            const cardH = rows * bubbleSize + (rows-1) * gap + cardPad*2;
+                            const headerH = 26;
+                            const cardW = Math.max(perRow * bubbleSize + (perRow-1) * gap + cardPad*2, 90);
+                            const gridH = rows * bubbleSize + (rows-1) * gap + cardPad*2;
+                            const isCollapsed = !!list.itemsCollapsed;
+                            const cardH = headerH + (isCollapsed ? 0 : gridH);
                             const baseColor = list.color || '#10b981';
                             return (
                               <div key={node.id} style={{position:'absolute', left:px-cardW/2, top:py-cardH/2,
                                 width:cardW, height:cardH, borderRadius:10,
                                 background:dm?'#1e293b':'white', border:`2px solid ${baseColor}`,
-                                display:'grid', gridTemplateColumns:`repeat(${perRow}, ${bubbleSize}px)`,
-                                gap:gap, padding:cardPad, boxSizing:'border-box'}}>
-                                {list.categories.map((cat) => {
-                                  const count = todayCounts[cat.id] || 0;
-                                  const progress = Math.min(1, count / (cat.target || 1));
-                                  return (
-                                    <div key={cat.id}
-                                      onClick={() => setHabitToday(prev => ({
-                                          ...prev,
-                                          [list.id]: { ...(prev[list.id]||{}), [cat.id]: ((prev[list.id]||{})[cat.id]||0) + 1 }
-                                        }))}
-                                      title={`${cat.label}: ${count}/${cat.target}`}
-                                      style={{width:bubbleSize, height:bubbleSize, borderRadius:'50%', cursor:'pointer',
-                                        display:'flex', alignItems:'center', justifyContent:'center',
-                                        border:`2px solid ${baseColor}`,
-                                        background: progress >= 1 ? baseColor : `${baseColor}${Math.round(progress*255).toString(16).padStart(2,'0')}`,
-                                        fontSize: bubbleSize*0.5, transition:'background 0.2s'}}>
-                                      {cat.icon}
-                                    </div>
-                                  );
-                                })}
+                                overflow:'hidden', boxSizing:'border-box'}}>
+                                <div onClick={() => setShowHealthListDetail(list.id)}
+                                  style={{height:headerH, display:'flex', alignItems:'center', justifyContent:'space-between',
+                                    padding:'0 6px', cursor:'pointer', borderBottom: isCollapsed ? 'none' : `1px solid ${baseColor}40`}}>
+                                  <span style={{fontSize:11, fontWeight:800, color:dm?'white':'#0f172a',
+                                    overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>
+                                    {list.icon} {list.name}
+                                  </span>
+                                  <button onClick={(e) => { e.stopPropagation(); setHealthLists(prev => prev.map(l => l.id === list.id ? {...l, itemsCollapsed: !l.itemsCollapsed} : l)); }}
+                                    title={isCollapsed ? 'Show items' : 'Hide items'}
+                                    style={{background:'none', border:'none', cursor:'pointer', padding:2, flexShrink:0,
+                                      color:dm?'#64748b':'#94a3b8', fontSize:12, lineHeight:1}}>
+                                    {isCollapsed ? '▾' : '▸'}
+                                  </button>
+                                </div>
+                                {!isCollapsed && (
+                                  <div style={{display:'grid', gridTemplateColumns:`repeat(${perRow}, ${bubbleSize}px)`,
+                                    gap:gap, padding:cardPad, boxSizing:'border-box', justifyContent:'center'}}>
+                                    {list.categories.map((cat) => {
+                                      const count = todayCounts[cat.id] || 0;
+                                      const progress = Math.min(1, count / (cat.target || 1));
+                                      return (
+                                        <div key={cat.id}
+                                          onClick={() => setHabitToday(prev => ({
+                                              ...prev,
+                                              [list.id]: { ...(prev[list.id]||{}), [cat.id]: ((prev[list.id]||{})[cat.id]||0) + 1 }
+                                            }))}
+                                          title={`${cat.label}: ${count}/${cat.target}`}
+                                          style={{width:bubbleSize, height:bubbleSize, borderRadius:'50%', cursor:'pointer',
+                                            display:'flex', alignItems:'center', justifyContent:'center',
+                                            border:`2px solid ${baseColor}`,
+                                            background: progress >= 1 ? baseColor : `${baseColor}${Math.round(progress*255).toString(16).padStart(2,'0')}`,
+                                            fontSize: bubbleSize*0.5, transition:'background 0.2s'}}>
+                                          {cat.icon}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
                               </div>
                             );
                           }
