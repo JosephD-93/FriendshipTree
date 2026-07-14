@@ -2919,6 +2919,23 @@ function AppInner() {
   // a second, independent finger scrolls; lifting the holding finger drops it).
   const [feedCarrying, setFeedCarrying] = useState(null); // {dimKey, nodeId, branchIds, pageX, pageY, dropMode, holdPointerId}
   const [feedScrollTop, setFeedScrollTop] = useState(0);
+  const [healthSectionInView, setHealthSectionInView] = useState(false);
+  useEffect(() => {
+    const checkHealthVisible = () => {
+      const healthEl = document.querySelector('[data-feed-section="health"]');
+      const containerEl = feedScrollRef.current;
+      if (healthEl && containerEl) {
+        const elRect = healthEl.getBoundingClientRect();
+        const containerRect = containerEl.getBoundingClientRect();
+        setHealthSectionInView(elRect.bottom > containerRect.top && elRect.top < containerRect.bottom);
+      } else {
+        setHealthSectionInView(false);
+      }
+    };
+    const t = setTimeout(checkHealthVisible, 200); // let the feed finish its initial layout first
+    return () => clearTimeout(t);
+  }, [viewMode, mapStyle]);
+
   // 'saved' | 'pending' | 'error' -- drives the save status dot in the corner
   const [saveStatus, setSaveStatus] = useState('saved');
 
@@ -5380,6 +5397,10 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
           const list = (res && res.contacts) || [];
           if (!list.length) { showToast('No contacts found on device'); return; }
           const wanted = (nodes.find(n => n.id === selectedNodeId)?.label || '').toLowerCase().trim();
+          if (wanted === 'me') {
+            showToast('Rename your profile to your real name first, so it can find the right contact — this older Contacts plugin can\'t show a picker to choose manually');
+            return;
+          }
           c = (wanted && list.find(x => ((x.name && x.name.display) || '').toLowerCase().includes(wanted))) || list[0];
         }
         if (!c) return;
@@ -6144,15 +6165,20 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
   };
   useEffect(() => {
     const todayStr = getLocalDateStr();
+    window.ftDiagLog('[FT-DIAG] Habit rollover ON-MOUNT check: habitLastResetDate=', habitLastResetDate, 'todayStr=', todayStr);
     if (habitLastResetDate !== todayStr) {
+      window.ftDiagLog('[FT-DIAG] Habit rollover TRIGGERED on mount, archiving', habitLastResetDate);
       doHabitRollover(habitLastResetDate);
       setHabitLastResetDate(todayStr);
       saveRaw('ft_habit_last_reset', todayStr);
     }
-    const checkAndRollover = () => {
+    const checkAndRollover = (source) => {
       const now = getLocalDateStr();
+      window.ftDiagLog(`[FT-DIAG] Habit rollover check via ${source}, now=`, now);
       setHabitLastResetDate(prevDate => {
+        window.ftDiagLog(`[FT-DIAG] Habit rollover check via ${source} - prevDate=`, prevDate, 'now=', now);
         if (prevDate !== now) {
+          window.ftDiagLog(`[FT-DIAG] Habit rollover TRIGGERED via ${source}, archiving`, prevDate);
           doHabitRollover(prevDate);
           saveRaw('ft_habit_last_reset', now);
           return now;
@@ -6161,7 +6187,7 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
       });
     };
     // Also re-check periodically in case the app stays open across midnight
-    const iv = setInterval(checkAndRollover, 60000); // check every minute
+    const iv = setInterval(() => checkAndRollover('interval'), 60000); // check every minute
     // AND re-check the moment the app comes back to the foreground -- Android
     // commonly suspends setInterval timers while an app is backgrounded (not
     // force-closed, just switched away from) to save battery, so the interval
@@ -6170,13 +6196,15 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
     // then, since it's tied to Android's own app lifecycle, not a JS timer.
     let resumeListener = null;
     const CapApp = window.Capacitor?.Plugins?.App;
+    window.ftDiagLog('[FT-DIAG] Habit rollover: App plugin available?', !!CapApp);
     if (CapApp && typeof CapApp.addListener === 'function') {
       try {
-        const result = CapApp.addListener('resume', checkAndRollover);
+        const result = CapApp.addListener('resume', () => checkAndRollover('resume'));
         if (result && typeof result.then === 'function') {
-          result.then(l => { resumeListener = l; }).catch(() => {});
+          result.then(l => { resumeListener = l; window.ftDiagLog('[FT-DIAG] Habit rollover: resume listener attached (async)'); }).catch(() => {});
         } else {
           resumeListener = result;
+          window.ftDiagLog('[FT-DIAG] Habit rollover: resume listener attached (sync)');
         }
       } catch(e) {}
     }
@@ -6386,6 +6414,19 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
 
   // Directly create a friend or group at a screen drop point -- used when the type is
   // already known (dragging the green person circle or brown group circle from the Add menu).
+  // Creates a brand new, empty health tracker - used when the red Tracker
+  // circle is dragged and dropped, mirroring the same blank-list creation
+  // already available in Manage Lists, so there's one consistent way a
+  // blank tracker comes into being regardless of which button triggered it.
+  const spawnBlankTracker = () => {
+    const newId = 'list_'+Date.now();
+    setHealthLists(prev => [...prev, { id:newId, name:'New List', icon:'📋', color:'#10b981', categories:[] }]);
+    setNodes(prev => [...prev, { id:'health_list_'+newId, type:'health_list', listId:newId,
+      label:'New List', x: 400 + Math.random()*100, y: 400 + Math.random()*100, pinned:false }]);
+    setLinks(prev => [...prev, { source:'flower_health', target:'health_list_'+newId }]);
+    showToast('📋 New tracker created — add your own categories in its settings');
+  };
+
   const spawnTypedNodeAtScreenPoint = async (screenX, screenY, kind) => {
     const rect = svgRef.current ? svgRef.current.getBoundingClientRect() : { left:0, top:0 };
     const svgX = (screenX - rect.left - transform.x) / transform.scale;
@@ -7616,14 +7657,32 @@ Return only the JSON array. If nothing trackable is found, return [].`;
   };
 
 
+  const activeRenderNodesById = useMemo(() => {
+    const m = new Map();
+    activeRenderNodes.forEach(n => m.set(n.id, n));
+    return m;
+  }, [activeRenderNodes]);
+
+  // Who's directly connected to the Social flower -- precomputed once per
+  // links change, instead of re-scanning the entire links array for every
+  // single hub-connected vine every time geometry needs to recalculate.
+  const socialConnectedIds = useMemo(() => {
+    const s = new Set();
+    links.forEach(l => {
+      if (l.source === 'flower_social') s.add(l.target);
+      if (l.target === 'flower_social') s.add(l.source);
+    });
+    return s;
+  }, [links]);
+
   const linkParts = useMemo(() => {
     if (sliderDragging || simpleMode) return [];
     const newFallenAccum = [];
     const fallenLeafIdSet = new Set(fallenLeaves.map(fl => fl.id));
     const blockerNodesAll = activeRenderNodes.filter(n => !n.hidden && n.renderX != null && n.renderY != null);
     const result = links.map((link, i) => {
-                  const src = activeRenderNodes.find(n => n.id === link.source);
-                  const tgt = activeRenderNodes.find(n => n.id === link.target);
+                  const src = activeRenderNodesById.get(link.source);
+                  const tgt = activeRenderNodesById.get(link.target);
                   if (!src || !tgt) return null;
                   // Don't render vines to/from hidden hub nodes -- they're invisible
                   if (src.hidden || tgt.hidden) return null;
@@ -7645,10 +7704,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   if (src.type === 'hub' || tgt.type === 'hub') {
                     const hubNode = src.type === 'hub' ? src : tgt;
                     const personNode = src.type === 'hub' ? tgt : src;
-                    const personOnSocial = links.some(l =>
-                      (l.source==='flower_social'&&l.target===personNode.id) ||
-                      (l.target==='flower_social'&&l.source===personNode.id)
-                    );
+                    const personOnSocial = socialConnectedIds.has(personNode.id);
                     if (personNode.id !== 'me' && !personOnSocial
                         && nodeGroupMap[personNode.id] && nodeGroupMap[personNode.id] !== hubNode.id) {
                       return null;
@@ -7700,7 +7756,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       });
     }
     return result;
-  }, [links, activeRenderNodes, nodes, theme, nodeGroupMap, sliderDragging, simpleMode, transform, growingVines, vineBorderParams, fallenLeaves]);
+  }, [links, activeRenderNodes, activeRenderNodesById, socialConnectedIds, nodes, theme, nodeGroupMap, sliderDragging, simpleMode, growingVines, vineBorderParams, fallenLeaves]);
   return (
     <>
     <style>{KEYFRAMES_CSS}</style>
@@ -8702,7 +8758,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           }}>
             {[
               {kind:'person', bg:'#16a34a', label:'Person'},
-              {kind:'group',  bg:'#92400e', label:'Group'},
+              {kind:'group',  bg:'#065f46', label:'Group'},
             ].map(opt => (
               <div key={opt.kind} style={{display:'flex',flexDirection:'column',alignItems:'center',gap:4}}>
                 <button
@@ -8738,8 +8794,10 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     </svg>
                   ) : (
                     <svg width="26" height="26" viewBox="0 0 100 100">
-                      <rect x="46" y="20" width="6" height="68" fill="white"/>
-                      <path d="M52 26 L88 36 L52 46 Z" fill="white"/>
+                      <circle cx="32" cy="34" r="16" fill="white"/>
+                      <path d="M6 86 Q6 60 32 60 Q58 60 58 86 Z" fill="white"/>
+                      <circle cx="68" cy="30" r="13" fill="white" opacity="0.7"/>
+                      <path d="M48 86 Q48 64 68 64 Q88 64 88 86 Z" fill="white" opacity="0.7"/>
                     </svg>
                   )}
                 </button>
@@ -8773,6 +8831,53 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 Contacts
               </span>
             </div>
+
+            {/* New health tracker -- only shown while the Health section is
+                actually scrolled into view in the stack view, since that's
+                the only context where "add" plausibly means this. Same
+                drag-to-place interaction as Person/Group -- dropping it
+                creates a genuine new blank tracker right away. */}
+            {healthSectionInView && viewMode === 'canvas' && (mapStyle === 'feed' || mapStyle === 'feedDetailed') && (
+              <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:4}}>
+                <button
+                  onPointerDown={e=>{
+                    e.currentTarget.setPointerCapture(e.pointerId);
+                    addCircleDragStart.current = { kind:'tracker', moved:false, startX:e.clientX, startY:e.clientY };
+                    setAddCircleDrag({ kind:'tracker', x:e.clientX, y:e.clientY });
+                  }}
+                  onPointerMove={e=>{
+                    const d = addCircleDragStart.current; if (!d || d.kind !== 'tracker') return;
+                    const dx = e.clientX - d.startX, dy = e.clientY - d.startY;
+                    if (Math.sqrt(dx*dx + dy*dy) > 8) d.moved = true;
+                    setAddCircleDrag({ kind:'tracker', x:e.clientX, y:e.clientY });
+                  }}
+                  onPointerUp={e=>{
+                    const d = addCircleDragStart.current;
+                    if (d && d.kind === 'tracker') {
+                      spawnBlankTracker();
+                    }
+                    addCircleDragStart.current = null;
+                    setAddCircleDrag(null);
+                    setShowAddMenu(false);
+                  }}
+                  style={{width:56,height:56,borderRadius:'50%',border:'2px solid white',
+                    background:'#dc2626',cursor:'grab',touchAction:'none',
+                    display:'flex',alignItems:'center',justifyContent:'center',
+                    boxShadow:'0 4px 16px rgba(0,0,0,0.35)'}}>
+                  <svg width="26" height="26" viewBox="0 0 100 100">
+                    <circle cx="24" cy="24" r="10" fill="white"/>
+                    <circle cx="76" cy="24" r="10" fill="white"/>
+                    <circle cx="50" cy="50" r="10" fill="white"/>
+                    <circle cx="24" cy="76" r="10" fill="white"/>
+                    <circle cx="76" cy="76" r="10" fill="white"/>
+                  </svg>
+                </button>
+                <span style={{fontSize:11,fontWeight:700,color:'white',
+                  background:'rgba(0,0,0,0.55)',padding:'2px 8px',borderRadius:8}}>
+                  Tracker
+                </span>
+              </div>
+            )}
           </div>
         </>
       )}
@@ -8780,7 +8885,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       {/* Ghost circle following the finger while dragging a person/group circle from the Add menu */}
       {addCircleDrag && (
         <div style={{position:'fixed',left:addCircleDrag.x-28,top:addCircleDrag.y-28,width:56,height:56,
-          borderRadius:'50%',background:addCircleDrag.kind==='group'?'#92400e':'#16a34a',opacity:0.9,
+          borderRadius:'50%',background:addCircleDrag.kind==='group'?'#065f46':addCircleDrag.kind==='tracker'?'#dc2626':'#16a34a',opacity:0.9,
           zIndex:300,pointerEvents:'none',display:'flex',alignItems:'center',justifyContent:'center',
           boxShadow:'0 6px 20px rgba(0,0,0,0.4)',border:'2px solid white'}}>
           {addCircleDrag.kind === 'person' ? (
@@ -8788,10 +8893,20 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               <circle cx="50" cy="38" r="20" fill="white"/>
               <path d="M14 92 Q14 60 50 60 Q86 60 86 92 Z" fill="white"/>
             </svg>
+          ) : addCircleDrag.kind === 'tracker' ? (
+            <svg width="26" height="26" viewBox="0 0 100 100">
+              <circle cx="24" cy="24" r="10" fill="white"/>
+              <circle cx="76" cy="24" r="10" fill="white"/>
+              <circle cx="50" cy="50" r="10" fill="white"/>
+              <circle cx="24" cy="76" r="10" fill="white"/>
+              <circle cx="76" cy="76" r="10" fill="white"/>
+            </svg>
           ) : (
             <svg width="26" height="26" viewBox="0 0 100 100">
-              <rect x="46" y="20" width="6" height="68" fill="white"/>
-              <path d="M52 26 L88 36 L52 46 Z" fill="white"/>
+              <circle cx="32" cy="34" r="16" fill="white"/>
+              <path d="M6 86 Q6 60 32 60 Q58 60 58 86 Z" fill="white"/>
+              <circle cx="68" cy="30" r="13" fill="white" opacity="0.7"/>
+              <path d="M48 86 Q48 64 68 64 Q88 64 88 86 Z" fill="white" opacity="0.7"/>
             </svg>
           )}
         </div>
@@ -9217,7 +9332,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
 
               {/* Messaging row — open a conversation with this person */}
-              {selectedNode.type !== 'hub' && selectedNode.id !== 'me' && (()=>{
+              {selectedNode.type !== 'hub' && (()=>{
                 const dm = theme.darkMode;
                 const handles = selectedNode.socialHandles || {};
                 const hasPhone = !!(selectedNode.phone || '').replace(/[^\d]/g,'');
@@ -9373,7 +9488,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       )}
                     </button>
                     {/* Contact button */}
-                    {selectedNode.id !== 'me' && (
+                    {(
                       <button onClick={()=>{setShowContactDetails(o=>!o);setFlowerMenuOpen(false);setTagsMenuOpen(false);}}
                         style={{width:48,height:48,borderRadius:'50%',border:'2px solid '+(theme.darkMode?'#334155':'#e2e8f0'),background:theme.darkMode?'#1e293b':'white',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',padding:0,position:'relative',flexShrink:0}} title="Contact details">
                         <span style={{fontSize:20}}>📞</span>
@@ -9470,7 +9585,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
 
                   {/* Contact dropdown */}
-                  {showContactDetails && selectedNode.id !== 'me' && (
+                  {showContactDetails && (
                     <div style={{marginTop:8}}>
                     <div style={{borderRadius:12,border:`1px solid ${pw.border}`,overflow:'hidden',marginBottom:8}}>
                       <div style={{display:'flex',alignItems:'center',gap:8,padding:'8px 12px',borderBottom:`1px solid ${pw.border}`}}>
@@ -14636,6 +14751,28 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   </div>
                 </div>
 
+                {/* How this list appears as a bubble on the map/stack view */}
+                <div style={{marginBottom:14}}>
+                  <label style={{fontSize:11, fontWeight:700, color:dm?'#64748b':'#94a3b8',
+                    textTransform:'uppercase', letterSpacing:0.5, display:'block', marginBottom:6}}>How it appears on the map</label>
+                  <div style={{display:'flex', flexDirection:'column', gap:6}}>
+                    {[
+                      { key:'percent', label:'One bubble — name + % complete today' },
+                      { key:'points',  label:'One bubble — name + points earned so far today' },
+                      { key:'items',   label:'Separate bubbles per item — icon only, darkens as you tap toward target' },
+                    ].map(opt => (
+                      <button key={opt.key} onClick={() => updateList(l => ({...l, displayMode: opt.key}))}
+                        style={{textAlign:'left', padding:'8px 10px', borderRadius:8,
+                          border: (list.displayMode||'percent') === opt.key ? '1.5px solid #10b981' : `1px solid ${dm?'#334155':'#e2e8f0'}`,
+                          background: (list.displayMode||'percent') === opt.key ? (dm?'#064e3b':'#ecfdf5') : 'none',
+                          color: (list.displayMode||'percent') === opt.key ? '#10b981' : (dm?'#94a3b8':'#64748b'),
+                          fontSize:12, fontWeight:600, cursor:'pointer'}}>
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 {/* Sort mode: 3 toggle-style buttons */}
                 <div style={{marginBottom:14}}>
                   <label style={{fontSize:11, fontWeight:700, color:dm?'#64748b':'#94a3b8',
@@ -15962,9 +16099,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         const FEED_HEX = Math.max(28, Math.min(72, availW / ((COLS - 1) * 1.5 + 2)));
         const sectionDefs = [
           { dimKey: 'social',     flowerId: 'flower_social' },
-          { dimKey: 'creativity', flowerId: 'flower_creativity' },
-          { dimKey: 'knowledge',  flowerId: 'flower_knowledge' },
           { dimKey: 'health',     flowerId: 'flower_health' },
+          { dimKey: 'knowledge',  flowerId: 'flower_knowledge' },
+          { dimKey: 'creativity', flowerId: 'flower_creativity' },
           { dimKey: 'growth',     flowerId: 'flower_growth' },
         ];
         const colOffsets = Array.from({length: COLS}, (_, i) => i * FEED_HEX * 1.5);
@@ -16456,7 +16593,19 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             cursor: feedMacheteMode ? 'crosshair' : 'auto',
             userSelect:'none', WebkitUserSelect:'none', WebkitTouchCallout:'none',
             background:bg}}
-            onScroll={e => setFeedScrollTop(e.currentTarget.scrollTop)}
+            onScroll={e => {
+              setFeedScrollTop(e.currentTarget.scrollTop);
+              const healthEl = document.querySelector('[data-feed-section="health"]');
+              const containerEl = e.currentTarget;
+              if (healthEl && containerEl) {
+                const elRect = healthEl.getBoundingClientRect();
+                const containerRect = containerEl.getBoundingClientRect();
+                const inView = elRect.bottom > containerRect.top && elRect.top < containerRect.bottom;
+                setHealthSectionInView(inView);
+              } else {
+                setHealthSectionInView(false);
+              }
+            }}
             onPointerDown={e => {
               if (!feedMacheteMode) return;
               setFeedSlashing(true);
@@ -16998,19 +17147,108 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           const todayCounts = habitToday[list.id] || {};
                           const hitCount = list.categories.filter(c => (todayCounts[c.id]||0) >= c.target).length;
                           const score = Math.round(listScores[list.id] || 0);
+                          const displayMode = list.displayMode || 'percent';
+                          const isCarried = feedCarrying?.nodeId === node.id;
+
+                          // Items mode: one small tappable bubble per category,
+                          // icon only, no drag -- laid out in a small cluster
+                          // around the node's anchor point.
+                          if (displayMode === 'items') {
+                            const bubbleR = FEED_HEX * 0.42;
+                            const spacing = bubbleR * 2.3;
+                            const perRow = Math.max(1, Math.ceil(Math.sqrt(list.categories.length)));
+                            return (
+                              <g key={node.id}>
+                                {list.categories.map((cat, ci) => {
+                                  const row = Math.floor(ci / perRow), col = ci % perRow;
+                                  const rowCount = Math.min(perRow, list.categories.length - row*perRow);
+                                  const bx = px + (col - (rowCount-1)/2) * spacing;
+                                  const by = py + (row - (Math.ceil(list.categories.length/perRow)-1)/2) * spacing;
+                                  const count = todayCounts[cat.id] || 0;
+                                  const progress = Math.min(1, count / (cat.target || 1));
+                                  const baseColor = list.color || '#10b981';
+                                  return (
+                                    <foreignObject key={cat.id} x={bx-bubbleR} y={by-bubbleR} width={bubbleR*2} height={bubbleR*2} style={{overflow:'visible'}}>
+                                      <div onClick={() => setHabitToday(prev => ({
+                                          ...prev,
+                                          [list.id]: { ...(prev[list.id]||{}), [cat.id]: ((prev[list.id]||{})[cat.id]||0) + 1 }
+                                        }))}
+                                        title={`${cat.label}: ${count}/${cat.target}`}
+                                        style={{width:'100%', height:'100%', borderRadius:'50%', cursor:'pointer',
+                                          display:'flex', alignItems:'center', justifyContent:'center',
+                                          border:`2px solid ${baseColor}`,
+                                          background: progress >= 1 ? baseColor : `${baseColor}${Math.round(progress*255).toString(16).padStart(2,'0')}`,
+                                          fontSize: bubbleR*0.9, transition:'background 0.2s'}}>
+                                        {cat.icon}
+                                      </div>
+                                    </foreignObject>
+                                  );
+                                })}
+                              </g>
+                            );
+                          }
+
                           const cardW = FEED_HEX * 2.4, cardH = FEED_HEX * 1.3;
+                          const percentComplete = list.categories.length > 0 ? Math.round((hitCount/list.categories.length)*100) : 0;
+                          const dayPointsSoFar = Math.round(computeListDayPoints(list, todayCounts));
                           return (
                             <div key={node.id} style={{position:'absolute', left:px-cardW/2, top:py-cardH/2,
                               width:cardW, height:cardH, borderRadius:12,
-                              background:dm?'#1e293b':'white', border:`2px solid ${list.color||'#10b981'}`,
+                              background:dm?'#1e293b':'white', border:`2px solid ${isCarried?(list.color||'#10b981')+'aa':(list.color||'#10b981')}`,
                               display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
-                              gap:2, cursor:'pointer', padding:'0 6px'}}
-                              onClick={() => setShowHealthListDetail(list.id)}>
+                              gap:2, cursor:'grab', opacity:isCarried?0.5:1, padding:'0 6px',
+                              touchAction:'none'}}
+                              onPointerDown={e=>{
+                                if (feedCarrying) return;
+                                const pointerId = e.pointerId;
+                                const targetEl = e.currentTarget;
+                                const startX = e.clientX, startY = e.clientY;
+                                feedLiveTouchRef.current = { x: startX, y: startY, pointerId };
+                                feedLiftTimer.current = setTimeout(() => {
+                                  try { targetEl.setPointerCapture(pointerId); } catch(err) {}
+                                  const live = feedLiveTouchRef.current;
+                                  const liveX = (live && live.pointerId === pointerId) ? live.x : startX;
+                                  const liveY = (live && live.pointerId === pointerId) ? live.y : startY;
+                                  setFeedCarrying({ dimKey, nodeId: node.id, branchIds: new Set([node.id]),
+                                    screenX: liveX, screenY: liveY,
+                                    dropMode: feedDragMode, holdPointerId: feedDragMode === 'twohand' ? pointerId : null });
+                                }, 350);
+                              }}
+                              onPointerUp={e=>{
+                                clearTimeout(feedLiftTimer.current);
+                                feedLiveTouchRef.current = null;
+                                try { e.currentTarget.releasePointerCapture(e.pointerId); } catch(err) {}
+                              }}
+                              onPointerMove={e=>{
+                                if (feedLiveTouchRef.current && feedLiveTouchRef.current.pointerId === e.pointerId) {
+                                  feedLiveTouchRef.current.x = e.clientX;
+                                  feedLiveTouchRef.current.y = e.clientY;
+                                }
+                                if (!feedCarrying || feedCarrying.nodeId !== node.id) return;
+                                if (feedCarrying.dropMode === 'twohand' && feedCarrying.holdPointerId !== e.pointerId) return;
+                                const x = e.clientX, y = e.clientY;
+                                if (feedDragRAF.current) cancelAnimationFrame(feedDragRAF.current);
+                                feedDragRAF.current = requestAnimationFrame(() => {
+                                  setFeedCarrying(d => d ? { ...d, screenX: x, screenY: y } : d);
+                                  feedDragRAF.current = null;
+                                });
+                              }}
+                              onPointerLeave={()=>{ clearTimeout(feedLiftTimer.current); }}
+                              onClick={() => {
+                                if (feedCarrying || feedJustPlaced.current.has(node.id)) return;
+                                setShowHealthListDetail(list.id);
+                              }}>
                               <div style={{fontSize:14}}>{list.icon}</div>
                               <div style={{fontSize:Math.max(9, FEED_HEX*0.22), fontWeight:800,
                                 color:dm?'white':'#0f172a', lineHeight:1.2, textAlign:'center',
                                 overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', maxWidth:'100%'}}>{list.name}</div>
-                              <div style={{fontSize:Math.max(8, FEED_HEX*0.2), color:dm?'#64748b':'#94a3b8'}}>{hitCount}/{list.categories.length} hit</div>
+                              {displayMode === 'points' ? (
+                                <div style={{fontSize:Math.max(8, FEED_HEX*0.2), fontWeight:700, color:dayPointsSoFar>=0?'#10b981':'#ef4444'}}>
+                                  {dayPointsSoFar} pts today
+                                </div>
+                              ) : (
+                                <div style={{fontSize:Math.max(8, FEED_HEX*0.2), color:dm?'#64748b':'#94a3b8'}}>{percentComplete}% today</div>
+                              )}
                               <div style={{fontSize:Math.max(8, FEED_HEX*0.2), fontWeight:700, color:score>=0?'#10b981':'#ef4444'}}>⭐ {score}</div>
                             </div>
                           );
@@ -21788,7 +22026,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           const isMapTab = tab.id === 'canvas';
           return (
             <button key={tab.id}
-              onClick={() => { if (!isAddTab) setViewMode(tab.id); }}
+              onClick={() => { if (tab.action) { if (!isAddTab) tab.action(); } else { setViewMode(tab.id); } }}
               onPointerDown={isAddTab ? (e=>{
                 e.currentTarget.setPointerCapture(e.pointerId);
                 bottomAddDragStart.current = { moved: false, startX: e.clientX, startY: e.clientY };
