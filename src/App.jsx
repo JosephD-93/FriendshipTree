@@ -3312,6 +3312,8 @@ function AppInner() {
   const [aiLoading, setAiLoading] = useState(false);
   const moleDragRef = useRef(null);
   const panRafRef = useRef(null);
+  const panSyncRafRef = useRef(null); // throttles setTransform during an active pan to once per frame, since applyTransform already handles the actual visual movement directly via the DOM
+  const panSyncLatestRef = useRef(null); // always holds the most recent position, so the throttled sync never commits a stale intermediate value
   const [hubGalleryItems, setHubGalleryItems] = useState([]);
   const [hubGalleryLoading, setHubGalleryLoading] = useState(false);
   const [hubGalleryViewer, setHubGalleryViewer] = useState(null);
@@ -3903,7 +3905,22 @@ function AppInner() {
       // Apply directly to DOM for smooth 60fps — no React re-render
       const newT = { ...transform, x: newX, y: newY };
       applyTransform(newT);
-      setTransform(newT);
+      // React state only needs to keep up at roughly frame rate, not on every
+      // single raw pointer event (which can fire well above 60/sec) -- the
+      // actual visual movement is already fully handled above via direct DOM
+      // manipulation, so this is purely for anything else that reads
+      // transform from state, throttled to avoid re-rendering the whole
+      // component far more often than the screen can even repaint. Always
+      // syncs the LATEST position via a ref, not whatever position happened
+      // to be current when the frame was first scheduled, so state doesn't
+      // lag behind if several pointer moves land within the same frame.
+      panSyncLatestRef.current = newT;
+      if (!panSyncRafRef.current) {
+        panSyncRafRef.current = requestAnimationFrame(() => {
+          panSyncRafRef.current = null;
+          setTransform(panSyncLatestRef.current);
+        });
+      }
       lastPanPos.current = { x: e.clientX, y: e.clientY };
       if (liftTimer.current) {
         clearTimeout(liftTimer.current);
@@ -4183,6 +4200,17 @@ function AppInner() {
     isPanningOverride.current = false;
     if (activePointers.current.size === 0) {
       setIsPanning(false);
+      // Force a final, guaranteed sync now that the gesture is over -- don't
+      // leave React state waiting on a throttled frame that may not have
+      // fired yet, or slightly behind the true final position.
+      if (panSyncRafRef.current) {
+        cancelAnimationFrame(panSyncRafRef.current);
+        panSyncRafRef.current = null;
+      }
+      if (panSyncLatestRef.current) {
+        setTransform(panSyncLatestRef.current);
+        panSyncLatestRef.current = null;
+      }
     }
   };
 
@@ -17154,19 +17182,26 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           // icon only, no drag -- laid out in a small cluster
                           // around the node's anchor point.
                           if (displayMode === 'items') {
-                            const bubbleR = FEED_HEX * 0.42;
-                            const spacing = bubbleR * 2.3;
-                            const perRow = Math.max(1, Math.ceil(Math.sqrt(list.categories.length)));
+                            const bubbleR = FEED_HEX * 0.36;
+                            const gap = bubbleR * 0.5;
+                            const perRow = 3; // matches the sketch: a neat 3-wide grid
+                            const rows = Math.ceil(list.categories.length / perRow);
+                            const cellSize = bubbleR * 2 + gap;
+                            const cardPad = bubbleR * 0.6;
+                            const cardW = perRow * cellSize - gap + cardPad*2;
+                            const cardH = rows * cellSize - gap + cardPad*2;
+                            const cardX = px - cardW/2, cardY = py - cardH/2;
+                            const baseColor = list.color || '#10b981';
                             return (
                               <g key={node.id}>
+                                <rect x={cardX} y={cardY} width={cardW} height={cardH} rx={16}
+                                  fill={dm?'#1e293b':'white'} stroke={baseColor} strokeWidth={2}/>
                                 {list.categories.map((cat, ci) => {
                                   const row = Math.floor(ci / perRow), col = ci % perRow;
-                                  const rowCount = Math.min(perRow, list.categories.length - row*perRow);
-                                  const bx = px + (col - (rowCount-1)/2) * spacing;
-                                  const by = py + (row - (Math.ceil(list.categories.length/perRow)-1)/2) * spacing;
+                                  const bx = cardX + cardPad + bubbleR + col*cellSize;
+                                  const by = cardY + cardPad + bubbleR + row*cellSize;
                                   const count = todayCounts[cat.id] || 0;
                                   const progress = Math.min(1, count / (cat.target || 1));
-                                  const baseColor = list.color || '#10b981';
                                   return (
                                     <foreignObject key={cat.id} x={bx-bubbleR} y={by-bubbleR} width={bubbleR*2} height={bubbleR*2} style={{overflow:'visible'}}>
                                       <div onClick={() => setHabitToday(prev => ({
