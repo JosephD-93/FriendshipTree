@@ -2800,6 +2800,20 @@ function AppInner() {
   }, [selectedNodeId]); // eslint-disable-line
   const [toastMessage, setToastMessage] = useState(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [showDiagLogViewer, setShowDiagLogViewer] = useState(false);
+  const [diagLogText, setDiagLogText] = useState('');
+  useEffect(() => {
+    if (!showDiagLogViewer) return;
+    setDiagLogText('Loading…');
+    try {
+      const Prefs = window.Capacitor?.Plugins?.Preferences;
+      if (Prefs && typeof Prefs.get === 'function') {
+        Prefs.get({ key: 'ft_diag_log' }).then(r => setDiagLogText(r?.value || '(log is empty)')).catch(() => setDiagLogText('(could not read log)'));
+      } else {
+        setDiagLogText('(Preferences plugin not available)');
+      }
+    } catch(e) { setDiagLogText('(error reading log)'); }
+  }, [showDiagLogViewer]);
   const [futureOpen, setFutureOpen] = useState(false);
   const [newIdea, setNewIdea] = useState('');
   const [userIdeas, setUserIdeas] = useState(() => {
@@ -8214,6 +8228,17 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       <div key={i} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 0',borderBottom:`1px solid ${pw.border}`}}><span style={{fontSize:14,color:theme.darkMode?'#e2e8f0':pw.bodyText}}>{row.label}</span>{row.ctrl}</div>
                     ))}
 
+                    {/* ---- Diagnostic log -- always reachable from here, since
+                        it's referenced during bug investigation and needs a
+                        stable, findable home rather than a conditional banner ---- */}
+                    <button onClick={() => { setSettingsOpen(false); setShowDiagLogViewer(true); }}
+                      style={{width:'100%', display:'flex', alignItems:'center', justifyContent:'space-between',
+                        padding:'10px 0', borderBottom:`1px solid ${pw.border}`, background:'none', border:'none',
+                        borderBottomWidth:1, borderBottomStyle:'solid', cursor:'pointer', textAlign:'left'}}>
+                      <span style={{fontSize:14,color:theme.darkMode?'#e2e8f0':pw.bodyText}}>🔍 Diagnostic Log</span>
+                      <span style={{fontSize:12, color:theme.darkMode?'#64748b':'#94a3b8'}}>view →</span>
+                    </button>
+
                     {/* ---- Map style picker ---- */}
                     <div style={{padding:'12px 0',borderBottom:`1px solid ${pw.border}`}}>
                       <div style={{fontSize:12,fontWeight:700,color:theme.darkMode?'#94a3b8':'#64748b',marginBottom:10,textTransform:'uppercase',letterSpacing:0.5}}>🗺️ Map Style</div>
@@ -12170,7 +12195,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   const displayMode = list.displayMode || 'percent';
 
                   if (displayMode === 'items') {
-                    const bubbleR = (list.itemBubbleSize || 28) / 2;
+                    const bubbleR = (list.itemBubbleSize || 42) / 2;
                     const gap = bubbleR * 0.5;
                     const perRow = list.gridCols || 3;
                     const rows = Math.ceil(list.categories.length / perRow);
@@ -14892,8 +14917,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         </label>
                         <label style={{flex:1}}>
                           <div style={{fontSize:10, color:dm?'#94a3b8':'#64748b', marginBottom:3}}>Bubble size (px)</div>
-                          <input type="number" min={20} max={80} value={list.itemBubbleSize || 28}
-                            onChange={e => updateList(l => ({...l, itemBubbleSize: Math.max(20, Math.min(80, parseInt(e.target.value)||28))}))}
+                          <input type="number" min={20} max={80} value={list.itemBubbleSize || 42}
+                            onChange={e => updateList(l => ({...l, itemBubbleSize: Math.max(20, Math.min(80, parseInt(e.target.value)||42))}))}
                             style={{width:'100%', padding:'6px 8px', borderRadius:6, fontSize:12,
                               border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#1e293b':'white', color:dm?'white':'#0f172a'}}/>
                         </label>
@@ -15001,8 +15026,25 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     background:'none', color:dm?'#64748b':'#94a3b8', fontSize:12, fontWeight:600, cursor:'pointer'}}>
                   + Add item
                 </button>
+                <button onClick={() => {
+                    if (!window.confirm(`Delete "${list.name}" entirely? This can't be undone.`)) return;
+                    const listId = list.id;
+                    setHealthLists(prev => prev.filter(l => l.id !== listId));
+                    setNodes(prev => prev.filter(n => !(n.type === 'health_list' && n.listId === listId)));
+                    setLinks(prev => prev.filter(l2 => {
+                      const targetNode = nodes.find(n => n.id === l2.target);
+                      return !(targetNode?.type === 'health_list' && targetNode?.listId === listId);
+                    }));
+                    setShowListPointsEditor(null);
+                    showToast(`🗑️ "${list.name}" removed`);
+                  }}
+                  style={{width:'100%', marginTop:10, padding:'9px 0', borderRadius:8,
+                    border:`1px solid ${dm?'#7f1d1d':'#fecaca'}`,
+                    background:'none', color:'#ef4444', fontSize:12, fontWeight:700, cursor:'pointer'}}>
+                  Delete this list
+                </button>
                 <button onClick={() => setShowListPointsEditor(null)}
-                  style={{width:'100%', marginTop:14, padding:'10px 0', borderRadius:8, border:'none',
+                  style={{width:'100%', marginTop:8, padding:'10px 0', borderRadius:8, border:'none',
                     background:'#10b981', color:'white', fontSize:13, fontWeight:700, cursor:'pointer'}}>
                   Done
                 </button>
@@ -15403,6 +15445,51 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         {/* ──────────────────────────────────────────────────────────────── */}
 
         {/* ── Health Metric Detail ─────────────────────────────────────── */}
+        {/* ── Diagnostic Log Viewer ───────────────────────────────────────── */}
+        {showDiagLogViewer && (() => {
+          const dm = theme.darkMode;
+          const rolloverLines = diagLogText.split('\n').filter(l => l.includes('Habit rollover')).join('\n');
+          return (
+            <div style={{position:'fixed', inset:0, zIndex:500, display:'flex', alignItems:'flex-end',
+              background:'rgba(0,0,0,0.6)'}}
+              onClick={e => { if (e.target === e.currentTarget) setShowDiagLogViewer(false); }}>
+              <div style={{width:'100%', background:dm?'#0f172a':'white', borderRadius:'16px 16px 0 0',
+                padding:'20px 16px', maxHeight:'85vh', display:'flex', flexDirection:'column', boxSizing:'border-box'}}>
+                <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10}}>
+                  <div style={{fontSize:15, fontWeight:800, color:dm?'white':'#0f172a'}}>🔍 Diagnostic Log</div>
+                  <button onClick={() => setShowDiagLogViewer(false)}
+                    style={{background:'none', border:'none', fontSize:22, color:dm?'#64748b':'#94a3b8', cursor:'pointer'}}>×</button>
+                </div>
+                <div style={{display:'flex', gap:8, marginBottom:10}}>
+                  <button onClick={() => { navigator.clipboard?.writeText(diagLogText); showToast('📋 Full log copied'); }}
+                    style={{flex:1, padding:'8px 0', borderRadius:8, border:`1px solid ${dm?'#334155':'#e2e8f0'}`,
+                      background:'none', color:dm?'#94a3b8':'#64748b', fontSize:12, fontWeight:600, cursor:'pointer'}}>
+                    📋 Copy full log
+                  </button>
+                  <button onClick={() => { navigator.clipboard?.writeText(rolloverLines || '(no rollover lines found)'); showToast('📋 Rollover lines copied'); }}
+                    style={{flex:1, padding:'8px 0', borderRadius:8, border:'1px solid #10b981',
+                      background:'none', color:'#10b981', fontSize:12, fontWeight:600, cursor:'pointer'}}>
+                    📋 Copy rollover lines only
+                  </button>
+                  <button onClick={() => {
+                      const Prefs = window.Capacitor?.Plugins?.Preferences;
+                      if (Prefs) Prefs.remove({ key: 'ft_diag_log' }).then(() => { setDiagLogText('(cleared)'); showToast('🗑️ Log cleared'); });
+                    }}
+                    style={{padding:'8px 10px', borderRadius:8, border:`1px solid ${dm?'#7f1d1d':'#fecaca'}`,
+                      background:'none', color:'#ef4444', fontSize:12, fontWeight:600, cursor:'pointer'}}>
+                    Clear
+                  </button>
+                </div>
+                <textarea readOnly value={diagLogText}
+                  style={{flex:1, minHeight:300, padding:10, borderRadius:8, fontSize:10, fontFamily:'monospace',
+                    border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#1e293b':'#f8fafc',
+                    color:dm?'#e2e8f0':'#0f172a', resize:'none', boxSizing:'border-box'}}/>
+              </div>
+            </div>
+          );
+        })()}
+        {/* ──────────────────────────────────────────────────────────────── */}
+
         {showMetricDetail && (() => {
           const dm = theme.darkMode;
           const METRIC_DEFS = {
@@ -15957,6 +16044,15 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     {Math.round(listScores[list.id]||0)} pts
                   </span>
                 </div>
+                <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10}}>
+                  <div style={{fontSize:12, fontWeight:700, color:dm?'white':'#0f172a'}}>Today's logging</div>
+                  <button onClick={() => setHealthLists(prev => prev.map(l => l.id === list.id ? {...l, logSectionCollapsed: !l.logSectionCollapsed} : l))}
+                    style={{background:'none', border:'none', cursor:'pointer', padding:2,
+                      color:dm?'#64748b':'#94a3b8', fontSize:13, lineHeight:1}}>
+                    {list.logSectionCollapsed ? '▾ Show' : '▸ Hide'}
+                  </button>
+                </div>
+                {!list.logSectionCollapsed && (
                 <div style={{display:'flex', flexDirection:'column', gap:10}}>
                   {list.categories.map(cat => {
                     const count = todayCounts[cat.id] || 0;
@@ -15995,6 +16091,43 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                             −
                           </button>
                         )}
+                      </div>
+                    );
+                  })}
+                </div>
+                )}
+                {/* History -- how often each item actually gets hit, not just
+                    today. A simple 7-day strip per item: solid green if you
+                    hit target that day, a muted dot if you didn't. Reading
+                    this top-to-bottom quickly shows which items are reliable
+                    habits versus which ones keep slipping. */}
+                <div style={{marginTop:18, paddingTop:14, borderTop:`1px solid ${dm?'#1e293b':'#f1f5f9'}`}}>
+                  <div style={{fontSize:12, fontWeight:700, color:dm?'white':'#0f172a', marginBottom:10}}>Last 7 days</div>
+                  {list.categories.map(cat => {
+                    const days = Array.from({length:7}, (_, i) => {
+                      const d = new Date(); d.setDate(d.getDate() - (6-i));
+                      const dayStr = getLocalDateStr(d);
+                      const isToday = i === 6;
+                      const dayCounts = isToday ? todayCounts : (habitHistory[dayStr]?.[list.id] || {});
+                      const c = dayCounts[cat.id] || 0;
+                      return { hit: c >= cat.target, label: d.toLocaleDateString('en',{weekday:'narrow'}) };
+                    });
+                    const hitRate = Math.round((days.filter(d=>d.hit).length / 7) * 100);
+                    return (
+                      <div key={cat.id} style={{display:'flex', alignItems:'center', gap:8, marginBottom:8}}>
+                        <div style={{fontSize:13, width:20, textAlign:'center', flexShrink:0}}>{cat.icon}</div>
+                        <div style={{flex:1, display:'flex', gap:3}}>
+                          {days.map((d, i) => (
+                            <div key={i} style={{flex:1, display:'flex', flexDirection:'column', alignItems:'center', gap:2}}>
+                              <div style={{width:'100%', aspectRatio:'1', borderRadius:4,
+                                background: d.hit ? '#10b981' : (dm?'#1e293b':'#f1f5f9'),
+                                border: d.hit ? 'none' : `1px solid ${dm?'#334155':'#e2e8f0'}`}}/>
+                              <span style={{fontSize:7, color:dm?'#475569':'#94a3b8'}}>{d.label}</span>
+                            </div>
+                          ))}
+                        </div>
+                        <div style={{fontSize:10, fontWeight:700, width:32, textAlign:'right', flexShrink:0,
+                          color: hitRate>=70?'#10b981':hitRate>=40?'#f59e0b':'#ef4444'}}>{hitRate}%</div>
                       </div>
                     );
                   })}
@@ -17291,7 +17424,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           // actual <svg> -- that mismatch was the real bug
                           // behind the broken 1-column/oversized rendering.
                           if (displayMode === 'items') {
-                            const bubbleSize = list.itemBubbleSize || 28;
+                            const bubbleSize = list.itemBubbleSize || 42;
                             const gap = bubbleSize * 0.25;
                             const perRow = list.gridCols || 3;
                             const rows = Math.ceil(list.categories.length / perRow);
@@ -17304,7 +17437,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                             const baseColor = list.color || '#10b981';
                             const isCarried = feedCarrying?.nodeId === node.id;
                             return (
-                              <div key={node.id} style={{position:'absolute', left:px-cardW/2, top:py-cardH/2,
+                              <div key={node.id} style={{position:'absolute', left:px-cardW/2, top:py-cardH*0.68,
                                 width:cardW, height:cardH, borderRadius:10,
                                 background:dm?'#1e293b':'white', border:`2px solid ${isCarried?baseColor+'aa':baseColor}`,
                                 overflow:'hidden', boxSizing:'border-box', opacity:isCarried?0.5:1, touchAction:'none'}}
