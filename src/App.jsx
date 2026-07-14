@@ -3864,7 +3864,15 @@ function AppInner() {
       const dist = Math.sqrt(dx*dx + dy*dy);
       if (initialPinchDist.current > 0) {
         const newScale = Math.min(Math.max(0.01, initialPinchScale.current * (dist / initialPinchDist.current)), 3);
-        setTransform(t => ({ ...t, scale: newScale }));
+        const newT = { ...transform, scale: newScale };
+        applyTransform(newT);
+        panSyncLatestRef.current = newT;
+        if (!panSyncRafRef.current) {
+          panSyncRafRef.current = requestAnimationFrame(() => {
+            panSyncRafRef.current = null;
+            setTransform(panSyncLatestRef.current);
+          });
+        }
       }
       return;
     }
@@ -14799,6 +14807,30 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       </button>
                     ))}
                   </div>
+                  {(list.displayMode === 'items') && (
+                    <div style={{marginTop:10, padding:'10px', borderRadius:8, background:dm?'#0f172a':'#f1f5f9'}}>
+                      <div style={{fontSize:10, fontWeight:700, color:dm?'#64748b':'#94a3b8', marginBottom:8, textTransform:'uppercase'}}>Grid dimensions</div>
+                      <div style={{display:'flex', gap:12, marginBottom:8}}>
+                        <label style={{flex:1}}>
+                          <div style={{fontSize:10, color:dm?'#94a3b8':'#64748b', marginBottom:3}}>Columns</div>
+                          <input type="number" min={1} max={8} value={list.gridCols || 3}
+                            onChange={e => updateList(l => ({...l, gridCols: Math.max(1, Math.min(8, parseInt(e.target.value)||3))}))}
+                            style={{width:'100%', padding:'6px 8px', borderRadius:6, fontSize:12,
+                              border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#1e293b':'white', color:dm?'white':'#0f172a'}}/>
+                        </label>
+                        <label style={{flex:1}}>
+                          <div style={{fontSize:10, color:dm?'#94a3b8':'#64748b', marginBottom:3}}>Bubble size (px)</div>
+                          <input type="number" min={20} max={80} value={list.itemBubbleSize || 36}
+                            onChange={e => updateList(l => ({...l, itemBubbleSize: Math.max(20, Math.min(80, parseInt(e.target.value)||36))}))}
+                            style={{width:'100%', padding:'6px 8px', borderRadius:6, fontSize:12,
+                              border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#1e293b':'white', color:dm?'white':'#0f172a'}}/>
+                        </label>
+                      </div>
+                      <div style={{fontSize:10, color:dm?'#64748b':'#94a3b8'}}>
+                        Rows fill automatically based on how many items you have and your column count.
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Sort mode: 3 toggle-style buttons */}
@@ -17182,9 +17214,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           // icon only, no drag -- laid out in a small cluster
                           // around the node's anchor point.
                           if (displayMode === 'items') {
-                            const bubbleR = FEED_HEX * 0.36;
+                            const bubbleR = (list.itemBubbleSize || 36) / 2;
                             const gap = bubbleR * 0.5;
-                            const perRow = 3; // matches the sketch: a neat 3-wide grid
+                            const perRow = list.gridCols || 3;
                             const rows = Math.ceil(list.categories.length / perRow);
                             const cellSize = bubbleR * 2 + gap;
                             const cardPad = bubbleR * 0.6;
@@ -17192,9 +17224,10 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                             const cardH = rows * cellSize - gap + cardPad*2;
                             const cardX = px - cardW/2, cardY = py - cardH/2;
                             const baseColor = list.color || '#10b981';
+                            const cornerRadius = 10; // fixed, modest radius so this reads as a rounded rectangle at any size, not an oversized oval
                             return (
                               <g key={node.id}>
-                                <rect x={cardX} y={cardY} width={cardW} height={cardH} rx={16}
+                                <rect x={cardX} y={cardY} width={cardW} height={cardH} rx={cornerRadius}
                                   fill={dm?'#1e293b':'white'} stroke={baseColor} strokeWidth={2}/>
                                 {list.categories.map((cat, ci) => {
                                   const row = Math.floor(ci / perRow), col = ci % perRow;
