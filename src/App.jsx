@@ -15125,18 +15125,18 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       ? Math.round(((m.value - avg) / avg) * 100) : null;
                     return (
                     <div key={m.key} onClick={() => { setShowMetricDetail(m.key); setMetricDetailHourly(null); }}
-                      style={{borderRadius:12, padding:'12px 14px', cursor:'pointer',
+                      style={{borderRadius:14, padding:'16px 18px', cursor:'pointer',
                       background:dm?'#1e293b':'#f8fafc', border:`1px solid ${m.color}30`}}>
-                      <div style={{display:'flex', alignItems:'center', gap:6, marginBottom:6}}>
-                        <span style={{fontSize:16}}>{m.icon}</span>
-                        <span style={{fontSize:10, fontWeight:700, color:m.color, textTransform:'uppercase', letterSpacing:0.5}}>{m.label}</span>
+                      <div style={{display:'flex', alignItems:'center', gap:7, marginBottom:8}}>
+                        <span style={{fontSize:19}}>{m.icon}</span>
+                        <span style={{fontSize:11, fontWeight:700, color:m.color, textTransform:'uppercase', letterSpacing:0.5}}>{m.label}</span>
                       </div>
-                      <div style={{fontSize:24, fontWeight:800, color:dm?'white':'#0f172a', lineHeight:1}}>
+                      <div style={{fontSize:29, fontWeight:800, color:dm?'white':'#0f172a', lineHeight:1}}>
                         {m.format(m.value)}
                       </div>
-                      <div style={{fontSize:10, color:dm?'#64748b':'#94a3b8', marginTop:2}}>{m.unit}</div>
+                      <div style={{fontSize:11, color:dm?'#64748b':'#94a3b8', marginTop:3}}>{m.unit}</div>
                       {vsAvg != null && (
-                        <div style={{fontSize:10, fontWeight:700, marginTop:4,
+                        <div style={{fontSize:11, fontWeight:700, marginTop:5,
                           color: vsAvg >= 0 ? '#10b981' : '#f59e0b'}}>
                           {vsAvg >= 0 ? '▲' : '▼'} {Math.abs(vsAvg)}% vs 7-day avg
                         </div>
@@ -16362,6 +16362,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         // available width after the band.
         const availW = window.innerWidth - BAND_W - 16; // small side margin
         const FEED_HEX = Math.max(28, Math.min(72, availW / ((COLS - 1) * 1.5 + 2)));
+        // Health list cards get their own target width, independent of the
+        // 4-column people grid -- sized so roughly 6 fit across the
+        // available width, giving them a visually distinct density rather
+        // than sharing the same grid spacing as person nodes.
+        const HEALTH_CARD_W = Math.max(70, (availW - 5*8) / 6);
         const sectionDefs = [
           { dimKey: 'social',     flowerId: 'flower_social' },
           { dimKey: 'health',     flowerId: 'flower_health' },
@@ -16477,6 +16482,41 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         // Same fixed 6-column grid resolver as the original Feed: explicit
         // feedPositions entry if dragged before, otherwise auto-fill the next
         // free slot in reading order.
+        // Dedicated, simple layout for health list nodes specifically -- 6
+        // columns, wrapping to new rows, entirely separate from
+        // resolvePositions below (which stays untouched and handles only
+        // people/groups, at zero added risk to their existing drag
+        // behaviour). Uses its own feedPositions key namespace
+        // ("dimKey:hlist:nodeId") so a health list's saved position can
+        // never collide or be confused with a person's.
+        const HEALTH_COLS = 6;
+        const resolveHealthListPositions = (dimKey, healthListMembers) => {
+          const placed = {};
+          const occupied = new Set();
+          healthListMembers.forEach(n => {
+            const key = `${dimKey}:hlist:${n.id}`;
+            const saved = feedPositions[key];
+            if (saved && saved.col >= 0 && saved.col < HEALTH_COLS && !occupied.has(`${saved.col},${saved.row}`)) {
+              placed[n.id] = saved;
+              occupied.add(`${saved.col},${saved.row}`);
+            }
+          });
+          let col = 0, row = 0;
+          const newlyPlaced = {};
+          healthListMembers.forEach(n => {
+            if (placed[n.id]) return;
+            while (occupied.has(`${col},${row}`)) { col++; if (col >= HEALTH_COLS) { col = 0; row++; } }
+            placed[n.id] = { col, row };
+            newlyPlaced[`${dimKey}:hlist:${n.id}`] = { col, row };
+            occupied.add(`${col},${row}`);
+            col++; if (col >= HEALTH_COLS) { col = 0; row++; }
+          });
+          if (Object.keys(newlyPlaced).length > 0) {
+            setTimeout(() => setFeedPositions(prev => ({ ...prev, ...newlyPlaced })), 0);
+          }
+          return placed;
+        };
+
         const resolvePositions = (dimKey, members, excludedNodesStillReserved) => {
           const occupied = new Set();
           const placed = {};
@@ -16802,6 +16842,37 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           }
 
           const localX = screenX - stripRect.left, localY = screenY - stripRect.top;
+
+          // Health list nodes use their own dedicated 6-column grid and
+          // namespace, entirely separate from the people/group drop logic
+          // below -- they never have branch children, so this simple path
+          // covers everything they need.
+          if (draggedNode && draggedNode.type === 'health_list') {
+            const hlColSpacing = HEALTH_CARD_W + 10, hlRowSpacing = 90;
+            let hCol = Math.max(0, Math.min(HEALTH_COLS - 1, Math.round((localX - hlColSpacing/2) / hlColSpacing)));
+            let hRow = Math.max(0, Math.round((localY - 600) / hlRowSpacing));
+            setFeedPositions(prev => {
+              const myKey = `${cDimKey}:hlist:${nodeId}`;
+              const isFree = (c, r) => !Object.entries(prev).some(([k, v]) =>
+                k.startsWith(`${cDimKey}:hlist:`) && k !== myKey && v.col === c && v.row === r);
+              if (isFree(hCol, hRow)) return { ...prev, [myKey]: { col: hCol, row: hRow } };
+              for (let ring = 1; ring <= 20; ring++) {
+                for (let dc = -ring; dc <= ring; dc++) {
+                  for (let dr = -ring; dr <= ring; dr++) {
+                    if (Math.max(Math.abs(dc), Math.abs(dr)) !== ring) continue;
+                    const c = Math.max(0, Math.min(HEALTH_COLS-1, hCol+dc)), r = Math.max(0, hRow+dr);
+                    if (isFree(c, r)) return { ...prev, [myKey]: { col: c, row: r } };
+                  }
+                }
+              }
+              return { ...prev, [myKey]: { col: hCol, row: hRow } };
+            });
+            setFeedCarrying(null);
+            feedJustPlaced.current.add(nodeId);
+            setTimeout(() => { feedJustPlaced.current.delete(nodeId); }, 500);
+            return;
+          }
+
           const yOffsetForDrop = cDimKey === 'health' ? 148 : 50;
           let col = Math.round((localX - FEED_HEX) / (FEED_HEX * 1.5));
           let row = Math.round((localY - yOffsetForDrop) / (ROW_STEP));
@@ -17037,7 +17108,16 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               // full-size on the grid like anyone else unless actually minimised.)
               const members = allMembers.filter(n => !minimisedSet.has(n.id));
               const minimisedNodeObjs = allMembers.filter(n => minimisedSet.has(n.id));
-              const positions = resolvePositions(dimKey, members, minimisedNodeObjs);
+              // Health list nodes get their own dedicated 6-column layout,
+              // entirely separate from the people/group grid below -- split
+              // out first so resolvePositions never even sees them.
+              const healthListMembers = members.filter(n => n.type === 'health_list');
+              const peopleMembers = members.filter(n => n.type !== 'health_list');
+              const healthListPositions = resolveHealthListPositions(dimKey, healthListMembers);
+              const positions = resolvePositions(dimKey, peopleMembers, minimisedNodeObjs);
+              Object.keys(healthListPositions).forEach(id => {
+                positions[id] = { ...healthListPositions[id], isHealthListGrid: true };
+              });
               // Each top-level cluster's bounding-box centre (average screen
               // position of every member sharing the same top-level root) -- used
               // to decide which side of a person's own circle their curved name
@@ -17349,11 +17429,24 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           Nobody connected here yet
                         </div>
                       ) : members.map((node) => {
-                        const { col, row } = positions[node.id];
-                        const rowShift = (row % 2 === 1) ? FEED_HEX * 0.75 : 0;
-                        const px = colOffsets[col] + rowShift + FEED_HEX;
-                        const yOffset = dimKey === 'health' ? 148 : 50;
-                        const py = row * ROW_STEP + yOffset;
+                        const posInfo = positions[node.id];
+                        let px, py;
+                        if (posInfo.isHealthListGrid) {
+                          // Health lists use their own dedicated grid, sized
+                          // for 6-per-row, entirely independent of the
+                          // people grid's column spacing -- placed in their
+                          // own band below the people grid area.
+                          const hlColSpacing = HEALTH_CARD_W + 10;
+                          const hlRowSpacing = 90;
+                          px = posInfo.col * hlColSpacing + hlColSpacing/2;
+                          py = 600 + posInfo.row * hlRowSpacing;
+                        } else {
+                          const { col, row } = posInfo;
+                          const rowShift = (row % 2 === 1) ? FEED_HEX * 0.75 : 0;
+                          px = colOffsets[col] + rowShift + FEED_HEX;
+                          const yOffset = dimKey === 'health' ? 148 : 50;
+                          py = row * ROW_STEP + yOffset;
+                        }
 
                         // Health metric nodes — pill/card rendering in feed view
                         if (node.type === 'health_metric') {
@@ -17424,9 +17517,16 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           // actual <svg> -- that mismatch was the real bug
                           // behind the broken 1-column/oversized rendering.
                           if (displayMode === 'items') {
-                            const bubbleSize = list.itemBubbleSize || 42;
-                            const gap = bubbleSize * 0.25;
                             const perRow = list.gridCols || 3;
+                            const fixedGap = 6, fixedPad = 10;
+                            // Auto-fit to the shared 6-per-row target width when
+                            // no custom bubble size has been set, so lists get a
+                            // sensible, consistent default rather than needing
+                            // manual tuning every time -- explicit customization
+                            // still overrides this.
+                            const autoFitSize = (HEALTH_CARD_W - fixedPad*2 - (perRow-1)*fixedGap) / perRow;
+                            const bubbleSize = list.itemBubbleSize || Math.max(20, Math.min(60, autoFitSize));
+                            const gap = bubbleSize * 0.25;
                             const rows = Math.ceil(list.categories.length / perRow);
                             const cardPad = bubbleSize * 0.3;
                             const headerH = 30;
@@ -17529,7 +17629,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                             );
                           }
 
-                          const cardW = FEED_HEX * 2.4, cardH = FEED_HEX * 1.3;
+                          const cardW = HEALTH_CARD_W, cardH = FEED_HEX * 1.3;
                           const percentComplete = list.categories.length > 0 ? Math.round((hitCount/list.categories.length)*100) : 0;
                           const dayPointsSoFar = Math.round(computeListDayPoints(list, todayCounts));
                           return (
