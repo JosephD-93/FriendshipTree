@@ -6250,12 +6250,6 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
     };
     // Also re-check periodically in case the app stays open across midnight
     const iv = setInterval(() => checkAndRollover('interval'), 60000); // check every minute
-    // Browser/WebView fallback: Capacitor's native resume listener is not
-    // guaranteed to be available in every build, but visibilitychange is.
-    const onVisibilityChange = () => {
-      if (document.visibilityState === 'visible') checkAndRollover('visibilitychange');
-    };
-    document.addEventListener('visibilitychange', onVisibilityChange);
     // AND re-check the moment the app comes back to the foreground -- Android
     // commonly suspends setInterval timers while an app is backgrounded (not
     // force-closed, just switched away from) to save battery, so the interval
@@ -6278,7 +6272,6 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
     }
     return () => {
       clearInterval(iv);
-      document.removeEventListener('visibilitychange', onVisibilityChange);
       if (resumeListener && typeof resumeListener.remove === 'function') resumeListener.remove();
     };
   }, []); // eslint-disable-line
@@ -17205,9 +17198,40 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               // extent, the next section could start above where a flower near
               // the boundary actually ends up.
               const measuredExtra = feedSectionExtraH[dimKey] || 0;
-              // Health section has extra cards at the top taking ~140px
+              // Health section has extra metric cards at the top taking ~140px.
               const healthCardsExtra = dimKey === 'health' ? 148 : 0;
-              const sectionH = Math.max(160, (maxRow + 1) * ROW_STEP + 80 + measuredExtra + healthCardsExtra);
+
+              // Health-list cards use a separate grid whose origin is fixed at
+              // y=600 (see the renderer below). They therefore cannot be sized
+              // from the normal people-grid maxRow. Previously the section could
+              // end around y=300 while these cards were visibly overflowing at
+              // y=600; the following dimension sections were then painted on top
+              // of them and intercepted every tap. Include the real health-list
+              // extent in the section height so the cards remain inside their own
+              // section and receive pointer events normally.
+              const healthListBottom = healthListMembers.reduce((bottom, node) => {
+                const pos = healthListPositions[node.id];
+                if (!pos) return bottom;
+                const list = healthLists.find(l => l.id === node.listId);
+                let cardH = FEED_HEX * 1.3;
+                if ((list?.displayMode || 'percent') === 'items') {
+                  const perRow = list.gridCols || 3;
+                  const autoFitSize = (HEALTH_CARD_W - 20 - (perRow - 1) * 6) / perRow;
+                  const bubbleSize = list.itemBubbleSize || Math.max(20, Math.min(60, autoFitSize));
+                  const rows = Math.ceil((list.categories?.length || 0) / perRow);
+                  const gap = bubbleSize * 0.25;
+                  const gridH = rows > 0 ? rows * bubbleSize + (rows - 1) * gap + bubbleSize * 0.6 : 0;
+                  cardH = 30 + (list.itemsCollapsed ? 0 : gridH);
+                }
+                const centreY = 600 + pos.row * 90;
+                return Math.max(bottom, centreY + cardH * 0.5 + 40);
+              }, 0);
+
+              const sectionH = Math.max(
+                160,
+                (maxRow + 1) * ROW_STEP + 80 + measuredExtra + healthCardsExtra,
+                healthListBottom,
+              );
 
               // Anchor point for each member (centre of its circle) plus the flower
               // band's own anchor, so we can draw a line from every node back to
@@ -17537,11 +17561,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           const list = healthLists.find(l => l.id === node.listId);
                           if (!list) return null;
                           const dm = theme.darkMode;
-                          // Never display yesterday's counts while the midnight/resume
-                          // rollover effect is still catching up. This also forces the
-                          // Stack view to use the same local-day boundary as the Map view.
-                          const isCurrentHabitDay = habitLastResetDate === getLocalDateStr();
-                          const todayCounts = isCurrentHabitDay ? (habitToday[list.id] || {}) : {};
+                          const todayCounts = habitToday[list.id] || {};
                           const hitCount = list.categories.filter(c => (todayCounts[c.id]||0) >= c.target).length;
                           const score = Math.round(listScores[list.id] || 0);
                           const displayMode = list.displayMode || 'percent';
@@ -17581,9 +17601,6 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                 background:dm?'#1e293b':'white', border:`2px solid ${isCarried?baseColor+'aa':baseColor}`,
                                 overflow:'hidden', boxSizing:'border-box', opacity:isCarried?0.5:1, touchAction:'none'}}
                                 onPointerDown={e=>{
-                                  // Controls inside the card own their taps. Do not start
-                                  // the card's long-press drag timer for those controls.
-                                  if (e.target.closest?.('[data-health-control="true"]')) return;
                                   if (feedCarrying) return;
                                   window.ftDiagLog('[FT-DIAG] health list items-mode pointerDown', node.id);
                                   const pointerId = e.pointerId;
@@ -17622,11 +17639,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                   });
                                 }}
                                 onPointerLeave={()=>{ clearTimeout(feedLiftTimer.current); }}>
-                                <div data-health-control="true"
-                                  onPointerDown={e => { e.stopPropagation(); clearTimeout(feedLiftTimer.current); }}
-                                  onPointerUp={e => e.stopPropagation()}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
+                                <div onClick={() => {
                                     if (feedCarrying || feedJustPlaced.current.has(node.id)) return;
                                     const now = Date.now();
                                     const lastTap = listTitleLastTapRef.current[node.id] || 0;
@@ -17643,10 +17656,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                     overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>
                                     {list.icon} {list.name}
                                   </span>
-                                  <button data-health-control="true"
-                                    onPointerDown={e => { e.stopPropagation(); clearTimeout(feedLiftTimer.current); }}
-                                    onPointerUp={e => e.stopPropagation()}
-                                    onClick={(e) => { e.stopPropagation(); setHealthLists(prev => prev.map(l => l.id === list.id ? {...l, itemsCollapsed: !l.itemsCollapsed} : l)); }}
+                                  <button onClick={(e) => { e.stopPropagation(); setHealthLists(prev => prev.map(l => l.id === list.id ? {...l, itemsCollapsed: !l.itemsCollapsed} : l)); }}
                                     title={isCollapsed ? 'Show items' : 'Hide items'}
                                     style={{background:'none', border:'none', cursor:'pointer', padding:2, flexShrink:0,
                                       color:dm?'#64748b':'#94a3b8', fontSize:12, lineHeight:1}}>
@@ -17660,16 +17670,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                       const count = todayCounts[cat.id] || 0;
                                       const progress = Math.min(1, count / (cat.target || 1));
                                       return (
-                                        <div key={`${cat.id}:${habitLastResetDate}`} data-health-control="true"
-                                          onPointerDown={e => { e.stopPropagation(); clearTimeout(feedLiftTimer.current); }}
-                                          onPointerUp={e => e.stopPropagation()}
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            setHabitToday(prev => ({
+                                        <div key={cat.id}
+                                          onClick={() => setHabitToday(prev => ({
                                               ...prev,
                                               [list.id]: { ...(prev[list.id]||{}), [cat.id]: ((prev[list.id]||{})[cat.id]||0) + 1 }
-                                            }));
-                                          }}
+                                            }))}
                                           title={`${cat.label}: ${count}/${cat.target}`}
                                           style={{width:bubbleSize, height:bubbleSize, borderRadius:'50%', cursor:'pointer',
                                             display:'flex', alignItems:'center', justifyContent:'center',
