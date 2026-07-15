@@ -14921,8 +14921,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       <div style={{display:'flex', gap:12, marginBottom:8}}>
                         <label style={{flex:1}}>
                           <div style={{fontSize:10, color:dm?'#94a3b8':'#64748b', marginBottom:3}}>Columns</div>
-                          <input type="number" min={1} max={8} value={list.gridCols || 3}
-                            onChange={e => updateList(l => ({...l, gridCols: Math.max(1, Math.min(8, parseInt(e.target.value)||3))}))}
+                          <input type="number" min={1} max={6} value={Math.max(1, Math.min(6, list.gridCols || 3))}
+                            onChange={e => updateList(l => ({...l, gridCols: Math.max(1, Math.min(6, parseInt(e.target.value)||3))}))}
                             style={{width:'100%', padding:'6px 8px', borderRadius:6, fontSize:12,
                               border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#1e293b':'white', color:dm?'white':'#0f172a'}}/>
                         </label>
@@ -16500,52 +16500,73 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         // behaviour). Uses its own feedPositions key namespace
         // ("dimKey:hlist:nodeId") so a health list's saved position can
         // never collide or be confused with a person's.
-        const HEALTH_COLS = 1;
-        const HEALTH_LIST_ROW_STEP = 210;
-        const HEALTH_ITEMS_PER_ROW = 6;
-        const HEALTH_ITEMS_CARD_W = Math.min(420, Math.max(300, availW - 24));
+        // Health lists use a six-lane packing grid. Each list chooses a
+        // width of 1–6 lanes through list.gridCols, so three 2-column lists,
+        // two 3-column lists, one 6-column list, etc. can share a row.
+        const HEALTH_COLS = 6;
+        const HEALTH_LIST_ROW_STEP = 78;
         const HEALTH_ITEMS_GAP = 8;
-        const HEALTH_ITEMS_PAD = 12;
+        const HEALTH_ITEMS_PAD = 10;
+        const HEALTH_LANE_GAP = 8;
+        const HEALTH_LANE_W = (availW - 24 - HEALTH_LANE_GAP * (HEALTH_COLS - 1)) / HEALTH_COLS;
+        const healthListCols = list => Math.max(1, Math.min(6, Number(list?.gridCols) || 3));
+        const healthListCardMetrics = list => {
+          const perRow = healthListCols(list);
+          const cardW = perRow * HEALTH_LANE_W + (perRow - 1) * HEALTH_LANE_GAP;
+          const autoFitSize = (cardW - HEALTH_ITEMS_PAD * 2 - (perRow - 1) * HEALTH_ITEMS_GAP) / perRow;
+          const bubbleSize = Math.max(44, Math.min(58, Number(list?.itemBubbleSize) || autoFitSize, autoFitSize));
+          const rows = Math.max(1, Math.ceil((list?.categories?.length || 0) / perRow));
+          const headerH = 34;
+          const gridH = rows * bubbleSize + Math.max(0, rows - 1) * HEALTH_ITEMS_GAP + HEALTH_ITEMS_PAD * 2;
+          const cardH = headerH + (list?.itemsCollapsed ? 0 : gridH);
+          return { perRow, cardW, bubbleSize, rows, headerH, gridH, cardH, rowSpan: Math.max(1, Math.ceil((cardH + 12) / HEALTH_LIST_ROW_STEP)) };
+        };
         const resolveHealthListPositions = (dimKey, healthListMembers) => {
           const placed = {};
           const occupied = new Set();
+          const mark = (col, row, colSpan, rowSpan) => {
+            for (let r = row; r < row + rowSpan; r++) for (let c = col; c < col + colSpan; c++) occupied.add(`${c},${r}`);
+          };
+          const isFree = (col, row, colSpan, rowSpan) => {
+            if (col < 0 || col + colSpan > HEALTH_COLS || row < 0) return false;
+            for (let r = row; r < row + rowSpan; r++) for (let c = col; c < col + colSpan; c++) if (occupied.has(`${c},${r}`)) return false;
+            return true;
+          };
+          // Restore valid saved positions first.
           healthListMembers.forEach(n => {
+            const list = healthLists.find(l => l.id === n.listId);
+            const { perRow: colSpan, rowSpan } = healthListCardMetrics(list);
             const key = `${dimKey}:hlist:${n.id}`;
             const saved = feedPositions[key];
-            if (saved && saved.col >= 0 && saved.col < HEALTH_COLS && !occupied.has(`${saved.col},${saved.row}`)) {
-              placed[n.id] = saved;
-              occupied.add(`${saved.col},${saved.row}`);
+            if (saved && isFree(saved.col, saved.row, colSpan, rowSpan)) {
+              placed[n.id] = { col: saved.col, row: saved.row, colSpan, rowSpan };
+              mark(saved.col, saved.row, colSpan, rowSpan);
             }
           });
-          let col = 0, row = 0;
           const newlyPlaced = {};
           healthListMembers.forEach(n => {
             if (placed[n.id]) return;
-            // Guard against scheduling the same node's position save more than
-            // once, regardless of how many times this function re-runs across
-            // renders -- a ref persists correctly where a closure-local check
-            // alone could be fooled by a stale view of feedPositions,
-            // previously risking a runaway render loop.
+            const list = healthLists.find(l => l.id === n.listId);
+            const { perRow: colSpan, rowSpan } = healthListCardMetrics(list);
             const key = `${dimKey}:hlist:${n.id}`;
-            if (healthListPositionScheduledRef.current.has(key)) {
-              // Already scheduled but not yet reflected in feedPositions --
-              // use a temporary spot for this render only, don't reschedule.
-              placed[n.id] = { col, row };
-              col++; if (col >= HEALTH_COLS) { col = 0; row++; }
-              return;
+            let row = 0, col = 0, found = false;
+            for (row = 0; row < 200 && !found; row++) {
+              for (col = 0; col <= HEALTH_COLS - colSpan; col++) {
+                if (isFree(col, row, colSpan, rowSpan)) { found = true; break; }
+              }
             }
-            while (occupied.has(`${col},${row}`)) { col++; if (col >= HEALTH_COLS) { col = 0; row++; } }
-            placed[n.id] = { col, row };
-            newlyPlaced[key] = { col, row };
-            healthListPositionScheduledRef.current.add(key);
-            occupied.add(`${col},${row}`);
-            col++; if (col >= HEALTH_COLS) { col = 0; row++; }
+            if (!found) { row = 0; col = 0; }
+            placed[n.id] = { col, row, colSpan, rowSpan };
+            mark(col, row, colSpan, rowSpan);
+            if (!healthListPositionScheduledRef.current.has(key)) {
+              newlyPlaced[key] = { col, row };
+              healthListPositionScheduledRef.current.add(key);
+            }
           });
-          if (Object.keys(newlyPlaced).length > 0) {
-            setTimeout(() => setFeedPositions(prev => ({ ...prev, ...newlyPlaced })), 0);
-          }
+          if (Object.keys(newlyPlaced).length) setTimeout(() => setFeedPositions(prev => ({ ...prev, ...newlyPlaced })), 0);
           return placed;
         };
+
 
         const resolvePositions = (dimKey, members, excludedNodesStillReserved) => {
           const occupied = new Set();
@@ -16878,25 +16899,33 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           // below -- they never have branch children, so this simple path
           // covers everything they need.
           if (draggedNode && draggedNode.type === 'health_list') {
-            const hlColSpacing = HEALTH_ITEMS_CARD_W + 10, hlRowSpacing = HEALTH_LIST_ROW_STEP;
-            let hCol = Math.max(0, Math.min(HEALTH_COLS - 1, Math.round((localX - hlColSpacing/2) / hlColSpacing)));
+            const draggedList = healthLists.find(l => l.id === draggedNode.listId);
+            const draggedMetrics = healthListCardMetrics(draggedList);
+            const colSpan = draggedMetrics.perRow, rowSpan = draggedMetrics.rowSpan;
+            let hCol = Math.round((localX - 12 - draggedMetrics.cardW / 2) / (HEALTH_LANE_W + HEALTH_LANE_GAP));
+            hCol = Math.max(0, Math.min(HEALTH_COLS - colSpan, hCol));
             const healthListBaseY = Number(stripEl.dataset.healthListBaseY) || 250;
-            let hRow = Math.max(0, Math.round((localY - healthListBaseY) / hlRowSpacing));
+            let hRow = Math.max(0, Math.round((localY - healthListBaseY - draggedMetrics.cardH / 2) / HEALTH_LIST_ROW_STEP));
             setFeedPositions(prev => {
               const myKey = `${cDimKey}:hlist:${nodeId}`;
-              const isFree = (c, r) => !Object.entries(prev).some(([k, v]) =>
-                k.startsWith(`${cDimKey}:hlist:`) && k !== myKey && v.col === c && v.row === r);
+              const overlaps = (aCol, aRow, aCols, aRows, bCol, bRow, bCols, bRows) =>
+                aCol < bCol + bCols && aCol + aCols > bCol && aRow < bRow + bRows && aRow + aRows > bRow;
+              const isFree = (c, r) => !healthListMembers.some(other => {
+                if (other.id === nodeId) return false;
+                const op = prev[`${cDimKey}:hlist:${other.id}`];
+                if (!op) return false;
+                const om = healthListCardMetrics(healthLists.find(l => l.id === other.listId));
+                return overlaps(c, r, colSpan, rowSpan, op.col, op.row, om.perRow, om.rowSpan);
+              });
               if (isFree(hCol, hRow)) return { ...prev, [myKey]: { col: hCol, row: hRow } };
-              for (let ring = 1; ring <= 20; ring++) {
-                for (let dc = -ring; dc <= ring; dc++) {
-                  for (let dr = -ring; dr <= ring; dr++) {
-                    if (Math.max(Math.abs(dc), Math.abs(dr)) !== ring) continue;
-                    const c = Math.max(0, Math.min(HEALTH_COLS-1, hCol+dc)), r = Math.max(0, hRow+dr);
-                    if (isFree(c, r)) return { ...prev, [myKey]: { col: c, row: r } };
-                  }
+              for (let ring = 1; ring <= 30; ring++) {
+                for (let dr = -ring; dr <= ring; dr++) for (let dc = -ring; dc <= ring; dc++) {
+                  if (Math.max(Math.abs(dc), Math.abs(dr)) !== ring) continue;
+                  const c = Math.max(0, Math.min(HEALTH_COLS-colSpan, hCol+dc)), r = Math.max(0, hRow+dr);
+                  if (isFree(c, r)) return { ...prev, [myKey]: { col: c, row: r } };
                 }
               }
-              return { ...prev, [myKey]: { col: hCol, row: hRow } };
+              return prev;
             });
             setFeedCarrying(null);
             feedJustPlaced.current.add(nodeId);
@@ -17236,15 +17265,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 const list = healthLists.find(l => l.id === node.listId);
                 let cardH = FEED_HEX * 1.3;
                 if ((list?.displayMode || 'percent') === 'items') {
-                  const perRow = HEALTH_ITEMS_PER_ROW;
-                  const autoFitSize = (HEALTH_ITEMS_CARD_W - HEALTH_ITEMS_PAD * 2 - (perRow - 1) * HEALTH_ITEMS_GAP) / perRow;
-                  const bubbleSize = Math.max(44, Math.min(58, list.itemBubbleSize || autoFitSize, autoFitSize));
-                  const rows = Math.ceil((list.categories?.length || 0) / perRow);
-                  const gap = HEALTH_ITEMS_GAP;
-                  const gridH = rows > 0 ? rows * bubbleSize + (rows - 1) * gap + HEALTH_ITEMS_PAD * 2 : 0;
-                  cardH = 30 + (list.itemsCollapsed ? 0 : gridH);
+                  cardH = healthListCardMetrics(list).cardH;
                 }
-                const centreY = healthListBaseY + pos.row * HEALTH_LIST_ROW_STEP;
+                const centreY = healthListBaseY + pos.row * HEALTH_LIST_ROW_STEP + cardH / 2;
                 return Math.max(bottom, centreY + cardH * 0.5 + 40);
               }, 0);
 
@@ -17262,9 +17285,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               members.forEach(n => {
                 const pos = positions[n.id];
                 if (pos.isHealthListGrid) {
+                  const list = healthLists.find(l => l.id === n.listId);
+                  const m = healthListCardMetrics(list);
                   anchorOf[n.id] = {
-                    x: BAND_W + availW / 2,
-                    y: healthListBaseY + pos.row * HEALTH_LIST_ROW_STEP,
+                    x: BAND_W + 12 + pos.col * (HEALTH_LANE_W + HEALTH_LANE_GAP) + m.cardW / 2,
+                    y: healthListBaseY + pos.row * HEALTH_LIST_ROW_STEP + m.cardH / 2,
                   };
                   return;
                 }
@@ -17523,10 +17548,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           // for 6-per-row, entirely independent of the
                           // people grid's column spacing -- placed in their
                           // own band below the people grid area.
-                          const hlRowSpacing = HEALTH_LIST_ROW_STEP;
-                          col = 0; row = posInfo.row;
-                          px = availW / 2;
-                          py = healthListBaseY + posInfo.row * hlRowSpacing;
+                          const list = healthLists.find(l => l.id === node.listId);
+                          const m = healthListCardMetrics(list);
+                          col = posInfo.col; row = posInfo.row;
+                          px = 12 + posInfo.col * (HEALTH_LANE_W + HEALTH_LANE_GAP) + m.cardW / 2;
+                          py = healthListBaseY + posInfo.row * HEALTH_LIST_ROW_STEP + m.cardH / 2;
                         } else {
                           ({ col, row } = posInfo);
                           const rowShift = (row % 2 === 1) ? FEED_HEX * 0.75 : 0;
@@ -17604,24 +17630,14 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           // actual <svg> -- that mismatch was the real bug
                           // behind the broken 1-column/oversized rendering.
                           if (displayMode === 'items') {
-                            const perRow = HEALTH_ITEMS_PER_ROW;
                             const gap = HEALTH_ITEMS_GAP;
                             const cardPad = HEALTH_ITEMS_PAD;
-                            const cardW = HEALTH_ITEMS_CARD_W;
-                            const autoFitSize = (cardW - cardPad * 2 - (perRow - 1) * gap) / perRow;
-                            // Six large, consistent touch targets per row. A saved
-                            // custom size is honoured only when it still fits all
-                            // six buttons inside the card without clipping.
-                            const bubbleSize = Math.max(44, Math.min(58, list.itemBubbleSize || autoFitSize, autoFitSize));
-                            const rows = Math.ceil(list.categories.length / perRow);
-                            const headerH = 34;
-                            const gridH = rows * bubbleSize + (rows-1) * gap + cardPad*2;
+                            const { perRow, cardW, bubbleSize, rows, headerH, gridH, cardH } = healthListCardMetrics(list);
                             const isCollapsed = !!list.itemsCollapsed;
-                            const cardH = headerH + (isCollapsed ? 0 : gridH);
                             const baseColor = list.color || '#10b981';
                             const isCarried = feedCarrying?.nodeId === node.id;
                             return (
-                              <div key={node.id} style={{position:'absolute', left:px-cardW/2, top:py-cardH*0.68,
+                              <div key={node.id} style={{position:'absolute', left:px-cardW/2, top:py-cardH/2,
                                 width:cardW, height:cardH, borderRadius:10,
                                 background:dm?'#1e293b':'white', border:`2px solid ${isCarried?baseColor+'aa':baseColor}`,
                                 overflow:'hidden', boxSizing:'border-box', opacity:isCarried?0.5:1, touchAction:'none'}}
