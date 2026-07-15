@@ -3116,6 +3116,7 @@ function AppInner() {
   const birthdayDayRef = useRef(null), birthdayMonthRef = useRef(null), birthdayYearRef = useRef(null);
 
   const [showHealthListDetail, setShowHealthListDetail] = useState(null); // listId or null
+  const [healthHistoryUnlocked, setHealthHistoryUnlocked] = useState(false);
   const [showListPointsEditor, setShowListPointsEditor] = useState(null); // listId or null
   const listItemDragRef = useRef({ draggingId: null, startY: 0, itemHeights: {} });
 
@@ -16041,12 +16042,12 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           return (
             <div style={{position:'fixed', inset:0, zIndex:320, display:'flex', alignItems:'flex-end',
               background:'rgba(0,0,0,0.5)', paddingBottom:'calc(68px + env(safe-area-inset-bottom, 0px))'}}
-              onClick={e => { if (e.target === e.currentTarget) setShowHealthListDetail(null); }}>
+              onClick={e => { if (e.target === e.currentTarget) { setShowHealthListDetail(null); setHealthHistoryUnlocked(false); } }}>
               <div style={{width:'100%', background:dm?'#0f172a':'white', borderRadius:'16px 16px 0 0',
                 padding:'20px 16px', maxHeight:'80vh', overflowY:'auto', boxSizing:'border-box'}}>
                 <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:4}}>
                   <div style={{fontSize:16, fontWeight:800, color:dm?'white':'#0f172a'}}>{list.icon} {list.name}</div>
-                  <button onClick={() => setShowHealthListDetail(null)}
+                  <button onClick={() => { setShowHealthListDetail(null); setHealthHistoryUnlocked(false); }}
                     style={{background:'none', border:'none', fontSize:22, color:dm?'#64748b':'#94a3b8', cursor:'pointer'}}>×</button>
                 </div>
                 <div style={{fontSize:12, color:dm?'#64748b':'#94a3b8', marginBottom:16}}>
@@ -16113,35 +16114,91 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     this top-to-bottom quickly shows which items are reliable
                     habits versus which ones keep slipping. */}
                 <div style={{marginTop:18, paddingTop:14, borderTop:`1px solid ${dm?'#1e293b':'#f1f5f9'}`}}>
-                  <div style={{fontSize:12, fontWeight:700, color:dm?'white':'#0f172a', marginBottom:10}}>Last 7 days</div>
+                  <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10}}>
+                    <div style={{fontSize:12, fontWeight:700, color:dm?'white':'#0f172a'}}>Last 7 days</div>
+                    {healthHistoryUnlocked && (
+                      <div style={{fontSize:9, color:'#f59e0b', fontWeight:700}}>Tap squares to change values</div>
+                    )}
+                  </div>
                   {list.categories.map(cat => {
                     const days = Array.from({length:7}, (_, i) => {
                       const d = new Date(); d.setDate(d.getDate() - (6-i));
                       const dayStr = getLocalDateStr(d);
                       const isToday = i === 6;
                       const dayCounts = isToday ? todayCounts : (habitHistory[dayStr]?.[list.id] || {});
-                      const c = dayCounts[cat.id] || 0;
-                      return { hit: c >= cat.target, label: d.toLocaleDateString('en',{weekday:'narrow'}) };
+                      const count = dayCounts[cat.id] || 0;
+                      return {
+                        dayStr,
+                        isToday,
+                        count,
+                        hit: count >= cat.target,
+                        label: d.toLocaleDateString('en',{weekday:'narrow'}),
+                      };
                     });
                     const hitRate = Math.round((days.filter(d=>d.hit).length / 7) * 100);
                     return (
                       <div key={cat.id} style={{display:'flex', alignItems:'center', gap:8, marginBottom:8}}>
                         <div style={{fontSize:13, width:20, textAlign:'center', flexShrink:0}}>{cat.icon}</div>
                         <div style={{flex:1, display:'flex', gap:3}}>
-                          {days.map((d, i) => (
-                            <div key={i} style={{flex:1, display:'flex', flexDirection:'column', alignItems:'center', gap:2}}>
-                              <div style={{width:'100%', aspectRatio:'1', borderRadius:4,
-                                background: d.hit ? '#10b981' : (dm?'#1e293b':'#f1f5f9'),
-                                border: d.hit ? 'none' : `1px solid ${dm?'#334155':'#e2e8f0'}`}}/>
-                              <span style={{fontSize:7, color:dm?'#475569':'#94a3b8'}}>{d.label}</span>
-                            </div>
-                          ))}
+                          {days.map((d, i) => {
+                            const partial = d.count > 0 && !d.hit;
+                            const cycleValue = () => {
+                              if (!healthHistoryUnlocked) return;
+                              const next = d.count >= cat.target ? 0 : d.count + 1;
+                              if (d.isToday) {
+                                setHabitToday(prev => ({
+                                  ...prev,
+                                  [list.id]: { ...(prev[list.id] || {}), [cat.id]: next },
+                                }));
+                              } else {
+                                setHabitHistory(prev => ({
+                                  ...prev,
+                                  [d.dayStr]: {
+                                    ...(prev[d.dayStr] || {}),
+                                    [list.id]: {
+                                      ...(prev[d.dayStr]?.[list.id] || {}),
+                                      [cat.id]: next,
+                                    },
+                                  },
+                                }));
+                              }
+                            };
+                            return (
+                              <div key={d.dayStr} style={{flex:1, display:'flex', flexDirection:'column', alignItems:'center', gap:2}}>
+                                <button onClick={cycleValue} aria-label={`${cat.label} ${d.dayStr}: ${d.count}`}
+                                  style={{width:'100%', aspectRatio:'1', borderRadius:4, padding:0,
+                                    display:'flex', alignItems:'center', justifyContent:'center',
+                                    background:d.hit?'#10b981':partial?'#8b5cf6':(dm?'#1e293b':'#f1f5f9'),
+                                    border:d.hit||partial?'none':`1px solid ${dm?'#334155':'#e2e8f0'}`,
+                                    color:'white', fontSize:10, fontWeight:800,
+                                    cursor:healthHistoryUnlocked?'pointer':'default',
+                                    boxShadow:healthHistoryUnlocked?'inset 0 0 0 1px rgba(245,158,11,0.65)':'none'}}>
+                                  {healthHistoryUnlocked ? d.count : ''}
+                                </button>
+                                <span style={{fontSize:7, color:dm?'#475569':'#94a3b8'}}>{d.label}</span>
+                              </div>
+                            );
+                          })}
                         </div>
                         <div style={{fontSize:10, fontWeight:700, width:32, textAlign:'right', flexShrink:0,
                           color: hitRate>=70?'#10b981':hitRate>=40?'#f59e0b':'#ef4444'}}>{hitRate}%</div>
                       </div>
                     );
                   })}
+                  <div style={{display:'flex', alignItems:'center', justifyContent:'flex-start', marginTop:10}}>
+                    <button onClick={() => setHealthHistoryUnlocked(v => !v)}
+                      aria-label={healthHistoryUnlocked ? 'Lock health history' : 'Unlock health history'}
+                      style={{width:36, height:36, borderRadius:9,
+                        border:`1px solid ${healthHistoryUnlocked?'#f59e0b':(dm?'#334155':'#e2e8f0')}`,
+                        background:healthHistoryUnlocked?(dm?'rgba(245,158,11,0.16)':'#fffbeb'):'none',
+                        color:healthHistoryUnlocked?'#f59e0b':(dm?'#94a3b8':'#64748b'),
+                        fontSize:18, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center'}}>
+                      {healthHistoryUnlocked ? '🔓' : '🔒'}
+                    </button>
+                    <span style={{marginLeft:8, fontSize:10, color:dm?'#64748b':'#94a3b8'}}>
+                      {healthHistoryUnlocked ? 'Editing enabled' : 'Unlock to edit previous days'}
+                    </span>
+                  </div>
                 </div>
                 <button onClick={() => setShowListPointsEditor(list.id)}
                   style={{width:'100%', marginTop:14, padding:'8px 0', borderRadius:8,
