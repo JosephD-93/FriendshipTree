@@ -2926,6 +2926,7 @@ function AppInner() {
   const feedLastTapRef = useRef(new Map()); // nodeId -> timestamp, for double-tap-to-minimise detection in Feed
   const feedSingleTapTimersRef = useRef(new Map()); // nodeId -> timer, one independent pending-open timer PER node (a single shared slot was the actual bug: tapping a different node mid-sequence stomped on it)
   const feedJustPlaced = useRef(new Set()); // node ids that were just placed via hold-to-place, so the resulting click on THAT specific node doesn't open its detail panel
+  const healthListPositionScheduledRef = useRef(new Set()); // guards against scheduling the same health list's initial position save more than once across renders
   // A lifted/"carried" node, shown as a fixed overlay that rides along on
   // screen as the page scrolls beneath it. Stored in PAGE coordinates (i.e.
   // including scroll offset) so its on-screen position can be recomputed
@@ -3069,8 +3070,11 @@ function AppInner() {
     } catch(e) { return {}; }
   });
   const [habitLastResetDate, setHabitLastResetDate] = useState(() => {
-    try { return localStorage.getItem('ft_habit_last_reset') || getLocalDateStr(); }
-    catch(e) { return getLocalDateStr(); }
+    const yesterday = (() => { const d = new Date(); d.setDate(d.getDate()-1); return getLocalDateStr(d); })();
+    let raw = null;
+    try { raw = localStorage.getItem('ft_habit_last_reset'); } catch(e) {}
+    window.ftDiagLog('[FT-DIAG] habitLastResetDate initializer - raw stored value:', JSON.stringify(raw), 'using:', raw || yesterday);
+    return raw || yesterday;
   });
   // habitHistory: { [dateStr]: { [listId]: { [categoryId]: count } } }
   const [habitHistory, setHabitHistory] = useState(() => {
@@ -16505,9 +16509,23 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           const newlyPlaced = {};
           healthListMembers.forEach(n => {
             if (placed[n.id]) return;
+            // Guard against scheduling the same node's position save more than
+            // once, regardless of how many times this function re-runs across
+            // renders -- a ref persists correctly where a closure-local check
+            // alone could be fooled by a stale view of feedPositions,
+            // previously risking a runaway render loop.
+            const key = `${dimKey}:hlist:${n.id}`;
+            if (healthListPositionScheduledRef.current.has(key)) {
+              // Already scheduled but not yet reflected in feedPositions --
+              // use a temporary spot for this render only, don't reschedule.
+              placed[n.id] = { col, row };
+              col++; if (col >= HEALTH_COLS) { col = 0; row++; }
+              return;
+            }
             while (occupied.has(`${col},${row}`)) { col++; if (col >= HEALTH_COLS) { col = 0; row++; } }
             placed[n.id] = { col, row };
-            newlyPlaced[`${dimKey}:hlist:${n.id}`] = { col, row };
+            newlyPlaced[key] = { col, row };
+            healthListPositionScheduledRef.current.add(key);
             occupied.add(`${col},${row}`);
             col++; if (col >= HEALTH_COLS) { col = 0; row++; }
           });
@@ -17336,8 +17354,10 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     {/* Fixed 6-column hex strip (offset right of the band), unlimited rows */}
                     <div data-feed-strip={dimKey}
                       onPointerUp={e=>{
+                        window.ftDiagLog('[FT-DIAG] strip container onPointerUp, feedCarrying=', feedCarrying ? feedCarrying.nodeId+' dimKey='+feedCarrying.dimKey : null, 'this dimKey=', dimKey);
                         if (!feedCarrying || feedCarrying.dimKey !== dimKey) return;
                         if (feedCarrying.dropMode === 'twohand') return;
+                        window.ftDiagLog('[FT-DIAG] calling placeCarriedNode for', feedCarrying.nodeId);
                         placeCarriedNode(e.currentTarget, e.clientX, e.clientY);
                       }}
                       style={{position:'absolute', left:BAND_W, top:0, height:sectionH, width:stripW}}>
@@ -17544,12 +17564,14 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                 overflow:'hidden', boxSizing:'border-box', opacity:isCarried?0.5:1, touchAction:'none'}}
                                 onPointerDown={e=>{
                                   if (feedCarrying) return;
+                                  window.ftDiagLog('[FT-DIAG] health list items-mode pointerDown', node.id);
                                   const pointerId = e.pointerId;
                                   const targetEl = e.currentTarget;
                                   const startX = e.clientX, startY = e.clientY;
                                   feedLiveTouchRef.current = { x: startX, y: startY, pointerId };
                                   feedLiftTimer.current = setTimeout(() => {
-                                    try { targetEl.setPointerCapture(pointerId); } catch(err) {}
+                                    window.ftDiagLog('[FT-DIAG] health list items-mode hold-timer FIRED, starting carry', node.id);
+                                    try { targetEl.setPointerCapture(pointerId); } catch(err) { window.ftDiagLog('[FT-DIAG] setPointerCapture threw', err.message); }
                                     const live = feedLiveTouchRef.current;
                                     const liveX = (live && live.pointerId === pointerId) ? live.x : startX;
                                     const liveY = (live && live.pointerId === pointerId) ? live.y : startY;
@@ -17559,6 +17581,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                   }, 350);
                                 }}
                                 onPointerUp={e=>{
+                                  window.ftDiagLog('[FT-DIAG] health list items-mode card onPointerUp, feedCarrying=', feedCarrying ? feedCarrying.nodeId : null);
                                   clearTimeout(feedLiftTimer.current);
                                   feedLiveTouchRef.current = null;
                                   try { e.currentTarget.releasePointerCapture(e.pointerId); } catch(err) {}
