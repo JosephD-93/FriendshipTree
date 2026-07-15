@@ -349,6 +349,69 @@ function getVineLeafRaster(cacheKey, leaves) {
   return result;
 }
 
+// Completed vine strands are flattened into one cached bitmap per connection.
+// This removes the remaining multi-path SVG paint cost during pan/zoom while
+// preserving the original strand colours, widths and under-node fade. Newly
+// growing vines stay as SVG so their dash animation remains intact.
+const VINE_STRAND_RASTER_CACHE = new Map();
+const VINE_STRAND_RASTER_CACHE_LIMIT = 160;
+
+function getVineStrandRaster(cacheKey, strands) {
+  const cached = VINE_STRAND_RASTER_CACHE.get(cacheKey);
+  if (cached) return cached;
+  if (!strands.length || typeof document === 'undefined') return null;
+
+  const pad = 14;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const strand of strands) {
+    const reach = strand.width * 0.5 + pad;
+    for (const seg of strand.segments) for (const p of seg.points) {
+      minX = Math.min(minX, p.x - reach);
+      minY = Math.min(minY, p.y - reach);
+      maxX = Math.max(maxX, p.x + reach);
+      maxY = Math.max(maxY, p.y + reach);
+    }
+  }
+  if (!Number.isFinite(minX)) return null;
+
+  const cssWidth = Math.max(1, Math.ceil(maxX - minX));
+  const cssHeight = Math.max(1, Math.ceil(maxY - minY));
+  // Two device pixels per map unit keeps curved strands crisp at normal zoom
+  // while still being far cheaper to transform than hundreds of SVG paths.
+  const pixelRatio = 2;
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, cssWidth * pixelRatio);
+  canvas.height = Math.max(1, cssHeight * pixelRatio);
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  ctx.scale(pixelRatio, pixelRatio);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  for (const strand of strands) {
+    ctx.strokeStyle = strand.color;
+    ctx.lineWidth = strand.width;
+    for (const seg of strand.segments) {
+      if (seg.points.length < 2) continue;
+      ctx.globalAlpha = strand.opacity * seg.opacity;
+      ctx.beginPath();
+      ctx.moveTo(seg.points[0].x - minX, seg.points[0].y - minY);
+      for (let j = 1; j < seg.points.length; j++) {
+        ctx.lineTo(seg.points[j].x - minX, seg.points[j].y - minY);
+      }
+      ctx.stroke();
+    }
+  }
+  ctx.globalAlpha = 1;
+
+  const result = { href: canvas.toDataURL('image/png'), x: minX, y: minY, width: cssWidth, height: cssHeight };
+  if (VINE_STRAND_RASTER_CACHE.size >= VINE_STRAND_RASTER_CACHE_LIMIT) {
+    VINE_STRAND_RASTER_CACHE.delete(VINE_STRAND_RASTER_CACHE.keys().next().value);
+  }
+  VINE_STRAND_RASTER_CACHE.set(cacheKey, result);
+  return result;
+}
+
 
 // Inline SVG avatar data URIs — no network required, no XML comments (breaks JSX)
 const makeAvatar = (bg, skin, hair, extraPath) => {
@@ -1312,7 +1375,7 @@ function renderVineLink({
 
   const splitPathGraded = (pts) => {
     if (blockerCircles.length === 0) {
-      return [{ d: `M ${pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' L ')}`, opacity: 1 }];
+      return [{ d: `M ${pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' L ')}`, points: pts, opacity: 1 }];
     }
 
     // Keep one SVG path per continuous visible run. Previously every run was
@@ -1328,6 +1391,7 @@ function renderVineLink({
       if (points.length > 1) {
         out.push({
           d: `M ${points.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' L ')}`,
+          points: points.slice(),
           opacity: opacitySum / points.length,
         });
       }
@@ -1353,22 +1417,37 @@ function renderVineLink({
   ).join('|');
   const foliageRaster = getVineLeafRaster(`${key}|${darkMode?1:0}|${leafSignature}`, visibleLeaves);
 
+  const renderedStrands = activeStrands.map(({ pts, width, role, colorDark, colorLight }) => ({
+    width,
+    color: darkMode ? colorDark : colorLight,
+    opacity: role === 'growing' ? 0.78 : role === 'core' ? 1 : 0.9,
+    segments: splitPathGraded(pts),
+  }));
+  const strandSignature = renderedStrands.map(strand =>
+    `${strand.width.toFixed(2)},${strand.color},${strand.opacity.toFixed(2)}:` +
+    strand.segments.map(seg => `${seg.opacity.toFixed(2)}@${seg.points.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(';')}`).join('/')
+  ).join('|');
+  const strandRaster = dashOffset == null
+    ? getVineStrandRaster(`${key}|${darkMode?1:0}|${strandSignature}`, renderedStrands)
+    : null;
+
   return {
-    vine: (
+    vine: strandRaster ? (
+      <image key={`vine-${key}`} href={strandRaster.href}
+        x={strandRaster.x} y={strandRaster.y}
+        width={strandRaster.width} height={strandRaster.height}
+        preserveAspectRatio="none" style={{pointerEvents:'none'}}/>
+    ) : (
       <g key={`vine-${key}`}>
-        {activeStrands.map(({ pts, width, role, colorDark, colorLight }, si) => {
+        {renderedStrands.map((strand, si) => {
           const pathLen = dist * 1.1;
-          const baseOpacity = role === 'growing' ? 0.78 : role === 'core' ? 1 : 0.9;
-          const segs = splitPathGraded(pts);
-          return segs.map((seg, segi) => (
+          return strand.segments.map((seg, segi) => (
             <path key={`s-${si}-${segi}`} d={seg.d} fill="none"
-              stroke={darkMode ? colorDark : colorLight}
-              strokeWidth={width} strokeLinejoin="round" strokeLinecap="round"
-              opacity={baseOpacity * seg.opacity}
-              {...(dashOffset != null ? {
-                strokeDasharray: pathLen * 3,
-                strokeDashoffset: (pathLen * 3) * (1 - (growingProgress || 0)),
-              } : {})}
+              stroke={strand.color}
+              strokeWidth={strand.width} strokeLinejoin="round" strokeLinecap="round"
+              opacity={strand.opacity * seg.opacity}
+              strokeDasharray={pathLen * 3}
+              strokeDashoffset={(pathLen * 3) * (1 - (growingProgress || 0))}
             />
           ));
         })}
