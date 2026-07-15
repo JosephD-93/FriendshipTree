@@ -11506,39 +11506,24 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
               return (
                 <g key={hub.id} style={{pointerEvents:'none'}}>
-                  <defs>
-                    <filter id={filterId} x={x1} y={y1} width={x2-x1} height={y2-y1}
-                      filterUnits="userSpaceOnUse" colorInterpolationFilters="sRGB">
-                      <feGaussianBlur in="SourceGraphic" stdDeviation={BLOB_BLUR} result="blur"/>
-                      <feColorMatrix in="blur" type="matrix" result="shaped"
-                        values={`1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 ${BLOB_THRESHOLD} ${BLOB_THRESHOLD_SHIFT}`}/>
-                      <feFlood result="col" floodColor={blobCol} floodOpacity={blobOp}/>
-                      <feComposite in="col" in2="shaped" operator="in"/>
-                    </filter>
-                  </defs>
-
-
-                  {/* Blob — circles at each arch point, sized to match blob radius at node, thinning at sag */}
-                  <g filter={`url(#${filterId})`}>
-                    {blobPts.filter((_,i)=>i%2===0).map((p,pi)=>(
-                      <circle key={pi} cx={p.x} cy={p.y} r={16} fill={blobCol}/>
-                    ))}
-                    {blobHull.map((A,i)=>(
-                      <circle key={'n'+i} cx={A.x} cy={A.y} r={A.r*1.1} fill={blobCol}/>
-                    ))}
-                    {/* Interior fill: circles between each hull node and centroid */}
-                    {blobHull.map((A,i)=>{
-                      const steps=4;
-                      return Array.from({length:steps},(_,s)=>{
-                        const t=(s+1)/(steps+1);
-                        return <circle key={'f'+i+'_'+s}
-                          cx={A.x+(bCen.x-A.x)*t} cy={A.y+(bCen.y-A.y)*t}
-                          r={Math.max(A.r*0.7, 20)} fill={blobCol}/>;
-                      });
-                    })}
-                    {/* Centroid fill circle */}
-                    <circle cx={bCen.x} cy={bCen.y} r={30} fill={blobCol}/>
-                  </g>
+                  {/*
+                    Group fill: a single closed path replaces the previous metaball
+                    surface made from hundreds of circles plus a Gaussian-blur /
+                    threshold filter. The old filter was exceptionally expensive for
+                    Android WebView to repaint while panning. blobPts already follows
+                    the outside of the group in order, so it can provide the same
+                    enclosed region without an off-screen filtered surface.
+                  */}
+                  <path
+                    d={`M ${blobPts.map(p=>`${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' L ')} Z`}
+                    fill={blobCol}
+                    fillOpacity={blobOp}
+                    stroke={blobCol}
+                    strokeOpacity={Math.min(1, blobOp + 0.08)}
+                    strokeWidth={Math.max(10, avgMR * 0.22)}
+                    strokeLinejoin="round"
+                    style={{pointerEvents:'none'}}
+                  />
 
 
                   {/* Vine strands */}
