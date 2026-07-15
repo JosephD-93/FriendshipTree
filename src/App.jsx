@@ -16500,7 +16500,12 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         // behaviour). Uses its own feedPositions key namespace
         // ("dimKey:hlist:nodeId") so a health list's saved position can
         // never collide or be confused with a person's.
-        const HEALTH_COLS = 6;
+        const HEALTH_COLS = 1;
+        const HEALTH_LIST_ROW_STEP = 210;
+        const HEALTH_ITEMS_PER_ROW = 6;
+        const HEALTH_ITEMS_CARD_W = Math.min(420, Math.max(300, availW - 24));
+        const HEALTH_ITEMS_GAP = 8;
+        const HEALTH_ITEMS_PAD = 12;
         const resolveHealthListPositions = (dimKey, healthListMembers) => {
           const placed = {};
           const occupied = new Set();
@@ -16873,7 +16878,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           // below -- they never have branch children, so this simple path
           // covers everything they need.
           if (draggedNode && draggedNode.type === 'health_list') {
-            const hlColSpacing = HEALTH_CARD_W + 10, hlRowSpacing = 90;
+            const hlColSpacing = HEALTH_ITEMS_CARD_W + 10, hlRowSpacing = HEALTH_LIST_ROW_STEP;
             let hCol = Math.max(0, Math.min(HEALTH_COLS - 1, Math.round((localX - hlColSpacing/2) / hlColSpacing)));
             const healthListBaseY = Number(stripEl.dataset.healthListBaseY) || 250;
             let hRow = Math.max(0, Math.round((localY - healthListBaseY) / hlRowSpacing));
@@ -17231,15 +17236,15 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 const list = healthLists.find(l => l.id === node.listId);
                 let cardH = FEED_HEX * 1.3;
                 if ((list?.displayMode || 'percent') === 'items') {
-                  const perRow = list.gridCols || 3;
-                  const autoFitSize = (HEALTH_CARD_W - 20 - (perRow - 1) * 6) / perRow;
-                  const bubbleSize = list.itemBubbleSize || Math.max(20, Math.min(60, autoFitSize));
+                  const perRow = HEALTH_ITEMS_PER_ROW;
+                  const autoFitSize = (HEALTH_ITEMS_CARD_W - HEALTH_ITEMS_PAD * 2 - (perRow - 1) * HEALTH_ITEMS_GAP) / perRow;
+                  const bubbleSize = Math.max(44, Math.min(58, list.itemBubbleSize || autoFitSize, autoFitSize));
                   const rows = Math.ceil((list.categories?.length || 0) / perRow);
-                  const gap = bubbleSize * 0.25;
-                  const gridH = rows > 0 ? rows * bubbleSize + (rows - 1) * gap + bubbleSize * 0.6 : 0;
+                  const gap = HEALTH_ITEMS_GAP;
+                  const gridH = rows > 0 ? rows * bubbleSize + (rows - 1) * gap + HEALTH_ITEMS_PAD * 2 : 0;
                   cardH = 30 + (list.itemsCollapsed ? 0 : gridH);
                 }
-                const centreY = healthListBaseY + pos.row * 90;
+                const centreY = healthListBaseY + pos.row * HEALTH_LIST_ROW_STEP;
                 return Math.max(bottom, centreY + cardH * 0.5 + 40);
               }, 0);
 
@@ -17257,10 +17262,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               members.forEach(n => {
                 const pos = positions[n.id];
                 if (pos.isHealthListGrid) {
-                  const hlColSpacing = HEALTH_CARD_W + 10;
                   anchorOf[n.id] = {
-                    x: BAND_W + pos.col * hlColSpacing + hlColSpacing / 2,
-                    y: healthListBaseY + pos.row * 90,
+                    x: BAND_W + availW / 2,
+                    y: healthListBaseY + pos.row * HEALTH_LIST_ROW_STEP,
                   };
                   return;
                 }
@@ -17519,10 +17523,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           // for 6-per-row, entirely independent of the
                           // people grid's column spacing -- placed in their
                           // own band below the people grid area.
-                          const hlColSpacing = HEALTH_CARD_W + 10;
-                          const hlRowSpacing = 90;
-                          col = posInfo.col; row = posInfo.row;
-                          px = posInfo.col * hlColSpacing + hlColSpacing/2;
+                          const hlRowSpacing = HEALTH_LIST_ROW_STEP;
+                          col = 0; row = posInfo.row;
+                          px = availW / 2;
                           py = healthListBaseY + posInfo.row * hlRowSpacing;
                         } else {
                           ({ col, row } = posInfo);
@@ -17601,20 +17604,17 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           // actual <svg> -- that mismatch was the real bug
                           // behind the broken 1-column/oversized rendering.
                           if (displayMode === 'items') {
-                            const perRow = list.gridCols || 3;
-                            const fixedGap = 6, fixedPad = 10;
-                            // Auto-fit to the shared 6-per-row target width when
-                            // no custom bubble size has been set, so lists get a
-                            // sensible, consistent default rather than needing
-                            // manual tuning every time -- explicit customization
-                            // still overrides this.
-                            const autoFitSize = (HEALTH_CARD_W - fixedPad*2 - (perRow-1)*fixedGap) / perRow;
-                            const bubbleSize = list.itemBubbleSize || Math.max(20, Math.min(60, autoFitSize));
-                            const gap = bubbleSize * 0.25;
+                            const perRow = HEALTH_ITEMS_PER_ROW;
+                            const gap = HEALTH_ITEMS_GAP;
+                            const cardPad = HEALTH_ITEMS_PAD;
+                            const cardW = HEALTH_ITEMS_CARD_W;
+                            const autoFitSize = (cardW - cardPad * 2 - (perRow - 1) * gap) / perRow;
+                            // Six large, consistent touch targets per row. A saved
+                            // custom size is honoured only when it still fits all
+                            // six buttons inside the card without clipping.
+                            const bubbleSize = Math.max(44, Math.min(58, list.itemBubbleSize || autoFitSize, autoFitSize));
                             const rows = Math.ceil(list.categories.length / perRow);
-                            const cardPad = bubbleSize * 0.3;
-                            const headerH = 30;
-                            const cardW = Math.max(perRow * bubbleSize + (perRow-1) * gap + cardPad*2, 110);
+                            const headerH = 34;
                             const gridH = rows * bubbleSize + (rows-1) * gap + cardPad*2;
                             const isCollapsed = !!list.itemsCollapsed;
                             const cardH = headerH + (isCollapsed ? 0 : gridH);
@@ -17705,7 +17705,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                             display:'flex', alignItems:'center', justifyContent:'center',
                                             border:`2px solid ${baseColor}`,
                                             background: progress >= 1 ? baseColor : `${baseColor}${Math.round(progress*255).toString(16).padStart(2,'0')}`,
-                                            fontSize: bubbleSize*0.75, transition:'background 0.2s'}}>
+                                            fontSize: bubbleSize*0.6, transition:'background 0.2s'}}>
                                           {cat.icon}
                                         </div>
                                       );
