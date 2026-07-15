@@ -991,7 +991,10 @@ function renderVineLink({
 
   const perpX = -dy / dist;
   const perpY =  dx / dist;
-  const STEPS = Math.max(60, Math.floor(dist / 5));
+  // Enough samples to keep the organic curve smooth without producing an
+  // excessive SVG/JS workload on Android WebView. The old minimum of 60
+  // points per strand was visually redundant at normal zoom levels.
+  const STEPS = Math.max(32, Math.min(72, Math.floor(dist / 9)));
 
   const OCTAVES_MAP = [
     { freq: 1.0,          amp: 0.5,  phase: 0.0 + i * 0.7 },
@@ -1162,24 +1165,36 @@ function renderVineLink({
     if (blockerCircles.length === 0) {
       return [{ d: `M ${pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' L ')}`, opacity: 1 }];
     }
-    const withOpacity = pts.map(p => ({ ...p, o: opacityAt(p.x, p.y) }));
-    const segments = [];
-    let seg = null;
-    for (const p of withOpacity) {
-      if (p.o <= 0.02) { if (seg && seg.length > 1) segments.push(seg); seg = null; }
-      else { if (!seg) seg = []; seg.push(p); }
-    }
-    if (seg && seg.length > 1) segments.push(seg);
+
+    // Keep one SVG path per continuous visible run. Previously every run was
+    // split into 3-point chunks, producing dozens of DOM paths per strand and
+    // hundreds per vine. Android then had to repaint that huge DOM tree during
+    // every pan. Averaging opacity per run retains the under-node fade while
+    // reducing path count by roughly an order of magnitude.
     const out = [];
-    for (const s of segments) {
-      const chunkSize = 3;
-      for (let ci = 0; ci < s.length - 1; ci += chunkSize) {
-        const chunk = s.slice(ci, Math.min(s.length, ci + chunkSize + 1));
-        if (chunk.length < 2) continue;
-        const avgO = chunk.reduce((sum, p) => sum + p.o, 0) / chunk.length;
-        out.push({ d: `M ${chunk.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' L ')}`, opacity: avgO });
+    let points = [];
+    let opacitySum = 0;
+
+    const flush = () => {
+      if (points.length > 1) {
+        out.push({
+          d: `M ${points.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' L ')}`,
+          opacity: opacitySum / points.length,
+        });
+      }
+      points = [];
+      opacitySum = 0;
+    };
+
+    for (const p of pts) {
+      const opacity = opacityAt(p.x, p.y);
+      if (opacity <= 0.02) flush();
+      else {
+        points.push(p);
+        opacitySum += opacity;
       }
     }
+    flush();
     return out;
   };
 
@@ -7794,9 +7809,27 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
                   const scoreHistory = tgt.scoreHistory || src.scoreHistory || [];
 
-                  const blockerNodes = blockerNodesAll
-                    .filter(n => n.id !== src.id && n.id !== tgt.id)
-                    .map(n => ({ id: n.id, x: n.renderX, y: n.renderY, r: n.radius || 40 }));
+                  // Only nodes close enough to this link can hide it. Passing
+                  // every node into every vine made each sample test the whole map.
+                  const segDx = tgt.renderX - src.renderX;
+                  const segDy = tgt.renderY - src.renderY;
+                  const segLenSq = segDx * segDx + segDy * segDy || 1;
+                  const blockerNodes = [];
+                  for (const n of blockerNodesAll) {
+                    if (n.id === src.id || n.id === tgt.id) continue;
+                    const t = Math.max(0, Math.min(1,
+                      ((n.renderX - src.renderX) * segDx + (n.renderY - src.renderY) * segDy) / segLenSq
+                    ));
+                    const nearX = src.renderX + segDx * t;
+                    const nearY = src.renderY + segDy * t;
+                    const ndx = n.renderX - nearX;
+                    const ndy = n.renderY - nearY;
+                    const radius = n.radius || 40;
+                    const reach = radius + 60;
+                    if (ndx * ndx + ndy * ndy <= reach * reach) {
+                      blockerNodes.push({ id: n.id, x: n.renderX, y: n.renderY, r: radius });
+                    }
+                  }
 
                   const parts = renderVineLink({
                     key: `link-${i}`, srcX: src.renderX, srcY: src.renderY,
