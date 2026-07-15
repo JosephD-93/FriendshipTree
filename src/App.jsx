@@ -2820,7 +2820,7 @@ function AppInner() {
   const [fancyDiagOpen, setFancyDiagOpen] = useState(false);
   const [fancyDiag, setFancyDiag] = useState({
     vines: true, leaves: true, creatures: true, underpass: true,
-    flowers: true, darkness: true, filters: true, animations: true,
+    flowers: true, groupBorders: true, darkness: true, filters: true, animations: true,
   });
   const [fancyPerf, setFancyPerf] = useState({ fps: 0, paths: 0, circles: 0, groups: 0, creatures: 0 });
   useEffect(() => {
@@ -8258,7 +8258,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               </div>
               {[
                 ['vines','Vines'],['leaves','Leaves'],['creatures','Butterflies / fireflies'],
-                ['underpass','Under-node fading'],['flowers','Surround flowers'],['darkness','Night darkness mask'],
+                ['underpass','Under-node fading'],['flowers','Surround flowers'],['groupBorders','Group borders / border leaves'],
+                ['darkness','Night darkness mask'],
                 ['filters','SVG filters / shadows'],['animations','All animations'],
               ].map(([key,label])=>(
                 <label key={key} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'6px 0',borderTop:'1px solid #263449'}}>
@@ -8267,7 +8268,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     style={{width:18,height:18,accentColor:'#10b981'}}/>
                 </label>
               ))}
-              <button onClick={()=>setFancyDiag({vines:true,leaves:true,creatures:true,underpass:true,flowers:true,darkness:true,filters:true,animations:true})}
+              <button onClick={()=>setFancyDiag({vines:true,leaves:true,creatures:true,underpass:true,flowers:true,groupBorders:true,darkness:true,filters:true,animations:true})}
                 style={{width:'100%',marginTop:8,padding:7,border:0,borderRadius:8,background:'#334155',color:'white',fontWeight:800}}>Restore all</button>
             </div>
           )}
@@ -10939,7 +10940,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             {/* Minimised-bundle connecting vines — gentle wriggly lines from social
                 to overflow bundles, drawn HERE so they sit under the social node,
                 groups and people. */}
-            {viewMode === 'canvas' && collapseInfo.bundles.filter(b => b.parentX != null).map(b => {
+            {viewMode === 'canvas' && fancyDiag.vines && collapseInfo.bundles.filter(b => b.parentX != null).map(b => {
               const x1 = b.parentX, y1 = b.parentY, x2 = b.cx, y2 = b.cy;
               const dx = x2 - x1, dy = y2 - y1;
               const len = Math.hypot(dx, dy) || 1;
@@ -10969,7 +10970,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
             {/* Group vine borders — parametric arch system */}
             {/* Always compute border flower positions, even when vine borders hidden */}
-            {viewMode === 'canvas' && nodes.filter(n=>n.type==='hub').map((hub)=>{
+            {viewMode === 'canvas' && (fancyDiag.groupBorders || fancyDiag.flowers) && nodes.filter(n=>n.type==='hub').map((hub)=>{
               // Don't draw a group's border if its branch is minimised.
               if (collapseInfo.hidden.has(hub.id)) return null;
               let hubMembers;
@@ -11067,7 +11068,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             })}
 
 
-            {viewMode === 'canvas' && !simpleMode && nodes.filter(n=>n.type==='hub').map((hub, hubIdx) => {
+            {viewMode === 'canvas' && !simpleMode && fancyDiag.groupBorders && nodes.filter(n=>n.type==='hub').map((hub, hubIdx) => {
               // Gather members. For hidden hubs, include the whole tree branching
               // off the linked person (e.g. James + Ken who branches off James).
               let members;
