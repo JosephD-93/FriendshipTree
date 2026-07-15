@@ -413,6 +413,108 @@ function getVineStrandRaster(cacheKey, strands) {
 }
 
 
+
+// Persistent Fancy-map quality presets. These only change decorative render
+// density/resolution; saved graph data and relationship scores are untouched.
+const FANCY_QUALITY_PRESETS = {
+  ultra:       { label: 'Ultra',       flowerDensity: 1.00, flowerRasterScale: 2.0 },
+  high:        { label: 'High',        flowerDensity: 0.75, flowerRasterScale: 1.6 },
+  balanced:    { label: 'Balanced',    flowerDensity: 0.50, flowerRasterScale: 1.25 },
+  performance: { label: 'Performance', flowerDensity: 0.30, flowerRasterScale: 1.0 },
+};
+
+// Surrounding person flowers are flattened to one cached bitmap per person.
+// This removes hundreds of SVG groups/paths while preserving the same petal,
+// centre, stamen and pistil geometry. The quality preset controls both flower
+// density and raster resolution.
+const SURROUND_FLOWER_RASTER_CACHE = new Map();
+const SURROUND_FLOWER_RASTER_CACHE_LIMIT = 180;
+
+function getSurroundFlowerRaster(cacheKey, flowers, pixelRatio = 1.25) {
+  const cached = SURROUND_FLOWER_RASTER_CACHE.get(cacheKey);
+  if (cached) return cached;
+  if (!flowers.length || typeof document === 'undefined') return null;
+
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const f of flowers) {
+    const reach = f.fpr + Math.max(4, f.fr * 0.8);
+    minX = Math.min(minX, f.x - reach);
+    minY = Math.min(minY, f.y - reach);
+    maxX = Math.max(maxX, f.x + reach);
+    maxY = Math.max(maxY, f.y + reach);
+  }
+  if (!Number.isFinite(minX)) return null;
+  const width = Math.max(1, Math.ceil(maxX - minX));
+  const height = Math.max(1, Math.ceil(maxY - minY));
+  const pr = Math.max(1, Math.min(2, pixelRatio || 1));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.ceil(width * pr);
+  canvas.height = Math.ceil(height * pr);
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  ctx.scale(pr, pr);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  for (const f of flowers) {
+    ctx.save();
+    ctx.translate(f.x - minX, f.y - minY);
+    ctx.globalAlpha = f.opacity;
+    ctx.beginPath();
+    for (let pi = 0; pi < f.petals; pi++) {
+      const pa = (pi / f.petals) * Math.PI * 2 + f.rotation;
+      const tx = Math.cos(pa) * f.fpr, ty = Math.sin(pa) * f.fpr, pp = pa + Math.PI * 0.5;
+      const cp1x = Math.cos(pa)*f.fpr*f.baseL + Math.cos(pp)*f.fpw*0.6;
+      const cp1y = Math.sin(pa)*f.fpr*f.baseL + Math.sin(pp)*f.fpw*0.6;
+      const cp2x = Math.cos(pa)*f.fpr*f.tipL + Math.cos(pp)*f.fpw*0.5;
+      const cp2y = Math.sin(pa)*f.fpr*f.tipL + Math.sin(pp)*f.fpw*0.5;
+      const cp3x = Math.cos(pa)*f.fpr*f.tipL - Math.cos(pp)*f.fpw*0.5;
+      const cp3y = Math.sin(pa)*f.fpr*f.tipL - Math.sin(pp)*f.fpw*0.5;
+      const cp4x = Math.cos(pa)*f.fpr*f.baseL - Math.cos(pp)*f.fpw*0.6;
+      const cp4y = Math.sin(pa)*f.fpr*f.baseL - Math.sin(pp)*f.fpw*0.6;
+      ctx.moveTo(0, 0);
+      ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, tx, ty);
+      ctx.bezierCurveTo(cp3x, cp3y, cp4x, cp4y, 0, 0);
+    }
+    ctx.fillStyle = f.petalColor;
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(0, 0, f.fr * 0.22, 0, Math.PI * 2);
+    ctx.fillStyle = f.centerColor;
+    ctx.fill();
+    ctx.strokeStyle = f.petalColor;
+    ctx.lineWidth = 0.5;
+    ctx.stroke();
+
+    if (f.stamenCount > 0) {
+      ctx.strokeStyle = f.stamenColor;
+      ctx.fillStyle = f.stamenColor;
+      ctx.lineWidth = f.fr * 0.06;
+      for (let si = 0; si < f.stamenCount; si++) {
+        const sa = (si / f.stamenCount) * Math.PI * 2;
+        const x2 = Math.cos(sa) * f.stamenLength;
+        const y2 = Math.sin(sa) * f.stamenLength;
+        ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(x2,y2); ctx.stroke();
+        ctx.beginPath(); ctx.arc(x2,y2,f.fr*0.09,0,Math.PI*2); ctx.fill();
+      }
+    }
+    if (f.pistilRadius > 0) {
+      ctx.beginPath(); ctx.arc(0,0,f.pistilRadius,0,Math.PI*2);
+      ctx.fillStyle = f.pistilColor; ctx.fill();
+      ctx.strokeStyle = f.stamenColor; ctx.lineWidth = f.fr*0.04; ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  const result = { href: canvas.toDataURL('image/png'), x: minX, y: minY, width, height };
+  if (SURROUND_FLOWER_RASTER_CACHE.size >= SURROUND_FLOWER_RASTER_CACHE_LIMIT) {
+    SURROUND_FLOWER_RASTER_CACHE.delete(SURROUND_FLOWER_RASTER_CACHE.keys().next().value);
+  }
+  SURROUND_FLOWER_RASTER_CACHE.set(cacheKey, result);
+  return result;
+}
+
 // Inline SVG avatar data URIs — no network required, no XML comments (breaks JSX)
 const makeAvatar = (bg, skin, hair, extraPath) => {
   // Face-only portrait — no body, no neck, no shoulders
@@ -3039,6 +3141,12 @@ function AppInner() {
     vines: true, leaves: true, creatures: true, underpass: true,
     flowers: true, groupBorders: true, darkness: true, filters: true, animations: true,
   });
+  const [fancyQuality, setFancyQuality] = useState(() => {
+    const saved = localStorage.getItem('ft_fancy_quality') || 'ultra';
+    return FANCY_QUALITY_PRESETS[saved] ? saved : 'ultra';
+  });
+  const fancyQualityConfig = FANCY_QUALITY_PRESETS[fancyQuality] || FANCY_QUALITY_PRESETS.balanced;
+  useEffect(() => saveRaw('ft_fancy_quality', fancyQuality), [fancyQuality]);
   const [fancyPerf, setFancyPerf] = useState({ fps: 0, paths: 0, circles: 0, groups: 0, creatures: 0 });
   const [fancyBenchmarkRunning, setFancyBenchmarkRunning] = useState(false);
   const [fancyBenchmarkStatus, setFancyBenchmarkStatus] = useState('');
@@ -8593,6 +8701,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 <span>Circles <b>{fancyPerf.circles}</b></span>
                 <span>Groups <b>{fancyPerf.groups}</b></span>
               </div>
+              <label style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'7px 0',borderTop:'1px solid #263449',borderBottom:'1px solid #263449',marginBottom:2}}>
+                <span style={{fontWeight:800}}>Render quality</span>
+                <select value={fancyQuality} onChange={e=>setFancyQuality(e.target.value)}
+                  style={{background:'#1e293b',color:'white',border:'1px solid #475569',borderRadius:7,padding:'4px 6px',fontSize:11}}>
+                  {Object.entries(FANCY_QUALITY_PRESETS).map(([key,p])=><option key={key} value={key}>{p.label}</option>)}
+                </select>
+              </label>
               {[
                 ['vines','Vines'],['leaves','Leaves'],['creatures','Butterflies / fireflies'],
                 ['underpass','Under-node fading'],['flowers','Surround flowers'],['groupBorders','Group borders / border leaves'],
@@ -8852,6 +8967,15 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         </button>
                       </div>
                     )}
+                    <div style={{padding:'10px 0',borderBottom:`1px solid ${pw.border}`}}>
+                      <div style={{fontSize:13,fontWeight:700,color:theme.darkMode?'#94a3b8':pw.secondText,marginBottom:7}}>⚡ Fancy Map Performance</div>
+                      <div style={{fontSize:11,color:theme.darkMode?'#94a3b8':pw.secondText,marginBottom:7,lineHeight:1.35}}>Changes decorative density and raster sharpness only. It does not alter saved people, groups or scores.</div>
+                      <div style={{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:6}}>
+                        {Object.entries(FANCY_QUALITY_PRESETS).map(([key,p])=><button key={key} onClick={()=>setFancyQuality(key)}
+                          style={{padding:'8px 4px',borderRadius:8,border:`2px solid ${fancyQuality===key?'#10b981':pw.border}`,
+                            background:fancyQuality===key?'#10b981':pw.cellBg,color:fancyQuality===key?'white':(theme.darkMode?'#e2e8f0':pw.bodyText),fontSize:11,fontWeight:800}}>{p.label}</button>)}
+                      </div>
+                    </div>
                     {/* Surrounding flowers settings */}
                     <div style={{padding:'10px 0',borderBottom:`1px solid ${pw.border}`}}>
                       <div style={{fontSize:13,fontWeight:700,color:theme.darkMode?'#94a3b8':pw.secondText,marginBottom:8}}>🌸 Person Flowers</div>
@@ -12006,168 +12130,75 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               <g>
                 {/* -- Surrounding flowers — background layer, pointerEvents none -- */}
                 {!simpleMode && fancyDiag.flowers && surroundFlowerSettings.showSurround && activeRenderNodes.filter(n=>n.type==='friend'||(!n.type&&n.id!=='me')).map(node=>{
-                  // Find this node's hub — prefer its own hidden hub if it has one
                   const ownHiddenHub = nodes.find(n => n.id === 'hidden_hub_' + node.id && n.hidden);
-                  const nodeHubId = ownHiddenHub ? ownHiddenHub.id : (links.find(l=>l.source===node.id||l.target===node.id)
-                    ? (() => { const linked=links.filter(l=>l.source===node.id||l.target===node.id); const hl=linked.find(l=>{ const oid=l.source===node.id?l.target:l.source; return nodes.find(n=>n.id===oid&&n.type==='hub'); }); return hl?(hl.source===node.id?hl.target:hl.source):null; })()
-                    : null);
+                  const linked = links.filter(l=>l.source===node.id||l.target===node.id);
+                  const hubLink = linked.find(l=>{ const oid=l.source===node.id?l.target:l.source; return nodes.find(n=>n.id===oid&&n.type==='hub'); });
+                  const nodeHubId = ownHiddenHub?.id || (hubLink ? (hubLink.source===node.id?hubLink.target:hubLink.source) : null);
                   const hubNode = nodeHubId ? nodes.find(n=>n.id===nodeHubId) : null;
                   const mode = hubNode?.groupMiniFlowerMode || 'blend';
                   const groupMiniFlower = hubNode?.groupMiniFlower;
+                  const pf = mode==='shared' ? groupMiniFlower : mode==='personal'
+                    ? (node.miniFlower||node.partnerFlower||null)
+                    : (node.miniFlower||node.partnerFlower||groupMiniFlower||null);
+                  if (!pf || node.showBorderFlowers===false) return null;
 
-
-                  // Determine which flower to use based on mode
-                  let pf = null;
-                  if (mode === 'shared') pf = groupMiniFlower || null;
-                  else if (mode === 'blend') pf = node.miniFlower || node.partnerFlower || groupMiniFlower || null;
-                  else if (mode === 'personal') pf = node.miniFlower || node.partnerFlower || null;
-
-
-                  if (!pf) return null;
-                  if (node.showBorderFlowers === false) return null;
-                  const score = node.interactionScore||0;
-                  const tier = score<100?1:score<300?2:score<600?3:score<1000?4:5;
+                  const score=node.interactionScore||0;
+                  const tier=score<100?1:score<300?2:score<600?3:score<1000?4:5;
                   const tierBounds=[[0,100],[100,300],[300,600],[600,1000],[1000,1500]];
                   const [tMin,tMax]=tierBounds[Math.min(4,tier-1)];
                   const tierPos=Math.min(1,(score-tMin)/(tMax-tMin||1));
-                  const count=Math.max(1,surroundFlowerSettings.useCalc
-                    ?Math.round((1+tier*1.5+tierPos*2.5))
-                    :surroundFlowerSettings.count);
-                  const minS=surroundFlowerSettings.minSize;
-                  const maxS=surroundFlowerSettings.maxSize;
-                  const hist=node.scoreHistory||[];
-                  const now2=Date.now(),HOUR=3600000;
+                  const rawCount=Math.max(1,surroundFlowerSettings.useCalc?Math.round(1+tier*1.5+tierPos*2.5):surroundFlowerSettings.count);
+                  const count=Math.max(1,Math.round(rawCount*fancyQualityConfig.flowerDensity));
+                  const minS=surroundFlowerSettings.minSize,maxS=surroundFlowerSettings.maxSize;
+                  const hist=node.scoreHistory||[],now2=Date.now(),HOUR=3600000;
                   const scoreThen=(hist.find(h=>(now2-h.ts)>=48*HOUR)||hist[0])?.score??score;
                   const degraded=(score-scoreThen)<-50;
                   const flowerColor=degraded?'#ca8a04':(pf.petalColor||'#f59e0b');
                   const flowerOpacity=degraded?0.6:0.85;
-
-
-                  // Find which hub this person belongs to
-                  const hubId = nodeHubId;
-                  // Don't use border points from a minimised group (they're stale,
-                  // pointing at collapsed members) — fall back to node-centred flowers.
-                  const borderPts = (hubId && !collapseInfo.hidden.has(hubId)) ? borderFlowerPositionsRef.current[hubId] : null;
-
-
-                  return (
-                    <g key={'sf-'+node.id} style={{pointerEvents:'none'}}>
-                      {Array.from({length:count},(_,fi)=>{
-                        const nodeR = node.radius || 40;
-                        const sv=0.5+0.5*Math.abs(Math.sin(fi*2.3+node.id.length));
-                        const scale = surroundFlowerSettings.flowerScale ?? 1.0;
-                        const fr=(minS+(maxS-minS)*sv)*scale;
-                        const PETALS=pf.petals||6;
-                        const fpr=fr*(1+(pf.petalLength??0.55));
-                        const fpw=fpr*(pf.petalWidth??0.65);
-                        const _cv=pf.petalCurve??0.5,_tL=0.5+_cv*0.45,_bL=0.1+_cv*0.35;
-                        const fpPath=Array.from({length:PETALS},(_,pi)=>{
-                          const pa=(pi/PETALS)*Math.PI*2+(fi*0.5);
-                          const tx=Math.cos(pa)*fpr,ty=Math.sin(pa)*fpr,pp=pa+Math.PI*0.5;
-                          return `M 0,0 C ${Math.cos(pa)*fpr*_bL+Math.cos(pp)*fpw*0.6},${Math.sin(pa)*fpr*_bL+Math.sin(pp)*fpw*0.6} ${Math.cos(pa)*fpr*_tL+Math.cos(pp)*fpw*0.5},${Math.sin(pa)*fpr*_tL+Math.sin(pp)*fpw*0.5} ${tx},${ty} C ${Math.cos(pa)*fpr*_tL-Math.cos(pp)*fpw*0.5},${Math.sin(pa)*fpr*_tL-Math.sin(pp)*fpw*0.5} ${Math.cos(pa)*fpr*_bL-Math.cos(pp)*fpw*0.6},${Math.sin(pa)*fpr*_bL-Math.sin(pp)*fpw*0.6} 0,0`;
-                        }).join(' ');
-
-
-                        // Seeded random for border placement — consistent per node+flower
-                        let rngB = Math.abs(node.id.split('').reduce((a,c)=>((a<<5)-a+c.charCodeAt(0))|0, fi*31+7)) || 1;
-                        const seededRngBorder = () => { rngB=(rngB*1664525+1013904223)&0xffffffff; return (rngB>>>0)/0xffffffff; };
-
-
-                        // Only border flowers render in the background layer
-                        // Orbit flowers are rendered inside the node group (after photo) for overlap
-                        const positions = [];
-
-
-                        // 1. Orbit around photo node edge — biased toward the OUTER
-                        // side (away from the group centre) so the main person keeps
-                        // flowers on their outer edge as members are added
-                        let outwardAng = null;
-                        if (borderPts && borderPts.length > 0) {
-                          // group centre = centroid of the border points
-                          const gcx = borderPts.reduce((s,p)=>s+p.x,0)/borderPts.length;
-                          const gcy = borderPts.reduce((s,p)=>s+p.y,0)/borderPts.length;
-                          const dgx = node.renderX - gcx, dgy = node.renderY - gcy;
-                          // only bias if the node is meaningfully off-centre from the group
-                          if (Math.sqrt(dgx*dgx + dgy*dgy) > nodeR * 0.4) {
-                            outwardAng = Math.atan2(dgy, dgx);
-                          }
-                        }
-                        // Spread flowers in a ~200° fan centred on the outward direction
-                        let angle;
-                        if (outwardAng !== null) {
-                          const fan = Math.PI * 1.15; // ~200°
-                          const frac = count > 1 ? (fi / (count - 1)) - 0.5 : 0;
-                          angle = outwardAng + frac * fan + Math.sin(fi * 1.7 + node.id.length) * 0.15;
-                        } else {
-                          angle = (fi / count) * Math.PI * 2 + fi * 0.9 + node.id.length;
-                        }
-                        const distVariance = Math.sin(fi * 1.7 + node.id.length * 0.3) * nodeR * 0.35;
-                        const dist = nodeR + distVariance;
-                        if (Math.abs(dist) >= nodeR - fr) {
-                          positions.push({
-                            x: node.renderX + Math.cos(angle) * dist,
-                            y: node.renderY + Math.sin(angle) * dist,
-                          });
-                        }
-
-
-                        // Follow the vine border closely — mostly inside, ~10% just outside
-                        if (borderPts && borderPts.length > 0) {
-                          const ptIdx = Math.floor(((fi / count) + (node.id.length * 0.07 % 1)) * borderPts.length) % borderPts.length;
-                          const bp = borderPts[ptIdx];
-
-
-                          // Skip border-hugging flower if closer to a neighbour
-                          const distToOwner = (bp.x - node.renderX)**2 + (bp.y - node.renderY)**2;
-                          const tooClose = hubId && activeRenderNodes.some(n =>
-                            n.id !== node.id && n.type === 'friend' &&
-                            links.some(l => (l.source===n.id||l.target===n.id) && (l.source===hubId||l.target===hubId)) &&
-                            (bp.x - n.renderX)**2 + (bp.y - n.renderY)**2 < distToOwner * 0.7
-                          );
-                          if (!tooClose) {
-                            // Positive = inward, negative = just outside border
-                            const isOutside = seededRngBorder() < 0.1;
-                            const insetDist = isOutside
-                              ? -(2 + seededRngBorder() * 4)
-                              : (4 + seededRngBorder() * 12);
-                            positions.push({
-                              x: bp.x + bp.inX * insetDist,
-                              y: bp.y + bp.inY * insetDist,
-                            });
-
-
-                            // Always add inward spread flower toward other members
-                            const blend = 0.45 + sv * 0.1;
-                            const bx = bp.x + bp.inX * 4;
-                            const by = bp.y + bp.inY * 4;
-                            positions.push({
-                              x: node.renderX + (bx - node.renderX) * blend,
-                              y: node.renderY + (by - node.renderY) * blend,
-                            });
-                          }
-                        }
-
-
-                        return positions.map((pos, pi) => (
-                          <g key={fi+'-'+pi} transform={`translate(${pos.x},${pos.y})`} opacity={flowerOpacity}>
-                            <path d={fpPath} fill={flowerColor}/>
-                             <circle r={fr*0.22} fill={pf.centerColor||'#fef08a'} stroke={flowerColor} strokeWidth={0.5}/>
-                             {/* Stamen — drawn custom paths or parametric */}
-                             {(pf.stamenCount||0)>0&&Array.from({length:pf.stamenCount},(_,si)=>{
-                               const sa=(si/(pf.stamenCount))*Math.PI*2;
-                               const sLen=fr*(pf.stamenLength??0.35);
-                               const x2=Math.cos(sa)*sLen, y2=Math.sin(sa)*sLen;
-                               return <g key={si}>
-                                 <line x1={0} y1={0} x2={x2} y2={y2} stroke={pf.stamenColor||'#fbbf24'} strokeWidth={fr*0.06} strokeLinecap="round" opacity={0.9}/>
-                                 <circle cx={x2} cy={y2} r={fr*0.09} fill={pf.stamenColor||'#fbbf24'} opacity={0.95}/>
-                               </g>;
-                             })}
-                             {(pf.pistilSize||0)>0&&<circle r={fr*(pf.pistilSize??0)*0.35} fill={pf.pistilColor||'#f59e0b'} stroke={pf.stamenColor||'#fbbf24'} strokeWidth={fr*0.04} opacity={0.95}/>}
-                          </g>
-                        ));
-                      })}
-                    </g>
-                  );
+                  const hubId=nodeHubId;
+                  const borderPts=(hubId&&!collapseInfo.hidden.has(hubId))?borderFlowerPositionsRef.current[hubId]:null;
+                  const nodeR=node.radius||40;
+                  let outwardAng=null;
+                  if(borderPts?.length){
+                    const gcx=borderPts.reduce((a,p)=>a+p.x,0)/borderPts.length,gcy=borderPts.reduce((a,p)=>a+p.y,0)/borderPts.length;
+                    const dgx=node.renderX-gcx,dgy=node.renderY-gcy;
+                    if(Math.hypot(dgx,dgy)>nodeR*0.4) outwardAng=Math.atan2(dgy,dgx);
+                  }
+                  const flowers=[];
+                  for(let fi=0;fi<count;fi++){
+                    const sv=0.5+0.5*Math.abs(Math.sin(fi*2.3+node.id.length));
+                    const fr=(minS+(maxS-minS)*sv)*(surroundFlowerSettings.flowerScale??1);
+                    const petals=pf.petals||6,fpr=fr*(1+(pf.petalLength??0.55)),fpw=fpr*(pf.petalWidth??0.65);
+                    const cv=pf.petalCurve??0.5,tipL=0.5+cv*0.45,baseL=0.1+cv*0.35;
+                    let rngB=Math.abs(node.id.split('').reduce((a,c)=>((a<<5)-a+c.charCodeAt(0))|0,fi*31+7))||1;
+                    const rand=()=>{rngB=(rngB*1664525+1013904223)&0xffffffff;return(rngB>>>0)/0xffffffff;};
+                    const positions=[];
+                    let angle;
+                    if(outwardAng!==null){const fan=Math.PI*1.15,frac=count>1?fi/(count-1)-0.5:0;angle=outwardAng+frac*fan+Math.sin(fi*1.7+node.id.length)*0.15;}
+                    else angle=(fi/count)*Math.PI*2+fi*0.9+node.id.length;
+                    const dist=nodeR+Math.sin(fi*1.7+node.id.length*0.3)*nodeR*0.35;
+                    if(Math.abs(dist)>=nodeR-fr) positions.push({x:node.renderX+Math.cos(angle)*dist,y:node.renderY+Math.sin(angle)*dist});
+                    if(borderPts?.length){
+                      const bp=borderPts[Math.floor(((fi/count)+(node.id.length*0.07%1))*borderPts.length)%borderPts.length];
+                      const distToOwner=(bp.x-node.renderX)**2+(bp.y-node.renderY)**2;
+                      const tooClose=hubId&&activeRenderNodes.some(n=>n.id!==node.id&&n.type==='friend'&&links.some(l=>(l.source===n.id||l.target===n.id)&&(l.source===hubId||l.target===hubId))&&(bp.x-n.renderX)**2+(bp.y-n.renderY)**2<distToOwner*0.7);
+                      if(!tooClose){
+                        const inset=rand()<0.1?-(2+rand()*4):(4+rand()*12);
+                        positions.push({x:bp.x+bp.inX*inset,y:bp.y+bp.inY*inset});
+                        const bx=bp.x+bp.inX*4,by=bp.y+bp.inY*4,blend=0.45+sv*0.1;
+                        positions.push({x:node.renderX+(bx-node.renderX)*blend,y:node.renderY+(by-node.renderY)*blend});
+                      }
+                    }
+                    for(const pos of positions) flowers.push({x:pos.x,y:pos.y,fr,petals,fpr,fpw,tipL,baseL,rotation:fi*0.5,
+                      petalColor:flowerColor,centerColor:pf.centerColor||'#fef08a',opacity:flowerOpacity,
+                      stamenCount:pf.stamenCount||0,stamenLength:fr*(pf.stamenLength??0.35),stamenColor:pf.stamenColor||'#fbbf24',
+                      pistilRadius:(pf.pistilSize||0)>0?fr*(pf.pistilSize??0)*0.35:0,pistilColor:pf.pistilColor||'#f59e0b'});
+                  }
+                  const sig=[node.id,node.renderX.toFixed(1),node.renderY.toFixed(1),hubId||'',count,fancyQuality,
+                    flowerColor,flowerOpacity,pf.centerColor,pf.petals,pf.petalLength,pf.petalWidth,pf.petalCurve,pf.stamenCount,pf.stamenLength,pf.stamenColor,pf.pistilSize,pf.pistilColor,
+                    flowers.map(f=>`${f.x.toFixed(1)},${f.y.toFixed(1)},${f.fr.toFixed(1)}`).join(';')].join('|');
+                  const raster=getSurroundFlowerRaster(sig,flowers,fancyQualityConfig.flowerRasterScale);
+                  return raster?<image key={'sf-'+node.id} href={raster.href} x={raster.x} y={raster.y} width={raster.width} height={raster.height} style={{pointerEvents:'none'}}/>:null;
                 })}
                 {/* -- Hub stakes — drawn BEFORE links so vines appear in front -- */}
                 {!simpleMode && activeRenderNodes.filter(n=>n.type==='hub'&&!n.hidden).map(node=>{
