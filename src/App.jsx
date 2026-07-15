@@ -2817,6 +2817,33 @@ function AppInner() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [showDiagLogViewer, setShowDiagLogViewer] = useState(false);
   const [diagLogText, setDiagLogText] = useState('');
+  const [fancyDiagOpen, setFancyDiagOpen] = useState(false);
+  const [fancyDiag, setFancyDiag] = useState({
+    vines: true, leaves: true, creatures: true, underpass: true,
+    flowers: true, darkness: true, filters: true, animations: true,
+  });
+  const [fancyPerf, setFancyPerf] = useState({ fps: 0, paths: 0, circles: 0, groups: 0, creatures: 0 });
+  useEffect(() => {
+    if (!fancyDiagOpen) return;
+    let raf = 0, frames = 0, last = performance.now();
+    const tick = (now) => {
+      frames++;
+      if (now - last >= 500) {
+        const root = svgGroupRef.current;
+        setFancyPerf({
+          fps: Math.round(frames * 1000 / (now - last)),
+          paths: root?.querySelectorAll('path').length || 0,
+          circles: root?.querySelectorAll('circle').length || 0,
+          groups: root?.querySelectorAll('g').length || 0,
+          creatures: fancyDiag.creatures ? creatures.length : 0,
+        });
+        frames = 0; last = now;
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [fancyDiagOpen, fancyDiag.creatures, creatures.length]);
   useEffect(() => {
     if (!showDiagLogViewer) return;
     setDiagLogText('Loading…');
@@ -7834,7 +7861,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   const parts = renderVineLink({
                     key: `link-${i}`, srcX: src.renderX, srcY: src.renderY,
                     tgtX: tgt.renderX, tgtY: tgt.renderY, i, score, scoreHistory,
-                    blockerNodes, darkMode: theme.darkMode, dashOffset,
+                    blockerNodes: fancyDiag.underpass ? blockerNodes : [], darkMode: theme.darkMode, dashOffset,
                     growingProgress: growingVine ? growingVine.progress : null,
                     fallenLeafIds: fallenLeafIdSet,
                     onNewFallenLeaves: (nf) => newFallenAccum.push(...nf),
@@ -7850,10 +7877,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       });
     }
     return result;
-  }, [links, activeRenderNodes, activeRenderNodesById, socialConnectedIds, theme.darkMode, nodeGroupMap, sliderDragging, simpleMode, growingVines, fallenLeaves]);
+  }, [links, activeRenderNodes, activeRenderNodesById, socialConnectedIds, theme.darkMode, nodeGroupMap, sliderDragging, simpleMode, growingVines, fallenLeaves, fancyDiag.underpass]);
   return (
     <>
     <style>{KEYFRAMES_CSS}</style>
+    <style>{`.ft-pause-animations, .ft-pause-animations *{animation-play-state:paused !important;transition:none !important}.ft-disable-filters, .ft-disable-filters *{filter:none !important}`}</style>
     <div title={saveStatus === 'saved' ? 'Saved' : 'Not saved yet'}
       style={{position:'fixed', top:'calc(env(safe-area-inset-top, 0px) + 8px)', left:10, zIndex:9999,
         width:10, height:10, borderRadius:'50%', pointerEvents:'none',
@@ -8209,6 +8237,42 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         );
       })()}
 
+
+      {mapStyle === 'full' && viewMode === 'canvas' && (
+        <>
+          <button onClick={()=>setFancyDiagOpen(v=>!v)}
+            style={{position:'fixed',right:10,top:'calc(env(safe-area-inset-top, 0px) + 10px)',zIndex:10020,
+              border:'1px solid #475569',borderRadius:10,padding:'7px 10px',background:'rgba(15,23,42,0.9)',
+              color:'white',fontSize:11,fontWeight:800}}>⚡ FPS</button>
+          {fancyDiagOpen && (
+            <div style={{position:'fixed',right:10,top:'calc(env(safe-area-inset-top, 0px) + 48px)',zIndex:10019,
+              width:220,padding:12,borderRadius:14,background:'rgba(15,23,42,0.96)',color:'white',
+              border:'1px solid #475569',boxShadow:'0 8px 30px rgba(0,0,0,.45)',fontSize:11}}>
+              <div style={{fontWeight:900,fontSize:13,marginBottom:8}}>Fancy Map Diagnostics</div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'3px 10px',marginBottom:10,color:'#cbd5e1'}}>
+                <span>FPS <b style={{color:fancyPerf.fps>=50?'#4ade80':fancyPerf.fps>=30?'#facc15':'#f87171'}}>{fancyPerf.fps}</b></span>
+                <span>Creatures <b>{fancyPerf.creatures}</b></span>
+                <span>Paths <b>{fancyPerf.paths}</b></span>
+                <span>Circles <b>{fancyPerf.circles}</b></span>
+                <span>Groups <b>{fancyPerf.groups}</b></span>
+              </div>
+              {[
+                ['vines','Vines'],['leaves','Leaves'],['creatures','Butterflies / fireflies'],
+                ['underpass','Under-node fading'],['flowers','Surround flowers'],['darkness','Night darkness mask'],
+                ['filters','SVG filters / shadows'],['animations','All animations'],
+              ].map(([key,label])=>(
+                <label key={key} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'6px 0',borderTop:'1px solid #263449'}}>
+                  <span>{label}</span>
+                  <input type='checkbox' checked={fancyDiag[key]} onChange={e=>setFancyDiag(v=>({...v,[key]:e.target.checked}))}
+                    style={{width:18,height:18,accentColor:'#10b981'}}/>
+                </label>
+              ))}
+              <button onClick={()=>setFancyDiag({vines:true,leaves:true,creatures:true,underpass:true,flowers:true,darkness:true,filters:true,animations:true})}
+                style={{width:'100%',marginTop:8,padding:7,border:0,borderRadius:8,background:'#334155',color:'white',fontWeight:800}}>Restore all</button>
+            </div>
+          )}
+        </>
+      )}
 
       {/* Settings panel — full height slide-in from right */}
       {settingsOpen && (
@@ -10794,14 +10858,14 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           <rect width="100%" height="100%" fill="url(#bg-grid)" />
 
 
-          <g ref={svgGroupRef} transform={`translate(${transform.x}, ${transform.y}) scale(${transform.scale})`}>
+          <g ref={svgGroupRef} className={`${!fancyDiag.animations ? 'ft-pause-animations' : ''} ${!fancyDiag.filters ? 'ft-disable-filters' : ''}`} transform={`translate(${transform.x}, ${transform.y}) scale(${transform.scale})`}>
             {/* Background fill — green in light mode (grass texture shows from the Canvas div behind) */}
             <rect x="-50000" y="-50000" width="100000" height="100000"
               fill={theme.darkMode ? '#0f172a' : '#19432a'} fillOpacity={theme.darkMode ? 1 : 0.55} />
 
 
             {/* Connection vines — rendered low so group borders/leaves sit above them */}
-            {viewMode === 'canvas' && !sliderDragging && !simpleMode && (
+            {viewMode === 'canvas' && !sliderDragging && !simpleMode && fancyDiag.vines && (
               <g className="vines-layer">{linkParts.map(p => p && p.vine)}</g>
             )}
 
@@ -11637,7 +11701,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             {viewMode === 'canvas' && (
               <g>
                 {/* -- Surrounding flowers — background layer, pointerEvents none -- */}
-                {!simpleMode && surroundFlowerSettings.showSurround && activeRenderNodes.filter(n=>n.type==='friend'||(!n.type&&n.id!=='me')).map(node=>{
+                {!simpleMode && fancyDiag.flowers && surroundFlowerSettings.showSurround && activeRenderNodes.filter(n=>n.type==='friend'||(!n.type&&n.id!=='me')).map(node=>{
                   // Find this node's hub — prefer its own hidden hub if it has one
                   const ownHiddenHub = nodes.find(n => n.id === 'hidden_hub_' + node.id && n.hidden);
                   const nodeHubId = ownHiddenHub ? ownHiddenHub.id : (links.find(l=>l.source===node.id||l.target===node.id)
@@ -11822,14 +11886,14 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
 
             {viewMode === 'canvas' && !sliderDragging && !simpleMode && (
-              <g className="foliage-layer">{linkParts.map(p => p && p.foliage)}</g>
+              <g className="foliage-layer">{fancyDiag.leaves && linkParts.map(p => p && p.foliage)}</g>
             )}
 
 
 
 
             {/* Fallen leaves — persist until raked */}
-            {!simpleMode && fallenLeaves.length > 0 && (
+            {!simpleMode && fancyDiag.leaves && fallenLeaves.length > 0 && (
               <g className="fallen-leaves-layer" style={{pointerEvents:'none'}}>
                 {fallenLeaves.map((fl, idx) => {
                   const leafD = `M 0,0 C ${fl.lw*0.25},${-fl.lh} ${fl.lw*0.75},${-fl.lh} ${fl.lw},0 C ${fl.lw*0.75},${fl.lh} ${fl.lw*0.25},${fl.lh} 0,0 Z`;
@@ -13190,7 +13254,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
 
             {/* ---- Dark-mode darkness overlay: fireflies reveal light through it ---- */}
-            {theme.darkMode && darknessFilter && (() => {
+            {theme.darkMode && darknessFilter && fancyDiag.darkness && (() => {
               // huge rect in canvas coords; the mask is dark with soft white
               // circles at each firefly so light shows through there.
               const BIG = 100000;
@@ -13257,7 +13321,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
 
             {/* ---- Butterflies (day) / Fireflies (night) ---- */}
-            {!simpleMode && creatures.map(c => {
+            {!simpleMode && fancyDiag.creatures && creatures.map(c => {
               // WAVE: fixed cycle for ALL butterflies so waves never drift/clash.
               // The delay (0..WAVE_SWEEP) is set purely by diagonal position, so
               // the wave ripples across; everyone flaps with the SAME duration and
