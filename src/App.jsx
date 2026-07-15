@@ -16901,6 +16901,10 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           if (draggedNode && draggedNode.type === 'health_list') {
             const draggedList = healthLists.find(l => l.id === draggedNode.listId);
             const draggedMetrics = healthListCardMetrics(draggedList);
+            const healthFlowerId = sectionDefs.find(section => section.dimKey === cDimKey)?.flowerId;
+            const healthListMembers = healthFlowerId
+              ? buildMembers(healthFlowerId).members.filter(member => member.type === 'health_list')
+              : nodes.filter(node => node.type === 'health_list');
             const colSpan = draggedMetrics.perRow, rowSpan = draggedMetrics.rowSpan;
             let hCol = Math.round((localX - 12 - draggedMetrics.cardW / 2) / (HEALTH_LANE_W + HEALTH_LANE_GAP));
             hCol = Math.max(0, Math.min(HEALTH_COLS - colSpan, hCol));
