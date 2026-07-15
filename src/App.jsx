@@ -201,6 +201,80 @@ const MONTH_COLORS = [
 const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 
+// Group-border leaves are rasterised for Android performance. Cache the
+// resulting data URL so ordinary React renders and map movement do not redraw
+// every leaf to a canvas and PNG-encode it again. Entries are invalidated by a
+// signature containing the actual leaf geometry/appearance and zoom-density
+// bucket, so dragging members or changing border settings still rebuilds the
+// image correctly.
+const GROUP_BORDER_LEAF_RASTER_CACHE = new Map();
+const GROUP_BORDER_LEAF_RASTER_CACHE_LIMIT = 48;
+
+function getGroupBorderLeafRaster(cacheKey, leaves) {
+  const cached = GROUP_BORDER_LEAF_RASTER_CACHE.get(cacheKey);
+  if (cached) return cached;
+  if (!leaves.length || typeof document === 'undefined') return null;
+
+  const pad = 60;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const l of leaves) {
+    minX = Math.min(minX, l.x - pad);
+    minY = Math.min(minY, l.y - l.lw - pad);
+    maxX = Math.max(maxX, l.x + l.lw + pad);
+    maxY = Math.max(maxY, l.y + l.lw + pad);
+  }
+  const width = Math.ceil(maxX - minX);
+  const height = Math.ceil(maxY - minY);
+  if (width < 1 || height < 1) return null;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+
+  for (const lf of leaves) {
+    ctx.save();
+    ctx.translate(lf.x - minX, lf.y - minY);
+    ctx.rotate(lf.angle * Math.PI / 180);
+    ctx.globalAlpha = lf.opacity;
+    ctx.beginPath();
+    if (lf.bud) {
+      ctx.moveTo(0, 0);
+      ctx.bezierCurveTo(lf.lw * 0.15, -lf.lh * 0.4, lf.lw * 0.7, -lf.lh * 0.35, lf.lw, 0);
+      ctx.bezierCurveTo(lf.lw * 0.7, lf.lh * 0.35, lf.lw * 0.15, lf.lh * 0.4, 0, 0);
+    } else {
+      ctx.moveTo(0, 0);
+      ctx.bezierCurveTo(lf.lw * 0.25, -lf.lh, lf.lw * 0.75, -lf.lh, lf.lw, 0);
+      ctx.bezierCurveTo(lf.lw * 0.75, lf.lh, lf.lw * 0.25, lf.lh, 0, 0);
+    }
+    ctx.closePath();
+    ctx.fillStyle = lf.fill;
+    ctx.fill();
+    ctx.strokeStyle = lf.stroke;
+    ctx.lineWidth = 0.5;
+    ctx.stroke();
+    if (!lf.bud) {
+      ctx.beginPath();
+      ctx.moveTo(lf.lw * 0.05, 0);
+      ctx.lineTo(lf.lw * 0.82, 0);
+      ctx.strokeStyle = lf.stroke;
+      ctx.lineWidth = 0.35;
+      ctx.globalAlpha = lf.opacity * 0.5;
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  const result = { href: canvas.toDataURL('image/png'), x: minX, y: minY, width, height };
+  if (GROUP_BORDER_LEAF_RASTER_CACHE.size >= GROUP_BORDER_LEAF_RASTER_CACHE_LIMIT) {
+    GROUP_BORDER_LEAF_RASTER_CACHE.delete(GROUP_BORDER_LEAF_RASTER_CACHE.keys().next().value);
+  }
+  GROUP_BORDER_LEAF_RASTER_CACHE.set(cacheKey, result);
+  return result;
+}
+
+
 // Inline SVG avatar data URIs — no network required, no XML comments (breaks JSX)
 const makeAvatar = (bg, skin, hair, extraPath) => {
   // Face-only portrait — no body, no neck, no shoulders
@@ -11536,82 +11610,31 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   })}
 
 
-                  {/* Leaves — rendered to offscreen canvas then inserted as single <image> element */}
+                  {/* Leaves — rasterised once and reused until geometry/settings change */}
                   {(()=>{
                     if(allLeaves.length===0) return null;
-                    // Reduce leaf count at low zoom for performance
                     const zoom=transform.scale||1;
-                    const visibleLeaves=zoom<0.5
-                      ? allLeaves.filter((_,i)=>i%4===0)  // 25% at very low zoom
-                      : zoom<0.8
-                      ? allLeaves.filter((_,i)=>i%2===0)  // 50% at medium zoom
-                      : allLeaves;                          // 100% when zoomed in
+                    const densityBucket=zoom<0.5?4:zoom<0.8?2:1;
+                    const visibleLeaves=densityBucket===1
+                      ? allLeaves
+                      : allLeaves.filter((_,i)=>i%densityBucket===0);
 
-
-                    // Bounding box for canvas
-                    const pad=60;
-                    const lx1=Math.min(...visibleLeaves.map(l=>l.x))-pad;
-                    const ly1=Math.min(...visibleLeaves.map(l=>l.y))-pad;
-                    const lx2=Math.max(...visibleLeaves.map(l=>l.x+l.lw))+pad;
-                    const ly2=Math.max(...visibleLeaves.map(l=>l.y+l.lw))+pad;
-                    const cw=Math.ceil(lx2-lx1), ch=Math.ceil(ly2-ly1);
-                    if(cw<1||ch<1) return null;
-
-
-                    // Draw all leaves to offscreen canvas
-                    const cvs=document.createElement('canvas');
-                    cvs.width=cw; cvs.height=ch;
-                    const ctx=cvs.getContext('2d');
-
-
-                    visibleLeaves.forEach(lf=>{
-                      ctx.save();
-                      ctx.translate(lf.x-lx1, lf.y-ly1);
-                      ctx.rotate(lf.angle*Math.PI/180);
-                      ctx.globalAlpha=lf.opacity;
-
-
-                      // Draw leaf shape
-                      ctx.beginPath();
-                      if(lf.bud){
-                        ctx.moveTo(0,0);
-                        ctx.bezierCurveTo(lf.lw*0.15,-lf.lh*0.4, lf.lw*0.7,-lf.lh*0.35, lf.lw,0);
-                        ctx.bezierCurveTo(lf.lw*0.7,lf.lh*0.35, lf.lw*0.15,lf.lh*0.4, 0,0);
-                      } else {
-                        ctx.moveTo(0,0);
-                        ctx.bezierCurveTo(lf.lw*0.25,-lf.lh, lf.lw*0.75,-lf.lh, lf.lw,0);
-                        ctx.bezierCurveTo(lf.lw*0.75,lf.lh, lf.lw*0.25,lf.lh, 0,0);
-                      }
-                      ctx.closePath();
-                      ctx.fillStyle=lf.fill;
-                      ctx.fill();
-                      ctx.strokeStyle=lf.stroke;
-                      ctx.lineWidth=0.5;
-                      ctx.stroke();
-
-
-                      // Midrib
-                      if(!lf.bud){
-                        ctx.beginPath();
-                        ctx.moveTo(lf.lw*0.05,0);
-                        ctx.lineTo(lf.lw*0.82,0);
-                        ctx.strokeStyle=lf.stroke;
-                        ctx.lineWidth=0.35;
-                        ctx.globalAlpha=lf.opacity*0.5;
-                        ctx.stroke();
-                      }
-                      ctx.restore();
-                    });
-
-
-                    return (
-                      <image
-                        href={cvs.toDataURL()}
-                        x={lx1} y={ly1}
-                        width={cw} height={ch}
-                        style={{pointerEvents:'none'}}
-                      />
+                    // The signature deliberately excludes pan translation: all
+                    // coordinates are map-space values, so moving the camera does
+                    // not require a new bitmap. Member movement, visual settings,
+                    // theme, or zoom-density changes do invalidate it.
+                    const leafSignature = visibleLeaves.map(l =>
+                      `${l.x.toFixed(1)},${l.y.toFixed(1)},${l.angle.toFixed(1)},${l.lw.toFixed(1)},${l.lh.toFixed(1)},${l.fill},${l.stroke},${l.bud?1:0},${l.opacity.toFixed(2)}`
+                    ).join('|');
+                    const raster=getGroupBorderLeafRaster(
+                      `${hub.id}|${densityBucket}|${leafSignature}`,
+                      visibleLeaves
                     );
+                    return raster ? (
+                      <image href={raster.href} x={raster.x} y={raster.y}
+                        width={raster.width} height={raster.height}
+                        style={{pointerEvents:'none'}} />
+                    ) : null;
                   })()}
                 </g>
               );
