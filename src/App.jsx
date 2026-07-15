@@ -2906,7 +2906,14 @@ function AppInner() {
       let changed = false;
       const next = {};
       for (const [key, val] of Object.entries(prev)) {
-        const colonIdx = key.indexOf(':');
+        // The real node ID is always the LAST segment after the final colon
+        // -- works for both the plain "dimKey:nodeId" format and the newer
+        // "dimKey:hlist:nodeId" format used by health lists, whereas taking
+        // everything after the FIRST colon only worked for the plain
+        // format and incorrectly left "hlist:nodeId" as the extracted ID
+        // for health lists, which never matched a real node and caused
+        // every health list position to be deleted the moment it was saved.
+        const colonIdx = key.lastIndexOf(':');
         const nodeId = colonIdx >= 0 ? key.slice(colonIdx + 1) : key;
         if (liveIds.has(nodeId)) {
           next[key] = val;
