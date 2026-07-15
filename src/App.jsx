@@ -2843,7 +2843,7 @@ function AppInner() {
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [fancyDiagOpen, fancyDiag.creatures, creatures.length]);
+  }, [fancyDiagOpen, fancyDiag.creatures]);
   useEffect(() => {
     if (!showDiagLogViewer) return;
     setDiagLogText('Loading…');
