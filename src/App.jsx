@@ -16875,7 +16875,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           if (draggedNode && draggedNode.type === 'health_list') {
             const hlColSpacing = HEALTH_CARD_W + 10, hlRowSpacing = 90;
             let hCol = Math.max(0, Math.min(HEALTH_COLS - 1, Math.round((localX - hlColSpacing/2) / hlColSpacing)));
-            let hRow = Math.max(0, Math.round((localY - 600) / hlRowSpacing));
+            const healthListBaseY = Number(stripEl.dataset.healthListBaseY) || 250;
+            let hRow = Math.max(0, Math.round((localY - healthListBaseY) / hlRowSpacing));
             setFeedPositions(prev => {
               const myKey = `${cDimKey}:hlist:${nodeId}`;
               const isFree = (c, r) => !Object.entries(prev).some(([k, v]) =>
@@ -17201,8 +17202,23 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               // Health section has extra metric cards at the top taking ~140px.
               const healthCardsExtra = dimKey === 'health' ? 148 : 0;
 
-              // Health-list cards use a separate grid whose origin is fixed at
-              // y=600 (see the renderer below). They therefore cannot be sized
+              // Put health lists immediately below the lowest ordinary node in
+              // the Health section. Previously their visible cards used a fixed
+              // y=600 while their connector anchors still used the normal grid
+              // coordinates near the top, so the apparent draggable position and
+              // the actual card were hundreds of pixels apart.
+              const normalMemberRows = members
+                .filter(n => n.type !== 'health_list')
+                .map(n => positions[n.id]?.row)
+                .filter(Number.isFinite);
+              const normalMaxRow = normalMemberRows.length ? Math.max(...normalMemberRows) : 0;
+              const healthListBaseY = dimKey === 'health'
+                ? Math.max(250, (normalMaxRow + 1) * ROW_STEP + healthCardsExtra + measuredExtra + 35)
+                : 250;
+
+              // Health-list cards use a separate grid below the normal nodes.
+              // Size the section from the same shared origin used by rendering,
+              // connector anchors and drag/drop calculations.
               // from the normal people-grid maxRow. Previously the section could
               // end around y=300 while these cards were visibly overflowing at
               // y=600; the following dimension sections were then painted on top
@@ -17223,7 +17239,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   const gridH = rows > 0 ? rows * bubbleSize + (rows - 1) * gap + bubbleSize * 0.6 : 0;
                   cardH = 30 + (list.itemsCollapsed ? 0 : gridH);
                 }
-                const centreY = 600 + pos.row * 90;
+                const centreY = healthListBaseY + pos.row * 90;
                 return Math.max(bottom, centreY + cardH * 0.5 + 40);
               }, 0);
 
@@ -17239,7 +17255,16 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               // canvas, just laid out on the fixed grid instead of free positions.
               const anchorOf = {};
               members.forEach(n => {
-                const { col, row } = positions[n.id];
+                const pos = positions[n.id];
+                if (pos.isHealthListGrid) {
+                  const hlColSpacing = HEALTH_CARD_W + 10;
+                  anchorOf[n.id] = {
+                    x: BAND_W + pos.col * hlColSpacing + hlColSpacing / 2,
+                    y: healthListBaseY + pos.row * 90,
+                  };
+                  return;
+                }
+                const { col, row } = pos;
                 const rowShift = (row % 2 === 1) ? FEED_HEX * 0.75 : 0;
                 const yOff2 = dimKey === 'health' ? 148 : 50;
                 anchorOf[n.id] = {
@@ -17390,7 +17415,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     })()}
 
                     {/* Fixed 6-column hex strip (offset right of the band), unlimited rows */}
-                    <div data-feed-strip={dimKey}
+                    <div data-feed-strip={dimKey} data-health-list-base-y={healthListBaseY}
                       onPointerUp={e=>{
                         window.ftDiagLog('[FT-DIAG] strip container onPointerUp, feedCarrying=', feedCarrying ? feedCarrying.nodeId+' dimKey='+feedCarrying.dimKey : null, 'this dimKey=', dimKey);
                         if (!feedCarrying || feedCarrying.dimKey !== dimKey) return;
@@ -17498,7 +17523,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           const hlRowSpacing = 90;
                           col = posInfo.col; row = posInfo.row;
                           px = posInfo.col * hlColSpacing + hlColSpacing/2;
-                          py = 600 + posInfo.row * hlRowSpacing;
+                          py = healthListBaseY + posInfo.row * hlRowSpacing;
                         } else {
                           ({ col, row } = posInfo);
                           const rowShift = (row % 2 === 1) ? FEED_HEX * 0.75 : 0;
