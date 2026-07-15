@@ -2823,8 +2823,12 @@ function AppInner() {
     flowers: true, groupBorders: true, darkness: true, filters: true, animations: true,
   });
   const [fancyPerf, setFancyPerf] = useState({ fps: 0, paths: 0, circles: 0, groups: 0, creatures: 0 });
+  const [fancyBenchmarkRunning, setFancyBenchmarkRunning] = useState(false);
+  const [fancyBenchmarkStatus, setFancyBenchmarkStatus] = useState('');
+  const [fancyBenchmarkResults, setFancyBenchmarkResults] = useState(() => loadData('ft_fancy_benchmark_results', []));
+  const fancyBenchmarkCancelRef = useRef(false);
   useEffect(() => {
-    if (!fancyDiagOpen) return;
+    if (!fancyDiagOpen || fancyBenchmarkRunning) return;
     let raf = 0, frames = 0, last = performance.now();
     const tick = (now) => {
       frames++;
@@ -2843,7 +2847,7 @@ function AppInner() {
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [fancyDiagOpen, fancyDiag.creatures]);
+  }, [fancyDiagOpen, fancyDiag.creatures, fancyBenchmarkRunning]);
   useEffect(() => {
     if (!showDiagLogViewer) return;
     setDiagLogText('Loading…');
@@ -7660,6 +7664,122 @@ Return only the JSON array. If nothing trackable is found, return [].`;
     }
   }, []);
 
+  const waitMs = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+  const measureFancyFrames = useCallback((durationMs, movement, baseTransform) => new Promise(resolve => {
+    const start = performance.now();
+    let previous = start;
+    const frameTimes = [];
+    let raf = 0;
+    const tick = (now) => {
+      if (fancyBenchmarkCancelRef.current) {
+        applyTransform(baseTransform);
+        resolve(null);
+        return;
+      }
+      const elapsed = now - start;
+      if (previous !== start) frameTimes.push(now - previous);
+      previous = now;
+      if (movement) {
+        // Repeatable figure-of-eight camera movement. The amplitudes are in
+        // screen pixels so every visual-layer test receives the same repaint workload.
+        const phase = (elapsed / durationMs) * Math.PI * 4;
+        applyTransform({
+          ...baseTransform,
+          x: baseTransform.x + Math.sin(phase) * 115,
+          y: baseTransform.y + Math.sin(phase * 2) * 72,
+        });
+      }
+      if (elapsed < durationMs) raf = requestAnimationFrame(tick);
+      else {
+        cancelAnimationFrame(raf);
+        applyTransform(baseTransform);
+        const sorted = [...frameTimes].sort((a,b)=>a-b);
+        const total = frameTimes.reduce((a,b)=>a+b,0);
+        const avgMs = frameTimes.length ? total / frameTimes.length : 0;
+        const p95Ms = sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))] : 0;
+        const jank = frameTimes.filter(ms => ms > 33.34).length;
+        resolve({
+          fps: avgMs ? +(1000 / avgMs).toFixed(1) : 0,
+          avgFrameMs: +avgMs.toFixed(1),
+          p95FrameMs: +p95Ms.toFixed(1),
+          jankFrames: jank,
+          frames: frameTimes.length,
+        });
+      }
+    };
+    raf = requestAnimationFrame(tick);
+  }), [applyTransform]);
+
+  const runFancyBenchmark = useCallback(async () => {
+    if (fancyBenchmarkRunning) return;
+    fancyBenchmarkCancelRef.current = false;
+    setFancyBenchmarkRunning(true);
+    const baseTransform = { ...transform };
+    const off = {vines:false,leaves:false,creatures:false,underpass:false,flowers:false,groupBorders:false,darkness:false,filters:false,animations:false};
+    const presets = [
+      ['Everything off', off],
+      ['Vines only', {...off,vines:true}],
+      ['Leaves only', {...off,leaves:true}],
+      ['Butterflies/fireflies static', {...off,creatures:true}],
+      ['Butterflies/fireflies animated', {...off,creatures:true,animations:true}],
+      ['Under-node fading + vines', {...off,vines:true,underpass:true}],
+      ['Surround flowers only', {...off,flowers:true}],
+      ['Group borders + border leaves', {...off,groupBorders:true}],
+      ['Dark mask only', {...off,darkness:true}],
+      ['Dark mask + animated creatures', {...off,darkness:true,creatures:true,animations:true}],
+      ['Filters/shadows only', {...off,filters:true}],
+      ['Everything enabled', {vines:true,leaves:true,creatures:true,underpass:true,flowers:true,groupBorders:true,darkness:true,filters:true,animations:true}],
+    ];
+    const results = [];
+    try {
+      for (let i=0;i<presets.length;i++) {
+        if (fancyBenchmarkCancelRef.current) break;
+        const [name, config] = presets[i];
+        setFancyBenchmarkStatus(`${i+1}/${presets.length} ${name}: preparing…`);
+        setFancyDiag(config);
+        await waitMs(900);
+        if (fancyBenchmarkCancelRef.current) break;
+        const root = svgGroupRef.current;
+        const counts = {
+          paths: root?.querySelectorAll('path').length || 0,
+          circles: root?.querySelectorAll('circle').length || 0,
+          groups: root?.querySelectorAll('g').length || 0,
+        };
+        setFancyBenchmarkStatus(`${i+1}/${presets.length} ${name}: stationary…`);
+        const stationary = await measureFancyFrames(3000, false, baseTransform);
+        if (!stationary) break;
+        await waitMs(300);
+        setFancyBenchmarkStatus(`${i+1}/${presets.length} ${name}: figure eight…`);
+        const moving = await measureFancyFrames(4500, true, baseTransform);
+        if (!moving) break;
+        results.push({name, stationary, moving, counts});
+      }
+      if (results.length) {
+        const record = {timestamp:new Date().toISOString(), userAgent:navigator.userAgent, results};
+        setFancyBenchmarkResults(prev => {
+          const next = [record, ...prev].slice(0,5);
+          saveData('ft_fancy_benchmark_results', next);
+          return next;
+        });
+        window.ftDiagLog('[Fancy benchmark]', record);
+      }
+    } finally {
+      applyTransform(baseTransform);
+      setTransform(baseTransform);
+      setFancyBenchmarkStatus(fancyBenchmarkCancelRef.current ? 'Benchmark stopped' : 'Benchmark complete');
+      setFancyBenchmarkRunning(false);
+      fancyBenchmarkCancelRef.current = false;
+    }
+  }, [fancyBenchmarkRunning, transform, applyTransform, measureFancyFrames]);
+
+  const formatFancyBenchmark = useCallback((record) => {
+    if (!record) return 'No benchmark results yet.';
+    const lines = [`Fancy Map Benchmark — ${record.timestamp}`, 'Test | Stationary FPS | Moving FPS | Moving p95 ms | Moving jank >33ms | Paths | Circles | Groups'];
+    for (const r of record.results) lines.push(`${r.name} | ${r.stationary.fps} | ${r.moving.fps} | ${r.moving.p95FrameMs} | ${r.moving.jankFrames}/${r.moving.frames} | ${r.counts.paths} | ${r.counts.circles} | ${r.counts.groups}`);
+    return lines.join('\n');
+  }, []);
+
 
   const selectedNode = nodes.find(n => n.id === selectedNodeId);
   const MONTHS_SHORT_GLOBAL = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -8246,7 +8366,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               color:'white',fontSize:11,fontWeight:800}}>⚡ FPS</button>
           {fancyDiagOpen && (
             <div style={{position:'fixed',right:10,top:'calc(env(safe-area-inset-top, 0px) + 48px)',zIndex:10019,
-              width:220,padding:12,borderRadius:14,background:'rgba(15,23,42,0.96)',color:'white',
+              width:270,maxHeight:'calc(100vh - 120px)',overflowY:'auto',padding:12,borderRadius:14,background:'rgba(15,23,42,0.96)',color:'white',
               border:'1px solid #475569',boxShadow:'0 8px 30px rgba(0,0,0,.45)',fontSize:11}}>
               <div style={{fontWeight:900,fontSize:13,marginBottom:8}}>Fancy Map Diagnostics</div>
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'3px 10px',marginBottom:10,color:'#cbd5e1'}}>
@@ -8269,7 +8389,31 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 </label>
               ))}
               <button onClick={()=>setFancyDiag({vines:true,leaves:true,creatures:true,underpass:true,flowers:true,groupBorders:true,darkness:true,filters:true,animations:true})}
-                style={{width:'100%',marginTop:8,padding:7,border:0,borderRadius:8,background:'#334155',color:'white',fontWeight:800}}>Restore all</button>
+                disabled={fancyBenchmarkRunning}
+                style={{width:'100%',marginTop:8,padding:7,border:0,borderRadius:8,background:'#334155',color:'white',fontWeight:800,opacity:fancyBenchmarkRunning?.5:1}}>Restore all</button>
+              <div style={{borderTop:'1px solid #475569',marginTop:10,paddingTop:10}}>
+                <div style={{fontWeight:900,marginBottom:5}}>Repeatable benchmark</div>
+                <div style={{fontSize:9,color:'#94a3b8',lineHeight:1.35,marginBottom:7}}>Runs each Fancy layer stationary, then performs the same automatic figure-of-eight movement. About 2 minutes.</div>
+                {!fancyBenchmarkRunning ? (
+                  <button onClick={runFancyBenchmark}
+                    style={{width:'100%',padding:8,border:0,borderRadius:8,background:'#0f766e',color:'white',fontWeight:900}}>▶ Run full benchmark</button>
+                ) : (
+                  <button onClick={()=>{fancyBenchmarkCancelRef.current=true;setFancyBenchmarkStatus('Stopping…');}}
+                    style={{width:'100%',padding:8,border:0,borderRadius:8,background:'#b91c1c',color:'white',fontWeight:900}}>■ Stop benchmark</button>
+                )}
+                {fancyBenchmarkStatus && <div style={{fontSize:9,color:'#cbd5e1',marginTop:6}}>{fancyBenchmarkStatus}</div>}
+                {fancyBenchmarkResults[0] && (
+                  <>
+                    <button onClick={()=>{
+                      const text=formatFancyBenchmark(fancyBenchmarkResults[0]);
+                      navigator.clipboard?.writeText(text);
+                      showToast('📋 Benchmark copied');
+                    }} style={{width:'100%',marginTop:7,padding:7,border:'1px solid #475569',borderRadius:8,background:'#1e293b',color:'white',fontWeight:800}}>📋 Copy latest results</button>
+                    <textarea readOnly value={formatFancyBenchmark(fancyBenchmarkResults[0])}
+                      style={{width:'100%',height:105,marginTop:7,boxSizing:'border-box',resize:'vertical',fontSize:7,lineHeight:1.25,background:'#020617',color:'#cbd5e1',border:'1px solid #334155',borderRadius:7,padding:5}}/>
+                  </>
+                )}
+              </div>
             </div>
           )}
         </>
