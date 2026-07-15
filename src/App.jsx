@@ -417,10 +417,11 @@ function getVineStrandRaster(cacheKey, strands) {
 // Persistent Fancy-map quality presets. These only change decorative render
 // density/resolution; saved graph data and relationship scores are untouched.
 const FANCY_QUALITY_PRESETS = {
-  ultra:       { label: 'Ultra',       flowerDensity: 1.00, flowerRasterScale: 2.0 },
-  high:        { label: 'High',        flowerDensity: 0.75, flowerRasterScale: 1.6 },
-  balanced:    { label: 'Balanced',    flowerDensity: 0.50, flowerRasterScale: 1.25 },
-  performance: { label: 'Performance', flowerDensity: 0.30, flowerRasterScale: 1.0 },
+  adaptive:    { label: 'Living Forest', flowerDensity: 1.00, creatureDensity: 1.00, flowerRasterScale: 1.6, adaptive: true },
+  ultra:       { label: 'Ultra',         flowerDensity: 1.00, creatureDensity: 1.00, flowerRasterScale: 2.0 },
+  high:        { label: 'High',          flowerDensity: 0.75, creatureDensity: 0.75, flowerRasterScale: 1.6 },
+  balanced:    { label: 'Balanced',      flowerDensity: 0.50, creatureDensity: 0.50, flowerRasterScale: 1.25 },
+  performance: { label: 'Performance',   flowerDensity: 0.30, creatureDensity: 0.30, flowerRasterScale: 1.0 },
 };
 
 // Surrounding person flowers are flattened to one cached bitmap per person.
@@ -3142,16 +3143,50 @@ function AppInner() {
     flowers: true, groupBorders: true, darkness: true, filters: true, animations: true,
   });
   const [fancyQuality, setFancyQuality] = useState(() => {
-    const saved = localStorage.getItem('ft_fancy_quality') || 'ultra';
-    return FANCY_QUALITY_PRESETS[saved] ? saved : 'ultra';
+    const saved = localStorage.getItem('ft_fancy_quality') || 'adaptive';
+    return FANCY_QUALITY_PRESETS[saved] ? saved : 'adaptive';
   });
-  const fancyQualityConfig = FANCY_QUALITY_PRESETS[fancyQuality] || FANCY_QUALITY_PRESETS.balanced;
+  const [adaptiveQualityScale, setAdaptiveQualityScale] = useState(1);
+  const baseFancyQualityConfig = FANCY_QUALITY_PRESETS[fancyQuality] || FANCY_QUALITY_PRESETS.balanced;
+  const fancyQualityConfig = useMemo(() => ({
+    ...baseFancyQualityConfig,
+    flowerDensity: baseFancyQualityConfig.flowerDensity * (baseFancyQualityConfig.adaptive ? adaptiveQualityScale : 1),
+    creatureDensity: baseFancyQualityConfig.creatureDensity * (baseFancyQualityConfig.adaptive ? adaptiveQualityScale : 1),
+  }), [baseFancyQualityConfig, adaptiveQualityScale]);
   useEffect(() => saveRaw('ft_fancy_quality', fancyQuality), [fancyQuality]);
+  useEffect(() => { if (fancyQuality !== 'adaptive') setAdaptiveQualityScale(1); }, [fancyQuality]);
   const [fancyPerf, setFancyPerf] = useState({ fps: 0, paths: 0, circles: 0, groups: 0, creatures: 0 });
   const [fancyBenchmarkRunning, setFancyBenchmarkRunning] = useState(false);
   const [fancyBenchmarkStatus, setFancyBenchmarkStatus] = useState('');
   const [fancyBenchmarkResults, setFancyBenchmarkResults] = useState(() => loadData('ft_fancy_benchmark_results', []));
   const fancyBenchmarkCancelRef = useRef(false);
+
+  // Living Forest: gently adjusts decorative density from real frame rate.
+  // It changes only transient render density, never graph data or saved scores.
+  useEffect(() => {
+    if (fancyQuality !== 'adaptive' || fancyBenchmarkRunning || mapStyle !== 'full' || viewMode !== 'canvas') return;
+    let raf = 0, frames = 0, windowStart = performance.now(), lastAdjust = windowStart;
+    const tick = (now) => {
+      frames++;
+      const elapsed = now - windowStart;
+      if (elapsed >= 2000 && now - lastAdjust >= 1000) {
+        const fps = frames * 1000 / elapsed;
+        setAdaptiveQualityScale(prev => {
+          let next = prev;
+          if (fps < 38) next = Math.max(0.25, prev - 0.10);
+          else if (fps > 52) next = Math.min(1, prev + 0.05);
+          return Math.abs(next - prev) >= 0.001 ? +next.toFixed(2) : prev;
+        });
+        frames = 0;
+        windowStart = now;
+        lastAdjust = now;
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [fancyQuality, fancyBenchmarkRunning, mapStyle, viewMode]);
+
   useEffect(() => {
     if (!fancyDiagOpen || fancyBenchmarkRunning) return;
     let raf = 0, frames = 0, last = performance.now();
@@ -7948,7 +7983,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
     setCreatures(prev => {
       // Aim for roughly one creature per 1.5 perches, so they cover the whole
       // tree (every group/person), not just a few.
-      const target = Math.max(4, Math.round(creaturePerches.length * 0.6));
+      const target = Math.max(2, Math.round(creaturePerches.length * 0.6 * fancyQualityConfig.creatureDensity));
       const prevByKey = {};
       prev.forEach(c => { if (!c.flying) prevByKey[c.perchKey] = c; });
       // spread: walk through perches in order, keep/create a creature on a
@@ -7969,7 +8004,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       }
       return next;
     });
-  }, [creaturePerches, creaturesAway, creaturesReturning]);
+  }, [creaturePerches, creaturesAway, creaturesReturning, fancyQualityConfig.creatureDensity]);
 
 
   // Creatures stay stationary on their perches (no flying about).
@@ -8708,6 +8743,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   {Object.entries(FANCY_QUALITY_PRESETS).map(([key,p])=><option key={key} value={key}>{p.label}</option>)}
                 </select>
               </label>
+              {fancyQuality === 'adaptive' && (
+                <div style={{padding:'6px 0',color:'#a7f3d0',fontSize:10,fontWeight:800}}>
+                  Adaptive detail: {Math.round(adaptiveQualityScale * 100)}% · target 45 FPS
+                </div>
+              )}
               {[
                 ['vines','Vines'],['leaves','Leaves'],['creatures','Butterflies / fireflies'],
                 ['underpass','Under-node fading'],['flowers','Surround flowers'],['groupBorders','Group borders / border leaves'],
@@ -8969,7 +9009,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     )}
                     <div style={{padding:'10px 0',borderBottom:`1px solid ${pw.border}`}}>
                       <div style={{fontSize:13,fontWeight:700,color:theme.darkMode?'#94a3b8':pw.secondText,marginBottom:7}}>⚡ Fancy Map Performance</div>
-                      <div style={{fontSize:11,color:theme.darkMode?'#94a3b8':pw.secondText,marginBottom:7,lineHeight:1.35}}>Changes decorative density and raster sharpness only. It does not alter saved people, groups or scores.</div>
+                      <div style={{fontSize:11,color:theme.darkMode?'#94a3b8':pw.secondText,marginBottom:7,lineHeight:1.35}}>Living Forest automatically adjusts butterflies and surrounding flowers to keep movement smooth. No people, groups, scores or positions are changed.</div>
+                      {fancyQuality === 'adaptive' && <div style={{fontSize:11,fontWeight:800,color:'#10b981',marginBottom:7}}>Current adaptive detail: {Math.round(adaptiveQualityScale * 100)}%</div>}
                       <div style={{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:6}}>
                         {Object.entries(FANCY_QUALITY_PRESETS).map(([key,p])=><button key={key} onClick={()=>setFancyQuality(key)}
                           style={{padding:'8px 4px',borderRadius:8,border:`2px solid ${fancyQuality===key?'#10b981':pw.border}`,
