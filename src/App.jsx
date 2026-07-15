@@ -3893,13 +3893,11 @@ function AppInner() {
         const newScale = Math.min(Math.max(0.01, initialPinchScale.current * (dist / initialPinchDist.current)), 3);
         const newT = { ...transform, scale: newScale };
         applyTransform(newT);
+        // Keep React out of the live pinch loop. The SVG group has already
+        // been updated directly above; committing transform state here would
+        // rerender the entire app and rebuild expensive fancy-map geometry on
+        // every frame. React state is committed once when the gesture ends.
         panSyncLatestRef.current = newT;
-        if (!panSyncRafRef.current) {
-          panSyncRafRef.current = requestAnimationFrame(() => {
-            panSyncRafRef.current = null;
-            setTransform(panSyncLatestRef.current);
-          });
-        }
       }
       return;
     }
@@ -3949,13 +3947,11 @@ function AppInner() {
       // syncs the LATEST position via a ref, not whatever position happened
       // to be current when the frame was first scheduled, so state doesn't
       // lag behind if several pointer moves land within the same frame.
+      // The visible pan is already applied directly to the SVG group.
+      // Do not mirror it into React state every frame: that rerenders the
+      // entire component and invalidates the fancy vine/node calculations.
+      // Commit only the final transform in handlePointerUp.
       panSyncLatestRef.current = newT;
-      if (!panSyncRafRef.current) {
-        panSyncRafRef.current = requestAnimationFrame(() => {
-          panSyncRafRef.current = null;
-          setTransform(panSyncLatestRef.current);
-        });
-      }
       lastPanPos.current = { x: e.clientX, y: e.clientY };
       if (liftTimer.current) {
         clearTimeout(liftTimer.current);
@@ -7399,11 +7395,15 @@ Return only the JSON array. If nothing trackable is found, return [].`;
     liftedNodeId === nodeId ? 'transform 0.15s ease-out, opacity 0.15s ease-out' : 'transform 0.25s cubic-bezier(0.34,1.56,0.64,1), opacity 0.25s ease';
 
 
-  const activeRenderNodes = viewMode === 'calendar' ? calendarRenderNodes : nodes
-    .filter(node => !collapseInfo.hidden.has(node.id))
-    .map(node => {
-    return { ...node, renderX: node.x, renderY: node.y, radius: getNodeRadius(node) };
-  });
+  // Keep this array referentially stable. It feeds the most expensive
+  // fancy-map memos; rebuilding it on every unrelated state change forced all
+  // vine geometry to be regenerated even when no node had moved.
+  const activeRenderNodes = useMemo(() => {
+    if (viewMode === 'calendar') return calendarRenderNodes;
+    return nodes
+      .filter(node => !collapseInfo.hidden.has(node.id))
+      .map(node => ({ ...node, renderX: node.x, renderY: node.y, radius: getNodeRadius(node) }));
+  }, [viewMode, calendarRenderNodes, nodes, collapseInfo.hidden, getNodeRadius]);
 
 
   // ---- Butterfly / firefly perch points (photo edges + flowers) ----
@@ -7792,9 +7792,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     ? growingVine.totalLen * (1 - growingVine.progress)
                     : null;
 
-                  const srcNode = nodes.find(n => n.id === link.source);
-                  const tgtNode = nodes.find(n => n.id === link.target);
-                  const scoreHistory = tgtNode?.scoreHistory || srcNode?.scoreHistory || [];
+                  const scoreHistory = tgt.scoreHistory || src.scoreHistory || [];
 
                   const blockerNodes = blockerNodesAll
                     .filter(n => n.id !== src.id && n.id !== tgt.id)
@@ -7819,7 +7817,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       });
     }
     return result;
-  }, [links, activeRenderNodes, activeRenderNodesById, socialConnectedIds, nodes, theme, nodeGroupMap, sliderDragging, simpleMode, growingVines, vineBorderParams, fallenLeaves]);
+  }, [links, activeRenderNodes, activeRenderNodesById, socialConnectedIds, theme.darkMode, nodeGroupMap, sliderDragging, simpleMode, growingVines, fallenLeaves]);
   return (
     <>
     <style>{KEYFRAMES_CSS}</style>
