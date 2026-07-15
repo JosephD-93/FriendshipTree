@@ -6250,6 +6250,12 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
     };
     // Also re-check periodically in case the app stays open across midnight
     const iv = setInterval(() => checkAndRollover('interval'), 60000); // check every minute
+    // Browser/WebView fallback: Capacitor's native resume listener is not
+    // guaranteed to be available in every build, but visibilitychange is.
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') checkAndRollover('visibilitychange');
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
     // AND re-check the moment the app comes back to the foreground -- Android
     // commonly suspends setInterval timers while an app is backgrounded (not
     // force-closed, just switched away from) to save battery, so the interval
@@ -6272,6 +6278,7 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
     }
     return () => {
       clearInterval(iv);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       if (resumeListener && typeof resumeListener.remove === 'function') resumeListener.remove();
     };
   }, []); // eslint-disable-line
@@ -17530,7 +17537,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           const list = healthLists.find(l => l.id === node.listId);
                           if (!list) return null;
                           const dm = theme.darkMode;
-                          const todayCounts = habitToday[list.id] || {};
+                          // Never display yesterday's counts while the midnight/resume
+                          // rollover effect is still catching up. This also forces the
+                          // Stack view to use the same local-day boundary as the Map view.
+                          const isCurrentHabitDay = habitLastResetDate === getLocalDateStr();
+                          const todayCounts = isCurrentHabitDay ? (habitToday[list.id] || {}) : {};
                           const hitCount = list.categories.filter(c => (todayCounts[c.id]||0) >= c.target).length;
                           const score = Math.round(listScores[list.id] || 0);
                           const displayMode = list.displayMode || 'percent';
@@ -17570,6 +17581,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                 background:dm?'#1e293b':'white', border:`2px solid ${isCarried?baseColor+'aa':baseColor}`,
                                 overflow:'hidden', boxSizing:'border-box', opacity:isCarried?0.5:1, touchAction:'none'}}
                                 onPointerDown={e=>{
+                                  // Controls inside the card own their taps. Do not start
+                                  // the card's long-press drag timer for those controls.
+                                  if (e.target.closest?.('[data-health-control="true"]')) return;
                                   if (feedCarrying) return;
                                   window.ftDiagLog('[FT-DIAG] health list items-mode pointerDown', node.id);
                                   const pointerId = e.pointerId;
@@ -17608,7 +17622,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                   });
                                 }}
                                 onPointerLeave={()=>{ clearTimeout(feedLiftTimer.current); }}>
-                                <div onClick={() => {
+                                <div data-health-control="true"
+                                  onPointerDown={e => { e.stopPropagation(); clearTimeout(feedLiftTimer.current); }}
+                                  onPointerUp={e => e.stopPropagation()}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
                                     if (feedCarrying || feedJustPlaced.current.has(node.id)) return;
                                     const now = Date.now();
                                     const lastTap = listTitleLastTapRef.current[node.id] || 0;
@@ -17625,7 +17643,10 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                     overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>
                                     {list.icon} {list.name}
                                   </span>
-                                  <button onClick={(e) => { e.stopPropagation(); setHealthLists(prev => prev.map(l => l.id === list.id ? {...l, itemsCollapsed: !l.itemsCollapsed} : l)); }}
+                                  <button data-health-control="true"
+                                    onPointerDown={e => { e.stopPropagation(); clearTimeout(feedLiftTimer.current); }}
+                                    onPointerUp={e => e.stopPropagation()}
+                                    onClick={(e) => { e.stopPropagation(); setHealthLists(prev => prev.map(l => l.id === list.id ? {...l, itemsCollapsed: !l.itemsCollapsed} : l)); }}
                                     title={isCollapsed ? 'Show items' : 'Hide items'}
                                     style={{background:'none', border:'none', cursor:'pointer', padding:2, flexShrink:0,
                                       color:dm?'#64748b':'#94a3b8', fontSize:12, lineHeight:1}}>
@@ -17639,11 +17660,16 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                       const count = todayCounts[cat.id] || 0;
                                       const progress = Math.min(1, count / (cat.target || 1));
                                       return (
-                                        <div key={cat.id}
-                                          onClick={() => setHabitToday(prev => ({
+                                        <div key={`${cat.id}:${habitLastResetDate}`} data-health-control="true"
+                                          onPointerDown={e => { e.stopPropagation(); clearTimeout(feedLiftTimer.current); }}
+                                          onPointerUp={e => e.stopPropagation()}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setHabitToday(prev => ({
                                               ...prev,
                                               [list.id]: { ...(prev[list.id]||{}), [cat.id]: ((prev[list.id]||{})[cat.id]||0) + 1 }
-                                            }))}
+                                            }));
+                                          }}
                                           title={`${cat.label}: ${count}/${cat.target}`}
                                           style={{width:bubbleSize, height:bubbleSize, borderRadius:'50%', cursor:'pointer',
                                             display:'flex', alignItems:'center', justifyContent:'center',
