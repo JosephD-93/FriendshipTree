@@ -274,6 +274,81 @@ function getGroupBorderLeafRaster(cacheKey, leaves) {
   return result;
 }
 
+// Ordinary connection-vine foliage is also rasterised. A single SVG <image>
+// per vine replaces hundreds of nested <g>/<path> nodes while preserving the
+// same leaf geometry, colour, opacity and midrib detail. This specifically
+// targets Android WebView's high cost when transforming large SVG DOM trees.
+const VINE_LEAF_RASTER_CACHE = new Map();
+const VINE_LEAF_RASTER_CACHE_LIMIT = 160;
+
+function getVineLeafRaster(cacheKey, leaves) {
+  const cached = VINE_LEAF_RASTER_CACHE.get(cacheKey);
+  if (cached) return cached;
+  if (!leaves.length || typeof document === 'undefined') return null;
+
+  const pad = 8;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const l of leaves) {
+    const reach = Math.max(l.lw, l.lh) + pad;
+    minX = Math.min(minX, l.x - reach);
+    minY = Math.min(minY, l.y - reach);
+    maxX = Math.max(maxX, l.x + reach);
+    maxY = Math.max(maxY, l.y + reach);
+  }
+  const width = Math.max(1, Math.ceil(maxX - minX));
+  const height = Math.max(1, Math.ceil(maxY - minY));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+
+  for (const lf of leaves) {
+    if (lf.shrivelled) continue;
+    ctx.save();
+    ctx.translate(lf.x - minX, lf.y - minY);
+    ctx.rotate(lf.angle * Math.PI / 180);
+    ctx.globalAlpha = lf.opacity;
+
+    if (lf.bud) {
+      ctx.beginPath();
+      ctx.arc(0, 0, Math.max(1.5, lf.lw * 0.3), 0, Math.PI * 2);
+      ctx.fillStyle = '#bbf7d0';
+      ctx.fill();
+      ctx.strokeStyle = '#4ade80';
+      ctx.lineWidth = 0.4;
+      ctx.stroke();
+    } else {
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.bezierCurveTo(lf.lw * 0.25, -lf.lh, lf.lw * 0.75, -lf.lh, lf.lw, 0);
+      ctx.bezierCurveTo(lf.lw * 0.75, lf.lh, lf.lw * 0.25, lf.lh, 0, 0);
+      ctx.closePath();
+      ctx.fillStyle = lf.fill;
+      ctx.fill();
+      ctx.strokeStyle = lf.stroke;
+      ctx.lineWidth = 0.5;
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(lf.lw * 0.05, 0);
+      ctx.lineTo(lf.lw * 0.82, 0);
+      ctx.globalAlpha = lf.opacity * 0.5;
+      ctx.lineWidth = 0.35;
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  const result = { href: canvas.toDataURL('image/png'), x: minX, y: minY, width, height };
+  if (VINE_LEAF_RASTER_CACHE.size >= VINE_LEAF_RASTER_CACHE_LIMIT) {
+    VINE_LEAF_RASTER_CACHE.delete(VINE_LEAF_RASTER_CACHE.keys().next().value);
+  }
+  VINE_LEAF_RASTER_CACHE.set(cacheKey, result);
+  return result;
+}
+
 
 // Inline SVG avatar data URIs — no network required, no XML comments (breaks JSX)
 const makeAvatar = (bg, skin, hair, extraPath) => {
@@ -1273,6 +1348,10 @@ function renderVineLink({
   };
 
   const visibleLeaves = blockerCircles.length > 0 ? allLeaves.filter(lf => !ptInBlocker(lf.x, lf.y)) : allLeaves;
+  const leafSignature = visibleLeaves.map(lf =>
+    `${lf.x.toFixed(1)},${lf.y.toFixed(1)},${lf.angle.toFixed(1)},${lf.lw.toFixed(1)},${lf.fill},${lf.opacity.toFixed(2)},${lf.bud?1:0},${lf.shrivelled?1:0}`
+  ).join('|');
+  const foliageRaster = getVineLeafRaster(`${key}|${darkMode?1:0}|${leafSignature}`, visibleLeaves);
 
   return {
     vine: (
@@ -1295,27 +1374,12 @@ function renderVineLink({
         })}
       </g>
     ),
-    foliage: (
-      <g key={`foliage-${key}`}>
-        {visibleLeaves.map((lf, li) => {
-          if (lf.shrivelled) return null;
-          if (lf.bud) {
-            return (
-              <circle key={`lf-${li}`} cx={lf.x} cy={lf.y} r={Math.max(1.5, lf.lw * 0.3)}
-                fill="#bbf7d0" stroke="#4ade80" strokeWidth={0.4} opacity={lf.opacity} style={{pointerEvents:'none'}}/>
-            );
-          }
-          const leafD = `M 0,0 C ${lf.lw*0.25},${-lf.lh} ${lf.lw*0.75},${-lf.lh} ${lf.lw},0 C ${lf.lw*0.75},${lf.lh} ${lf.lw*0.25},${lf.lh} 0,0 Z`;
-          const midrib = `M ${lf.lw*0.05},0 L ${lf.lw*0.82},0`;
-          return (
-            <g key={`lf-${li}`} transform={`translate(${lf.x},${lf.y}) rotate(${lf.angle})`} opacity={lf.opacity} style={{pointerEvents:'none'}}>
-              <path d={leafD} fill={lf.fill} stroke={lf.stroke} strokeWidth={0.5}/>
-              <path d={midrib} fill="none" stroke={lf.stroke} strokeWidth={0.35} opacity={0.5}/>
-            </g>
-          );
-        })}
-      </g>
-    ),
+    foliage: foliageRaster ? (
+      <image key={`foliage-${key}`} href={foliageRaster.href}
+        x={foliageRaster.x} y={foliageRaster.y}
+        width={foliageRaster.width} height={foliageRaster.height}
+        preserveAspectRatio="none" style={{pointerEvents:'none'}}/>
+    ) : null,
   };
 }
 
