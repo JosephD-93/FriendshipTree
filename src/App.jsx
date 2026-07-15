@@ -3161,32 +3161,6 @@ function AppInner() {
   const [fancyBenchmarkResults, setFancyBenchmarkResults] = useState(() => loadData('ft_fancy_benchmark_results', []));
   const fancyBenchmarkCancelRef = useRef(false);
 
-  // Living Forest: gently adjusts decorative density from real frame rate.
-  // It changes only transient render density, never graph data or saved scores.
-  useEffect(() => {
-    if (fancyQuality !== 'adaptive' || fancyBenchmarkRunning || mapStyle !== 'full' || viewMode !== 'canvas') return;
-    let raf = 0, frames = 0, windowStart = performance.now(), lastAdjust = windowStart;
-    const tick = (now) => {
-      frames++;
-      const elapsed = now - windowStart;
-      if (elapsed >= 2000 && now - lastAdjust >= 1000) {
-        const fps = frames * 1000 / elapsed;
-        setAdaptiveQualityScale(prev => {
-          let next = prev;
-          if (fps < 38) next = Math.max(0.25, prev - 0.10);
-          else if (fps > 52) next = Math.min(1, prev + 0.05);
-          return Math.abs(next - prev) >= 0.001 ? +next.toFixed(2) : prev;
-        });
-        frames = 0;
-        windowStart = now;
-        lastAdjust = now;
-      }
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [fancyQuality, fancyBenchmarkRunning, mapStyle, viewMode]);
-
   useEffect(() => {
     if (!fancyDiagOpen || fancyBenchmarkRunning) return;
     let raf = 0, frames = 0, last = performance.now();
@@ -3283,6 +3257,32 @@ function AppInner() {
   const [simpleMode, setSimpleMode] = useState((() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); return s.simpleMode || false; } catch(e) { return false; } })());
   // mapStyle: 'full' (decorated canvas) | 'simple' (plain circles, same canvas) | 'feed' (stacked dimension sections, vertical scroll)
   const [mapStyle, setMapStyle] = useState((() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); if (s.mapStyle) return s.mapStyle; return s.simpleMode ? 'simple' : 'full'; } catch(e) { return 'full'; } })());
+
+  // Living Forest: gently adjusts decorative density from real frame rate.
+  // It changes only transient render density, never graph data or saved scores.
+  useEffect(() => {
+    if (fancyQuality !== 'adaptive' || fancyBenchmarkRunning || mapStyle !== 'full' || viewMode !== 'canvas') return;
+    let raf = 0, frames = 0, windowStart = performance.now(), lastAdjust = windowStart;
+    const tick = (now) => {
+      frames++;
+      const elapsed = now - windowStart;
+      if (elapsed >= 2000 && now - lastAdjust >= 1000) {
+        const fps = frames * 1000 / elapsed;
+        setAdaptiveQualityScale(prev => {
+          let next = prev;
+          if (fps < 38) next = Math.max(0.25, prev - 0.10);
+          else if (fps > 52) next = Math.min(1, prev + 0.05);
+          return Math.abs(next - prev) >= 0.001 ? +next.toFixed(2) : prev;
+        });
+        frames = 0;
+        windowStart = now;
+        lastAdjust = now;
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [fancyQuality, fancyBenchmarkRunning, mapStyle, viewMode]);
   // Per-dimension feed layout: { "dimKey:nodeId": {col, row} }. Independent of each
   // person's real canvas x/y -- this is purely where they sit within the Feed view's
   // fixed-width hex strip for that one dimension.
