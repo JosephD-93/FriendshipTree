@@ -8478,11 +8478,19 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 {fancyBenchmarkStatus && <div style={{fontSize:9,color:'#cbd5e1',marginTop:6}}>{fancyBenchmarkStatus}</div>}
                 {fancyBenchmarkResults[0] && (
                   <>
-                    <button onClick={()=>{
-                      const text=formatFancyBenchmark(fancyBenchmarkResults[0]);
-                      navigator.clipboard?.writeText(text);
-                      showToast('📋 Benchmark copied');
-                    }} style={{width:'100%',marginTop:7,padding:7,border:'1px solid #475569',borderRadius:8,background:'#1e293b',color:'white',fontWeight:800}}>📋 Copy latest results</button>
+                    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:7,marginTop:7}}>
+                      <button onClick={()=>{
+                        const text=formatFancyBenchmark(fancyBenchmarkResults[0]);
+                        navigator.clipboard?.writeText(text);
+                        showToast('📋 Benchmark copied');
+                      }} style={{padding:7,border:'1px solid #475569',borderRadius:8,background:'#1e293b',color:'white',fontWeight:800}}>📋 Copy latest</button>
+                      <button disabled={fancyBenchmarkRunning} onClick={()=>{
+                        setFancyBenchmarkResults([]);
+                        saveData('ft_fancy_benchmark_results', []);
+                        setFancyBenchmarkStatus('Benchmark data cleared');
+                        showToast('🗑️ Benchmark data cleared');
+                      }} style={{padding:7,border:'1px solid #7f1d1d',borderRadius:8,background:'#450a0a',color:'#fecaca',fontWeight:800,opacity:fancyBenchmarkRunning?.5:1}}>🗑️ Clear data</button>
+                    </div>
                     <textarea readOnly value={formatFancyBenchmark(fancyBenchmarkResults[0])}
                       style={{width:'100%',height:105,marginTop:7,boxSizing:'border-box',resize:'vertical',fontSize:7,lineHeight:1.25,background:'#020617',color:'#cbd5e1',border:'1px solid #334155',borderRadius:7,padding:5}}/>
                   </>
