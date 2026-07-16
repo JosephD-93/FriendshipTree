@@ -2774,33 +2774,33 @@ function AppInner() {
   };
 
 
-  // On mount — ask the OS to PERSIST our storage so Android doesn't evict
-  // IndexedDB (which is why photos vanished after closing the native app).
+  // Browser storage persistence is useful on the web, but Capacitor's Android
+  // WebView commonly returns false/unsupported even though app data is stored in
+  // the application's private sandbox. Treating that as data-loss failure caused
+  // a misleading warning on every native launch. Native durability is handled by
+  // the app's localStorage/IndexedDB plus Capacitor Preferences/photo backups.
   useEffect(() => {
+    const Capacitor = window.Capacitor;
+    const isNative = typeof Capacitor?.isNativePlatform === 'function'
+      ? Capacitor.isNativePlatform()
+      : !!Capacitor?.Plugins;
+
+    if (isNative) {
+      console.log('Browser persistence request skipped in native Capacitor app');
+      return;
+    }
+
     (async () => {
       try {
-        if (navigator.storage && navigator.storage.persist) {
-          const already = navigator.storage.persisted ? await navigator.storage.persisted() : false;
-          if (already) {
-            console.log('Persistent storage: already granted');
-            showToast('✅ Persistent storage already granted');
-          } else {
-            const granted = await navigator.storage.persist();
-            console.log('Persistent storage:', granted ? 'granted' : 'denied');
-            // Surface this directly -- if denied, Android can clear app
-            // storage (including localStorage, not just IndexedDB) under
-            // normal storage pressure, which would explain data loss that
-            // has nothing to do with the app-closing timing at all.
-            if (!granted) {
-              showToast('⚠️ Persistent storage denied by Android — data may be at risk of being cleared');
-            }
-          }
-        } else {
-          showToast('⚠️ Persistent storage API not available on this device');
+        const storage = navigator.storage;
+        if (!storage?.persist) return;
+        const already = storage.persisted ? await storage.persisted() : false;
+        if (!already) {
+          const granted = await storage.persist();
+          console.log('Browser persistent storage:', granted ? 'granted' : 'not granted');
         }
-      } catch(e) {
-        console.warn('storage.persist failed:', e);
-        showToast('⚠️ Storage persistence check failed: ' + e.message);
+      } catch (e) {
+        console.warn('Browser storage persistence check failed:', e);
       }
     })();
   }, []);
@@ -3147,6 +3147,7 @@ function AppInner() {
     return FANCY_QUALITY_PRESETS[saved] ? saved : 'adaptive';
   });
   const [adaptiveQualityScale, setAdaptiveQualityScale] = useState(1);
+  const adaptiveQualityScaleRef = useRef(1);
   const baseFancyQualityConfig = FANCY_QUALITY_PRESETS[fancyQuality] || FANCY_QUALITY_PRESETS.balanced;
   const fancyQualityConfig = useMemo(() => ({
     ...baseFancyQualityConfig,
@@ -3154,7 +3155,13 @@ function AppInner() {
     creatureDensity: baseFancyQualityConfig.creatureDensity * (baseFancyQualityConfig.adaptive ? adaptiveQualityScale : 1),
   }), [baseFancyQualityConfig, adaptiveQualityScale]);
   useEffect(() => saveRaw('ft_fancy_quality', fancyQuality), [fancyQuality]);
-  useEffect(() => { if (fancyQuality !== 'adaptive') setAdaptiveQualityScale(1); }, [fancyQuality]);
+  useEffect(() => {
+    if (fancyQuality !== 'adaptive') {
+      adaptiveQualityScaleRef.current = 1;
+      setAdaptiveQualityScale(1);
+    }
+  }, [fancyQuality]);
+  useEffect(() => { adaptiveQualityScaleRef.current = adaptiveQualityScale; }, [adaptiveQualityScale]);
   const [fancyPerf, setFancyPerf] = useState({ fps: 0, paths: 0, circles: 0, groups: 0, creatures: 0 });
   const [fancyBenchmarkRunning, setFancyBenchmarkRunning] = useState(false);
   const [fancyBenchmarkStatus, setFancyBenchmarkStatus] = useState('');
@@ -3259,29 +3266,49 @@ function AppInner() {
   const [mapStyle, setMapStyle] = useState((() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); if (s.mapStyle) return s.mapStyle; return s.simpleMode ? 'simple' : 'full'; } catch(e) { return 'full'; } })());
 
   // Living Forest: gently adjusts decorative density from real frame rate.
-  // It changes only transient render density, never graph data or saved scores.
+  // Uses guarded window timing APIs because this runs inside Android WebView.
   useEffect(() => {
     if (fancyQuality !== 'adaptive' || fancyBenchmarkRunning || mapStyle !== 'full' || viewMode !== 'canvas') return;
-    let raf = 0, frames = 0, windowStart = performance.now(), lastAdjust = windowStart;
-    const tick = (now) => {
-      frames++;
+    const requestFrame = typeof window.requestAnimationFrame === 'function'
+      ? window.requestAnimationFrame.bind(window)
+      : null;
+    const cancelFrame = typeof window.cancelAnimationFrame === 'function'
+      ? window.cancelAnimationFrame.bind(window)
+      : null;
+    if (!requestFrame) return;
+
+    let rafId = 0;
+    let stopped = false;
+    let frames = 0;
+    let windowStart = typeof performance?.now === 'function' ? performance.now() : Date.now();
+
+    const tick = (timestamp) => {
+      if (stopped) return;
+      const now = Number.isFinite(timestamp) ? timestamp : Date.now();
+      frames += 1;
       const elapsed = now - windowStart;
-      if (elapsed >= 2000 && now - lastAdjust >= 1000) {
-        const fps = frames * 1000 / elapsed;
-        setAdaptiveQualityScale(prev => {
-          let next = prev;
-          if (fps < 38) next = Math.max(0.25, prev - 0.10);
-          else if (fps > 52) next = Math.min(1, prev + 0.05);
-          return Math.abs(next - prev) >= 0.001 ? +next.toFixed(2) : prev;
-        });
+      if (elapsed >= 2000) {
+        const fps = frames * 1000 / Math.max(1, elapsed);
+        const current = adaptiveQualityScaleRef.current;
+        let next = current;
+        if (fps < 38) next = Math.max(0.25, current - 0.10);
+        else if (fps > 52) next = Math.min(1, current + 0.05);
+        next = Math.round(next * 100) / 100;
+        if (next !== current) {
+          adaptiveQualityScaleRef.current = next;
+          setAdaptiveQualityScale(next);
+        }
         frames = 0;
         windowStart = now;
-        lastAdjust = now;
       }
-      raf = requestAnimationFrame(tick);
+      rafId = requestFrame(tick);
     };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+
+    rafId = requestFrame(tick);
+    return () => {
+      stopped = true;
+      if (cancelFrame && rafId) cancelFrame(rafId);
+    };
   }, [fancyQuality, fancyBenchmarkRunning, mapStyle, viewMode]);
   // Per-dimension feed layout: { "dimKey:nodeId": {col, row} }. Independent of each
   // person's real canvas x/y -- this is purely where they sit within the Feed view's
