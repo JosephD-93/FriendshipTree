@@ -3128,6 +3128,12 @@ function AppInner() {
   const [liftedNodeId, setLiftedNodeId] = useState(null);
   const [hoverTarget, setHoverTarget] = useState(null);
   const [selectedNodeId, setSelectedNodeId] = useState(null);
+  const [profileTransition, setProfileTransition] = useState(null);
+  const profileTransitionTimersRef = useRef([]);
+  const clearProfileTransitionTimers = useCallback(() => {
+    profileTransitionTimersRef.current.forEach(clearTimeout);
+    profileTransitionTimersRef.current = [];
+  }, []);
   useEffect(() => {
     if (!selectedNodeId) { setGalleryItems([]); return; }
     setGalleryLoading(true);
@@ -3215,6 +3221,8 @@ function AppInner() {
   // Butterflies (day) / fireflies (night) perched on flowers & photo edges.
   // Each: {id, perchKey, x, y, flying, fromX, fromY, toX, toY, flightStart}
   const [creatures, setCreatures] = useState([]);
+  const creaturesRef = useRef([]);
+  useEffect(() => { creaturesRef.current = Array.isArray(creatures) ? creatures : []; }, [creatures]);
   const [creaturesAway, setCreaturesAway] = useState(false);
   const [creaturesReturning, setCreaturesReturning] = useState(false);
   const scarePointRef = useRef({ x: 0, y: 0 });
@@ -3265,49 +3273,44 @@ function AppInner() {
   // mapStyle: 'full' (decorated canvas) | 'simple' (plain circles, same canvas) | 'feed' (stacked dimension sections, vertical scroll)
   const [mapStyle, setMapStyle] = useState((() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); if (s.mapStyle) return s.mapStyle; return s.simpleMode ? 'simple' : 'full'; } catch(e) { return 'full'; } })());
 
-  // Living Forest: gently adjusts decorative density from real frame rate.
-  // Uses guarded window timing APIs because this runs inside Android WebView.
+  // Living Forest: adjusts decorative density from a sampled frame-rate window.
+  // The sampler uses a plain interval and a small requestAnimationFrame counter,
+  // avoiding callback-style state updates when changing performance modes.
   useEffect(() => {
     if (fancyQuality !== 'adaptive' || fancyBenchmarkRunning || mapStyle !== 'full' || viewMode !== 'canvas') return;
-    const requestFrame = typeof window.requestAnimationFrame === 'function'
-      ? window.requestAnimationFrame.bind(window)
-      : null;
-    const cancelFrame = typeof window.cancelAnimationFrame === 'function'
-      ? window.cancelAnimationFrame.bind(window)
-      : null;
-    if (!requestFrame) return;
+    if (typeof window.requestAnimationFrame !== 'function') return;
 
+    let active = true;
+    let frameCount = 0;
     let rafId = 0;
-    let stopped = false;
-    let frames = 0;
-    let windowStart = typeof performance?.now === 'function' ? performance.now() : Date.now();
-
-    const tick = (timestamp) => {
-      if (stopped) return;
-      const now = Number.isFinite(timestamp) ? timestamp : Date.now();
-      frames += 1;
-      const elapsed = now - windowStart;
-      if (elapsed >= 2000) {
-        const fps = frames * 1000 / Math.max(1, elapsed);
-        const current = adaptiveQualityScaleRef.current;
-        let next = current;
-        if (fps < 38) next = Math.max(0.25, current - 0.10);
-        else if (fps > 52) next = Math.min(1, current + 0.05);
-        next = Math.round(next * 100) / 100;
-        if (next !== current) {
-          adaptiveQualityScaleRef.current = next;
-          setAdaptiveQualityScale(next);
-        }
-        frames = 0;
-        windowStart = now;
-      }
-      rafId = requestFrame(tick);
+    const countFrame = () => {
+      if (!active) return;
+      frameCount += 1;
+      rafId = window.requestAnimationFrame(countFrame);
     };
+    rafId = window.requestAnimationFrame(countFrame);
 
-    rafId = requestFrame(tick);
+    const intervalId = window.setInterval(() => {
+      if (!active) return;
+      const fps = frameCount / 2;
+      frameCount = 0;
+      const current = Number.isFinite(adaptiveQualityScaleRef.current)
+        ? adaptiveQualityScaleRef.current
+        : 1;
+      let next = current;
+      if (fps < 38) next = Math.max(0.25, current - 0.10);
+      else if (fps > 52) next = Math.min(1, current + 0.05);
+      next = Math.round(next * 100) / 100;
+      if (next !== current) {
+        adaptiveQualityScaleRef.current = next;
+        setAdaptiveQualityScale(next);
+      }
+    }, 2000);
+
     return () => {
-      stopped = true;
-      if (cancelFrame && rafId) cancelFrame(rafId);
+      active = false;
+      window.clearInterval(intervalId);
+      if (rafId && typeof window.cancelAnimationFrame === 'function') window.cancelAnimationFrame(rafId);
     };
   }, [fancyQuality, fancyBenchmarkRunning, mapStyle, viewMode]);
   // Per-dimension feed layout: { "dimKey:nodeId": {col, row} }. Independent of each
@@ -4538,7 +4541,7 @@ function AppInner() {
             } else if (tappedNode?.type === 'health_list') {
               setShowHealthListDetail(tappedNode.listId);
             } else {
-              setSelectedNodeId(nid);
+              openProfileFromNode(nid);
             }
             singleTapTimerRef.current = null;
           }, 520);
@@ -6793,13 +6796,14 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
   }, [fallenLeaves]);
 
 
-  // Smooth animated pan to a canvas coordinate
-  const smoothPanTo = (canvasX, canvasY, targetScale) => {
+  // Smooth animated pan to a canvas coordinate. Optional viewport ratios let
+  // profile-opening transitions leave deliberate space for the person panel.
+  const smoothPanTo = (canvasX, canvasY, targetScale, screenXRatio = 0.5, screenYRatio = 0.5) => {
     if (panRafRef.current) cancelAnimationFrame(panRafRef.current);
     const rect = svgRef.current ? svgRef.current.getBoundingClientRect() : { width: window.innerWidth, height: window.innerHeight };
     const scl = targetScale || transform.scale;
-    const destX = rect.width  / 2 - canvasX * scl;
-    const destY = rect.height / 2 - canvasY * scl;
+    const destX = rect.width  * screenXRatio - canvasX * scl;
+    const destY = rect.height * screenYRatio - canvasY * scl;
     const start = performance.now();
     const dur = 520;
     const fromX = transform.x, fromY = transform.y, fromS = transform.scale;
@@ -6809,11 +6813,67 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
       const e = ease(p);
       const next = { x: fromX + (destX-fromX)*e, y: fromY + (destY-fromY)*e, scale: fromS + (scl-fromS)*e };
       applyTransform(next);
-      setTransform(next);
-      if (p < 1) panRafRef.current = requestAnimationFrame(step);
+      if (p < 1) {
+        panRafRef.current = requestAnimationFrame(step);
+      } else {
+        setTransform(next);
+        panRafRef.current = null;
+      }
     };
     panRafRef.current = requestAnimationFrame(step);
   };
+
+  const getProfileNodeScreenRect = useCallback((node) => {
+    const hostRect = svgRef.current?.getBoundingClientRect?.() || { left:0, top:0 };
+    const size = Math.max(54, Math.min(96, 72 * transform.scale));
+    const cx = hostRect.left + transform.x + (node.x || 0) * transform.scale;
+    const cy = hostRect.top + transform.y + (node.y || 0) * transform.scale;
+    return { left: cx - size/2, top: cy - size/2, width:size, height:size, borderRadius:size/2 };
+  }, [transform]);
+
+  const openProfileFromNode = useCallback((nodeId) => {
+    const node = nodesRef.current.find(n => n.id === nodeId);
+    if (!node || node.type === 'hub' || node.type === 'flower' || node.type === 'health_metric' || node.type === 'health_list') {
+      setSelectedNodeId(nodeId);
+      return;
+    }
+    if (profileTransition) return;
+    clearProfileTransitionTimers();
+    const startRect = getProfileNodeScreenRect(node);
+    const panelWidth = Math.min(320, window.innerWidth * 0.86);
+    const endRect = { left:0, top:0, width:panelWidth, height:window.innerHeight, borderRadius:0 };
+    setProfileTransition({ nodeId, img:node.img || '', label:node.label || '', phase:'open-start', startRect, endRect });
+    smoothPanTo(node.x || 0, node.y || 0, Math.max(transform.scale, 0.85), 0.64, 0.40);
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      setProfileTransition(t => t ? { ...t, phase:'open-end' } : t);
+    }));
+    profileTransitionTimersRef.current.push(setTimeout(() => setSelectedNodeId(nodeId), 390));
+    profileTransitionTimersRef.current.push(setTimeout(() => setProfileTransition(null), 700));
+  }, [profileTransition, clearProfileTransitionTimers, getProfileNodeScreenRect, smoothPanTo, transform.scale]);
+
+  const closeProfileWithTransition = useCallback(() => {
+    const node = nodesRef.current.find(n => n.id === selectedNodeId);
+    if (!node || profileTransition) {
+      setSelectedNodeId(null);
+      setAddFriendForms([]);
+      setShowPhotoOptions(false);
+      return;
+    }
+    clearProfileTransitionTimers();
+    const panelWidth = Math.min(320, window.innerWidth * 0.86);
+    const startRect = { left:0, top:0, width:panelWidth, height:window.innerHeight, borderRadius:0 };
+    const endRect = getProfileNodeScreenRect(node);
+    setProfileTransition({ nodeId:node.id, img:node.img || '', label:node.label || '', phase:'close-start', startRect, endRect });
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      setProfileTransition(t => t ? { ...t, phase:'close-end' } : t);
+      setSelectedNodeId(null);
+      setAddFriendForms([]);
+      setShowPhotoOptions(false);
+    }));
+    profileTransitionTimersRef.current.push(setTimeout(() => setProfileTransition(null), 520));
+  }, [selectedNodeId, profileTransition, clearProfileTransitionTimers, getProfileNodeScreenRect]);
+
+  useEffect(() => () => clearProfileTransitionTimers(), [clearProfileTransitionTimers]);
 
   // Generate mole garden summary from current node scores vs prevScore
   const generateMoleSummary = () => {
@@ -8000,37 +8060,41 @@ Return only the JSON array. If nothing trackable is found, return [].`;
   useEffect(() => { if (!liftedNodeId && !dragNode) frozenPerchesRef.current = creaturePerches; }, [creaturePerches, liftedNodeId, dragNode]);
 
 
-  // Initialise / maintain a population of creatures spread across ALL perches
+  // Initialise / maintain a population of creatures spread across ALL perches.
+  // Uses a ref-backed direct update rather than a functional state callback;
+  // this avoids Android WebView/minified callback failures when quality changes.
   useEffect(() => {
-    // Don't repopulate while creatures are mid-flee (away). Allow the position
-    // update once the return begins so they fly toward their NEW spots, while the
-    // hidden-ref + fly-in opacity keep the repositioning frame invisible.
     if (creaturesAway) return;
-    if (creaturePerches.length === 0) { setCreatures([]); return; }
-    setCreatures(prev => {
-      // Aim for roughly one creature per 1.5 perches, so they cover the whole
-      // tree (every group/person), not just a few.
-      const target = Math.max(2, Math.round(creaturePerches.length * 0.6 * fancyQualityConfig.creatureDensity));
-      const prevByKey = {};
-      prev.forEach(c => { if (!c.flying) prevByKey[c.perchKey] = c; });
-      // spread: walk through perches in order, keep/create a creature on a
-      // proportional subset so they're distributed everywhere
-      const step = creaturePerches.length / target;
-      const next = [];
-      const usedKeys = new Set();
-      for (let i = 0; i < target; i++) {
-        const p = creaturePerches[Math.floor(i * step) % creaturePerches.length];
-        if (!p || usedKeys.has(p.key)) continue;
-        usedKeys.add(p.key);
-        const existing = prevByKey[p.key];
-        if (existing) {
-          next.push({ ...existing, x: p.x, y: p.y, angle: p.angle || 0, trend: p.trend, level: p.level });
-        } else {
-          next.push({ id: `cr-${p.key}`, perchKey: p.key, x: p.x, y: p.y, angle: p.angle || 0, flying: false, trend: p.trend, level: p.level, jitter: Math.random() });
-        }
-      }
-      return next;
-    });
+    if (!Array.isArray(creaturePerches) || creaturePerches.length === 0) {
+      creaturesRef.current = [];
+      setCreatures([]);
+      return;
+    }
+
+    const previous = Array.isArray(creaturesRef.current) ? creaturesRef.current : [];
+    const density = Number.isFinite(fancyQualityConfig.creatureDensity)
+      ? fancyQualityConfig.creatureDensity
+      : 1;
+    const target = Math.max(2, Math.round(creaturePerches.length * 0.6 * density));
+    const prevByKey = Object.create(null);
+    for (const creature of previous) {
+      if (creature && !creature.flying && creature.perchKey) prevByKey[creature.perchKey] = creature;
+    }
+
+    const step = creaturePerches.length / target;
+    const next = [];
+    const usedKeys = new Set();
+    for (let i = 0; i < target; i++) {
+      const perch = creaturePerches[Math.floor(i * step) % creaturePerches.length];
+      if (!perch || usedKeys.has(perch.key)) continue;
+      usedKeys.add(perch.key);
+      const existing = prevByKey[perch.key];
+      next.push(existing
+        ? { ...existing, x: perch.x, y: perch.y, angle: perch.angle || 0, trend: perch.trend, level: perch.level }
+        : { id: `cr-${perch.key}`, perchKey: perch.key, x: perch.x, y: perch.y, angle: perch.angle || 0, flying: false, trend: perch.trend, level: perch.level, jitter: Math.random() });
+    }
+    creaturesRef.current = next;
+    setCreatures(next);
   }, [creaturePerches, creaturesAway, creaturesReturning, fancyQualityConfig.creatureDensity]);
 
 
@@ -9644,6 +9708,32 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       )}
 
 
+      {profileTransition && (() => {
+        const opening = profileTransition.phase === 'open-end';
+        const closingEnd = profileTransition.phase === 'close-end';
+        const useEnd = opening || closingEnd;
+        const rect = useEnd ? profileTransition.endRect : profileTransition.startRect;
+        const expanded = profileTransition.phase === 'open-end' || profileTransition.phase === 'close-start';
+        return (
+          <>
+            <div style={{position:'fixed',inset:0,zIndex:69,pointerEvents:'none',
+              background:expanded?'rgba(2,6,23,0.36)':'rgba(2,6,23,0)',
+              transition:'background 480ms ease'}}/>
+            <div aria-hidden="true" style={{position:'fixed',zIndex:70,pointerEvents:'none',overflow:'hidden',
+              left:rect.left,top:rect.top,width:rect.width,height:rect.height,borderRadius:rect.borderRadius,
+              background:theme.darkMode?'#0f172a':'#ffffff',
+              border:'3px solid #10b981',
+              boxShadow:expanded?'0 24px 70px rgba(0,0,0,0.48)':'0 0 0 7px rgba(16,185,129,0.22), 0 10px 30px rgba(0,0,0,0.35)',
+              transform:'translateZ(0)',willChange:'left,top,width,height,border-radius',
+              transition:'left 480ms cubic-bezier(.22,.8,.2,1), top 480ms cubic-bezier(.22,.8,.2,1), width 480ms cubic-bezier(.22,.8,.2,1), height 480ms cubic-bezier(.22,.8,.2,1), border-radius 480ms cubic-bezier(.22,.8,.2,1), box-shadow 480ms ease'}}>
+              {profileTransition.img ? <img src={profileTransition.img} alt="" style={{width:'100%',height:'100%',objectFit:'cover',
+                opacity:expanded?0.10:1,filter:expanded?'blur(2px)':'none',transition:'opacity 300ms ease, filter 300ms ease'}}/> :
+                <div style={{width:'100%',height:'100%',display:'flex',alignItems:'center',justifyContent:'center',fontSize:28,fontWeight:800,color:'#10b981'}}>{(profileTransition.label||'?').slice(0,1)}</div>}
+            </div>
+          </>
+        );
+      })()}
+
       {/* Sidebar — fixed overlay, slides in from left */}
       <div className={`border-r shadow-2xl flex flex-col z-40 transition-all duration-300`}
         style={{
@@ -9673,7 +9763,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             />
           )}
                   {!selectedNode && <div style={{flex:1}}/>}
-          {selectedNode && <button onClick={() => { setSelectedNodeId(null); setAddFriendForms([]); setShowPhotoOptions(false); }} className={`p-1.5 rounded-full flex-shrink-0 ${theme.darkMode ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-200 hover:bg-slate-300'}`}><X className="w-3.5 h-3.5" /></button>}
+          {selectedNode && <button onClick={closeProfileWithTransition} className={`p-1.5 rounded-full flex-shrink-0 ${theme.darkMode ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-200 hover:bg-slate-300'}`}><X className="w-3.5 h-3.5" /></button>}
         </div>
 
 
@@ -11420,7 +11510,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           <rect width="100%" height="100%" fill="url(#bg-grid)" />
 
 
-          <g ref={svgGroupRef} className={`${!fancyDiag.animations ? 'ft-pause-animations' : ''} ${!fancyDiag.filters ? 'ft-disable-filters' : ''}`} transform={`translate(${transform.x}, ${transform.y}) scale(${transform.scale})`}>
+          <g ref={svgGroupRef} className={`${(!fancyDiag.animations || profileTransition) ? 'ft-pause-animations' : ''} ${!fancyDiag.filters ? 'ft-disable-filters' : ''}`} transform={`translate(${transform.x}, ${transform.y}) scale(${transform.scale})`}>
             {/* Background fill — green in light mode (grass texture shows from the Canvas div behind) */}
             <rect x="-50000" y="-50000" width="100000" height="100000"
               fill={theme.darkMode ? '#0f172a' : '#19432a'} fillOpacity={theme.darkMode ? 1 : 0.55} />
@@ -12652,7 +12742,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     return [(
                       <g key={node.id} transform={`translate(${nx},${ny})`}
                         style={{cursor:'pointer'}}
-                        onPointerDown={e => handlePointerDown(e, node)}>
+                        onPointerDown={e => handlePointerDown(e, node.id)}>
                         <rect x={-cw/2} y={-ch/2} width={cw} height={ch} rx={12}
                           fill={dm?'#1e293b':'white'} stroke={color} strokeWidth={isLifted2?3:1.5}
                           filter={isLifted2?'drop-shadow(0 4px 12px rgba(0,0,0,0.4))':undefined}/>
@@ -12677,7 +12767,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   return [(
                     <g key={node.id} transform={`translate(${nx},${ny})`}
                       style={{cursor:'pointer'}}
-                      onPointerDown={e => handlePointerDown(e, node)}>
+                      onPointerDown={e => handlePointerDown(e, node.id)}>
                       <rect x={-pw/2} y={-ph/2} width={pw} height={ph} rx={ph/2}
                         fill={dm?'#1e293b':'white'} stroke={color} strokeWidth={isLifted2?3:1.5}
                         filter={isLifted2?'drop-shadow(0 4px 12px rgba(0,0,0,0.4))':undefined}/>
@@ -12718,7 +12808,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     const cardH = headerH + (isCollapsed2 ? 0 : gridH);
                     return [(
                       <g key={node.id} transform={`translate(${nx},${ny})`} style={{cursor:'pointer'}}
-                        onPointerDown={e => handlePointerDown(e, node)}>
+                        onPointerDown={e => handlePointerDown(e, node.id)}>
                         <rect x={-cardW/2} y={-cardH/2} width={cardW} height={cardH} rx={10}
                           fill={dm?'#1e293b':'white'} stroke={baseColor}
                           strokeWidth={isLifted2?3:2}
@@ -12776,7 +12866,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   return [(
                     <g key={node.id} transform={`translate(${nx},${ny})`}
                       style={{cursor:'pointer'}}
-                      onPointerDown={e => handlePointerDown(e, node)}
+                      onPointerDown={e => handlePointerDown(e, node.id)}
                       onClick={() => setShowHealthListDetail(list.id)}>
                       <rect x={-cw/2} y={-ch/2} width={cw} height={ch} rx={12}
                         fill={dm?'#1e293b':'white'} stroke={baseColor} strokeWidth={isLifted2?3:1.5}
@@ -19776,9 +19866,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     const lvl = FRIENDSHIP_LEVELS.find(l=>l.tier===tier)||FRIENDSHIP_LEVELS[0];
                     return (
                       <div key={n.id} onClick={()=>{
-                        setSelectedNodeId(n.id);
                         setViewMode('canvas');
                         setSearchOpen(false); setSearchQuery('');
+                        setTimeout(() => openProfileFromNode(n.id), 40);
                       }} style={{display:'flex',alignItems:'center',gap:12,padding:'10px 16px',cursor:'pointer',borderBottom:`1px solid ${dm?'#1e293b':'#f8fafc'}`}}
                         onMouseEnter={e=>e.currentTarget.style.background=dm?'#1e293b':'#f8fafc'}
                         onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
