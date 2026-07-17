@@ -1,0 +1,1115 @@
+FRIENDSHIP TREE / FRIENDSHIP FOREST
+DEVELOPMENT HANDOVER, PERFORMANCE HISTORY, TEST RESULTS, IMPLEMENTED CHANGES, KNOWN ISSUES, AND FUTURE ROADMAP
+
+Prepared for: Joe
+Purpose: To brief Claude, Gemini, or another developer/AI with access to the live codebase
+Current app context: Large React / Capacitor Android application, currently centred in one very large App.jsx file
+Approximate scale referenced during development: about 22,000 lines in App.jsx
+Primary platform: Android via Capacitor WebView
+Primary requirement: Preserve existing functionality, visuals, saved data, and compatibility while improving performance and expanding the living-forest concept.
+
+======================================================================
+1. EXECUTIVE SUMMARY
+======================================================================
+
+The app has evolved from a friendship map into a large personal ecosystem application containing:
+
+- A friendship graph with people, groups, health nodes, and life areas
+- Fancy and Simple map modes
+- Stack / feed views
+- Relationship scoring and history
+- Health lists and editable historical records
+- Health Connect data
+- Photos and profile windows
+- Calendar integration
+- Undo/redo, lasso, vine drawing, tools, settings, and search
+- Day/night modes
+- Decorative vines, leaves, butterflies, fireflies, flowers, and group borders
+- A diagnostic benchmark system
+- Early work on adaptive performance modes
+- Early work on person-to-profile camera transitions
+- Many recent fixes to health-list behaviour and Fancy-map performance
+
+The main performance lesson is:
+
+DO NOT GUESS AT THE BOTTLENECK.
+
+The built-in benchmark proved that the expensive systems were not always the visually obvious ones. The benchmark-and-measure workflow produced major gains:
+
+- Group border rendering improved from roughly 4 FPS to around 33-43 FPS
+- Ordinary vine leaves improved from roughly 12 FPS to around 59-73 FPS
+- Vines improved from roughly 31-44 FPS to around 60-63 FPS
+- Surrounding flowers improved from roughly 33 FPS to around 55 FPS
+- Everything enabled improved from roughly 6.7 FPS to around 26.9 FPS
+
+The largest successful architectural change was replacing thousands of repeated SVG objects and repeated raster generation with cached rasterised layers.
+
+Later work on Living Forest adaptive quality and profile-growth transitions produced runtime errors or remained untested. Those features must be reviewed carefully against the actual live code before being trusted.
+
+======================================================================
+2. DEVELOPMENT PRINCIPLES
+======================================================================
+
+1. Preserve 100% of existing functionality unless a deliberate UX change is agreed.
+2. Do not rewrite the entire app at once.
+3. Make one contained change at a time.
+4. Build and test after every change.
+5. Commit every successful change separately.
+6. Benchmark before and after performance changes.
+7. Avoid speculative architecture for graph sizes the app will never reach.
+8. Do not introduce quadtrees, workers, or a custom renderer unless evidence shows they are needed.
+9. Prefer exact root-cause fixes over broad optimisation passes.
+10. Do not make architectural assumptions based only on snippets.
+11. The app currently has no meaningful automated regression suite, so manual testing discipline is essential.
+12. Any large structural split should be preceded by a small regression-test harness.
+
+======================================================================
+3. EARLY PERFORMANCE PLAN AND REPRIORITISATION
+======================================================================
+
+The original broad plan included:
+
+- Lookup Maps instead of repeated nodes.find / links.find / filter calls
+- Memoising vine geometry
+- React.memo
+- Component splitting
+- Viewport culling
+- Spatial indexing
+- Web Workers
+- A custom rendering engine
+- Adaptive quality
+- Undo-history redesign
+- Codebase modularisation
+
+After inspecting the actual code, priorities changed.
+
+Confirmed problems included:
+
+- Every vine performed two full nodes.find scans for its endpoints
+- Every vine performed another links.some scan
+- Vine geometry used expensive trigonometry and SVG construction
+- A broad useMemo dependency array invalidated expensive work
+- The giant App component meant unrelated state changes could trigger extensive work
+- Pan/zoom state could trigger full-component rerenders
+
+Deliberately deprioritised:
+
+- Spatial indexing / quadtrees
+- Web Workers
+- A Figma-style custom rendering engine
+- Large architecture work before fixing known inefficiencies
+
+Reason: the intended map size is likely around 30-50 people, not thousands. Complexity should match actual scale.
+
+======================================================================
+4. VERIFIED FANCY-MAP PERFORMANCE ROOT CAUSES
+======================================================================
+
+The Simple map was smooth while the Fancy map was very laggy. This strongly indicated that core map interaction, basic pan/zoom, and node count were not the primary problem.
+
+Fancy-only systems were isolated:
+
+- Vines
+- Ordinary vine leaves
+- Butterflies / fireflies
+- Under-node fading
+- Surrounding flowers
+- Group borders and border leaves
+- Dark mask
+- Filters and shadows
+- Animation layers
+
+A diagnostics panel was added with independent toggles and an automated benchmark runner.
+
+======================================================================
+5. BENCHMARK SYSTEM
+======================================================================
+
+The benchmark runs each visual layer in two conditions:
+
+1. Stationary test
+2. Automated figure-of-eight camera movement
+
+It records:
+
+- Stationary FPS
+- Moving FPS
+- Moving 95th-percentile frame time
+- Moving jank frames over 33 ms
+- SVG path count
+- SVG circle count
+- SVG group count
+
+A Clear Benchmark Data button was added because old results were accidentally copied.
+
+Recommended improvement: include app version, build timestamp, device model, Android version, and git commit hash in every benchmark report.
+
+======================================================================
+6. BENCHMARK HISTORY
+======================================================================
+
+----------------------------------------------------------------------
+6.1 INITIAL BENCHMARK
+Timestamp: 2026-07-15T18:44:20.505Z
+----------------------------------------------------------------------
+
+Test | Stationary FPS | Moving FPS | p95 ms | Jank >33ms | Paths | Circles | Groups
+
+Everything off | 100.4 | 64.0 | 25.0 | 2/289 | 93 | 144 | 190
+Vines only | 98.6 | 36.9 | 50.3 | 37/166 | 343 | 144 | 241
+Leaves only | 70.5 | 25.9 | 75.0 | 60/117 | 2582 | 427 | 1495
+Butterflies/fireflies static | 71.2 | 37.9 | 41.7 | 24/170 | 190 | 1114 | 1354
+Butterflies/fireflies animated | 67.0 | 48.3 | 33.3 | 7/218 | 190 | 1114 | 1354
+Under-node fading + vines | 76.4 | 52.3 | 41.6 | 17/235 | 379 | 144 | 241
+Surround flowers only | 61.4 | 38.7 | 41.6 | 23/175 | 365 | 416 | 483
+Group borders + border leaves | 3.2 | 3.5 | 349.4 | 14/15 | 129 | 1242 | 214
+Dark mask only | 60.1 | 41.0 | 49.9 | 34/186 | 93 | 250 | 193
+Dark mask + animated creatures | 48.3 | 44.2 | 33.4 | 12/200 | 190 | 1220 | 1357
+Filters/shadows only | 75.4 | 63.8 | 25.0 | 3/288 | 93 | 144 | 190
+Everything enabled | 3.6 | 3.5 | 333.1 | 16/16 | 2559 | 2783 | 2671
+
+Interpretation:
+- Group borders were catastrophic.
+- Leaves were the next major bottleneck.
+- Vines were significant but not dominant.
+- Filters/shadows alone were not a major problem.
+- Butterflies/fireflies were expensive but not the worst layer.
+- Full-map performance matching group-border-only performance proved group borders dominated total frame time.
+
+----------------------------------------------------------------------
+6.2 FIRST GROUP-BORDER ATTEMPT
+Timestamp: 2026-07-15T19:31:13.648Z
+----------------------------------------------------------------------
+
+A filtered metaball-style border fill was replaced with a single closed path.
+
+Result:
+- Circle count dropped dramatically
+- FPS did not materially improve
+- Group borders remained around 4 FPS
+
+Relevant result:
+Group borders + border leaves | 3.6 stationary | 4.0 moving | 317.2 ms p95 | 141 paths | 144 circles | 202 groups
+
+Conclusion:
+The Gaussian blur / threshold fill was not the dominant bottleneck. The benchmark disproved the initial theory.
+
+----------------------------------------------------------------------
+6.3 ACTUAL GROUP-BORDER FIX
+Timestamp: 2026-07-15T20:00:11.425Z
+----------------------------------------------------------------------
+
+Actual root cause:
+Every render recreated an off-screen canvas for each group, redrew all border leaves, and PNG-encoded the canvas using toDataURL().
+
+Fix:
+Cache each group’s rasterised border-leaf image. Regenerate only when group geometry or relevant appearance changes.
+
+Results:
+
+Everything off | 88.3 | 62.0 | 25.1 | 7/279 | 93 | 144 | 190
+Group borders + border leaves | 65.2 | 33.6 | 50.0 | 44/152 | 141 | 144 | 202
+Everything enabled | 10.5 | 6.7 | 341.6 | 16/31 | 2571 | 1685 | 2659
+
+Interpretation:
+- Group borders improved from about 4 FPS to 33.6 FPS
+- Roughly an 8x improvement
+- Ordinary leaves became the next dominant bottleneck
+
+----------------------------------------------------------------------
+6.4 ORDINARY LEAF RASTERISATION
+Timestamp: 2026-07-15T20:40:01.355Z
+----------------------------------------------------------------------
+
+Fix:
+Rasterise and cache each vine’s foliage into one image instead of rendering thousands of nested SVG groups and paths.
+
+Results:
+
+Everything off | 106.5 | 74.0 | 25.0 | 1/333 | 93 | 144 | 190
+Vines only | 80.9 | 44.3 | 49.9 | 26/199 | 343 | 144 | 241
+Leaves only | 80.9 | 72.6 | 25.0 | 3/326 | 112 | 144 | 210
+Butterflies/fireflies static | 73.7 | 40.6 | 41.6 | 27/183 | 190 | 1114 | 1354
+Butterflies/fireflies animated | 79.2 | 53.3 | 33.3 | 6/241 | 190 | 1114 | 1354
+Under-node fading + vines | 82.4 | 56.7 | 33.4 | 15/256 | 379 | 144 | 241
+Surround flowers only | 65.9 | 42.5 | 41.6 | 22/191 | 365 | 416 | 483
+Group borders + border leaves | 66.8 | 38.6 | 41.7 | 29/174 | 141 | 144 | 202
+Dark mask only | 77.7 | 43.1 | 49.9 | 35/194 | 93 | 250 | 193
+Dark mask + animated creatures | 56.7 | 50.2 | 33.3 | 8/227 | 190 | 1220 | 1357
+Filters/shadows only | 80.8 | 70.2 | 25.0 | 2/316 | 93 | 144 | 190
+Everything enabled | 24.4 | 22.2 | 75.0 | 68/100 | 811 | 1488 | 1729
+
+Interpretation:
+- Leaves improved from roughly 12-26 FPS to 72.6 FPS
+- SVG paths dropped from around 2,582 to 112
+- SVG groups dropped from around 1,495 to 210
+- Everything enabled improved from about 6.7 FPS to 22.2 FPS
+
+----------------------------------------------------------------------
+6.5 VINE RASTERISATION
+Timestamp: 2026-07-15T21:12:00.583Z
+----------------------------------------------------------------------
+
+Fix:
+Rasterise and cache completed multi-strand vines. Keep newly growing vines in SVG so growth animation still works.
+
+Results:
+
+Everything off | 77.5 | 58.6 | 25.1 | 2/264 | 93 | 144 | 190
+Vines only | 78.5 | 60.6 | 25.1 | 4/272 | 93 | 144 | 191
+Leaves only | 79.0 | 59.2 | 33.3 | 6/266 | 112 | 144 | 210
+Butterflies/fireflies static | 67.9 | 33.6 | 58.2 | 45/151 | 190 | 1114 | 1354
+Butterflies/fireflies animated | 70.0 | 42.4 | 41.6 | 19/191 | 190 | 1114 | 1354
+Under-node fading + vines | 87.6 | 63.2 | 25.1 | 4/284 | 93 | 144 | 196
+Surround flowers only | 64.4 | 32.8 | 58.4 | 42/148 | 365 | 416 | 483
+Group borders + border leaves | 66.7 | 33.6 | 50.0 | 42/151 | 141 | 144 | 202
+Dark mask only | 77.4 | 41.1 | 50.0 | 39/185 | 93 | 250 | 193
+Dark mask + animated creatures | 45.9 | 39.7 | 41.7 | 27/180 | 190 | 1220 | 1357
+Filters/shadows only | 79.0 | 60.8 | 25.0 | 3/274 | 93 | 144 | 190
+Everything enabled | 22.4 | 19.6 | 91.7 | 60/89 | 525 | 1488 | 1684
+
+Interpretation:
+- Vines improved from about 44.3 FPS to 60.6 FPS
+- Under-node fading + vines became effectively solved
+- SVG path count dropped heavily
+- Full-map FPS did not improve, proving another system had become dominant
+
+----------------------------------------------------------------------
+6.6 SURROUNDING-FLOWER RASTERISATION
+Timestamp: 2026-07-15T21:25:14.565Z
+----------------------------------------------------------------------
+
+Fix:
+Rasterise and cache surrounding person flowers. Add quality presets controlling decorative density and raster resolution.
+
+Results:
+
+Everything off | 78.8 | 67.3 | 16.8 | 0/303 | 93 | 144 | 190
+Vines only | 68.2 | 63.3 | 25.0 | 0/285 | 93 | 144 | 191
+Leaves only | 64.3 | 58.6 | 25.0 | 0/264 | 112 | 144 | 210
+Butterflies/fireflies static | 56.7 | 42.1 | 33.3 | 9/189 | 190 | 1114 | 1354
+Butterflies/fireflies animated | 54.3 | 41.4 | 33.4 | 10/187 | 190 | 1114 | 1354
+Under-node fading + vines | 66.4 | 65.5 | 16.8 | 1/295 | 93 | 144 | 196
+Surround flowers only | 53.2 | 54.5 | 25.0 | 0/245 | 93 | 144 | 190
+Group borders + border leaves | 59.2 | 42.7 | 33.4 | 10/192 | 141 | 144 | 202
+Dark mask only | 69.5 | 49.3 | 41.6 | 17/221 | 93 | 250 | 193
+Dark mask + animated creatures | 41.4 | 38.2 | 41.6 | 20/173 | 190 | 1220 | 1357
+Filters/shadows only | 77.0 | 67.5 | 16.8 | 1/303 | 93 | 144 | 190
+Everything enabled | 26.9 | 26.9 | 58.3 | 58/122 | 257 | 1220 | 1395
+
+Interpretation:
+- Surround flowers improved from about 32.8 FPS to 54.5 FPS
+- Everything enabled improved from about 19.6 FPS to 26.9 FPS
+- SVG paths dropped to 257
+- Remaining heavy systems were butterflies/fireflies, group borders, and dark-mask interaction
+
+======================================================================
+7. SUCCESSFUL HEALTH-LIST WORK
+======================================================================
+
+7.1 Stack health lists were unresponsive
+
+Symptoms:
+- Health lists could not be clicked in Stack view
+- Map view worked correctly
+- Stack view could appear to retain yesterday’s status
+
+First attempted theory:
+Pointer capture / drag timers. This did not solve it.
+
+Actual root cause:
+Health-list cards were visually rendered much lower than the Health section’s declared height. Following Stack sections overlapped them invisibly and captured taps.
+
+Fix:
+Correct the Health section height to include the health-list grid.
+
+Result:
+Health lists became interactive.
+
+7.2 Stack health-list alignment
+
+Problem:
+Visible card position, connector anchor, drag grid, and section height used different vertical coordinate systems.
+
+Fix:
+Use one shared vertical origin for:
+- Visible card
+- Connection line
+- Drag/drop
+- Section height
+
+Result:
+Alignment became much better.
+
+7.3 Larger buttons and configurable columns
+
+Requested:
+- Larger touch targets
+- About six buttons per row
+- Icons about 20% smaller
+
+Refinement:
+Each list should independently support 1-6 columns.
+
+Implemented:
+- Per-list column setting from 1 to 6
+- Automatic wrapping
+- 1-column, 2-column, 3-column, etc. cards can coexist
+- Six-lane packing grid for Stack layout
+
+7.4 Drag error
+
+Error:
+ReferenceError: healthListMembers is not defined
+
+Cause:
+Scope/name error in drag collision logic.
+
+Fix:
+Rebuild the relevant member collection inside drag scope.
+
+7.5 Editable previous-day history
+
+Feature:
+- Lock/unlock toggle in history window
+- Locked: display-only
+- Unlocked: historical squares tappable
+- Values cycle upward
+- Completed value wraps to zero
+- Numbers appear only while unlocked
+- Closing automatically locks editing
+- Uses existing habitHistory and habitToday persistence
+
+User confirmed this worked very well.
+
+7.6 Fancy-map health-list dragging
+
+Bug:
+Health cards called the drag handler with the entire node object, while the handler expected node.id.
+
+Fix:
+Pass node.id for health lists and health metric cards.
+
+Status:
+Implemented but not yet tested by the user.
+
+======================================================================
+8. STORAGE WARNING
+======================================================================
+
+Warning:
+“Persistent storage denied by Android - data may be at risk of being cleared”
+
+Cause:
+navigator.storage.persist() is a browser API. Capacitor Android WebView may return false or not support it even while app-private storage works normally.
+
+Fix direction:
+- Skip browser persistence warning in native Capacitor builds
+- Keep browser persistence request silent for browser builds
+- Preserve localStorage, IndexedDB, Preferences, and photo/file backup systems
+
+Important:
+The warning was misleading, but the broader persistence system still deserves long-term review.
+
+======================================================================
+9. LIVING FOREST / ADAPTIVE QUALITY
+======================================================================
+
+Suggested quality modes:
+
+- Lush Forest / Ultra
+- Woodland / High
+- Meadow / Balanced
+- Sapling / Performance
+- Living Forest / Adaptive
+
+Intended adaptive behaviour:
+
+- Target around 45 FPS
+- Use a rolling FPS average
+- Reduce decorative density when FPS stays low
+- Restore detail gradually when FPS recovers
+- Initially adjust only butterflies/fireflies and surrounding flowers
+- Clamp quality scale between 25% and 100%
+- Pause during benchmark runs
+- Never alter saved relationship data
+
+Problems encountered:
+
+1. ReferenceError caused by reading mapStyle before initialization
+2. TypeError: o is not a function when switching to Living Forest
+3. The error persisted after multiple callback/state-loop changes
+
+Conclusion:
+Adaptive mode is not trustworthy yet. Inspect the live code directly and stop patching blindly.
+
+Recommended next action:
+- Revert or disable Living Forest if necessary
+- Use an unminified development build and capture the real stack trace
+- Inspect the quality click handler, quality state, creature rebuild effect, and adaptive loop
+- Replace anonymous/minified callback chains with named functions
+- Test each quality mode separately
+
+======================================================================
+10. PROFILE-GROWTH TRANSITION
+======================================================================
+
+Design goal when tapping a person in Fancy map:
+
+- Camera drifts towards them
+- Person is framed around 40% down the screen
+- Decorative animations temporarily freeze
+- Portrait gets a highlight ring
+- Ring expands toward the existing profile panel
+- Existing profile panel cross-fades in
+- Closing reverses the transition
+
+Implementation advice:
+Use a shared-element illusion:
+- Temporary clone starts at the person’s screen position
+- Final profile remains a fixed-position normal React panel
+- Do not keep interactive text inside a scaled SVG
+
+Status:
+A first implementation was produced but not tested.
+
+Risk:
+This touches camera state, profile state, search, animation freezing, and gestures.
+
+======================================================================
+11. NAVIGATION DESIGN
+======================================================================
+
+Major concept:
+The forest should feel like a place, not a canvas.
+
+Proposed navigation:
+
+- When zoomed into a neighbourhood, off-screen people/groups appear as directional edge buttons
+- Each button appears on the edge in the direction of the destination
+- Tapping smoothly pans/zooms to that destination
+- Start with no more than one primary destination per edge
+- Keep free dragging for exploration and editing
+
+Navigation hierarchy:
+
+1. Navigate to an area / neighbourhood
+2. Explore local people/groups
+3. Tap a person
+4. Grow their profile from their portrait
+
+Potential future features:
+
+- Breadcrumb history
+- Follow-the-path navigation along vines
+- Glowing route vines
+- Camera easing
+- Destination pre-rendering
+- Freeze off-screen areas during travel
+- Reduce decoration during travel
+- Restore quality near arrival
+- Group framing based on bounding box
+- Person framing at closer zoom
+- Health-list destination framing
+
+Recommended first navigation version:
+
+- Directly connected people/groups only
+- Up to four edge buttons
+- Straight-line eased movement
+- No complex path-following yet
+
+======================================================================
+12. PRODUCT VISION: CULTIVATION, NOT PUNISHMENT
+======================================================================
+
+The app should make people want to cultivate their life and relationships.
+
+Relationships should not die when attention is low.
+
+Suggested relationship ecosystem states:
+
+Established / quiet:
+- Healthy basic leaves
+- Closed flower buds
+- Few insects
+- Calm appearance
+
+Growing:
+- Buds opening
+- New leaves
+- Occasional bee
+- More colour and movement
+
+Flourishing:
+- Open flowers
+- Rich foliage
+- Bees visiting
+- Butterflies resting nearby
+- Pollen or petal effects
+
+The emotional message should be:
+Nothing is dead. Some areas are simply waiting to flourish.
+
+======================================================================
+13. TWO EXPERIENCES USING THE SAME DATA
+======================================================================
+
+13.1 Quick / practical experience
+
+A Today / Next Steps layer should show:
+
+- What is going well
+- What needs attention
+- The next 1-3 useful actions
+- Recent wins
+- Clear action buttons
+- No need to explore the map
+
+Example:
+- Health: 4 of 6 complete
+- Relationships: 2 people worth contacting
+- Growth: 3-day learning streak
+- Suggested next step: Message Simon
+
+13.2 Immersive forest experience
+
+Positive actions anywhere in the app should visibly affect the forest:
+
+- Health achievements enrich the health area
+- Contacting someone opens flowers or grows foliage
+- Sustained habits produce long-term landscape changes
+- Exploration reveals wildlife and paths
+- Milestones trigger rare visual events
+
+13.3 Progressive disclosure
+
+At a glance:
+- Healthy areas look alive
+- Quiet areas look simpler
+- Important indicators remain readable
+
+Closer zoom:
+- Names and individual status
+- More flowers, wildlife, and history
+
+Profile:
+- Detailed information and actions
+
+13.4 Suggested modes
+
+- Focus: clean dashboard and simple map
+- Living Forest: immersive adaptive experience
+- Hybrid: practical panel over a moderately detailed forest
+
+======================================================================
+14. REWARD DESIGN
+======================================================================
+
+Every meaningful action should produce:
+
+1. A useful result
+2. A clear confirmation
+3. A small immediate visual reward
+4. A lasting visual consequence when repeated
+
+Immediate:
+- Leaf growth
+- Flower opening
+- Gentle glow
+- Bee arrival
+- Prefer under one second
+
+Daily:
+- Today’s growth summary
+- Relevant area appears healthier
+- Dew / light effect
+
+Long-term:
+- Mature flowers
+- Denser foliage
+- Paths
+- Wildlife
+- Seasonal milestones
+- Slow decay, not punitive resets
+
+Avoid:
+- Harsh streak resets
+- Constant red guilt indicators
+- Competitive leaderboards
+- Arbitrary points
+- Random rewards disconnected from real behaviour
+
+======================================================================
+15. ECOSYSTEM IDEAS
+======================================================================
+
+15.1 Bees
+
+Meaning:
+Active care and flourishing relationships.
+
+Behaviour:
+- Attracted to open flowers
+- Occasionally visit growing relationships
+- Pass closed buds
+- Travel between flourishing people in the same group
+- Can arrive after a positive interaction
+- Spend much of their time landed/resting to reduce render cost
+
+Suggested states:
+- Flying
+- Landing
+- Resting
+- Cleaning
+- Takeoff
+
+Minimal data:
+- x
+- y
+- angle
+- targetFlower
+- state
+- timer
+
+15.2 Butterflies
+
+Meaning:
+Joyful recent moments / relationship improvement.
+
+Desired motion:
+- Flutter
+- Drift
+- Glide
+- Turn
+- Avoid straight paths
+- Rest on flowers sometimes
+
+Performance issue:
+Butterflies/fireflies remain one of the largest remaining SVG object counts.
+
+Future options:
+- Shared sprites
+- Canvas layer
+- Adaptive density
+- Lower update rate
+
+15.3 Fireflies
+
+Meaning:
+Night ambience and relationship signals.
+
+Ideas:
+- Keep coloured fireflies because their status meaning is useful
+- Synchronised blinking clusters
+- Background murmuration of low-detail dots
+- Red fireflies can be targeted more by bats, but decorative predation must not hide the underlying relationship status
+
+15.4 Bats
+
+Night-only ambience.
+
+Desired realistic low-cost movement:
+- Glide with wings open
+- Bank by tilting wings
+- Occasional corrective flap
+- Short rapid flap burst during insect chase
+- Wings stop moving during glide
+
+Minimal state:
+- position
+- velocity
+- heading
+- wing phase
+- bank angle
+
+Possible interaction:
+- Occasionally intercept decorative fireflies
+- Prefer red decorative fireflies more often
+- Fireflies replenish
+- Relationship warning remains stable through another indicator
+
+Rendering recommendation:
+- Low-detail silhouettes/shadows
+- Canvas or sprite animation
+- Avoid detailed multi-element SVG bats
+
+15.5 Owl
+
+Rare night event:
+- Large shadow
+- Silent glide
+- No detailed wing animation needed
+- Perhaps once every 5-10 minutes
+- Briefly darkens the map beneath it
+
+15.6 Day birds / swifts
+
+Why swifts:
+- Small silhouette
+- Low detail
+- Fast movement
+- Mostly in flight
+
+Motion:
+- Glide
+- Bank
+- Small flap
+- Fast curved turn
+- Exit screen
+
+Only one or two visible at once.
+
+15.7 Pollen
+
+Day ambience:
+- Low-detail particles
+- Shared wind vector
+- Subtle
+- Should be felt more than consciously noticed
+
+15.8 Background firefly murmuration
+
+Night ambience:
+- Many tiny low-detail dots
+- Coordinated drift
+- Shared field / sine-wave movement
+- No collisions or independent physics
+- Best drawn on Canvas
+
+15.9 Wind
+
+Shared system:
+- windAngle
+- windStrength
+
+Used by:
+- Pollen
+- Leaves
+- Butterflies
+- Bees
+- Bat glides
+- Firefly cloud
+- Other ambient particles
+
+======================================================================
+16. ECOSYSTEM ENGINE PROPOSAL
+======================================================================
+
+Future module:
+EcosystemEngine
+
+Owns:
+- Time of day
+- Season
+- Wind
+- Weather
+- Quality mode
+- Current FPS
+- Camera movement state
+- Creature density
+- Ambient density
+- Visible neighbourhood
+- Performance budget
+
+Recommended rollout:
+
+Phase 1:
+- Define bloom / flourishing state
+- No creatures yet
+
+Phase 2:
+- Add bees
+
+Phase 3:
+- Add day ambience: pollen and swifts
+
+Phase 4:
+- Add night ambience: firefly cloud and bat shadows
+
+Phase 5:
+- Add rare owl event
+
+Phase 6:
+- Add seasons/weather only after performance is stable
+
+Do not implement all creatures at once.
+
+======================================================================
+17. PERFORMANCE QUALITY SYSTEM
+======================================================================
+
+Suggested modes:
+
+- Lush Forest / Ultra
+- Woodland / High
+- Meadow / Balanced
+- Sapling / Performance
+- Living Forest / Adaptive
+
+Each mode can control:
+
+- Creature density
+- Flower density
+- Pollen density
+- Firefly-cloud density
+- Raster resolution
+- Animation update frequency
+- Rare ambience availability
+
+Adaptive mode should:
+
+- Target a stable FPS
+- Adjust slowly
+- Reduce only decorative systems
+- Never affect functionality
+- Pause during benchmark
+- Use hysteresis to avoid oscillation
+- Use named update functions and refs
+- Be tested in an unminified development build
+
+Example density:
+
+Ultra: 100%
+High: 75%
+Balanced: 50%
+Performance: 25-30%
+Adaptive: continuously selects roughly 25-100%
+
+======================================================================
+18. RECOMMENDED RENDERING ARCHITECTURE FOR AMBIENCE
+======================================================================
+
+Do not add hundreds of new React/SVG nodes.
+
+Keep in React/SVG:
+- Interactive people
+- Groups
+- Health cards
+- Profile elements
+- Clickable controls
+
+Keep as cached raster images:
+- Vines
+- Ordinary leaves
+- Group border leaves
+- Surrounding flowers
+
+Put continuously moving decorative ambience on one or a few Canvas layers:
+- Bees
+- Butterflies
+- Fireflies
+- Background firefly cloud
+- Bats
+- Owl shadow
+- Swifts
+- Pollen
+- Wind particles
+
+Benefits:
+- Thousands of sprites can be drawn cheaply
+- No React rerender every frame
+- No SVG DOM explosion
+- Easy density control
+- Easy camera culling
+- Easy freeze/pause during camera travel
+
+Suggested update rates:
+- Butterflies: 30 FPS
+- Fireflies: 20-30 FPS
+- Background cloud: 15-20 FPS
+- Pollen: 15 FPS
+- Swifts / bats: 30 FPS
+- Owl: event-driven
+
+======================================================================
+19. CURRENT UNVERIFIED OR BROKEN AREAS
+======================================================================
+
+Must be checked in the live code:
+
+1. Living Forest performance mode still produced:
+   TypeError: o is not a function
+
+2. Storage-warning fix should be verified.
+
+3. Fancy-map health-list dragging was implemented but not tested.
+
+4. Person-to-profile growth transition was implemented but not tested.
+
+5. Performance switching should be tested across all modes.
+
+6. Generated patches should be diffed against the actual live App.jsx before use.
+
+7. The giant single file increases temporal-dead-zone, scope, and callback errors.
+
+======================================================================
+20. IMMEDIATE NEXT STEPS
+======================================================================
+
+Recommended order:
+
+1. Stabilise the current build
+- Fix or disable Living Forest until the exact error is understood
+- Test storage warning
+- Test Fancy-map health-list dragging
+- Test profile growth transition
+
+2. Add versioned benchmark output
+- App version
+- Git commit hash
+- Quality mode
+- Device model
+- Android version
+- Build timestamp
+
+3. Add lightweight regression tests
+At minimum:
+- getLocalDateStr
+- Health-history value cycling
+- Health-list column calculations
+- Health-list drag-position calculations
+- Quality preset lookup
+- Relationship bloom-state calculation
+- Save/load compatibility
+
+4. Implement bloom states
+- Established
+- Growing
+- Flourishing
+
+5. Implement one Canvas ambience layer
+- Start with bees or pollen
+- Do not add several creatures in one patch
+
+6. Benchmark again
+
+======================================================================
+21. RECOMMENDED FIRST ECOSYSTEM IMPLEMENTATION
+======================================================================
+
+A. Relationship bloom-state selector
+
+Inputs:
+- Current relationship score
+- Recent interaction trend
+- Recent positive actions
+- Optional stability period
+
+Outputs:
+- established
+- growing
+- flourishing
+
+B. Flower openness
+
+- Established: closed bud
+- Growing: partially open
+- Flourishing: open
+
+C. Bees
+
+- Spawn only for open flowers
+- Cap visible bees per neighbourhood
+- Use Canvas
+- Density controlled by quality mode
+- No effect on saved relationship score
+
+D. Benchmark additions
+
+- Bees only
+- Pollen only
+- Swifts only
+- Bats only
+- Background firefly cloud only
+- All ambience enabled
+
+======================================================================
+22. GIT / BUILD WORKFLOW
+======================================================================
+
+Typical PowerShell workflow:
+
+cd C:\Users\Joe\FriendshipTree
+
+git pull
+git add src\App.jsx
+git commit -m "DESCRIBE THE CHANGE CLEARLY"
+git push
+
+npx vite build --base=./
+npx cap copy android
+cd android
+.\gradlew assembleDebug
+& "C:\Users\Joe\AppData\Local\Android\Sdk\platform-tools\adb.exe" install app\build\outputs\apk\debug\app-debug.apk
+cd ..
+
+Recommended additions:
+
+- Run git diff before commit
+- Use a development build first for runtime errors
+- Enable source maps
+- Capture full stack trace
+- Tag benchmark commits
+- Keep a backup branch before major rendering changes
+
+======================================================================
+23. IMPORTANT LESSONS FOR THE NEXT DEVELOPER / AI
+======================================================================
+
+1. Benchmark data is more trustworthy than visual intuition.
+2. Reducing SVG count alone may not help if expensive canvas encoding still runs.
+3. Cache keys must include only values that affect output.
+4. Do not include pan/zoom transform in geometry memo dependencies unless geometry truly depends on it.
+5. Never call toDataURL() repeatedly during ordinary renders.
+6. Avoid creating off-screen canvases inside hot render paths.
+7. A huge React component increases initialization-order and scope errors.
+8. Functional state callbacks were implicated in minified runtime errors; use named testable updates.
+9. Any adaptive loop must be isolated and cleaned up carefully.
+10. The app’s future strength is the emotional model of cultivating a living forest.
+
+======================================================================
+24. PRODUCT NORTH STAR
+======================================================================
+
+The app should make users think:
+
+“I wonder how my forest is doing today.”
+
+Not:
+
+“What task have I failed to complete?”
+
+The visual world should reflect:
+
+- Attention
+- Growth
+- Stability
+- Flourishing
+- Opportunity
+- Positive self-care
+- Meaningful relationships
+
+Quiet areas should feel dormant or waiting, not dead.
+Flourishing areas should attract life.
+Progress should be visible.
+Quick users should receive clear practical guidance.
+Immersive users should feel rewarded for exploring and cultivating.
+
+======================================================================
+25. FINAL RECOMMENDATION
+======================================================================
+
+Before adding the full ecosystem:
+
+- Stabilise the current code
+- Confirm the last untested patches
+- Fix the performance-mode crash with a real stack trace
+- Add basic regression tests
+- Add one named EcosystemEngine module
+- Implement bloom state and one Canvas creature
+- Benchmark after each layer
+
+Do not add bees, bats, swifts, owl, firefly clouds, pollen, seasons, and weather in one change.
+
+Build the forest one living system at a time.

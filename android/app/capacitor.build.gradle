@@ -12,7 +12,12 @@ dependencies {
     implementation project(':capacitor-community-contacts')
     implementation project(':capacitor-app')
     implementation project(':capacitor-app-launcher')
+    implementation project(':capacitor-browser')
     implementation project(':capacitor-local-notifications')
+    implementation project(':capacitor-preferences')
+    implementation project(':capgo-capacitor-calendar')
+    implementation project(':capgo-capacitor-health')
+    implementation project(':capgo-capacitor-social-login')
 
 }
 

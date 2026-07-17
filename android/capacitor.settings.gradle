@@ -11,5 +11,20 @@ project(':capacitor-app').projectDir = new File('../node_modules/@capacitor/app/
 include ':capacitor-app-launcher'
 project(':capacitor-app-launcher').projectDir = new File('../node_modules/@capacitor/app-launcher/android')
 
+include ':capacitor-browser'
+project(':capacitor-browser').projectDir = new File('../node_modules/@capacitor/browser/android')
+
 include ':capacitor-local-notifications'
 project(':capacitor-local-notifications').projectDir = new File('../node_modules/@capacitor/local-notifications/android')
+
+include ':capacitor-preferences'
+project(':capacitor-preferences').projectDir = new File('../node_modules/@capacitor/preferences/android')
+
+include ':capgo-capacitor-calendar'
+project(':capgo-capacitor-calendar').projectDir = new File('../node_modules/@capgo/capacitor-calendar/android')
+
+include ':capgo-capacitor-health'
+project(':capgo-capacitor-health').projectDir = new File('../node_modules/@capgo/capacitor-health/android')
+
+include ':capgo-capacitor-social-login'
+project(':capgo-capacitor-social-login').projectDir = new File('../node_modules/@capgo/capacitor-social-login/android')

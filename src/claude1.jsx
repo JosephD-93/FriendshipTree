@@ -201,321 +201,6 @@ const MONTH_COLORS = [
 const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 
-// Group-border leaves are rasterised for Android performance. Cache the
-// resulting data URL so ordinary React renders and map movement do not redraw
-// every leaf to a canvas and PNG-encode it again. Entries are invalidated by a
-// signature containing the actual leaf geometry/appearance and zoom-density
-// bucket, so dragging members or changing border settings still rebuilds the
-// image correctly.
-const GROUP_BORDER_LEAF_RASTER_CACHE = new Map();
-const GROUP_BORDER_LEAF_RASTER_CACHE_LIMIT = 48;
-
-function getGroupBorderLeafRaster(cacheKey, leaves) {
-  const cached = GROUP_BORDER_LEAF_RASTER_CACHE.get(cacheKey);
-  if (cached) return cached;
-  if (!leaves.length || typeof document === 'undefined') return null;
-
-  const pad = 60;
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const l of leaves) {
-    minX = Math.min(minX, l.x - pad);
-    minY = Math.min(minY, l.y - l.lw - pad);
-    maxX = Math.max(maxX, l.x + l.lw + pad);
-    maxY = Math.max(maxY, l.y + l.lw + pad);
-  }
-  const width = Math.ceil(maxX - minX);
-  const height = Math.ceil(maxY - minY);
-  if (width < 1 || height < 1) return null;
-
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return null;
-
-  for (const lf of leaves) {
-    ctx.save();
-    ctx.translate(lf.x - minX, lf.y - minY);
-    ctx.rotate(lf.angle * Math.PI / 180);
-    ctx.globalAlpha = lf.opacity;
-    ctx.beginPath();
-    if (lf.bud) {
-      ctx.moveTo(0, 0);
-      ctx.bezierCurveTo(lf.lw * 0.15, -lf.lh * 0.4, lf.lw * 0.7, -lf.lh * 0.35, lf.lw, 0);
-      ctx.bezierCurveTo(lf.lw * 0.7, lf.lh * 0.35, lf.lw * 0.15, lf.lh * 0.4, 0, 0);
-    } else {
-      ctx.moveTo(0, 0);
-      ctx.bezierCurveTo(lf.lw * 0.25, -lf.lh, lf.lw * 0.75, -lf.lh, lf.lw, 0);
-      ctx.bezierCurveTo(lf.lw * 0.75, lf.lh, lf.lw * 0.25, lf.lh, 0, 0);
-    }
-    ctx.closePath();
-    ctx.fillStyle = lf.fill;
-    ctx.fill();
-    ctx.strokeStyle = lf.stroke;
-    ctx.lineWidth = 0.5;
-    ctx.stroke();
-    if (!lf.bud) {
-      ctx.beginPath();
-      ctx.moveTo(lf.lw * 0.05, 0);
-      ctx.lineTo(lf.lw * 0.82, 0);
-      ctx.strokeStyle = lf.stroke;
-      ctx.lineWidth = 0.35;
-      ctx.globalAlpha = lf.opacity * 0.5;
-      ctx.stroke();
-    }
-    ctx.restore();
-  }
-
-  const result = { href: canvas.toDataURL('image/png'), x: minX, y: minY, width, height };
-  if (GROUP_BORDER_LEAF_RASTER_CACHE.size >= GROUP_BORDER_LEAF_RASTER_CACHE_LIMIT) {
-    GROUP_BORDER_LEAF_RASTER_CACHE.delete(GROUP_BORDER_LEAF_RASTER_CACHE.keys().next().value);
-  }
-  GROUP_BORDER_LEAF_RASTER_CACHE.set(cacheKey, result);
-  return result;
-}
-
-// Ordinary connection-vine foliage is also rasterised. A single SVG <image>
-// per vine replaces hundreds of nested <g>/<path> nodes while preserving the
-// same leaf geometry, colour, opacity and midrib detail. This specifically
-// targets Android WebView's high cost when transforming large SVG DOM trees.
-const VINE_LEAF_RASTER_CACHE = new Map();
-const VINE_LEAF_RASTER_CACHE_LIMIT = 160;
-
-function getVineLeafRaster(cacheKey, leaves) {
-  const cached = VINE_LEAF_RASTER_CACHE.get(cacheKey);
-  if (cached) return cached;
-  if (!leaves.length || typeof document === 'undefined') return null;
-
-  const pad = 8;
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const l of leaves) {
-    const reach = Math.max(l.lw, l.lh) + pad;
-    minX = Math.min(minX, l.x - reach);
-    minY = Math.min(minY, l.y - reach);
-    maxX = Math.max(maxX, l.x + reach);
-    maxY = Math.max(maxY, l.y + reach);
-  }
-  const width = Math.max(1, Math.ceil(maxX - minX));
-  const height = Math.max(1, Math.ceil(maxY - minY));
-
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return null;
-
-  for (const lf of leaves) {
-    if (lf.shrivelled) continue;
-    ctx.save();
-    ctx.translate(lf.x - minX, lf.y - minY);
-    ctx.rotate(lf.angle * Math.PI / 180);
-    ctx.globalAlpha = lf.opacity;
-
-    if (lf.bud) {
-      ctx.beginPath();
-      ctx.arc(0, 0, Math.max(1.5, lf.lw * 0.3), 0, Math.PI * 2);
-      ctx.fillStyle = '#bbf7d0';
-      ctx.fill();
-      ctx.strokeStyle = '#4ade80';
-      ctx.lineWidth = 0.4;
-      ctx.stroke();
-    } else {
-      ctx.beginPath();
-      ctx.moveTo(0, 0);
-      ctx.bezierCurveTo(lf.lw * 0.25, -lf.lh, lf.lw * 0.75, -lf.lh, lf.lw, 0);
-      ctx.bezierCurveTo(lf.lw * 0.75, lf.lh, lf.lw * 0.25, lf.lh, 0, 0);
-      ctx.closePath();
-      ctx.fillStyle = lf.fill;
-      ctx.fill();
-      ctx.strokeStyle = lf.stroke;
-      ctx.lineWidth = 0.5;
-      ctx.stroke();
-
-      ctx.beginPath();
-      ctx.moveTo(lf.lw * 0.05, 0);
-      ctx.lineTo(lf.lw * 0.82, 0);
-      ctx.globalAlpha = lf.opacity * 0.5;
-      ctx.lineWidth = 0.35;
-      ctx.stroke();
-    }
-    ctx.restore();
-  }
-
-  const result = { href: canvas.toDataURL('image/png'), x: minX, y: minY, width, height };
-  if (VINE_LEAF_RASTER_CACHE.size >= VINE_LEAF_RASTER_CACHE_LIMIT) {
-    VINE_LEAF_RASTER_CACHE.delete(VINE_LEAF_RASTER_CACHE.keys().next().value);
-  }
-  VINE_LEAF_RASTER_CACHE.set(cacheKey, result);
-  return result;
-}
-
-// Completed vine strands are flattened into one cached bitmap per connection.
-// This removes the remaining multi-path SVG paint cost during pan/zoom while
-// preserving the original strand colours, widths and under-node fade. Newly
-// growing vines stay as SVG so their dash animation remains intact.
-const VINE_STRAND_RASTER_CACHE = new Map();
-const VINE_STRAND_RASTER_CACHE_LIMIT = 160;
-
-function getVineStrandRaster(cacheKey, strands) {
-  const cached = VINE_STRAND_RASTER_CACHE.get(cacheKey);
-  if (cached) return cached;
-  if (!strands.length || typeof document === 'undefined') return null;
-
-  const pad = 14;
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const strand of strands) {
-    const reach = strand.width * 0.5 + pad;
-    for (const seg of strand.segments) for (const p of seg.points) {
-      minX = Math.min(minX, p.x - reach);
-      minY = Math.min(minY, p.y - reach);
-      maxX = Math.max(maxX, p.x + reach);
-      maxY = Math.max(maxY, p.y + reach);
-    }
-  }
-  if (!Number.isFinite(minX)) return null;
-
-  const cssWidth = Math.max(1, Math.ceil(maxX - minX));
-  const cssHeight = Math.max(1, Math.ceil(maxY - minY));
-  // Two device pixels per map unit keeps curved strands crisp at normal zoom
-  // while still being far cheaper to transform than hundreds of SVG paths.
-  const pixelRatio = 2;
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.max(1, cssWidth * pixelRatio);
-  canvas.height = Math.max(1, cssHeight * pixelRatio);
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return null;
-  ctx.scale(pixelRatio, pixelRatio);
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-
-  for (const strand of strands) {
-    ctx.strokeStyle = strand.color;
-    ctx.lineWidth = strand.width;
-    for (const seg of strand.segments) {
-      if (seg.points.length < 2) continue;
-      ctx.globalAlpha = strand.opacity * seg.opacity;
-      ctx.beginPath();
-      ctx.moveTo(seg.points[0].x - minX, seg.points[0].y - minY);
-      for (let j = 1; j < seg.points.length; j++) {
-        ctx.lineTo(seg.points[j].x - minX, seg.points[j].y - minY);
-      }
-      ctx.stroke();
-    }
-  }
-  ctx.globalAlpha = 1;
-
-  const result = { href: canvas.toDataURL('image/png'), x: minX, y: minY, width: cssWidth, height: cssHeight };
-  if (VINE_STRAND_RASTER_CACHE.size >= VINE_STRAND_RASTER_CACHE_LIMIT) {
-    VINE_STRAND_RASTER_CACHE.delete(VINE_STRAND_RASTER_CACHE.keys().next().value);
-  }
-  VINE_STRAND_RASTER_CACHE.set(cacheKey, result);
-  return result;
-}
-
-
-
-// Persistent Fancy-map quality presets. These only change decorative render
-// density/resolution; saved graph data and relationship scores are untouched.
-const FANCY_QUALITY_PRESETS = {
-  adaptive:    { label: 'Living Forest', flowerDensity: 1.00, creatureDensity: 1.00, flowerRasterScale: 1.6, adaptive: true },
-  ultra:       { label: 'Ultra',         flowerDensity: 1.00, creatureDensity: 1.00, flowerRasterScale: 2.0 },
-  high:        { label: 'High',          flowerDensity: 0.75, creatureDensity: 0.75, flowerRasterScale: 1.6 },
-  balanced:    { label: 'Balanced',      flowerDensity: 0.50, creatureDensity: 0.50, flowerRasterScale: 1.25 },
-  performance: { label: 'Performance',   flowerDensity: 0.30, creatureDensity: 0.30, flowerRasterScale: 1.0 },
-};
-
-// Surrounding person flowers are flattened to one cached bitmap per person.
-// This removes hundreds of SVG groups/paths while preserving the same petal,
-// centre, stamen and pistil geometry. The quality preset controls both flower
-// density and raster resolution.
-const SURROUND_FLOWER_RASTER_CACHE = new Map();
-const SURROUND_FLOWER_RASTER_CACHE_LIMIT = 180;
-
-function getSurroundFlowerRaster(cacheKey, flowers, pixelRatio = 1.25) {
-  const cached = SURROUND_FLOWER_RASTER_CACHE.get(cacheKey);
-  if (cached) return cached;
-  if (!flowers.length || typeof document === 'undefined') return null;
-
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const f of flowers) {
-    const reach = f.fpr + Math.max(4, f.fr * 0.8);
-    minX = Math.min(minX, f.x - reach);
-    minY = Math.min(minY, f.y - reach);
-    maxX = Math.max(maxX, f.x + reach);
-    maxY = Math.max(maxY, f.y + reach);
-  }
-  if (!Number.isFinite(minX)) return null;
-  const width = Math.max(1, Math.ceil(maxX - minX));
-  const height = Math.max(1, Math.ceil(maxY - minY));
-  const pr = Math.max(1, Math.min(2, pixelRatio || 1));
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.ceil(width * pr);
-  canvas.height = Math.ceil(height * pr);
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return null;
-  ctx.scale(pr, pr);
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-
-  for (const f of flowers) {
-    ctx.save();
-    ctx.translate(f.x - minX, f.y - minY);
-    ctx.globalAlpha = f.opacity;
-    ctx.beginPath();
-    for (let pi = 0; pi < f.petals; pi++) {
-      const pa = (pi / f.petals) * Math.PI * 2 + f.rotation;
-      const tx = Math.cos(pa) * f.fpr, ty = Math.sin(pa) * f.fpr, pp = pa + Math.PI * 0.5;
-      const cp1x = Math.cos(pa)*f.fpr*f.baseL + Math.cos(pp)*f.fpw*0.6;
-      const cp1y = Math.sin(pa)*f.fpr*f.baseL + Math.sin(pp)*f.fpw*0.6;
-      const cp2x = Math.cos(pa)*f.fpr*f.tipL + Math.cos(pp)*f.fpw*0.5;
-      const cp2y = Math.sin(pa)*f.fpr*f.tipL + Math.sin(pp)*f.fpw*0.5;
-      const cp3x = Math.cos(pa)*f.fpr*f.tipL - Math.cos(pp)*f.fpw*0.5;
-      const cp3y = Math.sin(pa)*f.fpr*f.tipL - Math.sin(pp)*f.fpw*0.5;
-      const cp4x = Math.cos(pa)*f.fpr*f.baseL - Math.cos(pp)*f.fpw*0.6;
-      const cp4y = Math.sin(pa)*f.fpr*f.baseL - Math.sin(pp)*f.fpw*0.6;
-      ctx.moveTo(0, 0);
-      ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, tx, ty);
-      ctx.bezierCurveTo(cp3x, cp3y, cp4x, cp4y, 0, 0);
-    }
-    ctx.fillStyle = f.petalColor;
-    ctx.fill();
-
-    ctx.beginPath();
-    ctx.arc(0, 0, f.fr * 0.22, 0, Math.PI * 2);
-    ctx.fillStyle = f.centerColor;
-    ctx.fill();
-    ctx.strokeStyle = f.petalColor;
-    ctx.lineWidth = 0.5;
-    ctx.stroke();
-
-    if (f.stamenCount > 0) {
-      ctx.strokeStyle = f.stamenColor;
-      ctx.fillStyle = f.stamenColor;
-      ctx.lineWidth = f.fr * 0.06;
-      for (let si = 0; si < f.stamenCount; si++) {
-        const sa = (si / f.stamenCount) * Math.PI * 2;
-        const x2 = Math.cos(sa) * f.stamenLength;
-        const y2 = Math.sin(sa) * f.stamenLength;
-        ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(x2,y2); ctx.stroke();
-        ctx.beginPath(); ctx.arc(x2,y2,f.fr*0.09,0,Math.PI*2); ctx.fill();
-      }
-    }
-    if (f.pistilRadius > 0) {
-      ctx.beginPath(); ctx.arc(0,0,f.pistilRadius,0,Math.PI*2);
-      ctx.fillStyle = f.pistilColor; ctx.fill();
-      ctx.strokeStyle = f.stamenColor; ctx.lineWidth = f.fr*0.04; ctx.stroke();
-    }
-    ctx.restore();
-  }
-
-  const result = { href: canvas.toDataURL('image/png'), x: minX, y: minY, width, height };
-  if (SURROUND_FLOWER_RASTER_CACHE.size >= SURROUND_FLOWER_RASTER_CACHE_LIMIT) {
-    SURROUND_FLOWER_RASTER_CACHE.delete(SURROUND_FLOWER_RASTER_CACHE.keys().next().value);
-  }
-  SURROUND_FLOWER_RASTER_CACHE.set(cacheKey, result);
-  return result;
-}
-
 // Inline SVG avatar data URIs — no network required, no XML comments (breaks JSX)
 const makeAvatar = (bg, skin, hair, extraPath) => {
   // Face-only portrait — no body, no neck, no shoulders
@@ -665,32 +350,14 @@ const DEMO_LINKS = [
 
 
 class ErrorBoundary extends React.Component {
-  constructor(props) { super(props); this.state = { error: null, componentStack: null }; }
+  constructor(props) { super(props); this.state = { error: null }; }
   static getDerivedStateFromError(e) { return { error: e }; }
-  componentDidCatch(error, info) {
-    this.setState({ componentStack: info?.componentStack || null });
-    try {
-      window.ftDiagLog && window.ftDiagLog('[FT-DIAG] RENDER CRASH:', String(error), '\nSTACK:', error?.stack || '(no stack)', '\nCOMPONENT STACK:', info?.componentStack || '(none)');
-    } catch(e) {}
-  }
   render() {
     if (this.state.error) {
       return (
-        <div style={{ padding: 32, fontFamily: 'monospace', background: '#0f172a', color: '#f87171', minHeight: '100vh', overflowY: 'auto' }}>
+        <div style={{ padding: 32, fontFamily: 'monospace', background: '#0f172a', color: '#f87171', minHeight: '100vh' }}>
           <h2 style={{ marginBottom: 16 }}>Render Error — check console</h2>
           <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12 }}>{String(this.state.error)}</pre>
-          {this.state.error?.stack && (
-            <>
-              <h3 style={{ marginTop: 20, marginBottom: 8, fontSize: 13, color: '#fbbf24' }}>Stack trace:</h3>
-              <pre style={{ whiteSpace: 'pre-wrap', fontSize: 10, opacity: 0.85 }}>{this.state.error.stack}</pre>
-            </>
-          )}
-          {this.state.componentStack && (
-            <>
-              <h3 style={{ marginTop: 20, marginBottom: 8, fontSize: 13, color: '#fbbf24' }}>Component stack:</h3>
-              <pre style={{ whiteSpace: 'pre-wrap', fontSize: 10, opacity: 0.85 }}>{this.state.componentStack}</pre>
-            </>
-          )}
         </div>
       );
     }
@@ -1324,10 +991,7 @@ function renderVineLink({
 
   const perpX = -dy / dist;
   const perpY =  dx / dist;
-  // Enough samples to keep the organic curve smooth without producing an
-  // excessive SVG/JS workload on Android WebView. The old minimum of 60
-  // points per strand was visually redundant at normal zoom levels.
-  const STEPS = Math.max(32, Math.min(72, Math.floor(dist / 9)));
+  const STEPS = Math.max(60, Math.floor(dist / 5));
 
   const OCTAVES_MAP = [
     { freq: 1.0,          amp: 0.5,  phase: 0.0 + i * 0.7 },
@@ -1496,90 +1160,73 @@ function renderVineLink({
 
   const splitPathGraded = (pts) => {
     if (blockerCircles.length === 0) {
-      return [{ d: `M ${pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' L ')}`, points: pts, opacity: 1 }];
+      return [{ d: `M ${pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' L ')}`, opacity: 1 }];
     }
-
-    // Keep one SVG path per continuous visible run. Previously every run was
-    // split into 3-point chunks, producing dozens of DOM paths per strand and
-    // hundreds per vine. Android then had to repaint that huge DOM tree during
-    // every pan. Averaging opacity per run retains the under-node fade while
-    // reducing path count by roughly an order of magnitude.
+    const withOpacity = pts.map(p => ({ ...p, o: opacityAt(p.x, p.y) }));
+    const segments = [];
+    let seg = null;
+    for (const p of withOpacity) {
+      if (p.o <= 0.02) { if (seg && seg.length > 1) segments.push(seg); seg = null; }
+      else { if (!seg) seg = []; seg.push(p); }
+    }
+    if (seg && seg.length > 1) segments.push(seg);
     const out = [];
-    let points = [];
-    let opacitySum = 0;
-
-    const flush = () => {
-      if (points.length > 1) {
-        out.push({
-          d: `M ${points.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' L ')}`,
-          points: points.slice(),
-          opacity: opacitySum / points.length,
-        });
-      }
-      points = [];
-      opacitySum = 0;
-    };
-
-    for (const p of pts) {
-      const opacity = opacityAt(p.x, p.y);
-      if (opacity <= 0.02) flush();
-      else {
-        points.push(p);
-        opacitySum += opacity;
+    for (const s of segments) {
+      const chunkSize = 3;
+      for (let ci = 0; ci < s.length - 1; ci += chunkSize) {
+        const chunk = s.slice(ci, Math.min(s.length, ci + chunkSize + 1));
+        if (chunk.length < 2) continue;
+        const avgO = chunk.reduce((sum, p) => sum + p.o, 0) / chunk.length;
+        out.push({ d: `M ${chunk.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' L ')}`, opacity: avgO });
       }
     }
-    flush();
     return out;
   };
 
   const visibleLeaves = blockerCircles.length > 0 ? allLeaves.filter(lf => !ptInBlocker(lf.x, lf.y)) : allLeaves;
-  const leafSignature = visibleLeaves.map(lf =>
-    `${lf.x.toFixed(1)},${lf.y.toFixed(1)},${lf.angle.toFixed(1)},${lf.lw.toFixed(1)},${lf.fill},${lf.opacity.toFixed(2)},${lf.bud?1:0},${lf.shrivelled?1:0}`
-  ).join('|');
-  const foliageRaster = getVineLeafRaster(`${key}|${darkMode?1:0}|${leafSignature}`, visibleLeaves);
-
-  const renderedStrands = activeStrands.map(({ pts, width, role, colorDark, colorLight }) => ({
-    width,
-    color: darkMode ? colorDark : colorLight,
-    opacity: role === 'growing' ? 0.78 : role === 'core' ? 1 : 0.9,
-    segments: splitPathGraded(pts),
-  }));
-  const strandSignature = renderedStrands.map(strand =>
-    `${strand.width.toFixed(2)},${strand.color},${strand.opacity.toFixed(2)}:` +
-    strand.segments.map(seg => `${seg.opacity.toFixed(2)}@${seg.points.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(';')}`).join('/')
-  ).join('|');
-  const strandRaster = dashOffset == null
-    ? getVineStrandRaster(`${key}|${darkMode?1:0}|${strandSignature}`, renderedStrands)
-    : null;
 
   return {
-    vine: strandRaster ? (
-      <image key={`vine-${key}`} href={strandRaster.href}
-        x={strandRaster.x} y={strandRaster.y}
-        width={strandRaster.width} height={strandRaster.height}
-        preserveAspectRatio="none" style={{pointerEvents:'none'}}/>
-    ) : (
+    vine: (
       <g key={`vine-${key}`}>
-        {renderedStrands.map((strand, si) => {
+        {activeStrands.map(({ pts, width, role, colorDark, colorLight }, si) => {
           const pathLen = dist * 1.1;
-          return strand.segments.map((seg, segi) => (
+          const baseOpacity = role === 'growing' ? 0.78 : role === 'core' ? 1 : 0.9;
+          const segs = splitPathGraded(pts);
+          return segs.map((seg, segi) => (
             <path key={`s-${si}-${segi}`} d={seg.d} fill="none"
-              stroke={strand.color}
-              strokeWidth={strand.width} strokeLinejoin="round" strokeLinecap="round"
-              opacity={strand.opacity * seg.opacity}
-              strokeDasharray={pathLen * 3}
-              strokeDashoffset={(pathLen * 3) * (1 - (growingProgress || 0))}
+              stroke={darkMode ? colorDark : colorLight}
+              strokeWidth={width} strokeLinejoin="round" strokeLinecap="round"
+              opacity={baseOpacity * seg.opacity}
+              {...(dashOffset != null ? {
+                strokeDasharray: pathLen * 3,
+                strokeDashoffset: (pathLen * 3) * (1 - (growingProgress || 0)),
+              } : {})}
             />
           ));
         })}
       </g>
     ),
-    foliage: foliageRaster ? (
-      <image key={`foliage-${key}`} href={foliageRaster.href}
-        x={foliageRaster.x} y={foliageRaster.y}
-        width={foliageRaster.width} height={foliageRaster.height}
-        preserveAspectRatio="none" style={{pointerEvents:'none'}}/>
-    ) : null,
+    foliage: (
+      <g key={`foliage-${key}`}>
+        {visibleLeaves.map((lf, li) => {
+          if (lf.shrivelled) return null;
+          if (lf.bud) {
+            return (
+              <circle key={`lf-${li}`} cx={lf.x} cy={lf.y} r={Math.max(1.5, lf.lw * 0.3)}
+                fill="#bbf7d0" stroke="#4ade80" strokeWidth={0.4} opacity={lf.opacity} style={{pointerEvents:'none'}}/>
+            );
+          }
+          const leafD = `M 0,0 C ${lf.lw*0.25},${-lf.lh} ${lf.lw*0.75},${-lf.lh} ${lf.lw},0 C ${lf.lw*0.75},${lf.lh} ${lf.lw*0.25},${lf.lh} 0,0 Z`;
+          const midrib = `M ${lf.lw*0.05},0 L ${lf.lw*0.82},0`;
+          return (
+            <g key={`lf-${li}`} transform={`translate(${lf.x},${lf.y}) rotate(${lf.angle})`} opacity={lf.opacity} style={{pointerEvents:'none'}}>
+              <path d={leafD} fill={lf.fill} stroke={lf.stroke} strokeWidth={0.5}/>
+              <path d={midrib} fill="none" stroke={lf.stroke} strokeWidth={0.35} opacity={0.5}/>
+            </g>
+          );
+        })}
+      </g>
+    ),
   };
 }
 
@@ -2792,33 +2439,33 @@ function AppInner() {
   };
 
 
-  // Browser storage persistence is useful on the web, but Capacitor's Android
-  // WebView commonly returns false/unsupported even though app data is stored in
-  // the application's private sandbox. Treating that as data-loss failure caused
-  // a misleading warning on every native launch. Native durability is handled by
-  // the app's localStorage/IndexedDB plus Capacitor Preferences/photo backups.
+  // On mount — ask the OS to PERSIST our storage so Android doesn't evict
+  // IndexedDB (which is why photos vanished after closing the native app).
   useEffect(() => {
-    const Capacitor = window.Capacitor;
-    const isNative = typeof Capacitor?.isNativePlatform === 'function'
-      ? Capacitor.isNativePlatform()
-      : !!Capacitor?.Plugins;
-
-    if (isNative) {
-      console.log('Browser persistence request skipped in native Capacitor app');
-      return;
-    }
-
     (async () => {
       try {
-        const storage = navigator.storage;
-        if (!storage?.persist) return;
-        const already = storage.persisted ? await storage.persisted() : false;
-        if (!already) {
-          const granted = await storage.persist();
-          console.log('Browser persistent storage:', granted ? 'granted' : 'not granted');
+        if (navigator.storage && navigator.storage.persist) {
+          const already = navigator.storage.persisted ? await navigator.storage.persisted() : false;
+          if (already) {
+            console.log('Persistent storage: already granted');
+            showToast('✅ Persistent storage already granted');
+          } else {
+            const granted = await navigator.storage.persist();
+            console.log('Persistent storage:', granted ? 'granted' : 'denied');
+            // Surface this directly -- if denied, Android can clear app
+            // storage (including localStorage, not just IndexedDB) under
+            // normal storage pressure, which would explain data loss that
+            // has nothing to do with the app-closing timing at all.
+            if (!granted) {
+              showToast('⚠️ Persistent storage denied by Android — data may be at risk of being cleared');
+            }
+          }
+        } else {
+          showToast('⚠️ Persistent storage API not available on this device');
         }
-      } catch (e) {
-        console.warn('Browser storage persistence check failed:', e);
+      } catch(e) {
+        console.warn('storage.persist failed:', e);
+        showToast('⚠️ Storage persistence check failed: ' + e.message);
       }
     })();
   }, []);
@@ -3146,12 +2793,6 @@ function AppInner() {
   const [liftedNodeId, setLiftedNodeId] = useState(null);
   const [hoverTarget, setHoverTarget] = useState(null);
   const [selectedNodeId, setSelectedNodeId] = useState(null);
-  const [profileTransition, setProfileTransition] = useState(null);
-  const profileTransitionTimersRef = useRef([]);
-  const clearProfileTransitionTimers = useCallback(() => {
-    profileTransitionTimersRef.current.forEach(clearTimeout);
-    profileTransitionTimersRef.current = [];
-  }, []);
   useEffect(() => {
     if (!selectedNodeId) { setGalleryItems([]); return; }
     setGalleryLoading(true);
@@ -3161,58 +2802,6 @@ function AppInner() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [showDiagLogViewer, setShowDiagLogViewer] = useState(false);
   const [diagLogText, setDiagLogText] = useState('');
-  const [fancyDiagOpen, setFancyDiagOpen] = useState(false);
-  const [fancyDiag, setFancyDiag] = useState({
-    vines: true, leaves: true, creatures: true, underpass: true,
-    flowers: true, groupBorders: true, darkness: true, filters: true, animations: true,
-  });
-  const [fancyQuality, setFancyQuality] = useState(() => {
-    const saved = localStorage.getItem('ft_fancy_quality') || 'adaptive';
-    return FANCY_QUALITY_PRESETS[saved] ? saved : 'adaptive';
-  });
-  const [adaptiveQualityScale, setAdaptiveQualityScale] = useState(1);
-  const adaptiveQualityScaleRef = useRef(1);
-  const baseFancyQualityConfig = FANCY_QUALITY_PRESETS[fancyQuality] || FANCY_QUALITY_PRESETS.balanced;
-  const fancyQualityConfig = useMemo(() => ({
-    ...baseFancyQualityConfig,
-    flowerDensity: baseFancyQualityConfig.flowerDensity * (baseFancyQualityConfig.adaptive ? adaptiveQualityScale : 1),
-    creatureDensity: baseFancyQualityConfig.creatureDensity * (baseFancyQualityConfig.adaptive ? adaptiveQualityScale : 1),
-  }), [baseFancyQualityConfig, adaptiveQualityScale]);
-  useEffect(() => saveRaw('ft_fancy_quality', fancyQuality), [fancyQuality]);
-  useEffect(() => {
-    if (fancyQuality !== 'adaptive') {
-      adaptiveQualityScaleRef.current = 1;
-      setAdaptiveQualityScale(1);
-    }
-  }, [fancyQuality]);
-  useEffect(() => { adaptiveQualityScaleRef.current = adaptiveQualityScale; }, [adaptiveQualityScale]);
-  const [fancyPerf, setFancyPerf] = useState({ fps: 0, paths: 0, circles: 0, groups: 0, creatures: 0 });
-  const [fancyBenchmarkRunning, setFancyBenchmarkRunning] = useState(false);
-  const [fancyBenchmarkStatus, setFancyBenchmarkStatus] = useState('');
-  const [fancyBenchmarkResults, setFancyBenchmarkResults] = useState(() => loadData('ft_fancy_benchmark_results', []));
-  const fancyBenchmarkCancelRef = useRef(false);
-
-  useEffect(() => {
-    if (!fancyDiagOpen || fancyBenchmarkRunning) return;
-    let raf = 0, frames = 0, last = performance.now();
-    const tick = (now) => {
-      frames++;
-      if (now - last >= 500) {
-        const root = svgGroupRef.current;
-        setFancyPerf({
-          fps: Math.round(frames * 1000 / (now - last)),
-          paths: root?.querySelectorAll('path').length || 0,
-          circles: root?.querySelectorAll('circle').length || 0,
-          groups: root?.querySelectorAll('g').length || 0,
-          creatures: fancyDiag.creatures ? creatures.length : 0,
-        });
-        frames = 0; last = now;
-      }
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [fancyDiagOpen, fancyDiag.creatures, fancyBenchmarkRunning]);
   useEffect(() => {
     if (!showDiagLogViewer) return;
     setDiagLogText('Loading…');
@@ -3239,8 +2828,6 @@ function AppInner() {
   // Butterflies (day) / fireflies (night) perched on flowers & photo edges.
   // Each: {id, perchKey, x, y, flying, fromX, fromY, toX, toY, flightStart}
   const [creatures, setCreatures] = useState([]);
-  const creaturesRef = useRef([]);
-  useEffect(() => { creaturesRef.current = Array.isArray(creatures) ? creatures : []; }, [creatures]);
   const [creaturesAway, setCreaturesAway] = useState(false);
   const [creaturesReturning, setCreaturesReturning] = useState(false);
   const scarePointRef = useRef({ x: 0, y: 0 });
@@ -3290,47 +2877,6 @@ function AppInner() {
   const [simpleMode, setSimpleMode] = useState((() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); return s.simpleMode || false; } catch(e) { return false; } })());
   // mapStyle: 'full' (decorated canvas) | 'simple' (plain circles, same canvas) | 'feed' (stacked dimension sections, vertical scroll)
   const [mapStyle, setMapStyle] = useState((() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); if (s.mapStyle) return s.mapStyle; return s.simpleMode ? 'simple' : 'full'; } catch(e) { return 'full'; } })());
-
-  // Living Forest: adjusts decorative density from a sampled frame-rate window.
-  // The sampler uses a plain interval and a small requestAnimationFrame counter,
-  // avoiding callback-style state updates when changing performance modes.
-  useEffect(() => {
-    if (fancyQuality !== 'adaptive' || fancyBenchmarkRunning || mapStyle !== 'full' || viewMode !== 'canvas') return;
-    if (typeof window.requestAnimationFrame !== 'function') return;
-
-    let active = true;
-    let frameCount = 0;
-    let rafId = 0;
-    const countFrame = () => {
-      if (!active) return;
-      frameCount += 1;
-      rafId = window.requestAnimationFrame(countFrame);
-    };
-    rafId = window.requestAnimationFrame(countFrame);
-
-    const intervalId = window.setInterval(() => {
-      if (!active) return;
-      const fps = frameCount / 2;
-      frameCount = 0;
-      const current = Number.isFinite(adaptiveQualityScaleRef.current)
-        ? adaptiveQualityScaleRef.current
-        : 1;
-      let next = current;
-      if (fps < 38) next = Math.max(0.25, current - 0.10);
-      else if (fps > 52) next = Math.min(1, current + 0.05);
-      next = Math.round(next * 100) / 100;
-      if (next !== current) {
-        adaptiveQualityScaleRef.current = next;
-        setAdaptiveQualityScale(next);
-      }
-    }, 2000);
-
-    return () => {
-      active = false;
-      window.clearInterval(intervalId);
-      if (rafId && typeof window.cancelAnimationFrame === 'function') window.cancelAnimationFrame(rafId);
-    };
-  }, [fancyQuality, fancyBenchmarkRunning, mapStyle, viewMode]);
   // Per-dimension feed layout: { "dimKey:nodeId": {col, row} }. Independent of each
   // person's real canvas x/y -- this is purely where they sit within the Feed view's
   // fixed-width hex strip for that one dimension.
@@ -3570,7 +3116,6 @@ function AppInner() {
   const birthdayDayRef = useRef(null), birthdayMonthRef = useRef(null), birthdayYearRef = useRef(null);
 
   const [showHealthListDetail, setShowHealthListDetail] = useState(null); // listId or null
-  const [healthHistoryUnlocked, setHealthHistoryUnlocked] = useState(false);
   const [showListPointsEditor, setShowListPointsEditor] = useState(null); // listId or null
   const listItemDragRef = useRef({ draggingId: null, startY: 0, itemHeights: {} });
 
@@ -4347,11 +3892,13 @@ function AppInner() {
         const newScale = Math.min(Math.max(0.01, initialPinchScale.current * (dist / initialPinchDist.current)), 3);
         const newT = { ...transform, scale: newScale };
         applyTransform(newT);
-        // Keep React out of the live pinch loop. The SVG group has already
-        // been updated directly above; committing transform state here would
-        // rerender the entire app and rebuild expensive fancy-map geometry on
-        // every frame. React state is committed once when the gesture ends.
         panSyncLatestRef.current = newT;
+        if (!panSyncRafRef.current) {
+          panSyncRafRef.current = requestAnimationFrame(() => {
+            panSyncRafRef.current = null;
+            setTransform(panSyncLatestRef.current);
+          });
+        }
       }
       return;
     }
@@ -4401,11 +3948,13 @@ function AppInner() {
       // syncs the LATEST position via a ref, not whatever position happened
       // to be current when the frame was first scheduled, so state doesn't
       // lag behind if several pointer moves land within the same frame.
-      // The visible pan is already applied directly to the SVG group.
-      // Do not mirror it into React state every frame: that rerenders the
-      // entire component and invalidates the fancy vine/node calculations.
-      // Commit only the final transform in handlePointerUp.
       panSyncLatestRef.current = newT;
+      if (!panSyncRafRef.current) {
+        panSyncRafRef.current = requestAnimationFrame(() => {
+          panSyncRafRef.current = null;
+          setTransform(panSyncLatestRef.current);
+        });
+      }
       lastPanPos.current = { x: e.clientX, y: e.clientY };
       if (liftTimer.current) {
         clearTimeout(liftTimer.current);
@@ -4559,7 +4108,7 @@ function AppInner() {
             } else if (tappedNode?.type === 'health_list') {
               setShowHealthListDetail(tappedNode.listId);
             } else {
-              openProfileFromNode(nid);
+              setSelectedNodeId(nid);
             }
             singleTapTimerRef.current = null;
           }, 520);
@@ -6814,14 +6363,13 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
   }, [fallenLeaves]);
 
 
-  // Smooth animated pan to a canvas coordinate. Optional viewport ratios let
-  // profile-opening transitions leave deliberate space for the person panel.
-  const smoothPanTo = (canvasX, canvasY, targetScale, screenXRatio = 0.5, screenYRatio = 0.5) => {
+  // Smooth animated pan to a canvas coordinate
+  const smoothPanTo = (canvasX, canvasY, targetScale) => {
     if (panRafRef.current) cancelAnimationFrame(panRafRef.current);
     const rect = svgRef.current ? svgRef.current.getBoundingClientRect() : { width: window.innerWidth, height: window.innerHeight };
     const scl = targetScale || transform.scale;
-    const destX = rect.width  * screenXRatio - canvasX * scl;
-    const destY = rect.height * screenYRatio - canvasY * scl;
+    const destX = rect.width  / 2 - canvasX * scl;
+    const destY = rect.height / 2 - canvasY * scl;
     const start = performance.now();
     const dur = 520;
     const fromX = transform.x, fromY = transform.y, fromS = transform.scale;
@@ -6831,67 +6379,11 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
       const e = ease(p);
       const next = { x: fromX + (destX-fromX)*e, y: fromY + (destY-fromY)*e, scale: fromS + (scl-fromS)*e };
       applyTransform(next);
-      if (p < 1) {
-        panRafRef.current = requestAnimationFrame(step);
-      } else {
-        setTransform(next);
-        panRafRef.current = null;
-      }
+      setTransform(next);
+      if (p < 1) panRafRef.current = requestAnimationFrame(step);
     };
     panRafRef.current = requestAnimationFrame(step);
   };
-
-  const getProfileNodeScreenRect = useCallback((node) => {
-    const hostRect = svgRef.current?.getBoundingClientRect?.() || { left:0, top:0 };
-    const size = Math.max(54, Math.min(96, 72 * transform.scale));
-    const cx = hostRect.left + transform.x + (node.x || 0) * transform.scale;
-    const cy = hostRect.top + transform.y + (node.y || 0) * transform.scale;
-    return { left: cx - size/2, top: cy - size/2, width:size, height:size, borderRadius:size/2 };
-  }, [transform]);
-
-  const openProfileFromNode = useCallback((nodeId) => {
-    const node = nodesRef.current.find(n => n.id === nodeId);
-    if (!node || node.type === 'hub' || node.type === 'flower' || node.type === 'health_metric' || node.type === 'health_list') {
-      setSelectedNodeId(nodeId);
-      return;
-    }
-    if (profileTransition) return;
-    clearProfileTransitionTimers();
-    const startRect = getProfileNodeScreenRect(node);
-    const panelWidth = Math.min(320, window.innerWidth * 0.86);
-    const endRect = { left:0, top:0, width:panelWidth, height:window.innerHeight, borderRadius:0 };
-    setProfileTransition({ nodeId, img:node.img || '', label:node.label || '', phase:'open-start', startRect, endRect });
-    smoothPanTo(node.x || 0, node.y || 0, Math.max(transform.scale, 0.85), 0.64, 0.40);
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      setProfileTransition(t => t ? { ...t, phase:'open-end' } : t);
-    }));
-    profileTransitionTimersRef.current.push(setTimeout(() => setSelectedNodeId(nodeId), 390));
-    profileTransitionTimersRef.current.push(setTimeout(() => setProfileTransition(null), 700));
-  }, [profileTransition, clearProfileTransitionTimers, getProfileNodeScreenRect, smoothPanTo, transform.scale]);
-
-  const closeProfileWithTransition = useCallback(() => {
-    const node = nodesRef.current.find(n => n.id === selectedNodeId);
-    if (!node || profileTransition) {
-      setSelectedNodeId(null);
-      setAddFriendForms([]);
-      setShowPhotoOptions(false);
-      return;
-    }
-    clearProfileTransitionTimers();
-    const panelWidth = Math.min(320, window.innerWidth * 0.86);
-    const startRect = { left:0, top:0, width:panelWidth, height:window.innerHeight, borderRadius:0 };
-    const endRect = getProfileNodeScreenRect(node);
-    setProfileTransition({ nodeId:node.id, img:node.img || '', label:node.label || '', phase:'close-start', startRect, endRect });
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      setProfileTransition(t => t ? { ...t, phase:'close-end' } : t);
-      setSelectedNodeId(null);
-      setAddFriendForms([]);
-      setShowPhotoOptions(false);
-    }));
-    profileTransitionTimersRef.current.push(setTimeout(() => setProfileTransition(null), 520));
-  }, [selectedNodeId, profileTransition, clearProfileTransitionTimers, getProfileNodeScreenRect]);
-
-  useEffect(() => () => clearProfileTransitionTimers(), [clearProfileTransitionTimers]);
 
   // Generate mole garden summary from current node scores vs prevScore
   const generateMoleSummary = () => {
@@ -7906,15 +7398,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
     liftedNodeId === nodeId ? 'transform 0.15s ease-out, opacity 0.15s ease-out' : 'transform 0.25s cubic-bezier(0.34,1.56,0.64,1), opacity 0.25s ease';
 
 
-  // Keep this array referentially stable. It feeds the most expensive
-  // fancy-map memos; rebuilding it on every unrelated state change forced all
-  // vine geometry to be regenerated even when no node had moved.
-  const activeRenderNodes = useMemo(() => {
-    if (viewMode === 'calendar') return calendarRenderNodes;
-    return nodes
-      .filter(node => !collapseInfo.hidden.has(node.id))
-      .map(node => ({ ...node, renderX: node.x, renderY: node.y, radius: getNodeRadius(node) }));
-  }, [viewMode, calendarRenderNodes, nodes, collapseInfo.hidden, getNodeRadius]);
+  const activeRenderNodes = viewMode === 'calendar' ? calendarRenderNodes : nodes
+    .filter(node => !collapseInfo.hidden.has(node.id))
+    .map(node => {
+    return { ...node, renderX: node.x, renderY: node.y, radius: getNodeRadius(node) };
+  });
 
 
   // ---- Butterfly / firefly perch points (photo edges + flowers) ----
@@ -8078,42 +7566,38 @@ Return only the JSON array. If nothing trackable is found, return [].`;
   useEffect(() => { if (!liftedNodeId && !dragNode) frozenPerchesRef.current = creaturePerches; }, [creaturePerches, liftedNodeId, dragNode]);
 
 
-  // Initialise / maintain a population of creatures spread across ALL perches.
-  // Uses a ref-backed direct update rather than a functional state callback;
-  // this avoids Android WebView/minified callback failures when quality changes.
+  // Initialise / maintain a population of creatures spread across ALL perches
   useEffect(() => {
+    // Don't repopulate while creatures are mid-flee (away). Allow the position
+    // update once the return begins so they fly toward their NEW spots, while the
+    // hidden-ref + fly-in opacity keep the repositioning frame invisible.
     if (creaturesAway) return;
-    if (!Array.isArray(creaturePerches) || creaturePerches.length === 0) {
-      creaturesRef.current = [];
-      setCreatures([]);
-      return;
-    }
-
-    const previous = Array.isArray(creaturesRef.current) ? creaturesRef.current : [];
-    const density = Number.isFinite(fancyQualityConfig.creatureDensity)
-      ? fancyQualityConfig.creatureDensity
-      : 1;
-    const target = Math.max(2, Math.round(creaturePerches.length * 0.6 * density));
-    const prevByKey = Object.create(null);
-    for (const creature of previous) {
-      if (creature && !creature.flying && creature.perchKey) prevByKey[creature.perchKey] = creature;
-    }
-
-    const step = creaturePerches.length / target;
-    const next = [];
-    const usedKeys = new Set();
-    for (let i = 0; i < target; i++) {
-      const perch = creaturePerches[Math.floor(i * step) % creaturePerches.length];
-      if (!perch || usedKeys.has(perch.key)) continue;
-      usedKeys.add(perch.key);
-      const existing = prevByKey[perch.key];
-      next.push(existing
-        ? { ...existing, x: perch.x, y: perch.y, angle: perch.angle || 0, trend: perch.trend, level: perch.level }
-        : { id: `cr-${perch.key}`, perchKey: perch.key, x: perch.x, y: perch.y, angle: perch.angle || 0, flying: false, trend: perch.trend, level: perch.level, jitter: Math.random() });
-    }
-    creaturesRef.current = next;
-    setCreatures(next);
-  }, [creaturePerches, creaturesAway, creaturesReturning, fancyQualityConfig.creatureDensity]);
+    if (creaturePerches.length === 0) { setCreatures([]); return; }
+    setCreatures(prev => {
+      // Aim for roughly one creature per 1.5 perches, so they cover the whole
+      // tree (every group/person), not just a few.
+      const target = Math.max(4, Math.round(creaturePerches.length * 0.6));
+      const prevByKey = {};
+      prev.forEach(c => { if (!c.flying) prevByKey[c.perchKey] = c; });
+      // spread: walk through perches in order, keep/create a creature on a
+      // proportional subset so they're distributed everywhere
+      const step = creaturePerches.length / target;
+      const next = [];
+      const usedKeys = new Set();
+      for (let i = 0; i < target; i++) {
+        const p = creaturePerches[Math.floor(i * step) % creaturePerches.length];
+        if (!p || usedKeys.has(p.key)) continue;
+        usedKeys.add(p.key);
+        const existing = prevByKey[p.key];
+        if (existing) {
+          next.push({ ...existing, x: p.x, y: p.y, angle: p.angle || 0, trend: p.trend, level: p.level });
+        } else {
+          next.push({ id: `cr-${p.key}`, perchKey: p.key, x: p.x, y: p.y, angle: p.angle || 0, flying: false, trend: p.trend, level: p.level, jitter: Math.random() });
+        }
+      }
+      return next;
+    });
+  }, [creaturePerches, creaturesAway, creaturesReturning]);
 
 
   // Creatures stay stationary on their perches (no flying about).
@@ -8131,122 +7615,6 @@ Return only the JSON array. If nothing trackable is found, return [].`;
     if (svgGroupRef.current) {
       svgGroupRef.current.setAttribute('transform', `translate(${t.x}, ${t.y}) scale(${t.scale})`);
     }
-  }, []);
-
-  const waitMs = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-  const measureFancyFrames = useCallback((durationMs, movement, baseTransform) => new Promise(resolve => {
-    const start = performance.now();
-    let previous = start;
-    const frameTimes = [];
-    let raf = 0;
-    const tick = (now) => {
-      if (fancyBenchmarkCancelRef.current) {
-        applyTransform(baseTransform);
-        resolve(null);
-        return;
-      }
-      const elapsed = now - start;
-      if (previous !== start) frameTimes.push(now - previous);
-      previous = now;
-      if (movement) {
-        // Repeatable figure-of-eight camera movement. The amplitudes are in
-        // screen pixels so every visual-layer test receives the same repaint workload.
-        const phase = (elapsed / durationMs) * Math.PI * 4;
-        applyTransform({
-          ...baseTransform,
-          x: baseTransform.x + Math.sin(phase) * 115,
-          y: baseTransform.y + Math.sin(phase * 2) * 72,
-        });
-      }
-      if (elapsed < durationMs) raf = requestAnimationFrame(tick);
-      else {
-        cancelAnimationFrame(raf);
-        applyTransform(baseTransform);
-        const sorted = [...frameTimes].sort((a,b)=>a-b);
-        const total = frameTimes.reduce((a,b)=>a+b,0);
-        const avgMs = frameTimes.length ? total / frameTimes.length : 0;
-        const p95Ms = sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))] : 0;
-        const jank = frameTimes.filter(ms => ms > 33.34).length;
-        resolve({
-          fps: avgMs ? +(1000 / avgMs).toFixed(1) : 0,
-          avgFrameMs: +avgMs.toFixed(1),
-          p95FrameMs: +p95Ms.toFixed(1),
-          jankFrames: jank,
-          frames: frameTimes.length,
-        });
-      }
-    };
-    raf = requestAnimationFrame(tick);
-  }), [applyTransform]);
-
-  const runFancyBenchmark = useCallback(async () => {
-    if (fancyBenchmarkRunning) return;
-    fancyBenchmarkCancelRef.current = false;
-    setFancyBenchmarkRunning(true);
-    const baseTransform = { ...transform };
-    const off = {vines:false,leaves:false,creatures:false,underpass:false,flowers:false,groupBorders:false,darkness:false,filters:false,animations:false};
-    const presets = [
-      ['Everything off', off],
-      ['Vines only', {...off,vines:true}],
-      ['Leaves only', {...off,leaves:true}],
-      ['Butterflies/fireflies static', {...off,creatures:true}],
-      ['Butterflies/fireflies animated', {...off,creatures:true,animations:true}],
-      ['Under-node fading + vines', {...off,vines:true,underpass:true}],
-      ['Surround flowers only', {...off,flowers:true}],
-      ['Group borders + border leaves', {...off,groupBorders:true}],
-      ['Dark mask only', {...off,darkness:true}],
-      ['Dark mask + animated creatures', {...off,darkness:true,creatures:true,animations:true}],
-      ['Filters/shadows only', {...off,filters:true}],
-      ['Everything enabled', {vines:true,leaves:true,creatures:true,underpass:true,flowers:true,groupBorders:true,darkness:true,filters:true,animations:true}],
-    ];
-    const results = [];
-    try {
-      for (let i=0;i<presets.length;i++) {
-        if (fancyBenchmarkCancelRef.current) break;
-        const [name, config] = presets[i];
-        setFancyBenchmarkStatus(`${i+1}/${presets.length} ${name}: preparing…`);
-        setFancyDiag(config);
-        await waitMs(900);
-        if (fancyBenchmarkCancelRef.current) break;
-        const root = svgGroupRef.current;
-        const counts = {
-          paths: root?.querySelectorAll('path').length || 0,
-          circles: root?.querySelectorAll('circle').length || 0,
-          groups: root?.querySelectorAll('g').length || 0,
-        };
-        setFancyBenchmarkStatus(`${i+1}/${presets.length} ${name}: stationary…`);
-        const stationary = await measureFancyFrames(3000, false, baseTransform);
-        if (!stationary) break;
-        await waitMs(300);
-        setFancyBenchmarkStatus(`${i+1}/${presets.length} ${name}: figure eight…`);
-        const moving = await measureFancyFrames(4500, true, baseTransform);
-        if (!moving) break;
-        results.push({name, stationary, moving, counts});
-      }
-      if (results.length) {
-        const record = {timestamp:new Date().toISOString(), userAgent:navigator.userAgent, results};
-        setFancyBenchmarkResults(prev => {
-          const next = [record, ...prev].slice(0,5);
-          saveData('ft_fancy_benchmark_results', next);
-          return next;
-        });
-        window.ftDiagLog('[Fancy benchmark]', record);
-      }
-    } finally {
-      applyTransform(baseTransform);
-      setTransform(baseTransform);
-      setFancyBenchmarkStatus(fancyBenchmarkCancelRef.current ? 'Benchmark stopped' : 'Benchmark complete');
-      setFancyBenchmarkRunning(false);
-      fancyBenchmarkCancelRef.current = false;
-    }
-  }, [fancyBenchmarkRunning, transform, applyTransform, measureFancyFrames]);
-
-  const formatFancyBenchmark = useCallback((record) => {
-    if (!record) return 'No benchmark results yet.';
-    const lines = [`Fancy Map Benchmark — ${record.timestamp}`, 'Test | Stationary FPS | Moving FPS | Moving p95 ms | Moving jank >33ms | Paths | Circles | Groups'];
-    for (const r of record.results) lines.push(`${r.name} | ${r.stationary.fps} | ${r.moving.fps} | ${r.moving.p95FrameMs} | ${r.moving.jankFrames}/${r.moving.frames} | ${r.counts.paths} | ${r.counts.circles} | ${r.counts.groups}`);
-    return lines.join('\n');
   }, []);
 
 
@@ -8423,34 +7791,18 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     ? growingVine.totalLen * (1 - growingVine.progress)
                     : null;
 
-                  const scoreHistory = tgt.scoreHistory || src.scoreHistory || [];
+                  const srcNode = nodes.find(n => n.id === link.source);
+                  const tgtNode = nodes.find(n => n.id === link.target);
+                  const scoreHistory = tgtNode?.scoreHistory || srcNode?.scoreHistory || [];
 
-                  // Only nodes close enough to this link can hide it. Passing
-                  // every node into every vine made each sample test the whole map.
-                  const segDx = tgt.renderX - src.renderX;
-                  const segDy = tgt.renderY - src.renderY;
-                  const segLenSq = segDx * segDx + segDy * segDy || 1;
-                  const blockerNodes = [];
-                  for (const n of blockerNodesAll) {
-                    if (n.id === src.id || n.id === tgt.id) continue;
-                    const t = Math.max(0, Math.min(1,
-                      ((n.renderX - src.renderX) * segDx + (n.renderY - src.renderY) * segDy) / segLenSq
-                    ));
-                    const nearX = src.renderX + segDx * t;
-                    const nearY = src.renderY + segDy * t;
-                    const ndx = n.renderX - nearX;
-                    const ndy = n.renderY - nearY;
-                    const radius = n.radius || 40;
-                    const reach = radius + 60;
-                    if (ndx * ndx + ndy * ndy <= reach * reach) {
-                      blockerNodes.push({ id: n.id, x: n.renderX, y: n.renderY, r: radius });
-                    }
-                  }
+                  const blockerNodes = blockerNodesAll
+                    .filter(n => n.id !== src.id && n.id !== tgt.id)
+                    .map(n => ({ id: n.id, x: n.renderX, y: n.renderY, r: n.radius || 40 }));
 
                   const parts = renderVineLink({
                     key: `link-${i}`, srcX: src.renderX, srcY: src.renderY,
                     tgtX: tgt.renderX, tgtY: tgt.renderY, i, score, scoreHistory,
-                    blockerNodes: fancyDiag.underpass ? blockerNodes : [], darkMode: theme.darkMode, dashOffset,
+                    blockerNodes, darkMode: theme.darkMode, dashOffset,
                     growingProgress: growingVine ? growingVine.progress : null,
                     fallenLeafIds: fallenLeafIdSet,
                     onNewFallenLeaves: (nf) => newFallenAccum.push(...nf),
@@ -8466,11 +7818,10 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       });
     }
     return result;
-  }, [links, activeRenderNodes, activeRenderNodesById, socialConnectedIds, theme.darkMode, nodeGroupMap, sliderDragging, simpleMode, growingVines, fallenLeaves, fancyDiag.underpass]);
+  }, [links, activeRenderNodes, activeRenderNodesById, socialConnectedIds, nodes, theme, nodeGroupMap, sliderDragging, simpleMode, growingVines, vineBorderParams, fallenLeaves]);
   return (
     <>
     <style>{KEYFRAMES_CSS}</style>
-    <style>{`.ft-pause-animations, .ft-pause-animations *{animation-play-state:paused !important;transition:none !important}.ft-disable-filters, .ft-disable-filters *{filter:none !important}`}</style>
     <div title={saveStatus === 'saved' ? 'Saved' : 'Not saved yet'}
       style={{position:'fixed', top:'calc(env(safe-area-inset-top, 0px) + 8px)', left:10, zIndex:9999,
         width:10, height:10, borderRadius:'50%', pointerEvents:'none',
@@ -8827,87 +8178,6 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       })()}
 
 
-      {mapStyle === 'full' && viewMode === 'canvas' && (
-        <>
-          <button onClick={()=>setFancyDiagOpen(v=>!v)}
-            style={{position:'fixed',right:10,top:'calc(env(safe-area-inset-top, 0px) + 10px)',zIndex:10020,
-              border:'1px solid #475569',borderRadius:10,padding:'7px 10px',background:'rgba(15,23,42,0.9)',
-              color:'white',fontSize:11,fontWeight:800}}>⚡ FPS</button>
-          {fancyDiagOpen && (
-            <div style={{position:'fixed',right:10,top:'calc(env(safe-area-inset-top, 0px) + 48px)',zIndex:10019,
-              width:270,maxHeight:'calc(100vh - 120px)',overflowY:'auto',padding:12,borderRadius:14,background:'rgba(15,23,42,0.96)',color:'white',
-              border:'1px solid #475569',boxShadow:'0 8px 30px rgba(0,0,0,.45)',fontSize:11}}>
-              <div style={{fontWeight:900,fontSize:13,marginBottom:8}}>Fancy Map Diagnostics</div>
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'3px 10px',marginBottom:10,color:'#cbd5e1'}}>
-                <span>FPS <b style={{color:fancyPerf.fps>=50?'#4ade80':fancyPerf.fps>=30?'#facc15':'#f87171'}}>{fancyPerf.fps}</b></span>
-                <span>Creatures <b>{fancyPerf.creatures}</b></span>
-                <span>Paths <b>{fancyPerf.paths}</b></span>
-                <span>Circles <b>{fancyPerf.circles}</b></span>
-                <span>Groups <b>{fancyPerf.groups}</b></span>
-              </div>
-              <label style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'7px 0',borderTop:'1px solid #263449',borderBottom:'1px solid #263449',marginBottom:2}}>
-                <span style={{fontWeight:800}}>Render quality</span>
-                <select value={fancyQuality} onChange={e=>setFancyQuality(e.target.value)}
-                  style={{background:'#1e293b',color:'white',border:'1px solid #475569',borderRadius:7,padding:'4px 6px',fontSize:11}}>
-                  {Object.entries(FANCY_QUALITY_PRESETS).map(([key,p])=><option key={key} value={key}>{p.label}</option>)}
-                </select>
-              </label>
-              {fancyQuality === 'adaptive' && (
-                <div style={{padding:'6px 0',color:'#a7f3d0',fontSize:10,fontWeight:800}}>
-                  Adaptive detail: {Math.round(adaptiveQualityScale * 100)}% · target 45 FPS
-                </div>
-              )}
-              {[
-                ['vines','Vines'],['leaves','Leaves'],['creatures','Butterflies / fireflies'],
-                ['underpass','Under-node fading'],['flowers','Surround flowers'],['groupBorders','Group borders / border leaves'],
-                ['darkness','Night darkness mask'],
-                ['filters','SVG filters / shadows'],['animations','All animations'],
-              ].map(([key,label])=>(
-                <label key={key} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'6px 0',borderTop:'1px solid #263449'}}>
-                  <span>{label}</span>
-                  <input type='checkbox' checked={fancyDiag[key]} onChange={e=>setFancyDiag(v=>({...v,[key]:e.target.checked}))}
-                    style={{width:18,height:18,accentColor:'#10b981'}}/>
-                </label>
-              ))}
-              <button onClick={()=>setFancyDiag({vines:true,leaves:true,creatures:true,underpass:true,flowers:true,groupBorders:true,darkness:true,filters:true,animations:true})}
-                disabled={fancyBenchmarkRunning}
-                style={{width:'100%',marginTop:8,padding:7,border:0,borderRadius:8,background:'#334155',color:'white',fontWeight:800,opacity:fancyBenchmarkRunning?.5:1}}>Restore all</button>
-              <div style={{borderTop:'1px solid #475569',marginTop:10,paddingTop:10}}>
-                <div style={{fontWeight:900,marginBottom:5}}>Repeatable benchmark</div>
-                <div style={{fontSize:9,color:'#94a3b8',lineHeight:1.35,marginBottom:7}}>Runs each Fancy layer stationary, then performs the same automatic figure-of-eight movement. About 2 minutes.</div>
-                {!fancyBenchmarkRunning ? (
-                  <button onClick={runFancyBenchmark}
-                    style={{width:'100%',padding:8,border:0,borderRadius:8,background:'#0f766e',color:'white',fontWeight:900}}>▶ Run full benchmark</button>
-                ) : (
-                  <button onClick={()=>{fancyBenchmarkCancelRef.current=true;setFancyBenchmarkStatus('Stopping…');}}
-                    style={{width:'100%',padding:8,border:0,borderRadius:8,background:'#b91c1c',color:'white',fontWeight:900}}>■ Stop benchmark</button>
-                )}
-                {fancyBenchmarkStatus && <div style={{fontSize:9,color:'#cbd5e1',marginTop:6}}>{fancyBenchmarkStatus}</div>}
-                {fancyBenchmarkResults[0] && (
-                  <>
-                    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:7,marginTop:7}}>
-                      <button onClick={()=>{
-                        const text=formatFancyBenchmark(fancyBenchmarkResults[0]);
-                        navigator.clipboard?.writeText(text);
-                        showToast('📋 Benchmark copied');
-                      }} style={{padding:7,border:'1px solid #475569',borderRadius:8,background:'#1e293b',color:'white',fontWeight:800}}>📋 Copy latest</button>
-                      <button disabled={fancyBenchmarkRunning} onClick={()=>{
-                        setFancyBenchmarkResults([]);
-                        saveData('ft_fancy_benchmark_results', []);
-                        setFancyBenchmarkStatus('Benchmark data cleared');
-                        showToast('🗑️ Benchmark data cleared');
-                      }} style={{padding:7,border:'1px solid #7f1d1d',borderRadius:8,background:'#450a0a',color:'#fecaca',fontWeight:800,opacity:fancyBenchmarkRunning?.5:1}}>🗑️ Clear data</button>
-                    </div>
-                    <textarea readOnly value={formatFancyBenchmark(fancyBenchmarkResults[0])}
-                      style={{width:'100%',height:105,marginTop:7,boxSizing:'border-box',resize:'vertical',fontSize:7,lineHeight:1.25,background:'#020617',color:'#cbd5e1',border:'1px solid #334155',borderRadius:7,padding:5}}/>
-                  </>
-                )}
-              </div>
-            </div>
-          )}
-        </>
-      )}
-
       {/* Settings panel — full height slide-in from right */}
       {settingsOpen && (
         <div
@@ -9116,16 +8386,6 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         </button>
                       </div>
                     )}
-                    <div style={{padding:'10px 0',borderBottom:`1px solid ${pw.border}`}}>
-                      <div style={{fontSize:13,fontWeight:700,color:theme.darkMode?'#94a3b8':pw.secondText,marginBottom:7}}>⚡ Fancy Map Performance</div>
-                      <div style={{fontSize:11,color:theme.darkMode?'#94a3b8':pw.secondText,marginBottom:7,lineHeight:1.35}}>Living Forest automatically adjusts butterflies and surrounding flowers to keep movement smooth. No people, groups, scores or positions are changed.</div>
-                      {fancyQuality === 'adaptive' && <div style={{fontSize:11,fontWeight:800,color:'#10b981',marginBottom:7}}>Current adaptive detail: {Math.round(adaptiveQualityScale * 100)}%</div>}
-                      <div style={{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:6}}>
-                        {Object.entries(FANCY_QUALITY_PRESETS).map(([key,p])=><button key={key} onClick={()=>setFancyQuality(key)}
-                          style={{padding:'8px 4px',borderRadius:8,border:`2px solid ${fancyQuality===key?'#10b981':pw.border}`,
-                            background:fancyQuality===key?'#10b981':pw.cellBg,color:fancyQuality===key?'white':(theme.darkMode?'#e2e8f0':pw.bodyText),fontSize:11,fontWeight:800}}>{p.label}</button>)}
-                      </div>
-                    </div>
                     {/* Surrounding flowers settings */}
                     <div style={{padding:'10px 0',borderBottom:`1px solid ${pw.border}`}}>
                       <div style={{fontSize:13,fontWeight:700,color:theme.darkMode?'#94a3b8':pw.secondText,marginBottom:8}}>🌸 Person Flowers</div>
@@ -9726,32 +8986,6 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       )}
 
 
-      {profileTransition && (() => {
-        const opening = profileTransition.phase === 'open-end';
-        const closingEnd = profileTransition.phase === 'close-end';
-        const useEnd = opening || closingEnd;
-        const rect = useEnd ? profileTransition.endRect : profileTransition.startRect;
-        const expanded = profileTransition.phase === 'open-end' || profileTransition.phase === 'close-start';
-        return (
-          <>
-            <div style={{position:'fixed',inset:0,zIndex:69,pointerEvents:'none',
-              background:expanded?'rgba(2,6,23,0.36)':'rgba(2,6,23,0)',
-              transition:'background 480ms ease'}}/>
-            <div aria-hidden="true" style={{position:'fixed',zIndex:70,pointerEvents:'none',overflow:'hidden',
-              left:rect.left,top:rect.top,width:rect.width,height:rect.height,borderRadius:rect.borderRadius,
-              background:theme.darkMode?'#0f172a':'#ffffff',
-              border:'3px solid #10b981',
-              boxShadow:expanded?'0 24px 70px rgba(0,0,0,0.48)':'0 0 0 7px rgba(16,185,129,0.22), 0 10px 30px rgba(0,0,0,0.35)',
-              transform:'translateZ(0)',willChange:'left,top,width,height,border-radius',
-              transition:'left 480ms cubic-bezier(.22,.8,.2,1), top 480ms cubic-bezier(.22,.8,.2,1), width 480ms cubic-bezier(.22,.8,.2,1), height 480ms cubic-bezier(.22,.8,.2,1), border-radius 480ms cubic-bezier(.22,.8,.2,1), box-shadow 480ms ease'}}>
-              {profileTransition.img ? <img src={profileTransition.img} alt="" style={{width:'100%',height:'100%',objectFit:'cover',
-                opacity:expanded?0.10:1,filter:expanded?'blur(2px)':'none',transition:'opacity 300ms ease, filter 300ms ease'}}/> :
-                <div style={{width:'100%',height:'100%',display:'flex',alignItems:'center',justifyContent:'center',fontSize:28,fontWeight:800,color:'#10b981'}}>{(profileTransition.label||'?').slice(0,1)}</div>}
-            </div>
-          </>
-        );
-      })()}
-
       {/* Sidebar — fixed overlay, slides in from left */}
       <div className={`border-r shadow-2xl flex flex-col z-40 transition-all duration-300`}
         style={{
@@ -9781,7 +9015,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             />
           )}
                   {!selectedNode && <div style={{flex:1}}/>}
-          {selectedNode && <button onClick={closeProfileWithTransition} className={`p-1.5 rounded-full flex-shrink-0 ${theme.darkMode ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-200 hover:bg-slate-300'}`}><X className="w-3.5 h-3.5" /></button>}
+          {selectedNode && <button onClick={() => { setSelectedNodeId(null); setAddFriendForms([]); setShowPhotoOptions(false); }} className={`p-1.5 rounded-full flex-shrink-0 ${theme.darkMode ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-200 hover:bg-slate-300'}`}><X className="w-3.5 h-3.5" /></button>}
         </div>
 
 
@@ -11528,14 +10762,14 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           <rect width="100%" height="100%" fill="url(#bg-grid)" />
 
 
-          <g ref={svgGroupRef} className={`${(!fancyDiag.animations || profileTransition) ? 'ft-pause-animations' : ''} ${!fancyDiag.filters ? 'ft-disable-filters' : ''}`} transform={`translate(${transform.x}, ${transform.y}) scale(${transform.scale})`}>
+          <g ref={svgGroupRef} transform={`translate(${transform.x}, ${transform.y}) scale(${transform.scale})`}>
             {/* Background fill — green in light mode (grass texture shows from the Canvas div behind) */}
             <rect x="-50000" y="-50000" width="100000" height="100000"
               fill={theme.darkMode ? '#0f172a' : '#19432a'} fillOpacity={theme.darkMode ? 1 : 0.55} />
 
 
             {/* Connection vines — rendered low so group borders/leaves sit above them */}
-            {viewMode === 'canvas' && !sliderDragging && !simpleMode && fancyDiag.vines && (
+            {viewMode === 'canvas' && !sliderDragging && !simpleMode && (
               <g className="vines-layer">{linkParts.map(p => p && p.vine)}</g>
             )}
 
@@ -11609,7 +10843,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             {/* Minimised-bundle connecting vines — gentle wriggly lines from social
                 to overflow bundles, drawn HERE so they sit under the social node,
                 groups and people. */}
-            {viewMode === 'canvas' && fancyDiag.vines && collapseInfo.bundles.filter(b => b.parentX != null).map(b => {
+            {viewMode === 'canvas' && collapseInfo.bundles.filter(b => b.parentX != null).map(b => {
               const x1 = b.parentX, y1 = b.parentY, x2 = b.cx, y2 = b.cy;
               const dx = x2 - x1, dy = y2 - y1;
               const len = Math.hypot(dx, dy) || 1;
@@ -11639,7 +10873,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
             {/* Group vine borders — parametric arch system */}
             {/* Always compute border flower positions, even when vine borders hidden */}
-            {viewMode === 'canvas' && (fancyDiag.groupBorders || fancyDiag.flowers) && nodes.filter(n=>n.type==='hub').map((hub)=>{
+            {viewMode === 'canvas' && nodes.filter(n=>n.type==='hub').map((hub)=>{
               // Don't draw a group's border if its branch is minimised.
               if (collapseInfo.hidden.has(hub.id)) return null;
               let hubMembers;
@@ -11737,7 +10971,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             })}
 
 
-            {viewMode === 'canvas' && !simpleMode && fancyDiag.groupBorders && nodes.filter(n=>n.type==='hub').map((hub, hubIdx) => {
+            {viewMode === 'canvas' && !simpleMode && nodes.filter(n=>n.type==='hub').map((hub, hubIdx) => {
               // Gather members. For hidden hubs, include the whole tree branching
               // off the linked person (e.g. James + Ken who branches off James).
               let members;
@@ -12031,24 +11265,39 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
               return (
                 <g key={hub.id} style={{pointerEvents:'none'}}>
-                  {/*
-                    Group fill: a single closed path replaces the previous metaball
-                    surface made from hundreds of circles plus a Gaussian-blur /
-                    threshold filter. The old filter was exceptionally expensive for
-                    Android WebView to repaint while panning. blobPts already follows
-                    the outside of the group in order, so it can provide the same
-                    enclosed region without an off-screen filtered surface.
-                  */}
-                  <path
-                    d={`M ${blobPts.map(p=>`${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' L ')} Z`}
-                    fill={blobCol}
-                    fillOpacity={blobOp}
-                    stroke={blobCol}
-                    strokeOpacity={Math.min(1, blobOp + 0.08)}
-                    strokeWidth={Math.max(10, avgMR * 0.22)}
-                    strokeLinejoin="round"
-                    style={{pointerEvents:'none'}}
-                  />
+                  <defs>
+                    <filter id={filterId} x={x1} y={y1} width={x2-x1} height={y2-y1}
+                      filterUnits="userSpaceOnUse" colorInterpolationFilters="sRGB">
+                      <feGaussianBlur in="SourceGraphic" stdDeviation={BLOB_BLUR} result="blur"/>
+                      <feColorMatrix in="blur" type="matrix" result="shaped"
+                        values={`1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 ${BLOB_THRESHOLD} ${BLOB_THRESHOLD_SHIFT}`}/>
+                      <feFlood result="col" floodColor={blobCol} floodOpacity={blobOp}/>
+                      <feComposite in="col" in2="shaped" operator="in"/>
+                    </filter>
+                  </defs>
+
+
+                  {/* Blob — circles at each arch point, sized to match blob radius at node, thinning at sag */}
+                  <g filter={`url(#${filterId})`}>
+                    {blobPts.filter((_,i)=>i%2===0).map((p,pi)=>(
+                      <circle key={pi} cx={p.x} cy={p.y} r={16} fill={blobCol}/>
+                    ))}
+                    {blobHull.map((A,i)=>(
+                      <circle key={'n'+i} cx={A.x} cy={A.y} r={A.r*1.1} fill={blobCol}/>
+                    ))}
+                    {/* Interior fill: circles between each hull node and centroid */}
+                    {blobHull.map((A,i)=>{
+                      const steps=4;
+                      return Array.from({length:steps},(_,s)=>{
+                        const t=(s+1)/(steps+1);
+                        return <circle key={'f'+i+'_'+s}
+                          cx={A.x+(bCen.x-A.x)*t} cy={A.y+(bCen.y-A.y)*t}
+                          r={Math.max(A.r*0.7, 20)} fill={blobCol}/>;
+                      });
+                    })}
+                    {/* Centroid fill circle */}
+                    <circle cx={bCen.x} cy={bCen.y} r={30} fill={blobCol}/>
+                  </g>
 
 
                   {/* Vine strands */}
@@ -12061,31 +11310,82 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   })}
 
 
-                  {/* Leaves — rasterised once and reused until geometry/settings change */}
+                  {/* Leaves — rendered to offscreen canvas then inserted as single <image> element */}
                   {(()=>{
                     if(allLeaves.length===0) return null;
+                    // Reduce leaf count at low zoom for performance
                     const zoom=transform.scale||1;
-                    const densityBucket=zoom<0.5?4:zoom<0.8?2:1;
-                    const visibleLeaves=densityBucket===1
-                      ? allLeaves
-                      : allLeaves.filter((_,i)=>i%densityBucket===0);
+                    const visibleLeaves=zoom<0.5
+                      ? allLeaves.filter((_,i)=>i%4===0)  // 25% at very low zoom
+                      : zoom<0.8
+                      ? allLeaves.filter((_,i)=>i%2===0)  // 50% at medium zoom
+                      : allLeaves;                          // 100% when zoomed in
 
-                    // The signature deliberately excludes pan translation: all
-                    // coordinates are map-space values, so moving the camera does
-                    // not require a new bitmap. Member movement, visual settings,
-                    // theme, or zoom-density changes do invalidate it.
-                    const leafSignature = visibleLeaves.map(l =>
-                      `${l.x.toFixed(1)},${l.y.toFixed(1)},${l.angle.toFixed(1)},${l.lw.toFixed(1)},${l.lh.toFixed(1)},${l.fill},${l.stroke},${l.bud?1:0},${l.opacity.toFixed(2)}`
-                    ).join('|');
-                    const raster=getGroupBorderLeafRaster(
-                      `${hub.id}|${densityBucket}|${leafSignature}`,
-                      visibleLeaves
+
+                    // Bounding box for canvas
+                    const pad=60;
+                    const lx1=Math.min(...visibleLeaves.map(l=>l.x))-pad;
+                    const ly1=Math.min(...visibleLeaves.map(l=>l.y))-pad;
+                    const lx2=Math.max(...visibleLeaves.map(l=>l.x+l.lw))+pad;
+                    const ly2=Math.max(...visibleLeaves.map(l=>l.y+l.lw))+pad;
+                    const cw=Math.ceil(lx2-lx1), ch=Math.ceil(ly2-ly1);
+                    if(cw<1||ch<1) return null;
+
+
+                    // Draw all leaves to offscreen canvas
+                    const cvs=document.createElement('canvas');
+                    cvs.width=cw; cvs.height=ch;
+                    const ctx=cvs.getContext('2d');
+
+
+                    visibleLeaves.forEach(lf=>{
+                      ctx.save();
+                      ctx.translate(lf.x-lx1, lf.y-ly1);
+                      ctx.rotate(lf.angle*Math.PI/180);
+                      ctx.globalAlpha=lf.opacity;
+
+
+                      // Draw leaf shape
+                      ctx.beginPath();
+                      if(lf.bud){
+                        ctx.moveTo(0,0);
+                        ctx.bezierCurveTo(lf.lw*0.15,-lf.lh*0.4, lf.lw*0.7,-lf.lh*0.35, lf.lw,0);
+                        ctx.bezierCurveTo(lf.lw*0.7,lf.lh*0.35, lf.lw*0.15,lf.lh*0.4, 0,0);
+                      } else {
+                        ctx.moveTo(0,0);
+                        ctx.bezierCurveTo(lf.lw*0.25,-lf.lh, lf.lw*0.75,-lf.lh, lf.lw,0);
+                        ctx.bezierCurveTo(lf.lw*0.75,lf.lh, lf.lw*0.25,lf.lh, 0,0);
+                      }
+                      ctx.closePath();
+                      ctx.fillStyle=lf.fill;
+                      ctx.fill();
+                      ctx.strokeStyle=lf.stroke;
+                      ctx.lineWidth=0.5;
+                      ctx.stroke();
+
+
+                      // Midrib
+                      if(!lf.bud){
+                        ctx.beginPath();
+                        ctx.moveTo(lf.lw*0.05,0);
+                        ctx.lineTo(lf.lw*0.82,0);
+                        ctx.strokeStyle=lf.stroke;
+                        ctx.lineWidth=0.35;
+                        ctx.globalAlpha=lf.opacity*0.5;
+                        ctx.stroke();
+                      }
+                      ctx.restore();
+                    });
+
+
+                    return (
+                      <image
+                        href={cvs.toDataURL()}
+                        x={lx1} y={ly1}
+                        width={cw} height={ch}
+                        style={{pointerEvents:'none'}}
+                      />
                     );
-                    return raster ? (
-                      <image href={raster.href} x={raster.x} y={raster.y}
-                        width={raster.width} height={raster.height}
-                        style={{pointerEvents:'none'}} />
-                    ) : null;
                   })()}
                 </g>
               );
@@ -12305,76 +11605,169 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             {viewMode === 'canvas' && (
               <g>
                 {/* -- Surrounding flowers — background layer, pointerEvents none -- */}
-                {!simpleMode && fancyDiag.flowers && surroundFlowerSettings.showSurround && activeRenderNodes.filter(n=>n.type==='friend'||(!n.type&&n.id!=='me')).map(node=>{
+                {!simpleMode && surroundFlowerSettings.showSurround && activeRenderNodes.filter(n=>n.type==='friend'||(!n.type&&n.id!=='me')).map(node=>{
+                  // Find this node's hub — prefer its own hidden hub if it has one
                   const ownHiddenHub = nodes.find(n => n.id === 'hidden_hub_' + node.id && n.hidden);
-                  const linked = links.filter(l=>l.source===node.id||l.target===node.id);
-                  const hubLink = linked.find(l=>{ const oid=l.source===node.id?l.target:l.source; return nodes.find(n=>n.id===oid&&n.type==='hub'); });
-                  const nodeHubId = ownHiddenHub?.id || (hubLink ? (hubLink.source===node.id?hubLink.target:hubLink.source) : null);
+                  const nodeHubId = ownHiddenHub ? ownHiddenHub.id : (links.find(l=>l.source===node.id||l.target===node.id)
+                    ? (() => { const linked=links.filter(l=>l.source===node.id||l.target===node.id); const hl=linked.find(l=>{ const oid=l.source===node.id?l.target:l.source; return nodes.find(n=>n.id===oid&&n.type==='hub'); }); return hl?(hl.source===node.id?hl.target:hl.source):null; })()
+                    : null);
                   const hubNode = nodeHubId ? nodes.find(n=>n.id===nodeHubId) : null;
                   const mode = hubNode?.groupMiniFlowerMode || 'blend';
                   const groupMiniFlower = hubNode?.groupMiniFlower;
-                  const pf = mode==='shared' ? groupMiniFlower : mode==='personal'
-                    ? (node.miniFlower||node.partnerFlower||null)
-                    : (node.miniFlower||node.partnerFlower||groupMiniFlower||null);
-                  if (!pf || node.showBorderFlowers===false) return null;
 
-                  const score=node.interactionScore||0;
-                  const tier=score<100?1:score<300?2:score<600?3:score<1000?4:5;
+
+                  // Determine which flower to use based on mode
+                  let pf = null;
+                  if (mode === 'shared') pf = groupMiniFlower || null;
+                  else if (mode === 'blend') pf = node.miniFlower || node.partnerFlower || groupMiniFlower || null;
+                  else if (mode === 'personal') pf = node.miniFlower || node.partnerFlower || null;
+
+
+                  if (!pf) return null;
+                  if (node.showBorderFlowers === false) return null;
+                  const score = node.interactionScore||0;
+                  const tier = score<100?1:score<300?2:score<600?3:score<1000?4:5;
                   const tierBounds=[[0,100],[100,300],[300,600],[600,1000],[1000,1500]];
                   const [tMin,tMax]=tierBounds[Math.min(4,tier-1)];
                   const tierPos=Math.min(1,(score-tMin)/(tMax-tMin||1));
-                  const rawCount=Math.max(1,surroundFlowerSettings.useCalc?Math.round(1+tier*1.5+tierPos*2.5):surroundFlowerSettings.count);
-                  const count=Math.max(1,Math.round(rawCount*fancyQualityConfig.flowerDensity));
-                  const minS=surroundFlowerSettings.minSize,maxS=surroundFlowerSettings.maxSize;
-                  const hist=node.scoreHistory||[],now2=Date.now(),HOUR=3600000;
+                  const count=Math.max(1,surroundFlowerSettings.useCalc
+                    ?Math.round((1+tier*1.5+tierPos*2.5))
+                    :surroundFlowerSettings.count);
+                  const minS=surroundFlowerSettings.minSize;
+                  const maxS=surroundFlowerSettings.maxSize;
+                  const hist=node.scoreHistory||[];
+                  const now2=Date.now(),HOUR=3600000;
                   const scoreThen=(hist.find(h=>(now2-h.ts)>=48*HOUR)||hist[0])?.score??score;
                   const degraded=(score-scoreThen)<-50;
                   const flowerColor=degraded?'#ca8a04':(pf.petalColor||'#f59e0b');
                   const flowerOpacity=degraded?0.6:0.85;
-                  const hubId=nodeHubId;
-                  const borderPts=(hubId&&!collapseInfo.hidden.has(hubId))?borderFlowerPositionsRef.current[hubId]:null;
-                  const nodeR=node.radius||40;
-                  let outwardAng=null;
-                  if(borderPts?.length){
-                    const gcx=borderPts.reduce((a,p)=>a+p.x,0)/borderPts.length,gcy=borderPts.reduce((a,p)=>a+p.y,0)/borderPts.length;
-                    const dgx=node.renderX-gcx,dgy=node.renderY-gcy;
-                    if(Math.hypot(dgx,dgy)>nodeR*0.4) outwardAng=Math.atan2(dgy,dgx);
-                  }
-                  const flowers=[];
-                  for(let fi=0;fi<count;fi++){
-                    const sv=0.5+0.5*Math.abs(Math.sin(fi*2.3+node.id.length));
-                    const fr=(minS+(maxS-minS)*sv)*(surroundFlowerSettings.flowerScale??1);
-                    const petals=pf.petals||6,fpr=fr*(1+(pf.petalLength??0.55)),fpw=fpr*(pf.petalWidth??0.65);
-                    const cv=pf.petalCurve??0.5,tipL=0.5+cv*0.45,baseL=0.1+cv*0.35;
-                    let rngB=Math.abs(node.id.split('').reduce((a,c)=>((a<<5)-a+c.charCodeAt(0))|0,fi*31+7))||1;
-                    const rand=()=>{rngB=(rngB*1664525+1013904223)&0xffffffff;return(rngB>>>0)/0xffffffff;};
-                    const positions=[];
-                    let angle;
-                    if(outwardAng!==null){const fan=Math.PI*1.15,frac=count>1?fi/(count-1)-0.5:0;angle=outwardAng+frac*fan+Math.sin(fi*1.7+node.id.length)*0.15;}
-                    else angle=(fi/count)*Math.PI*2+fi*0.9+node.id.length;
-                    const dist=nodeR+Math.sin(fi*1.7+node.id.length*0.3)*nodeR*0.35;
-                    if(Math.abs(dist)>=nodeR-fr) positions.push({x:node.renderX+Math.cos(angle)*dist,y:node.renderY+Math.sin(angle)*dist});
-                    if(borderPts?.length){
-                      const bp=borderPts[Math.floor(((fi/count)+(node.id.length*0.07%1))*borderPts.length)%borderPts.length];
-                      const distToOwner=(bp.x-node.renderX)**2+(bp.y-node.renderY)**2;
-                      const tooClose=hubId&&activeRenderNodes.some(n=>n.id!==node.id&&n.type==='friend'&&links.some(l=>(l.source===n.id||l.target===n.id)&&(l.source===hubId||l.target===hubId))&&(bp.x-n.renderX)**2+(bp.y-n.renderY)**2<distToOwner*0.7);
-                      if(!tooClose){
-                        const inset=rand()<0.1?-(2+rand()*4):(4+rand()*12);
-                        positions.push({x:bp.x+bp.inX*inset,y:bp.y+bp.inY*inset});
-                        const bx=bp.x+bp.inX*4,by=bp.y+bp.inY*4,blend=0.45+sv*0.1;
-                        positions.push({x:node.renderX+(bx-node.renderX)*blend,y:node.renderY+(by-node.renderY)*blend});
-                      }
-                    }
-                    for(const pos of positions) flowers.push({x:pos.x,y:pos.y,fr,petals,fpr,fpw,tipL,baseL,rotation:fi*0.5,
-                      petalColor:flowerColor,centerColor:pf.centerColor||'#fef08a',opacity:flowerOpacity,
-                      stamenCount:pf.stamenCount||0,stamenLength:fr*(pf.stamenLength??0.35),stamenColor:pf.stamenColor||'#fbbf24',
-                      pistilRadius:(pf.pistilSize||0)>0?fr*(pf.pistilSize??0)*0.35:0,pistilColor:pf.pistilColor||'#f59e0b'});
-                  }
-                  const sig=[node.id,node.renderX.toFixed(1),node.renderY.toFixed(1),hubId||'',count,fancyQuality,
-                    flowerColor,flowerOpacity,pf.centerColor,pf.petals,pf.petalLength,pf.petalWidth,pf.petalCurve,pf.stamenCount,pf.stamenLength,pf.stamenColor,pf.pistilSize,pf.pistilColor,
-                    flowers.map(f=>`${f.x.toFixed(1)},${f.y.toFixed(1)},${f.fr.toFixed(1)}`).join(';')].join('|');
-                  const raster=getSurroundFlowerRaster(sig,flowers,fancyQualityConfig.flowerRasterScale);
-                  return raster?<image key={'sf-'+node.id} href={raster.href} x={raster.x} y={raster.y} width={raster.width} height={raster.height} style={{pointerEvents:'none'}}/>:null;
+
+
+                  // Find which hub this person belongs to
+                  const hubId = nodeHubId;
+                  // Don't use border points from a minimised group (they're stale,
+                  // pointing at collapsed members) — fall back to node-centred flowers.
+                  const borderPts = (hubId && !collapseInfo.hidden.has(hubId)) ? borderFlowerPositionsRef.current[hubId] : null;
+
+
+                  return (
+                    <g key={'sf-'+node.id} style={{pointerEvents:'none'}}>
+                      {Array.from({length:count},(_,fi)=>{
+                        const nodeR = node.radius || 40;
+                        const sv=0.5+0.5*Math.abs(Math.sin(fi*2.3+node.id.length));
+                        const scale = surroundFlowerSettings.flowerScale ?? 1.0;
+                        const fr=(minS+(maxS-minS)*sv)*scale;
+                        const PETALS=pf.petals||6;
+                        const fpr=fr*(1+(pf.petalLength??0.55));
+                        const fpw=fpr*(pf.petalWidth??0.65);
+                        const _cv=pf.petalCurve??0.5,_tL=0.5+_cv*0.45,_bL=0.1+_cv*0.35;
+                        const fpPath=Array.from({length:PETALS},(_,pi)=>{
+                          const pa=(pi/PETALS)*Math.PI*2+(fi*0.5);
+                          const tx=Math.cos(pa)*fpr,ty=Math.sin(pa)*fpr,pp=pa+Math.PI*0.5;
+                          return `M 0,0 C ${Math.cos(pa)*fpr*_bL+Math.cos(pp)*fpw*0.6},${Math.sin(pa)*fpr*_bL+Math.sin(pp)*fpw*0.6} ${Math.cos(pa)*fpr*_tL+Math.cos(pp)*fpw*0.5},${Math.sin(pa)*fpr*_tL+Math.sin(pp)*fpw*0.5} ${tx},${ty} C ${Math.cos(pa)*fpr*_tL-Math.cos(pp)*fpw*0.5},${Math.sin(pa)*fpr*_tL-Math.sin(pp)*fpw*0.5} ${Math.cos(pa)*fpr*_bL-Math.cos(pp)*fpw*0.6},${Math.sin(pa)*fpr*_bL-Math.sin(pp)*fpw*0.6} 0,0`;
+                        }).join(' ');
+
+
+                        // Seeded random for border placement — consistent per node+flower
+                        let rngB = Math.abs(node.id.split('').reduce((a,c)=>((a<<5)-a+c.charCodeAt(0))|0, fi*31+7)) || 1;
+                        const seededRngBorder = () => { rngB=(rngB*1664525+1013904223)&0xffffffff; return (rngB>>>0)/0xffffffff; };
+
+
+                        // Only border flowers render in the background layer
+                        // Orbit flowers are rendered inside the node group (after photo) for overlap
+                        const positions = [];
+
+
+                        // 1. Orbit around photo node edge — biased toward the OUTER
+                        // side (away from the group centre) so the main person keeps
+                        // flowers on their outer edge as members are added
+                        let outwardAng = null;
+                        if (borderPts && borderPts.length > 0) {
+                          // group centre = centroid of the border points
+                          const gcx = borderPts.reduce((s,p)=>s+p.x,0)/borderPts.length;
+                          const gcy = borderPts.reduce((s,p)=>s+p.y,0)/borderPts.length;
+                          const dgx = node.renderX - gcx, dgy = node.renderY - gcy;
+                          // only bias if the node is meaningfully off-centre from the group
+                          if (Math.sqrt(dgx*dgx + dgy*dgy) > nodeR * 0.4) {
+                            outwardAng = Math.atan2(dgy, dgx);
+                          }
+                        }
+                        // Spread flowers in a ~200° fan centred on the outward direction
+                        let angle;
+                        if (outwardAng !== null) {
+                          const fan = Math.PI * 1.15; // ~200°
+                          const frac = count > 1 ? (fi / (count - 1)) - 0.5 : 0;
+                          angle = outwardAng + frac * fan + Math.sin(fi * 1.7 + node.id.length) * 0.15;
+                        } else {
+                          angle = (fi / count) * Math.PI * 2 + fi * 0.9 + node.id.length;
+                        }
+                        const distVariance = Math.sin(fi * 1.7 + node.id.length * 0.3) * nodeR * 0.35;
+                        const dist = nodeR + distVariance;
+                        if (Math.abs(dist) >= nodeR - fr) {
+                          positions.push({
+                            x: node.renderX + Math.cos(angle) * dist,
+                            y: node.renderY + Math.sin(angle) * dist,
+                          });
+                        }
+
+
+                        // Follow the vine border closely — mostly inside, ~10% just outside
+                        if (borderPts && borderPts.length > 0) {
+                          const ptIdx = Math.floor(((fi / count) + (node.id.length * 0.07 % 1)) * borderPts.length) % borderPts.length;
+                          const bp = borderPts[ptIdx];
+
+
+                          // Skip border-hugging flower if closer to a neighbour
+                          const distToOwner = (bp.x - node.renderX)**2 + (bp.y - node.renderY)**2;
+                          const tooClose = hubId && activeRenderNodes.some(n =>
+                            n.id !== node.id && n.type === 'friend' &&
+                            links.some(l => (l.source===n.id||l.target===n.id) && (l.source===hubId||l.target===hubId)) &&
+                            (bp.x - n.renderX)**2 + (bp.y - n.renderY)**2 < distToOwner * 0.7
+                          );
+                          if (!tooClose) {
+                            // Positive = inward, negative = just outside border
+                            const isOutside = seededRngBorder() < 0.1;
+                            const insetDist = isOutside
+                              ? -(2 + seededRngBorder() * 4)
+                              : (4 + seededRngBorder() * 12);
+                            positions.push({
+                              x: bp.x + bp.inX * insetDist,
+                              y: bp.y + bp.inY * insetDist,
+                            });
+
+
+                            // Always add inward spread flower toward other members
+                            const blend = 0.45 + sv * 0.1;
+                            const bx = bp.x + bp.inX * 4;
+                            const by = bp.y + bp.inY * 4;
+                            positions.push({
+                              x: node.renderX + (bx - node.renderX) * blend,
+                              y: node.renderY + (by - node.renderY) * blend,
+                            });
+                          }
+                        }
+
+
+                        return positions.map((pos, pi) => (
+                          <g key={fi+'-'+pi} transform={`translate(${pos.x},${pos.y})`} opacity={flowerOpacity}>
+                            <path d={fpPath} fill={flowerColor}/>
+                             <circle r={fr*0.22} fill={pf.centerColor||'#fef08a'} stroke={flowerColor} strokeWidth={0.5}/>
+                             {/* Stamen — drawn custom paths or parametric */}
+                             {(pf.stamenCount||0)>0&&Array.from({length:pf.stamenCount},(_,si)=>{
+                               const sa=(si/(pf.stamenCount))*Math.PI*2;
+                               const sLen=fr*(pf.stamenLength??0.35);
+                               const x2=Math.cos(sa)*sLen, y2=Math.sin(sa)*sLen;
+                               return <g key={si}>
+                                 <line x1={0} y1={0} x2={x2} y2={y2} stroke={pf.stamenColor||'#fbbf24'} strokeWidth={fr*0.06} strokeLinecap="round" opacity={0.9}/>
+                                 <circle cx={x2} cy={y2} r={fr*0.09} fill={pf.stamenColor||'#fbbf24'} opacity={0.95}/>
+                               </g>;
+                             })}
+                             {(pf.pistilSize||0)>0&&<circle r={fr*(pf.pistilSize??0)*0.35} fill={pf.pistilColor||'#f59e0b'} stroke={pf.stamenColor||'#fbbf24'} strokeWidth={fr*0.04} opacity={0.95}/>}
+                          </g>
+                        ));
+                      })}
+                    </g>
+                  );
                 })}
                 {/* -- Hub stakes — drawn BEFORE links so vines appear in front -- */}
                 {!simpleMode && activeRenderNodes.filter(n=>n.type==='hub'&&!n.hidden).map(node=>{
@@ -12397,14 +11790,14 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
 
             {viewMode === 'canvas' && !sliderDragging && !simpleMode && (
-              <g className="foliage-layer">{fancyDiag.leaves && linkParts.map(p => p && p.foliage)}</g>
+              <g className="foliage-layer">{linkParts.map(p => p && p.foliage)}</g>
             )}
 
 
 
 
             {/* Fallen leaves — persist until raked */}
-            {!simpleMode && fancyDiag.leaves && fallenLeaves.length > 0 && (
+            {!simpleMode && fallenLeaves.length > 0 && (
               <g className="fallen-leaves-layer" style={{pointerEvents:'none'}}>
                 {fallenLeaves.map((fl, idx) => {
                   const leafD = `M 0,0 C ${fl.lw*0.25},${-fl.lh} ${fl.lw*0.75},${-fl.lh} ${fl.lw},0 C ${fl.lw*0.75},${fl.lh} ${fl.lw*0.25},${fl.lh} 0,0 Z`;
@@ -12760,7 +12153,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     return [(
                       <g key={node.id} transform={`translate(${nx},${ny})`}
                         style={{cursor:'pointer'}}
-                        onPointerDown={e => handlePointerDown(e, node.id)}>
+                        onPointerDown={e => handlePointerDown(e, node)}>
                         <rect x={-cw/2} y={-ch/2} width={cw} height={ch} rx={12}
                           fill={dm?'#1e293b':'white'} stroke={color} strokeWidth={isLifted2?3:1.5}
                           filter={isLifted2?'drop-shadow(0 4px 12px rgba(0,0,0,0.4))':undefined}/>
@@ -12785,7 +12178,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   return [(
                     <g key={node.id} transform={`translate(${nx},${ny})`}
                       style={{cursor:'pointer'}}
-                      onPointerDown={e => handlePointerDown(e, node.id)}>
+                      onPointerDown={e => handlePointerDown(e, node)}>
                       <rect x={-pw/2} y={-ph/2} width={pw} height={ph} rx={ph/2}
                         fill={dm?'#1e293b':'white'} stroke={color} strokeWidth={isLifted2?3:1.5}
                         filter={isLifted2?'drop-shadow(0 4px 12px rgba(0,0,0,0.4))':undefined}/>
@@ -12826,7 +12219,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     const cardH = headerH + (isCollapsed2 ? 0 : gridH);
                     return [(
                       <g key={node.id} transform={`translate(${nx},${ny})`} style={{cursor:'pointer'}}
-                        onPointerDown={e => handlePointerDown(e, node.id)}>
+                        onPointerDown={e => handlePointerDown(e, node)}>
                         <rect x={-cardW/2} y={-cardH/2} width={cardW} height={cardH} rx={10}
                           fill={dm?'#1e293b':'white'} stroke={baseColor}
                           strokeWidth={isLifted2?3:2}
@@ -12884,7 +12277,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   return [(
                     <g key={node.id} transform={`translate(${nx},${ny})`}
                       style={{cursor:'pointer'}}
-                      onPointerDown={e => handlePointerDown(e, node.id)}
+                      onPointerDown={e => handlePointerDown(e, node)}
                       onClick={() => setShowHealthListDetail(list.id)}>
                       <rect x={-cw/2} y={-ch/2} width={cw} height={ch} rx={12}
                         fill={dm?'#1e293b':'white'} stroke={baseColor} strokeWidth={isLifted2?3:1.5}
@@ -13765,7 +13158,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
 
             {/* ---- Dark-mode darkness overlay: fireflies reveal light through it ---- */}
-            {theme.darkMode && darknessFilter && fancyDiag.darkness && (() => {
+            {theme.darkMode && darknessFilter && (() => {
               // huge rect in canvas coords; the mask is dark with soft white
               // circles at each firefly so light shows through there.
               const BIG = 100000;
@@ -13832,7 +13225,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
 
             {/* ---- Butterflies (day) / Fireflies (night) ---- */}
-            {!simpleMode && fancyDiag.creatures && creatures.map(c => {
+            {!simpleMode && creatures.map(c => {
               // WAVE: fixed cycle for ALL butterflies so waves never drift/clash.
               // The delay (0..WAVE_SWEEP) is set purely by diagonal position, so
               // the wave ripples across; everyone flaps with the SAME duration and
@@ -15528,8 +14921,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       <div style={{display:'flex', gap:12, marginBottom:8}}>
                         <label style={{flex:1}}>
                           <div style={{fontSize:10, color:dm?'#94a3b8':'#64748b', marginBottom:3}}>Columns</div>
-                          <input type="number" min={1} max={6} value={Math.max(1, Math.min(6, list.gridCols || 3))}
-                            onChange={e => updateList(l => ({...l, gridCols: Math.max(1, Math.min(6, parseInt(e.target.value)||3))}))}
+                          <input type="number" min={1} max={8} value={list.gridCols || 3}
+                            onChange={e => updateList(l => ({...l, gridCols: Math.max(1, Math.min(8, parseInt(e.target.value)||3))}))}
                             style={{width:'100%', padding:'6px 8px', borderRadius:6, fontSize:12,
                               border:`1px solid ${dm?'#334155':'#e2e8f0'}`, background:dm?'#1e293b':'white', color:dm?'white':'#0f172a'}}/>
                         </label>
@@ -16648,12 +16041,12 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           return (
             <div style={{position:'fixed', inset:0, zIndex:320, display:'flex', alignItems:'flex-end',
               background:'rgba(0,0,0,0.5)', paddingBottom:'calc(68px + env(safe-area-inset-bottom, 0px))'}}
-              onClick={e => { if (e.target === e.currentTarget) { setShowHealthListDetail(null); setHealthHistoryUnlocked(false); } }}>
+              onClick={e => { if (e.target === e.currentTarget) setShowHealthListDetail(null); }}>
               <div style={{width:'100%', background:dm?'#0f172a':'white', borderRadius:'16px 16px 0 0',
                 padding:'20px 16px', maxHeight:'80vh', overflowY:'auto', boxSizing:'border-box'}}>
                 <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:4}}>
                   <div style={{fontSize:16, fontWeight:800, color:dm?'white':'#0f172a'}}>{list.icon} {list.name}</div>
-                  <button onClick={() => { setShowHealthListDetail(null); setHealthHistoryUnlocked(false); }}
+                  <button onClick={() => setShowHealthListDetail(null)}
                     style={{background:'none', border:'none', fontSize:22, color:dm?'#64748b':'#94a3b8', cursor:'pointer'}}>×</button>
                 </div>
                 <div style={{fontSize:12, color:dm?'#64748b':'#94a3b8', marginBottom:16}}>
@@ -16720,91 +16113,35 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     this top-to-bottom quickly shows which items are reliable
                     habits versus which ones keep slipping. */}
                 <div style={{marginTop:18, paddingTop:14, borderTop:`1px solid ${dm?'#1e293b':'#f1f5f9'}`}}>
-                  <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10}}>
-                    <div style={{fontSize:12, fontWeight:700, color:dm?'white':'#0f172a'}}>Last 7 days</div>
-                    {healthHistoryUnlocked && (
-                      <div style={{fontSize:9, color:'#f59e0b', fontWeight:700}}>Tap squares to change values</div>
-                    )}
-                  </div>
+                  <div style={{fontSize:12, fontWeight:700, color:dm?'white':'#0f172a', marginBottom:10}}>Last 7 days</div>
                   {list.categories.map(cat => {
                     const days = Array.from({length:7}, (_, i) => {
                       const d = new Date(); d.setDate(d.getDate() - (6-i));
                       const dayStr = getLocalDateStr(d);
                       const isToday = i === 6;
                       const dayCounts = isToday ? todayCounts : (habitHistory[dayStr]?.[list.id] || {});
-                      const count = dayCounts[cat.id] || 0;
-                      return {
-                        dayStr,
-                        isToday,
-                        count,
-                        hit: count >= cat.target,
-                        label: d.toLocaleDateString('en',{weekday:'narrow'}),
-                      };
+                      const c = dayCounts[cat.id] || 0;
+                      return { hit: c >= cat.target, label: d.toLocaleDateString('en',{weekday:'narrow'}) };
                     });
                     const hitRate = Math.round((days.filter(d=>d.hit).length / 7) * 100);
                     return (
                       <div key={cat.id} style={{display:'flex', alignItems:'center', gap:8, marginBottom:8}}>
                         <div style={{fontSize:13, width:20, textAlign:'center', flexShrink:0}}>{cat.icon}</div>
                         <div style={{flex:1, display:'flex', gap:3}}>
-                          {days.map((d, i) => {
-                            const partial = d.count > 0 && !d.hit;
-                            const cycleValue = () => {
-                              if (!healthHistoryUnlocked) return;
-                              const next = d.count >= cat.target ? 0 : d.count + 1;
-                              if (d.isToday) {
-                                setHabitToday(prev => ({
-                                  ...prev,
-                                  [list.id]: { ...(prev[list.id] || {}), [cat.id]: next },
-                                }));
-                              } else {
-                                setHabitHistory(prev => ({
-                                  ...prev,
-                                  [d.dayStr]: {
-                                    ...(prev[d.dayStr] || {}),
-                                    [list.id]: {
-                                      ...(prev[d.dayStr]?.[list.id] || {}),
-                                      [cat.id]: next,
-                                    },
-                                  },
-                                }));
-                              }
-                            };
-                            return (
-                              <div key={d.dayStr} style={{flex:1, display:'flex', flexDirection:'column', alignItems:'center', gap:2}}>
-                                <button onClick={cycleValue} aria-label={`${cat.label} ${d.dayStr}: ${d.count}`}
-                                  style={{width:'100%', aspectRatio:'1', borderRadius:4, padding:0,
-                                    display:'flex', alignItems:'center', justifyContent:'center',
-                                    background:d.hit?'#10b981':partial?'#8b5cf6':(dm?'#1e293b':'#f1f5f9'),
-                                    border:d.hit||partial?'none':`1px solid ${dm?'#334155':'#e2e8f0'}`,
-                                    color:'white', fontSize:10, fontWeight:800,
-                                    cursor:healthHistoryUnlocked?'pointer':'default',
-                                    boxShadow:healthHistoryUnlocked?'inset 0 0 0 1px rgba(245,158,11,0.65)':'none'}}>
-                                  {healthHistoryUnlocked ? d.count : ''}
-                                </button>
-                                <span style={{fontSize:7, color:dm?'#475569':'#94a3b8'}}>{d.label}</span>
-                              </div>
-                            );
-                          })}
+                          {days.map((d, i) => (
+                            <div key={i} style={{flex:1, display:'flex', flexDirection:'column', alignItems:'center', gap:2}}>
+                              <div style={{width:'100%', aspectRatio:'1', borderRadius:4,
+                                background: d.hit ? '#10b981' : (dm?'#1e293b':'#f1f5f9'),
+                                border: d.hit ? 'none' : `1px solid ${dm?'#334155':'#e2e8f0'}`}}/>
+                              <span style={{fontSize:7, color:dm?'#475569':'#94a3b8'}}>{d.label}</span>
+                            </div>
+                          ))}
                         </div>
                         <div style={{fontSize:10, fontWeight:700, width:32, textAlign:'right', flexShrink:0,
                           color: hitRate>=70?'#10b981':hitRate>=40?'#f59e0b':'#ef4444'}}>{hitRate}%</div>
                       </div>
                     );
                   })}
-                  <div style={{display:'flex', alignItems:'center', justifyContent:'flex-start', marginTop:10}}>
-                    <button onClick={() => setHealthHistoryUnlocked(v => !v)}
-                      aria-label={healthHistoryUnlocked ? 'Lock health history' : 'Unlock health history'}
-                      style={{width:36, height:36, borderRadius:9,
-                        border:`1px solid ${healthHistoryUnlocked?'#f59e0b':(dm?'#334155':'#e2e8f0')}`,
-                        background:healthHistoryUnlocked?(dm?'rgba(245,158,11,0.16)':'#fffbeb'):'none',
-                        color:healthHistoryUnlocked?'#f59e0b':(dm?'#94a3b8':'#64748b'),
-                        fontSize:18, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center'}}>
-                      {healthHistoryUnlocked ? '🔓' : '🔒'}
-                    </button>
-                    <span style={{marginLeft:8, fontSize:10, color:dm?'#64748b':'#94a3b8'}}>
-                      {healthHistoryUnlocked ? 'Editing enabled' : 'Unlock to edit previous days'}
-                    </span>
-                  </div>
                 </div>
                 <button onClick={() => setShowListPointsEditor(list.id)}
                   style={{width:'100%', marginTop:14, padding:'8px 0', borderRadius:8,
@@ -17163,73 +16500,47 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         // behaviour). Uses its own feedPositions key namespace
         // ("dimKey:hlist:nodeId") so a health list's saved position can
         // never collide or be confused with a person's.
-        // Health lists use a six-lane packing grid. Each list chooses a
-        // width of 1–6 lanes through list.gridCols, so three 2-column lists,
-        // two 3-column lists, one 6-column list, etc. can share a row.
         const HEALTH_COLS = 6;
-        const HEALTH_LIST_ROW_STEP = 78;
-        const HEALTH_ITEMS_GAP = 8;
-        const HEALTH_ITEMS_PAD = 10;
-        const HEALTH_LANE_GAP = 8;
-        const HEALTH_LANE_W = (availW - 24 - HEALTH_LANE_GAP * (HEALTH_COLS - 1)) / HEALTH_COLS;
-        const healthListCols = list => Math.max(1, Math.min(6, Number(list?.gridCols) || 3));
-        const healthListCardMetrics = list => {
-          const perRow = healthListCols(list);
-          const cardW = perRow * HEALTH_LANE_W + (perRow - 1) * HEALTH_LANE_GAP;
-          const autoFitSize = (cardW - HEALTH_ITEMS_PAD * 2 - (perRow - 1) * HEALTH_ITEMS_GAP) / perRow;
-          const bubbleSize = Math.max(44, Math.min(58, Number(list?.itemBubbleSize) || autoFitSize, autoFitSize));
-          const rows = Math.max(1, Math.ceil((list?.categories?.length || 0) / perRow));
-          const headerH = 34;
-          const gridH = rows * bubbleSize + Math.max(0, rows - 1) * HEALTH_ITEMS_GAP + HEALTH_ITEMS_PAD * 2;
-          const cardH = headerH + (list?.itemsCollapsed ? 0 : gridH);
-          return { perRow, cardW, bubbleSize, rows, headerH, gridH, cardH, rowSpan: Math.max(1, Math.ceil((cardH + 12) / HEALTH_LIST_ROW_STEP)) };
-        };
         const resolveHealthListPositions = (dimKey, healthListMembers) => {
           const placed = {};
           const occupied = new Set();
-          const mark = (col, row, colSpan, rowSpan) => {
-            for (let r = row; r < row + rowSpan; r++) for (let c = col; c < col + colSpan; c++) occupied.add(`${c},${r}`);
-          };
-          const isFree = (col, row, colSpan, rowSpan) => {
-            if (col < 0 || col + colSpan > HEALTH_COLS || row < 0) return false;
-            for (let r = row; r < row + rowSpan; r++) for (let c = col; c < col + colSpan; c++) if (occupied.has(`${c},${r}`)) return false;
-            return true;
-          };
-          // Restore valid saved positions first.
           healthListMembers.forEach(n => {
-            const list = healthLists.find(l => l.id === n.listId);
-            const { perRow: colSpan, rowSpan } = healthListCardMetrics(list);
             const key = `${dimKey}:hlist:${n.id}`;
             const saved = feedPositions[key];
-            if (saved && isFree(saved.col, saved.row, colSpan, rowSpan)) {
-              placed[n.id] = { col: saved.col, row: saved.row, colSpan, rowSpan };
-              mark(saved.col, saved.row, colSpan, rowSpan);
+            if (saved && saved.col >= 0 && saved.col < HEALTH_COLS && !occupied.has(`${saved.col},${saved.row}`)) {
+              placed[n.id] = saved;
+              occupied.add(`${saved.col},${saved.row}`);
             }
           });
+          let col = 0, row = 0;
           const newlyPlaced = {};
           healthListMembers.forEach(n => {
             if (placed[n.id]) return;
-            const list = healthLists.find(l => l.id === n.listId);
-            const { perRow: colSpan, rowSpan } = healthListCardMetrics(list);
+            // Guard against scheduling the same node's position save more than
+            // once, regardless of how many times this function re-runs across
+            // renders -- a ref persists correctly where a closure-local check
+            // alone could be fooled by a stale view of feedPositions,
+            // previously risking a runaway render loop.
             const key = `${dimKey}:hlist:${n.id}`;
-            let row = 0, col = 0, found = false;
-            for (row = 0; row < 200 && !found; row++) {
-              for (col = 0; col <= HEALTH_COLS - colSpan; col++) {
-                if (isFree(col, row, colSpan, rowSpan)) { found = true; break; }
-              }
+            if (healthListPositionScheduledRef.current.has(key)) {
+              // Already scheduled but not yet reflected in feedPositions --
+              // use a temporary spot for this render only, don't reschedule.
+              placed[n.id] = { col, row };
+              col++; if (col >= HEALTH_COLS) { col = 0; row++; }
+              return;
             }
-            if (!found) { row = 0; col = 0; }
-            placed[n.id] = { col, row, colSpan, rowSpan };
-            mark(col, row, colSpan, rowSpan);
-            if (!healthListPositionScheduledRef.current.has(key)) {
-              newlyPlaced[key] = { col, row };
-              healthListPositionScheduledRef.current.add(key);
-            }
+            while (occupied.has(`${col},${row}`)) { col++; if (col >= HEALTH_COLS) { col = 0; row++; } }
+            placed[n.id] = { col, row };
+            newlyPlaced[key] = { col, row };
+            healthListPositionScheduledRef.current.add(key);
+            occupied.add(`${col},${row}`);
+            col++; if (col >= HEALTH_COLS) { col = 0; row++; }
           });
-          if (Object.keys(newlyPlaced).length) setTimeout(() => setFeedPositions(prev => ({ ...prev, ...newlyPlaced })), 0);
+          if (Object.keys(newlyPlaced).length > 0) {
+            setTimeout(() => setFeedPositions(prev => ({ ...prev, ...newlyPlaced })), 0);
+          }
           return placed;
         };
-
 
         const resolvePositions = (dimKey, members, excludedNodesStillReserved) => {
           const occupied = new Set();
@@ -17562,37 +16873,24 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           // below -- they never have branch children, so this simple path
           // covers everything they need.
           if (draggedNode && draggedNode.type === 'health_list') {
-            const draggedList = healthLists.find(l => l.id === draggedNode.listId);
-            const draggedMetrics = healthListCardMetrics(draggedList);
-            const healthFlowerId = sectionDefs.find(section => section.dimKey === cDimKey)?.flowerId;
-            const healthListMembers = healthFlowerId
-              ? buildMembers(healthFlowerId).members.filter(member => member.type === 'health_list')
-              : nodes.filter(node => node.type === 'health_list');
-            const colSpan = draggedMetrics.perRow, rowSpan = draggedMetrics.rowSpan;
-            let hCol = Math.round((localX - 12 - draggedMetrics.cardW / 2) / (HEALTH_LANE_W + HEALTH_LANE_GAP));
-            hCol = Math.max(0, Math.min(HEALTH_COLS - colSpan, hCol));
-            const healthListBaseY = Number(stripEl.dataset.healthListBaseY) || 250;
-            let hRow = Math.max(0, Math.round((localY - healthListBaseY - draggedMetrics.cardH / 2) / HEALTH_LIST_ROW_STEP));
+            const hlColSpacing = HEALTH_CARD_W + 10, hlRowSpacing = 90;
+            let hCol = Math.max(0, Math.min(HEALTH_COLS - 1, Math.round((localX - hlColSpacing/2) / hlColSpacing)));
+            let hRow = Math.max(0, Math.round((localY - 600) / hlRowSpacing));
             setFeedPositions(prev => {
               const myKey = `${cDimKey}:hlist:${nodeId}`;
-              const overlaps = (aCol, aRow, aCols, aRows, bCol, bRow, bCols, bRows) =>
-                aCol < bCol + bCols && aCol + aCols > bCol && aRow < bRow + bRows && aRow + aRows > bRow;
-              const isFree = (c, r) => !healthListMembers.some(other => {
-                if (other.id === nodeId) return false;
-                const op = prev[`${cDimKey}:hlist:${other.id}`];
-                if (!op) return false;
-                const om = healthListCardMetrics(healthLists.find(l => l.id === other.listId));
-                return overlaps(c, r, colSpan, rowSpan, op.col, op.row, om.perRow, om.rowSpan);
-              });
+              const isFree = (c, r) => !Object.entries(prev).some(([k, v]) =>
+                k.startsWith(`${cDimKey}:hlist:`) && k !== myKey && v.col === c && v.row === r);
               if (isFree(hCol, hRow)) return { ...prev, [myKey]: { col: hCol, row: hRow } };
-              for (let ring = 1; ring <= 30; ring++) {
-                for (let dr = -ring; dr <= ring; dr++) for (let dc = -ring; dc <= ring; dc++) {
-                  if (Math.max(Math.abs(dc), Math.abs(dr)) !== ring) continue;
-                  const c = Math.max(0, Math.min(HEALTH_COLS-colSpan, hCol+dc)), r = Math.max(0, hRow+dr);
-                  if (isFree(c, r)) return { ...prev, [myKey]: { col: c, row: r } };
+              for (let ring = 1; ring <= 20; ring++) {
+                for (let dc = -ring; dc <= ring; dc++) {
+                  for (let dr = -ring; dr <= ring; dr++) {
+                    if (Math.max(Math.abs(dc), Math.abs(dr)) !== ring) continue;
+                    const c = Math.max(0, Math.min(HEALTH_COLS-1, hCol+dc)), r = Math.max(0, hRow+dr);
+                    if (isFree(c, r)) return { ...prev, [myKey]: { col: c, row: r } };
+                  }
                 }
               }
-              return prev;
+              return { ...prev, [myKey]: { col: hCol, row: hRow } };
             });
             setFeedCarrying(null);
             feedJustPlaced.current.add(nodeId);
@@ -17900,49 +17198,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               // extent, the next section could start above where a flower near
               // the boundary actually ends up.
               const measuredExtra = feedSectionExtraH[dimKey] || 0;
-              // Health section has extra metric cards at the top taking ~140px.
+              // Health section has extra cards at the top taking ~140px
               const healthCardsExtra = dimKey === 'health' ? 148 : 0;
-
-              // Put health lists immediately below the lowest ordinary node in
-              // the Health section. Previously their visible cards used a fixed
-              // y=600 while their connector anchors still used the normal grid
-              // coordinates near the top, so the apparent draggable position and
-              // the actual card were hundreds of pixels apart.
-              const normalMemberRows = members
-                .filter(n => n.type !== 'health_list')
-                .map(n => positions[n.id]?.row)
-                .filter(Number.isFinite);
-              const normalMaxRow = normalMemberRows.length ? Math.max(...normalMemberRows) : 0;
-              const healthListBaseY = dimKey === 'health'
-                ? Math.max(250, (normalMaxRow + 1) * ROW_STEP + healthCardsExtra + measuredExtra + 35)
-                : 250;
-
-              // Health-list cards use a separate grid below the normal nodes.
-              // Size the section from the same shared origin used by rendering,
-              // connector anchors and drag/drop calculations.
-              // from the normal people-grid maxRow. Previously the section could
-              // end around y=300 while these cards were visibly overflowing at
-              // y=600; the following dimension sections were then painted on top
-              // of them and intercepted every tap. Include the real health-list
-              // extent in the section height so the cards remain inside their own
-              // section and receive pointer events normally.
-              const healthListBottom = healthListMembers.reduce((bottom, node) => {
-                const pos = healthListPositions[node.id];
-                if (!pos) return bottom;
-                const list = healthLists.find(l => l.id === node.listId);
-                let cardH = FEED_HEX * 1.3;
-                if ((list?.displayMode || 'percent') === 'items') {
-                  cardH = healthListCardMetrics(list).cardH;
-                }
-                const centreY = healthListBaseY + pos.row * HEALTH_LIST_ROW_STEP + cardH / 2;
-                return Math.max(bottom, centreY + cardH * 0.5 + 40);
-              }, 0);
-
-              const sectionH = Math.max(
-                160,
-                (maxRow + 1) * ROW_STEP + 80 + measuredExtra + healthCardsExtra,
-                healthListBottom,
-              );
+              const sectionH = Math.max(160, (maxRow + 1) * ROW_STEP + 80 + measuredExtra + healthCardsExtra);
 
               // Anchor point for each member (centre of its circle) plus the flower
               // band's own anchor, so we can draw a line from every node back to
@@ -17950,17 +17208,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               // canvas, just laid out on the fixed grid instead of free positions.
               const anchorOf = {};
               members.forEach(n => {
-                const pos = positions[n.id];
-                if (pos.isHealthListGrid) {
-                  const list = healthLists.find(l => l.id === n.listId);
-                  const m = healthListCardMetrics(list);
-                  anchorOf[n.id] = {
-                    x: BAND_W + 12 + pos.col * (HEALTH_LANE_W + HEALTH_LANE_GAP) + m.cardW / 2,
-                    y: healthListBaseY + pos.row * HEALTH_LIST_ROW_STEP + m.cardH / 2,
-                  };
-                  return;
-                }
-                const { col, row } = pos;
+                const { col, row } = positions[n.id];
                 const rowShift = (row % 2 === 1) ? FEED_HEX * 0.75 : 0;
                 const yOff2 = dimKey === 'health' ? 148 : 50;
                 anchorOf[n.id] = {
@@ -18111,7 +17359,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     })()}
 
                     {/* Fixed 6-column hex strip (offset right of the band), unlimited rows */}
-                    <div data-feed-strip={dimKey} data-health-list-base-y={healthListBaseY}
+                    <div data-feed-strip={dimKey}
                       onPointerUp={e=>{
                         window.ftDiagLog('[FT-DIAG] strip container onPointerUp, feedCarrying=', feedCarrying ? feedCarrying.nodeId+' dimKey='+feedCarrying.dimKey : null, 'this dimKey=', dimKey);
                         if (!feedCarrying || feedCarrying.dimKey !== dimKey) return;
@@ -18215,11 +17463,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           // for 6-per-row, entirely independent of the
                           // people grid's column spacing -- placed in their
                           // own band below the people grid area.
-                          const list = healthLists.find(l => l.id === node.listId);
-                          const m = healthListCardMetrics(list);
+                          const hlColSpacing = HEALTH_CARD_W + 10;
+                          const hlRowSpacing = 90;
                           col = posInfo.col; row = posInfo.row;
-                          px = 12 + posInfo.col * (HEALTH_LANE_W + HEALTH_LANE_GAP) + m.cardW / 2;
-                          py = healthListBaseY + posInfo.row * HEALTH_LIST_ROW_STEP + m.cardH / 2;
+                          px = posInfo.col * hlColSpacing + hlColSpacing/2;
+                          py = 600 + posInfo.row * hlRowSpacing;
                         } else {
                           ({ col, row } = posInfo);
                           const rowShift = (row % 2 === 1) ? FEED_HEX * 0.75 : 0;
@@ -18297,14 +17545,27 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           // actual <svg> -- that mismatch was the real bug
                           // behind the broken 1-column/oversized rendering.
                           if (displayMode === 'items') {
-                            const gap = HEALTH_ITEMS_GAP;
-                            const cardPad = HEALTH_ITEMS_PAD;
-                            const { perRow, cardW, bubbleSize, rows, headerH, gridH, cardH } = healthListCardMetrics(list);
+                            const perRow = list.gridCols || 3;
+                            const fixedGap = 6, fixedPad = 10;
+                            // Auto-fit to the shared 6-per-row target width when
+                            // no custom bubble size has been set, so lists get a
+                            // sensible, consistent default rather than needing
+                            // manual tuning every time -- explicit customization
+                            // still overrides this.
+                            const autoFitSize = (HEALTH_CARD_W - fixedPad*2 - (perRow-1)*fixedGap) / perRow;
+                            const bubbleSize = list.itemBubbleSize || Math.max(20, Math.min(60, autoFitSize));
+                            const gap = bubbleSize * 0.25;
+                            const rows = Math.ceil(list.categories.length / perRow);
+                            const cardPad = bubbleSize * 0.3;
+                            const headerH = 30;
+                            const cardW = Math.max(perRow * bubbleSize + (perRow-1) * gap + cardPad*2, 110);
+                            const gridH = rows * bubbleSize + (rows-1) * gap + cardPad*2;
                             const isCollapsed = !!list.itemsCollapsed;
+                            const cardH = headerH + (isCollapsed ? 0 : gridH);
                             const baseColor = list.color || '#10b981';
                             const isCarried = feedCarrying?.nodeId === node.id;
                             return (
-                              <div key={node.id} style={{position:'absolute', left:px-cardW/2, top:py-cardH/2,
+                              <div key={node.id} style={{position:'absolute', left:px-cardW/2, top:py-cardH*0.68,
                                 width:cardW, height:cardH, borderRadius:10,
                                 background:dm?'#1e293b':'white', border:`2px solid ${isCarried?baseColor+'aa':baseColor}`,
                                 overflow:'hidden', boxSizing:'border-box', opacity:isCarried?0.5:1, touchAction:'none'}}
@@ -18388,7 +17649,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                             display:'flex', alignItems:'center', justifyContent:'center',
                                             border:`2px solid ${baseColor}`,
                                             background: progress >= 1 ? baseColor : `${baseColor}${Math.round(progress*255).toString(16).padStart(2,'0')}`,
-                                            fontSize: bubbleSize*0.6, transition:'background 0.2s'}}>
+                                            fontSize: bubbleSize*0.75, transition:'background 0.2s'}}>
                                           {cat.icon}
                                         </div>
                                       );
@@ -19884,9 +19145,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     const lvl = FRIENDSHIP_LEVELS.find(l=>l.tier===tier)||FRIENDSHIP_LEVELS[0];
                     return (
                       <div key={n.id} onClick={()=>{
+                        setSelectedNodeId(n.id);
                         setViewMode('canvas');
                         setSearchOpen(false); setSearchQuery('');
-                        setTimeout(() => openProfileFromNode(n.id), 40);
                       }} style={{display:'flex',alignItems:'center',gap:12,padding:'10px 16px',cursor:'pointer',borderBottom:`1px solid ${dm?'#1e293b':'#f8fafc'}`}}
                         onMouseEnter={e=>e.currentTarget.style.background=dm?'#1e293b':'#f8fafc'}
                         onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
