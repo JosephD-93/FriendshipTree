@@ -2282,6 +2282,285 @@ function TaggedPhotosSection({ nodeId, nodes, links, openPhotoDB, setHubGalleryO
 }
 
 
+
+
+// ─── Visible Capgo update controls ────────────────────────────────────────
+// Uses the already-installed native CapacitorUpdater plugin through
+// window.Capacitor, so this file does not add another package import or alter
+// web-browser builds. It exposes the normally hidden OTA process in Settings:
+// current bundle, channel/plugin details, live download progress, local bundle
+// list, update history, and an explicit install-and-restart button.
+function AppUpdatePanel({ darkMode = false }) {
+  const [supported, setSupported] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState('Loading update information…');
+  const [progress, setProgress] = useState(0);
+  const [current, setCurrent] = useState(null);
+  const [latest, setLatest] = useState(null);
+  const [readyBundle, setReadyBundle] = useState(null);
+  const [channel, setChannel] = useState(null);
+  const [pluginVersion, setPluginVersion] = useState('Unknown');
+  const [builtinVersion, setBuiltinVersion] = useState('Unknown');
+  const [localBundles, setLocalBundles] = useState([]);
+  const [error, setError] = useState('');
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [history, setHistory] = useState(() => loadData('ft_update_history', []));
+
+  const updater = () => window.Capacitor?.Plugins?.CapacitorUpdater;
+  const bundleVersion = (bundle) => bundle?.version || bundle?.id || 'builtin';
+
+  const addHistory = useCallback((message, kind = 'info') => {
+    const item = { at: new Date().toISOString(), message, kind };
+    setHistory(prev => {
+      const next = [item, ...prev].slice(0, 30);
+      saveData('ft_update_history', next);
+      return next;
+    });
+    window.ftDiagLog('[Updater]', message);
+  }, []);
+
+  const refreshInfo = useCallback(async () => {
+    const api = updater();
+    if (!api) {
+      setSupported(false);
+      setStatus('OTA updates are available in the installed Android app only.');
+      return;
+    }
+    setSupported(true);
+    try {
+      const [cur, ch, pv, bv, list] = await Promise.all([
+        api.current(),
+        api.getChannel ? api.getChannel().catch(() => null) : null,
+        api.getPluginVersion ? api.getPluginVersion().catch(() => null) : null,
+        api.getBuiltinVersion ? api.getBuiltinVersion().catch(() => null) : null,
+        api.list ? api.list().catch(() => null) : null,
+      ]);
+      setCurrent(cur || null);
+      setChannel(ch || null);
+      setPluginVersion(pv?.version || pv?.pluginVersion || 'Unknown');
+      setBuiltinVersion(bv?.version || 'Unknown');
+      setLocalBundles(list?.bundles || []);
+      setStatus(`Running bundle ${bundleVersion(cur?.bundle)}`);
+    } catch (e) {
+      const msg = e?.message || String(e);
+      setError(msg);
+      setStatus('Could not read update information');
+      window.ftDiagLog('[Updater] refresh failed:', msg);
+    }
+  }, []);
+
+  useEffect(() => {
+    let handles = [];
+    let cancelled = false;
+    const setup = async () => {
+      await refreshInfo();
+      const api = updater();
+      if (!api?.addListener || cancelled) return;
+      try {
+        handles.push(await api.addListener('download', event => {
+          const pct = Math.max(0, Math.min(100, Number(event?.percent) || 0));
+          setProgress(pct);
+          setBusy(true);
+          setStatus(`Downloading update… ${pct}%`);
+        }));
+        handles.push(await api.addListener('downloadComplete', event => {
+          if (event?.bundle) setReadyBundle(event.bundle);
+          setProgress(100);
+          setBusy(false);
+          setStatus(`Update ${bundleVersion(event?.bundle)} is ready to install`);
+          addHistory(`Downloaded bundle ${bundleVersion(event?.bundle)}`, 'success');
+          refreshInfo();
+        }));
+        handles.push(await api.addListener('downloadFailed', event => {
+          const msg = event?.message || `Download failed for ${bundleVersion(event?.bundle)}`;
+          setError(msg);
+          setBusy(false);
+          setStatus('Update download failed');
+          addHistory(msg, 'error');
+        }));
+        handles.push(await api.addListener('noNeedUpdate', () => {
+          setBusy(false);
+          setStatus('Already up to date');
+        }));
+        handles.push(await api.addListener('updateAvailable', event => {
+          setLatest(event?.bundle || null);
+          setStatus(`Update ${bundleVersion(event?.bundle)} is available`);
+        }));
+      } catch (e) {
+        window.ftDiagLog('[Updater] listener setup failed:', e?.message || String(e));
+      }
+    };
+    setup();
+    return () => {
+      cancelled = true;
+      handles.forEach(h => { try { h?.remove?.(); } catch(e) {} });
+    };
+  }, [addHistory, refreshInfo]);
+
+  const checkAndDownload = async () => {
+    const api = updater();
+    if (!api) return;
+    setBusy(true);
+    setError('');
+    setProgress(0);
+    setLatest(null);
+    setReadyBundle(null);
+    setStatus('Checking Capgo for updates…');
+    addHistory('Manual update check started');
+    try {
+      const cur = await api.current();
+      setCurrent(cur);
+      const result = await api.getLatest();
+      setLatest(result || null);
+      if (result?.error) throw new Error(result.message || result.error);
+      if (!result?.version || !result?.url) {
+        setBusy(false);
+        setStatus(result?.message || 'Already up to date');
+        addHistory(result?.message || 'No newer bundle available', 'success');
+        await refreshInfo();
+        return;
+      }
+      const currentVersion = bundleVersion(cur?.bundle);
+      if (result.version === currentVersion) {
+        setBusy(false);
+        setStatus(`Already running ${currentVersion}`);
+        addHistory(`Already running latest bundle ${currentVersion}`, 'success');
+        return;
+      }
+      setStatus(`Downloading bundle ${result.version}…`);
+      const options = { url: result.url, version: result.version };
+      if (result.checksum) options.checksum = result.checksum;
+      if (result.sessionKey) options.sessionKey = result.sessionKey;
+      if (result.manifest) options.manifest = result.manifest;
+      const downloaded = await api.download(options);
+      setReadyBundle(downloaded);
+      setProgress(100);
+      setBusy(false);
+      setStatus(`Bundle ${bundleVersion(downloaded)} is ready to install`);
+      addHistory(`Downloaded bundle ${bundleVersion(downloaded)}`, 'success');
+      await refreshInfo();
+    } catch (e) {
+      const msg = e?.message || String(e);
+      setError(msg);
+      setBusy(false);
+      setStatus('Update check/download failed');
+      addHistory(`Update failed: ${msg}`, 'error');
+    }
+  };
+
+  const installNow = async () => {
+    const api = updater();
+    if (!api || !readyBundle?.id) {
+      setError('No completed download is ready to install.');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    setStatus(`Installing ${bundleVersion(readyBundle)} and restarting…`);
+    addHistory(`Installing bundle ${bundleVersion(readyBundle)}`, 'success');
+    try {
+      await api.set({ id: readyBundle.id });
+    } catch (e) {
+      const msg = e?.message || String(e);
+      setBusy(false);
+      setError(msg);
+      setStatus('Installation failed');
+      addHistory(`Install failed: ${msg}`, 'error');
+    }
+  };
+
+  const reloadCurrent = async () => {
+    const api = updater();
+    if (!api?.reload) return;
+    setStatus('Reloading the current app bundle…');
+    try { await api.reload(); }
+    catch (e) { setError(e?.message || String(e)); }
+  };
+
+  const bg = darkMode ? '#111827' : '#f8fafc';
+  const card = darkMode ? '#1e293b' : '#ffffff';
+  const border = darkMode ? '#334155' : '#dbe4ee';
+  const text = darkMode ? '#e2e8f0' : '#172033';
+  const sub = darkMode ? '#94a3b8' : '#64748b';
+  const currentBundle = current?.bundle;
+  const channelName = channel?.channel || channel?.name || channel?.status || 'Automatic / production';
+
+  return (
+    <div style={{padding:'10px 0 14px'}}>
+      <div style={{padding:14,borderRadius:14,border:`1px solid ${border}`,background:bg,color:text}}>
+        <div style={{display:'flex',justifyContent:'space-between',gap:10,alignItems:'flex-start'}}>
+          <div>
+            <div style={{fontSize:14,fontWeight:800}}>App updates</div>
+            <div style={{fontSize:11,color:sub,marginTop:3}}>Visible checking, downloading and installation</div>
+          </div>
+          <span style={{fontSize:10,fontWeight:800,padding:'4px 8px',borderRadius:99,background:supported===false?'#fee2e2':'#dcfce7',color:supported===false?'#b91c1c':'#166534'}}>
+            {supported===false?'Web only':'Capgo connected'}
+          </span>
+        </div>
+
+        <div style={{marginTop:12,padding:10,borderRadius:10,background:card,border:`1px solid ${border}`}}>
+          <div style={{fontSize:12,fontWeight:700}}>{status}</div>
+          <div style={{fontSize:11,color:sub,marginTop:5}}>Current bundle: <b style={{color:text}}>{bundleVersion(currentBundle)}</b></div>
+          {latest?.version && <div style={{fontSize:11,color:sub,marginTop:2}}>Latest available: <b style={{color:text}}>{latest.version}</b></div>}
+          <div style={{fontSize:11,color:sub,marginTop:2}}>Channel: <b style={{color:text}}>{channelName}</b></div>
+        </div>
+
+        {(busy || progress > 0) && (
+          <div style={{marginTop:12}}>
+            <div style={{height:12,borderRadius:99,overflow:'hidden',background:darkMode?'#334155':'#e2e8f0'}}>
+              <div style={{height:'100%',width:`${progress}%`,background:'#10b981',transition:'width 180ms ease'}} />
+            </div>
+            <div style={{fontSize:11,color:sub,textAlign:'right',marginTop:4}}>{progress}%</div>
+          </div>
+        )}
+
+        {error && <div style={{marginTop:10,padding:10,borderRadius:9,background:darkMode?'#451a1a':'#fef2f2',color:darkMode?'#fca5a5':'#b91c1c',fontSize:11,wordBreak:'break-word'}}>{error}</div>}
+
+        <div style={{display:'grid',gridTemplateColumns:readyBundle?'1fr 1fr':'1fr',gap:8,marginTop:12}}>
+          <button onClick={checkAndDownload} disabled={busy || supported===false}
+            style={{padding:'10px 8px',borderRadius:10,border:'none',background:'#0284c7',color:'white',fontSize:12,fontWeight:800,cursor:'pointer',opacity:(busy||supported===false)?0.55:1}}>
+            {busy?'Working…':'Check & download'}
+          </button>
+          {readyBundle && <button onClick={installNow} disabled={busy}
+            style={{padding:'10px 8px',borderRadius:10,border:'none',background:'#10b981',color:'white',fontSize:12,fontWeight:800,cursor:'pointer',opacity:busy?0.55:1}}>
+            Install & restart
+          </button>}
+        </div>
+
+        <button onClick={()=>setShowAdvanced(v=>!v)} style={{width:'100%',marginTop:10,padding:'7px 0',border:'none',background:'none',color:sub,fontSize:11,fontWeight:700,cursor:'pointer'}}>
+          {showAdvanced?'Hide advanced details ▲':'Advanced details ▼'}
+        </button>
+
+        {showAdvanced && <div style={{marginTop:4,paddingTop:10,borderTop:`1px solid ${border}`}}>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,fontSize:10,color:sub}}>
+            <div>App UI version<br/><b style={{color:text}}>{APP_VERSION}</b></div>
+            <div>Plugin version<br/><b style={{color:text}}>{pluginVersion}</b></div>
+            <div>Built-in version<br/><b style={{color:text}}>{builtinVersion}</b></div>
+            <div>Bundle ID<br/><b style={{color:text,wordBreak:'break-all'}}>{currentBundle?.id || 'builtin'}</b></div>
+          </div>
+          <div style={{fontSize:11,fontWeight:800,marginTop:12}}>Downloaded bundles on this phone</div>
+          {localBundles.length ? localBundles.map((b,i)=><div key={b.id||i} style={{fontSize:10,color:sub,padding:'5px 0',borderBottom:`1px solid ${border}`}}>
+            <b style={{color:text}}>{bundleVersion(b)}</b> · {b.status || 'stored'}<br/><span style={{wordBreak:'break-all'}}>{b.id}</span>
+          </div>) : <div style={{fontSize:10,color:sub,marginTop:5}}>No locally stored OTA bundles reported.</div>}
+          <button onClick={reloadCurrent} disabled={busy} style={{width:'100%',marginTop:10,padding:'8px',borderRadius:9,border:`1px solid ${border}`,background:card,color:text,fontSize:11,fontWeight:700,cursor:'pointer'}}>Reload current bundle</button>
+        </div>}
+      </div>
+
+      <div style={{marginTop:10,padding:12,borderRadius:12,border:`1px solid ${border}`,background:card}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+          <div style={{fontSize:12,fontWeight:800,color:text}}>Update history</div>
+          {history.length>0 && <button onClick={()=>{setHistory([]);saveData('ft_update_history',[]);}} style={{border:'none',background:'none',fontSize:10,color:sub,cursor:'pointer'}}>Clear</button>}
+        </div>
+        {history.length===0 ? <div style={{fontSize:10,color:sub,marginTop:6}}>No manual update activity yet.</div> : history.slice(0,8).map((h,i)=><div key={h.at+i} style={{padding:'7px 0',borderBottom:i<history.slice(0,8).length-1?`1px solid ${border}`:'none'}}>
+          <div style={{fontSize:10,color:h.kind==='error'?'#ef4444':h.kind==='success'?'#16a34a':text,fontWeight:600}}>{h.message}</div>
+          <div style={{fontSize:9,color:sub,marginTop:2}}>{new Date(h.at).toLocaleString()}</div>
+        </div>)}
+      </div>
+    </div>
+  );
+}
+// ─────────────────────────────────────────────────────────────────────────
+
 function AppInner() {
   const svgRef = useRef(null);
   const [nodes, setNodes] = useState(() => {
@@ -2415,7 +2694,7 @@ function AppInner() {
   const [customPresets, setCustomPresets] = useState(() => {
     try { return JSON.parse(localStorage.getItem('ft_flower_presets') || '[]'); } catch(e) { return []; }
   });
-  const [settingsSections, setSettingsSections] = useState({appearance:false,toolbar:false,filters:false,data:false,reset:false,security:false,future:false,assistant:false});
+  const [settingsSections, setSettingsSections] = useState({appearance:false,toolbar:false,filters:false,data:false,reset:false,security:false,updates:true,future:false,assistant:false});
   const [fontSize, setFontSize] = useState(() => { try { return parseFloat(localStorage.getItem('ft_fontSize')||'1'); } catch(e) { return 1; } });
   useEffect(() => {
     document.documentElement.style.fontSize = `${fontSize * 16}px`;
@@ -9455,6 +9734,14 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   </div>
                 )}
                 </div>}
+
+
+                {/* App Updates */}
+                <button onClick={()=>setSettingsSections(p=>({...p,updates:!p.updates}))} style={{display:'flex',alignItems:'center',justifyContent:'space-between',width:'100%',padding:'12px 0',background:'none',border:'none',borderBottom:'1px solid '+(theme.darkMode?'#334155':'#e2e8f0'),cursor:'pointer',color:theme.darkMode?'#e2e8f0':pw.bodyText}}>
+                  <span style={{fontSize:13,fontWeight:800}}>⬇️ App Updates</span>
+                  <span style={{fontSize:12,color:theme.darkMode?'#475569':'#475569'}}>{settingsSections.updates?'▲':'▼'}</span>
+                </button>
+                {settingsSections.updates&&<AppUpdatePanel darkMode={theme.darkMode}/>} 
 
 
                 {/* Version */}

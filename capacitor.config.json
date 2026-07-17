@@ -5,5 +5,12 @@
   "backgroundColor": "#10b981",
   "android": {
     "backgroundColor": "#10b981"
+  },
+  "plugins": {
+    "CapacitorUpdater": {
+      "appId": "io.github.josephd93.friendshiptree",
+      "version": "0.0.0",
+      "autoUpdate": "atBackground"
+    }
   }
 }
