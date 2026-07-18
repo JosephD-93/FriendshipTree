@@ -6,176 +6,12 @@ import {
   MessageCircle, Coffee, PartyPopper, Plane, HeartHandshake, Map as MapIcon,
   BookUser
 } from 'lucide-react';
+import { detectImageMimeFromBase64 } from './utils/image';
+import { getLocalDateStr, parseBirthdayDateGlobal } from './utils/date';
+import { saveData, loadData, saveRaw, utf8ToBase64 } from './services/persistence';
 
 
 const APP_VERSION = '3.1';
-
-// Detects the real image format from raw base64 data by checking the
-// encoded byte signature, rather than assuming a fixed format -- this is
-// what fixes contact-imported photos that silently failed to display,
-// since Android's Contacts Provider doesn't guarantee JPEG and the import
-// code previously hardcoded that MIME type regardless of the actual bytes.
-function detectImageMimeFromBase64(base64String) {
-  if (!base64String) return 'image/jpeg';
-  if (base64String.startsWith('/9j/')) return 'image/jpeg';
-  if (base64String.startsWith('iVBORw0KG')) return 'image/png';
-  if (base64String.startsWith('R0lGOD')) return 'image/gif';
-  if (base64String.startsWith('UklGR')) return 'image/webp';
-  if (base64String.startsWith('Qk')) return 'image/bmp';
-  // Fallback -- most contact photos are JPEG in practice, so this remains
-  // a reasonable default for anything not matching a known signature
-  return 'image/jpeg';
-}
-
-// Returns YYYY-MM-DD in the user's LOCAL timezone, not UTC -- Date's own
-// toISOString() always returns UTC, which caused daily resets (habits, food
-// diary, calendar markers) to lag behind the user's actual local calendar
-// day by up to an hour right after midnight in any timezone ahead of UTC
-// (e.g. UK summer time), making "today" silently still look like yesterday.
-function getLocalDateStr(date = new Date()) {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
-
-// ─── FT-DIAG file logger ─────────────────────────────────────────────────
-// Writes diagnostic lines directly to a text file on the device via
-// Capacitor's Filesystem plugin, completely bypassing logcat (which wasn't
-// reliably capturing console.log from this WebView) and Chrome remote
-// debugging (which had persistent connection issues on this machine).
-// Pull the file afterward with:
-//   adb pull /sdcard/Documents/ft_diag.txt
-// ─── FT-DIAG logger ─────────────────────────────────────────────────────
-// Stores diagnostic lines via Capacitor's Preferences plugin (already
-// confirmed working on this device earlier in the session) rather than
-// Filesystem (which isn't properly configured/permissioned for this
-// project) or logcat/console.log (which weren't reliably reaching adb or
-// Chrome remote debugging on this machine). Read back in-app via the
-// Diagnostic Log viewer -- no adb, no USB debugging cooperation needed.
-let ftDiagBuffer = null; // lazy-loaded cache of the accumulated log string
-window.ftDiagLog = function(...args) {
-  const msg = args.map(a => {
-    if (a === undefined) return 'undefined';
-    if (typeof a === 'object') { try { return JSON.stringify(a); } catch(e) { return String(a); } }
-    return String(a);
-  }).join(' ');
-  const line = `[${new Date().toISOString()}] ${msg}`;
-  console.log(line);
-  try {
-    const Prefs = window.Capacitor?.Plugins?.Preferences;
-    if (!Prefs || typeof Prefs.set !== 'function') return;
-    const append = (existing) => {
-      const next = (existing || '') + line + '\n';
-      // Cap growth -- keep roughly the last 800 lines worth of characters
-      const capped = next.length > 200000 ? next.slice(next.length - 200000) : next;
-      ftDiagBuffer = capped;
-      Prefs.set({ key: 'ft_diag_log', value: capped }).catch(() => {});
-    };
-    if (ftDiagBuffer !== null) {
-      append(ftDiagBuffer);
-    } else {
-      Prefs.get({ key: 'ft_diag_log' }).then(r => append(r?.value || '')).catch(() => append(''));
-    }
-  } catch(e) {}
-};
-// ─────────────────────────────────────────────────────────────────────────
-
-// ─── Centralized persistence layer ─────────────────────────────────────────
-// Single, consistent save/load pair used for every piece of app state,
-// replacing 35+ previously-independent localStorage calls (many with
-// silent `catch(e) {}` blocks that swallowed errors with zero visibility).
-// Every failure is now logged via ftDiagLog, and any unexpectedly large
-// payload is flagged immediately -- the exact class of issue that caused
-// the earlier 60MB save race condition, now caught for every key, not just
-// the one we happened to find it in.
-const FT_SAVE_SIZE_WARNING = 2000000; // ~2MB -- flag anything approaching this
-
-function saveData(key, value) {
-  try {
-    const json = JSON.stringify(value);
-    if (json.length > FT_SAVE_SIZE_WARNING) {
-      window.ftDiagLog(`⚠️ [Persistence] key="${key}" unexpectedly large: ${json.length} chars`);
-    }
-    localStorage.setItem(key, json);
-    return true;
-  } catch(e) {
-    window.ftDiagLog(`❌ [Persistence] SAVE FAILED key="${key}": ${e.message}`);
-    return false;
-  }
-}
-
-function loadData(key, fallback) {
-  try {
-    const raw = localStorage.getItem(key);
-    if (raw === null || raw === undefined) return fallback;
-    return JSON.parse(raw);
-  } catch(e) {
-    window.ftDiagLog(`❌ [Persistence] LOAD FAILED key="${key}": ${e.message} — using fallback`);
-    return fallback;
-  }
-}
-
-// Raw-string variant for the handful of keys that store plain strings
-// rather than JSON (security PIN, lock timer, AI provider choice, etc.) --
-// these are read as raw strings in many places throughout the app, so
-// converting their format would be a real breaking change. This still
-// gets the same consistent error logging without touching the format.
-function saveRaw(key, value) {
-  try {
-    localStorage.setItem(key, value);
-    return true;
-  } catch(e) {
-    window.ftDiagLog(`❌ [Persistence] SAVE FAILED (raw) key="${key}": ${e.message}`);
-    return false;
-  }
-}
-// ─────────────────────────────────────────────────────────────────────────
-
-
-// ─── FT-DIAG: runs at script parse time, before React renders anything ─────
-(function() {
-  try {
-    window.ftDiagLog('========== NEW APP SESSION ==========');
-    const raw = localStorage.getItem('ft_nodes');
-    const meta = localStorage.getItem('ft_save_meta');
-    const parsed = raw ? JSON.parse(raw) : [];
-    const friendIds = parsed.filter(n => n.type === 'friend').map(n => n.id);
-    window.ftDiagLog('[FT-DIAG] PRE-REACT startup check:');
-    window.ftDiagLog('[FT-DIAG]   ft_nodes raw length (chars):', raw ? raw.length : 0);
-    window.ftDiagLog('[FT-DIAG]   total nodes:', parsed.length, '| friend nodes:', friendIds.length);
-    window.ftDiagLog('[FT-DIAG]   last 5 friend IDs:', friendIds.slice(-5));
-    window.ftDiagLog('[FT-DIAG]   ft_save_meta:', meta);
-  } catch(e) {
-    window.ftDiagLog('[FT-DIAG] PRE-REACT startup check FAILED:', e.message);
-  }
-})();
-// ─────────────────────────────────────────────────────────────────────────
-
-
-// Shared birthday parser -- birthdays are stored as free-text (e.g. "15 March
-// 1993", "03/15/93") since that's what the input field accepts, not a
-// structured date. This is the single source of truth for interpreting that
-// text, used by both the spiral calendar view and the monthly calendar.
-const parseBirthdayDateGlobal = (str) => {
-  if (!str) return null;
-  const MONTHS = {jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
-  const clean = str.toLowerCase().replace(/[,\/\-\.]/g,' ').replace(/\s+/g,' ').trim();
-  const tokens = clean.split(' ');
-  let day = null, month = null, year = null;
-  tokens.forEach(tok => {
-    const stripped = tok.replace(/\D/g,'');
-    const mKey = tok.replace(/[^a-z]/g,'').slice(0,3);
-    if (MONTHS[mKey] !== undefined) { month = MONTHS[mKey]; return; }
-    const num = parseInt(stripped, 10);
-    if (isNaN(num)) return;
-    if (num > 31) { year = num > 100 ? num : (num >= 0 && num <= 30 ? 2000 + num : 1900 + num); }
-    else if (day === null) { day = num; }
-    else if (year === null) { year = num > 100 ? num : (num >= 0 && num <= 30 ? 2000 + num : 1900 + num); }
-  });
-  if (!day || month === null) return null;
-  return { day, month, year: year || null };
-};
 
 // ─── Calendar Integration ─────────────────────────────────────────────────
 // Uses the Capgo calendar plugin (Capacitor) to read/write the phone's
@@ -438,7 +274,12 @@ function getSurroundFlowerRaster(cacheKey, flowers, pixelRatio = 1.25) {
 
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const f of flowers) {
-    const reach = f.fpr + Math.max(4, f.fr * 0.8);
+    // Buds don't use fpr for their shape (they have their own fixed 41-unit
+    // design, see BUD_UNIT below) -- fr*1.4 covers the bud's own max reach
+    // so it never clips even at very short pf.petalLength settings, while
+    // leaving the existing open-flower sizing untouched via Math.max.
+    const budReach = f.fr * 1.4;
+    const reach = Math.max(f.fpr, budReach) + Math.max(4, f.fr * 0.8);
     minX = Math.min(minX, f.x - reach);
     minY = Math.min(minY, f.y - reach);
     maxX = Math.max(maxX, f.x + reach);
@@ -461,49 +302,109 @@ function getSurroundFlowerRaster(cacheKey, flowers, pixelRatio = 1.25) {
     ctx.save();
     ctx.translate(f.x - minX, f.y - minY);
     ctx.globalAlpha = f.opacity;
-    ctx.beginPath();
-    for (let pi = 0; pi < f.petals; pi++) {
-      const pa = (pi / f.petals) * Math.PI * 2 + f.rotation;
-      const tx = Math.cos(pa) * f.fpr, ty = Math.sin(pa) * f.fpr, pp = pa + Math.PI * 0.5;
-      const cp1x = Math.cos(pa)*f.fpr*f.baseL + Math.cos(pp)*f.fpw*0.6;
-      const cp1y = Math.sin(pa)*f.fpr*f.baseL + Math.sin(pp)*f.fpw*0.6;
-      const cp2x = Math.cos(pa)*f.fpr*f.tipL + Math.cos(pp)*f.fpw*0.5;
-      const cp2y = Math.sin(pa)*f.fpr*f.tipL + Math.sin(pp)*f.fpw*0.5;
-      const cp3x = Math.cos(pa)*f.fpr*f.tipL - Math.cos(pp)*f.fpw*0.5;
-      const cp3y = Math.sin(pa)*f.fpr*f.tipL - Math.sin(pp)*f.fpw*0.5;
-      const cp4x = Math.cos(pa)*f.fpr*f.baseL - Math.cos(pp)*f.fpw*0.6;
-      const cp4y = Math.sin(pa)*f.fpr*f.baseL - Math.sin(pp)*f.fpw*0.6;
-      ctx.moveTo(0, 0);
-      ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, tx, ty);
-      ctx.bezierCurveTo(cp3x, cp3y, cp4x, cp4y, 0, 0);
-    }
-    ctx.fillStyle = f.petalColor;
-    ctx.fill();
 
-    ctx.beginPath();
-    ctx.arc(0, 0, f.fr * 0.22, 0, Math.PI * 2);
-    ctx.fillStyle = f.centerColor;
-    ctx.fill();
-    ctx.strokeStyle = f.petalColor;
-    ctx.lineWidth = 0.5;
-    ctx.stroke();
+    if (f.bloomState === 'established') {
+      // Closed bud -- handover doc section 21B. Design coordinates below
+      // are fixed at a nominal 41-unit height (matching the SVG mockup
+      // that was approved); BUD_UNIT normalizes that to this flower's fr,
+      // the same way fpr/fpw normalize the open-petal shape below.
+      const BUD_UNIT = 41;
+      const s = (f.fr * 1.3) / BUD_UNIT;
+      ctx.rotate((f.budTilt || 0) * Math.PI / 180);
 
-    if (f.stamenCount > 0) {
-      ctx.strokeStyle = f.stamenColor;
-      ctx.fillStyle = f.stamenColor;
-      ctx.lineWidth = f.fr * 0.06;
-      for (let si = 0; si < f.stamenCount; si++) {
-        const sa = (si / f.stamenCount) * Math.PI * 2;
-        const x2 = Math.cos(sa) * f.stamenLength;
-        const y2 = Math.sin(sa) * f.stamenLength;
-        ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(x2,y2); ctx.stroke();
-        ctx.beginPath(); ctx.arc(x2,y2,f.fr*0.09,0,Math.PI*2); ctx.fill();
+      // Bulb body
+      ctx.beginPath();
+      ctx.moveTo(-9*s, -6*s);
+      ctx.bezierCurveTo(-12*s,-19*s, -8*s,-33*s, 0,-41*s);
+      ctx.bezierCurveTo(8*s,-33*s, 12*s,-19*s, 9*s,-6*s);
+      ctx.bezierCurveTo(9*s,0, 5*s,4*s, 0,5*s);
+      ctx.bezierCurveTo(-5*s,4*s, -9*s,0, -9*s,-6*s);
+      ctx.closePath();
+      ctx.fillStyle = f.petalColor;
+      ctx.fill();
+
+      // Highlight streak
+      ctx.beginPath();
+      ctx.moveTo(-6*s,-9*s);
+      ctx.bezierCurveTo(-8*s,-19*s, -5*s,-31*s, -1*s,-39*s);
+      ctx.bezierCurveTo(-3*s,-29*s, -5*s,-17*s, -5*s,-5*s);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(255,255,255,0.35)';
+      ctx.fill();
+
+      // Seam crease
+      ctx.beginPath();
+      ctx.moveTo(-2*s,-37*s);
+      ctx.quadraticCurveTo(3*s,-29*s, -1*s,-19*s);
+      ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+      ctx.lineWidth = Math.max(0.4, 0.8*s);
+      ctx.stroke();
+
+      // Sepals -- drawn in front of the bulb, bases overlapping at centre
+      ctx.beginPath();
+      ctx.moveTo(2*s,3*s);
+      ctx.bezierCurveTo(-12*s,1*s, -21*s,-8*s, -17*s,-17*s);
+      ctx.lineTo(2*s,3*s);
+      ctx.closePath();
+      ctx.fillStyle = '#5c9450';
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(-2*s,3*s);
+      ctx.bezierCurveTo(12*s,1*s, 21*s,-8*s, 17*s,-17*s);
+      ctx.lineTo(-2*s,3*s);
+      ctx.closePath();
+      ctx.fill();
+
+      // Calyx bulb -- frontmost
+      ctx.beginPath();
+      ctx.ellipse(0, 5*s, 7.5*s, 6.5*s, 0, 0, Math.PI*2);
+      ctx.fillStyle = '#4a7a3a';
+      ctx.fill();
+    } else {
+      ctx.beginPath();
+      for (let pi = 0; pi < f.petals; pi++) {
+        const pa = (pi / f.petals) * Math.PI * 2 + f.rotation;
+        const tx = Math.cos(pa) * f.fpr, ty = Math.sin(pa) * f.fpr, pp = pa + Math.PI * 0.5;
+        const cp1x = Math.cos(pa)*f.fpr*f.baseL + Math.cos(pp)*f.fpw*0.6;
+        const cp1y = Math.sin(pa)*f.fpr*f.baseL + Math.sin(pp)*f.fpw*0.6;
+        const cp2x = Math.cos(pa)*f.fpr*f.tipL + Math.cos(pp)*f.fpw*0.5;
+        const cp2y = Math.sin(pa)*f.fpr*f.tipL + Math.sin(pp)*f.fpw*0.5;
+        const cp3x = Math.cos(pa)*f.fpr*f.tipL - Math.cos(pp)*f.fpw*0.5;
+        const cp3y = Math.sin(pa)*f.fpr*f.tipL - Math.sin(pp)*f.fpw*0.5;
+        const cp4x = Math.cos(pa)*f.fpr*f.baseL - Math.cos(pp)*f.fpw*0.6;
+        const cp4y = Math.sin(pa)*f.fpr*f.baseL - Math.sin(pp)*f.fpw*0.6;
+        ctx.moveTo(0, 0);
+        ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, tx, ty);
+        ctx.bezierCurveTo(cp3x, cp3y, cp4x, cp4y, 0, 0);
       }
-    }
-    if (f.pistilRadius > 0) {
-      ctx.beginPath(); ctx.arc(0,0,f.pistilRadius,0,Math.PI*2);
-      ctx.fillStyle = f.pistilColor; ctx.fill();
-      ctx.strokeStyle = f.stamenColor; ctx.lineWidth = f.fr*0.04; ctx.stroke();
+      ctx.fillStyle = f.petalColor;
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.arc(0, 0, f.fr * 0.22, 0, Math.PI * 2);
+      ctx.fillStyle = f.centerColor;
+      ctx.fill();
+      ctx.strokeStyle = f.petalColor;
+      ctx.lineWidth = 0.5;
+      ctx.stroke();
+
+      if (f.stamenCount > 0) {
+        ctx.strokeStyle = f.stamenColor;
+        ctx.fillStyle = f.stamenColor;
+        ctx.lineWidth = f.fr * 0.06;
+        for (let si = 0; si < f.stamenCount; si++) {
+          const sa = (si / f.stamenCount) * Math.PI * 2;
+          const x2 = Math.cos(sa) * f.stamenLength;
+          const y2 = Math.sin(sa) * f.stamenLength;
+          ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(x2,y2); ctx.stroke();
+          ctx.beginPath(); ctx.arc(x2,y2,f.fr*0.09,0,Math.PI*2); ctx.fill();
+        }
+      }
+      if (f.pistilRadius > 0) {
+        ctx.beginPath(); ctx.arc(0,0,f.pistilRadius,0,Math.PI*2);
+        ctx.fillStyle = f.pistilColor; ctx.fill();
+        ctx.strokeStyle = f.stamenColor; ctx.lineWidth = f.fr*0.04; ctx.stroke();
+      }
     }
     ctx.restore();
   }
@@ -2282,285 +2183,6 @@ function TaggedPhotosSection({ nodeId, nodes, links, openPhotoDB, setHubGalleryO
 }
 
 
-
-
-// ─── Visible Capgo update controls ────────────────────────────────────────
-// Uses the already-installed native CapacitorUpdater plugin through
-// window.Capacitor, so this file does not add another package import or alter
-// web-browser builds. It exposes the normally hidden OTA process in Settings:
-// current bundle, channel/plugin details, live download progress, local bundle
-// list, update history, and an explicit install-and-restart button.
-function AppUpdatePanel({ darkMode = false }) {
-  const [supported, setSupported] = useState(null);
-  const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState('Loading update information…');
-  const [progress, setProgress] = useState(0);
-  const [current, setCurrent] = useState(null);
-  const [latest, setLatest] = useState(null);
-  const [readyBundle, setReadyBundle] = useState(null);
-  const [channel, setChannel] = useState(null);
-  const [pluginVersion, setPluginVersion] = useState('Unknown');
-  const [builtinVersion, setBuiltinVersion] = useState('Unknown');
-  const [localBundles, setLocalBundles] = useState([]);
-  const [error, setError] = useState('');
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [history, setHistory] = useState(() => loadData('ft_update_history', []));
-
-  const updater = () => window.Capacitor?.Plugins?.CapacitorUpdater;
-  const bundleVersion = (bundle) => bundle?.version || bundle?.id || 'builtin';
-
-  const addHistory = useCallback((message, kind = 'info') => {
-    const item = { at: new Date().toISOString(), message, kind };
-    setHistory(prev => {
-      const next = [item, ...prev].slice(0, 30);
-      saveData('ft_update_history', next);
-      return next;
-    });
-    window.ftDiagLog('[Updater]', message);
-  }, []);
-
-  const refreshInfo = useCallback(async () => {
-    const api = updater();
-    if (!api) {
-      setSupported(false);
-      setStatus('OTA updates are available in the installed Android app only.');
-      return;
-    }
-    setSupported(true);
-    try {
-      const [cur, ch, pv, bv, list] = await Promise.all([
-        api.current(),
-        api.getChannel ? api.getChannel().catch(() => null) : null,
-        api.getPluginVersion ? api.getPluginVersion().catch(() => null) : null,
-        api.getBuiltinVersion ? api.getBuiltinVersion().catch(() => null) : null,
-        api.list ? api.list().catch(() => null) : null,
-      ]);
-      setCurrent(cur || null);
-      setChannel(ch || null);
-      setPluginVersion(pv?.version || pv?.pluginVersion || 'Unknown');
-      setBuiltinVersion(bv?.version || 'Unknown');
-      setLocalBundles(list?.bundles || []);
-      setStatus(`Running bundle ${bundleVersion(cur?.bundle)}`);
-    } catch (e) {
-      const msg = e?.message || String(e);
-      setError(msg);
-      setStatus('Could not read update information');
-      window.ftDiagLog('[Updater] refresh failed:', msg);
-    }
-  }, []);
-
-  useEffect(() => {
-    let handles = [];
-    let cancelled = false;
-    const setup = async () => {
-      await refreshInfo();
-      const api = updater();
-      if (!api?.addListener || cancelled) return;
-      try {
-        handles.push(await api.addListener('download', event => {
-          const pct = Math.max(0, Math.min(100, Number(event?.percent) || 0));
-          setProgress(pct);
-          setBusy(true);
-          setStatus(`Downloading update… ${pct}%`);
-        }));
-        handles.push(await api.addListener('downloadComplete', event => {
-          if (event?.bundle) setReadyBundle(event.bundle);
-          setProgress(100);
-          setBusy(false);
-          setStatus(`Update ${bundleVersion(event?.bundle)} is ready to install`);
-          addHistory(`Downloaded bundle ${bundleVersion(event?.bundle)}`, 'success');
-          refreshInfo();
-        }));
-        handles.push(await api.addListener('downloadFailed', event => {
-          const msg = event?.message || `Download failed for ${bundleVersion(event?.bundle)}`;
-          setError(msg);
-          setBusy(false);
-          setStatus('Update download failed');
-          addHistory(msg, 'error');
-        }));
-        handles.push(await api.addListener('noNeedUpdate', () => {
-          setBusy(false);
-          setStatus('Already up to date');
-        }));
-        handles.push(await api.addListener('updateAvailable', event => {
-          setLatest(event?.bundle || null);
-          setStatus(`Update ${bundleVersion(event?.bundle)} is available`);
-        }));
-      } catch (e) {
-        window.ftDiagLog('[Updater] listener setup failed:', e?.message || String(e));
-      }
-    };
-    setup();
-    return () => {
-      cancelled = true;
-      handles.forEach(h => { try { h?.remove?.(); } catch(e) {} });
-    };
-  }, [addHistory, refreshInfo]);
-
-  const checkAndDownload = async () => {
-    const api = updater();
-    if (!api) return;
-    setBusy(true);
-    setError('');
-    setProgress(0);
-    setLatest(null);
-    setReadyBundle(null);
-    setStatus('Checking Capgo for updates…');
-    addHistory('Manual update check started');
-    try {
-      const cur = await api.current();
-      setCurrent(cur);
-      const result = await api.getLatest();
-      setLatest(result || null);
-      if (result?.error) throw new Error(result.message || result.error);
-      if (!result?.version || !result?.url) {
-        setBusy(false);
-        setStatus(result?.message || 'Already up to date');
-        addHistory(result?.message || 'No newer bundle available', 'success');
-        await refreshInfo();
-        return;
-      }
-      const currentVersion = bundleVersion(cur?.bundle);
-      if (result.version === currentVersion) {
-        setBusy(false);
-        setStatus(`Already running ${currentVersion}`);
-        addHistory(`Already running latest bundle ${currentVersion}`, 'success');
-        return;
-      }
-      setStatus(`Downloading bundle ${result.version}…`);
-      const options = { url: result.url, version: result.version };
-      if (result.checksum) options.checksum = result.checksum;
-      if (result.sessionKey) options.sessionKey = result.sessionKey;
-      if (result.manifest) options.manifest = result.manifest;
-      const downloaded = await api.download(options);
-      setReadyBundle(downloaded);
-      setProgress(100);
-      setBusy(false);
-      setStatus(`Bundle ${bundleVersion(downloaded)} is ready to install`);
-      addHistory(`Downloaded bundle ${bundleVersion(downloaded)}`, 'success');
-      await refreshInfo();
-    } catch (e) {
-      const msg = e?.message || String(e);
-      setError(msg);
-      setBusy(false);
-      setStatus('Update check/download failed');
-      addHistory(`Update failed: ${msg}`, 'error');
-    }
-  };
-
-  const installNow = async () => {
-    const api = updater();
-    if (!api || !readyBundle?.id) {
-      setError('No completed download is ready to install.');
-      return;
-    }
-    setBusy(true);
-    setError('');
-    setStatus(`Installing ${bundleVersion(readyBundle)} and restarting…`);
-    addHistory(`Installing bundle ${bundleVersion(readyBundle)}`, 'success');
-    try {
-      await api.set({ id: readyBundle.id });
-    } catch (e) {
-      const msg = e?.message || String(e);
-      setBusy(false);
-      setError(msg);
-      setStatus('Installation failed');
-      addHistory(`Install failed: ${msg}`, 'error');
-    }
-  };
-
-  const reloadCurrent = async () => {
-    const api = updater();
-    if (!api?.reload) return;
-    setStatus('Reloading the current app bundle…');
-    try { await api.reload(); }
-    catch (e) { setError(e?.message || String(e)); }
-  };
-
-  const bg = darkMode ? '#111827' : '#f8fafc';
-  const card = darkMode ? '#1e293b' : '#ffffff';
-  const border = darkMode ? '#334155' : '#dbe4ee';
-  const text = darkMode ? '#e2e8f0' : '#172033';
-  const sub = darkMode ? '#94a3b8' : '#64748b';
-  const currentBundle = current?.bundle;
-  const channelName = channel?.channel || channel?.name || channel?.status || 'Automatic / production';
-
-  return (
-    <div style={{padding:'10px 0 14px'}}>
-      <div style={{padding:14,borderRadius:14,border:`1px solid ${border}`,background:bg,color:text}}>
-        <div style={{display:'flex',justifyContent:'space-between',gap:10,alignItems:'flex-start'}}>
-          <div>
-            <div style={{fontSize:14,fontWeight:800}}>App updates</div>
-            <div style={{fontSize:11,color:sub,marginTop:3}}>Visible checking, downloading and installation</div>
-          </div>
-          <span style={{fontSize:10,fontWeight:800,padding:'4px 8px',borderRadius:99,background:supported===false?'#fee2e2':'#dcfce7',color:supported===false?'#b91c1c':'#166534'}}>
-            {supported===false?'Web only':'Capgo connected'}
-          </span>
-        </div>
-
-        <div style={{marginTop:12,padding:10,borderRadius:10,background:card,border:`1px solid ${border}`}}>
-          <div style={{fontSize:12,fontWeight:700}}>{status}</div>
-          <div style={{fontSize:11,color:sub,marginTop:5}}>Current bundle: <b style={{color:text}}>{bundleVersion(currentBundle)}</b></div>
-          {latest?.version && <div style={{fontSize:11,color:sub,marginTop:2}}>Latest available: <b style={{color:text}}>{latest.version}</b></div>}
-          <div style={{fontSize:11,color:sub,marginTop:2}}>Channel: <b style={{color:text}}>{channelName}</b></div>
-        </div>
-
-        {(busy || progress > 0) && (
-          <div style={{marginTop:12}}>
-            <div style={{height:12,borderRadius:99,overflow:'hidden',background:darkMode?'#334155':'#e2e8f0'}}>
-              <div style={{height:'100%',width:`${progress}%`,background:'#10b981',transition:'width 180ms ease'}} />
-            </div>
-            <div style={{fontSize:11,color:sub,textAlign:'right',marginTop:4}}>{progress}%</div>
-          </div>
-        )}
-
-        {error && <div style={{marginTop:10,padding:10,borderRadius:9,background:darkMode?'#451a1a':'#fef2f2',color:darkMode?'#fca5a5':'#b91c1c',fontSize:11,wordBreak:'break-word'}}>{error}</div>}
-
-        <div style={{display:'grid',gridTemplateColumns:readyBundle?'1fr 1fr':'1fr',gap:8,marginTop:12}}>
-          <button onClick={checkAndDownload} disabled={busy || supported===false}
-            style={{padding:'10px 8px',borderRadius:10,border:'none',background:'#0284c7',color:'white',fontSize:12,fontWeight:800,cursor:'pointer',opacity:(busy||supported===false)?0.55:1}}>
-            {busy?'Working…':'Check & download'}
-          </button>
-          {readyBundle && <button onClick={installNow} disabled={busy}
-            style={{padding:'10px 8px',borderRadius:10,border:'none',background:'#10b981',color:'white',fontSize:12,fontWeight:800,cursor:'pointer',opacity:busy?0.55:1}}>
-            Install & restart
-          </button>}
-        </div>
-
-        <button onClick={()=>setShowAdvanced(v=>!v)} style={{width:'100%',marginTop:10,padding:'7px 0',border:'none',background:'none',color:sub,fontSize:11,fontWeight:700,cursor:'pointer'}}>
-          {showAdvanced?'Hide advanced details ▲':'Advanced details ▼'}
-        </button>
-
-        {showAdvanced && <div style={{marginTop:4,paddingTop:10,borderTop:`1px solid ${border}`}}>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,fontSize:10,color:sub}}>
-            <div>App UI version<br/><b style={{color:text}}>{APP_VERSION}</b></div>
-            <div>Plugin version<br/><b style={{color:text}}>{pluginVersion}</b></div>
-            <div>Built-in version<br/><b style={{color:text}}>{builtinVersion}</b></div>
-            <div>Bundle ID<br/><b style={{color:text,wordBreak:'break-all'}}>{currentBundle?.id || 'builtin'}</b></div>
-          </div>
-          <div style={{fontSize:11,fontWeight:800,marginTop:12}}>Downloaded bundles on this phone</div>
-          {localBundles.length ? localBundles.map((b,i)=><div key={b.id||i} style={{fontSize:10,color:sub,padding:'5px 0',borderBottom:`1px solid ${border}`}}>
-            <b style={{color:text}}>{bundleVersion(b)}</b> · {b.status || 'stored'}<br/><span style={{wordBreak:'break-all'}}>{b.id}</span>
-          </div>) : <div style={{fontSize:10,color:sub,marginTop:5}}>No locally stored OTA bundles reported.</div>}
-          <button onClick={reloadCurrent} disabled={busy} style={{width:'100%',marginTop:10,padding:'8px',borderRadius:9,border:`1px solid ${border}`,background:card,color:text,fontSize:11,fontWeight:700,cursor:'pointer'}}>Reload current bundle</button>
-        </div>}
-      </div>
-
-      <div style={{marginTop:10,padding:12,borderRadius:12,border:`1px solid ${border}`,background:card}}>
-        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-          <div style={{fontSize:12,fontWeight:800,color:text}}>Update history</div>
-          {history.length>0 && <button onClick={()=>{setHistory([]);saveData('ft_update_history',[]);}} style={{border:'none',background:'none',fontSize:10,color:sub,cursor:'pointer'}}>Clear</button>}
-        </div>
-        {history.length===0 ? <div style={{fontSize:10,color:sub,marginTop:6}}>No manual update activity yet.</div> : history.slice(0,8).map((h,i)=><div key={h.at+i} style={{padding:'7px 0',borderBottom:i<history.slice(0,8).length-1?`1px solid ${border}`:'none'}}>
-          <div style={{fontSize:10,color:h.kind==='error'?'#ef4444':h.kind==='success'?'#16a34a':text,fontWeight:600}}>{h.message}</div>
-          <div style={{fontSize:9,color:sub,marginTop:2}}>{new Date(h.at).toLocaleString()}</div>
-        </div>)}
-      </div>
-    </div>
-  );
-}
-// ─────────────────────────────────────────────────────────────────────────
-
 function AppInner() {
   const svgRef = useRef(null);
   const [nodes, setNodes] = useState(() => {
@@ -2694,7 +2316,11 @@ function AppInner() {
   const [customPresets, setCustomPresets] = useState(() => {
     try { return JSON.parse(localStorage.getItem('ft_flower_presets') || '[]'); } catch(e) { return []; }
   });
-  const [settingsSections, setSettingsSections] = useState({appearance:false,toolbar:false,filters:false,data:false,reset:false,security:false,updates:true,future:false,assistant:false});
+  const [settingsSections, setSettingsSections] = useState({appearance:false,toolbar:false,filters:false,data:false,reset:false,security:false,future:false,assistant:false});
+  const [autoBackupEnabled, setAutoBackupEnabled] = useState(() => localStorage.getItem('ft_auto_backup_enabled') !== 'false');
+  const [lastBackupAt, setLastBackupAt] = useState(() => localStorage.getItem('ft_last_backup_at') || '');
+  const [lastBackupError, setLastBackupError] = useState(() => localStorage.getItem('ft_last_backup_error') || '');
+  const autoBackupRunningRef = useRef(false);
   const [fontSize, setFontSize] = useState(() => { try { return parseFloat(localStorage.getItem('ft_fontSize')||'1'); } catch(e) { return 1; } });
   useEffect(() => {
     document.documentElement.style.fontSize = `${fontSize * 16}px`;
@@ -7387,53 +7013,167 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
   };
 
 
-  const exportData = async () => {
-    showToast('💦 Preparing export…');
+  const collectCompleteBackup = async () => {
+    // Capture every app-owned localStorage key rather than maintaining a
+    // fragile hand-written list. This includes calendar, health, habits,
+    // food diary, settings, layouts and future ft_* keys automatically.
+    const localStorageData = {};
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('ft_')) localStorageData[key] = localStorage.getItem(key);
+    }
+
+    // Use the current in-memory core state as the authoritative latest copy,
+    // in case a debounced localStorage write has not fired yet.
+    localStorageData.ft_nodes = JSON.stringify(nodes);
+    localStorageData.ft_links = JSON.stringify(links);
+    localStorageData.ft_dimensions = JSON.stringify(dimensions);
+
+    const db = idbRef.current || (idbRef.current = await openPhotoDB());
+    const [allPhotos, allGallery] = await Promise.all([
+      new Promise((res, rej) => { const tx = db.transaction('photos','readonly'); const req = tx.objectStore('photos').getAll(); req.onsuccess = e => res(e.target.result||[]); req.onerror = rej; }),
+      new Promise((res, rej) => { const tx = db.transaction('gallery','readonly'); const req = tx.objectStore('gallery').getAll(); req.onsuccess = e => res(e.target.result||[]); req.onerror = rej; }),
+    ]);
+    const photoMap = {};
+    allPhotos.forEach(p => { if (p && p.dataUrl) { const k = p.nodeId || p.key; if (k) photoMap[k] = p.dataUrl; } });
+
+    return {
+      format: 'FriendshipTreeBackup',
+      version: 4,
+      appVersion: APP_VERSION,
+      exportedAt: new Date().toISOString(),
+      localStorageData,
+      // Keep these top-level fields for backwards compatibility with older
+      // FriendshipTree imports and easier human inspection.
+      nodes,
+      links,
+      dimensions,
+      photoMap,
+      gallery: allGallery,
+    };
+  };
+
+  const writeAutomaticBackup = async ({ manual = false } = {}) => {
+    if (autoBackupRunningRef.current) return false;
+    autoBackupRunningRef.current = true;
     try {
-      const db = idbRef.current || (idbRef.current = await openPhotoDB());
-      const [allPhotos, allGallery] = await Promise.all([
-        new Promise((res, rej) => { const tx = db.transaction('photos','readonly'); const req = tx.objectStore('photos').getAll(); req.onsuccess = e => res(e.target.result||[]); req.onerror = rej; }),
-        new Promise((res, rej) => { const tx = db.transaction('gallery','readonly'); const req = tx.objectStore('gallery').getAll(); req.onsuccess = e => res(e.target.result||[]); req.onerror = rej; }),
-      ]);
-      const photoMap = {};
-      allPhotos.forEach(p => { if (p && p.dataUrl) { const k = p.nodeId || p.key; if (k) photoMap[k] = p.dataUrl; } });
-      const photoCount = Object.keys(photoMap).length;
-      const galleryCount = allGallery.length;
+      const isNative = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+      const FilesystemP = window.Capacitor?.Plugins?.Filesystem;
+      if (!isNative || !FilesystemP || typeof FilesystemP.writeFile !== 'function') {
+        throw new Error('Public device backup needs the Capacitor Filesystem plugin and a native Android build');
+      }
+
+      if (manual) showToast('💾 Creating complete device backup…');
+      if (pendingPhotoWrites.current.size) await Promise.allSettled([...pendingPhotoWrites.current]);
+      const data = await collectCompleteBackup();
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const filename = `FriendshipTree Backups/friendshiptree-auto-${stamp}.json`;
+      await FilesystemP.writeFile({
+        path: filename,
+        data: utf8ToBase64(JSON.stringify(data)),
+        directory: 'DOCUMENTS',
+        recursive: true,
+      });
+
+      // Keep multiple snapshots, but cap them so storage cannot grow forever.
+      try {
+        const listing = await FilesystemP.readdir({ path: 'FriendshipTree Backups', directory: 'DOCUMENTS' });
+        const files = (listing?.files || [])
+          .map(f => typeof f === 'string' ? f : f.name)
+          .filter(name => /^friendshiptree-auto-.*\.json$/.test(name))
+          .sort();
+        const excess = files.slice(0, Math.max(0, files.length - 7));
+        for (const name of excess) {
+          await FilesystemP.deleteFile({ path: `FriendshipTree Backups/${name}`, directory: 'DOCUMENTS' }).catch(() => {});
+        }
+      } catch(e) {
+        window.ftDiagLog('[Backup] Snapshot rotation warning:', e.message);
+      }
+
+      const completedAt = new Date().toISOString();
+      saveRaw('ft_last_backup_at', completedAt);
+      saveRaw('ft_last_backup_error', '');
+      setLastBackupAt(completedAt);
+      setLastBackupError('');
+      if (manual) showToast('✅ Backup saved in Documents/FriendshipTree Backups');
+      window.ftDiagLog('[Backup] Complete device backup saved:', filename);
+      return true;
+    } catch(err) {
+      const message = err?.message || String(err);
+      saveRaw('ft_last_backup_error', message);
+      setLastBackupError(message);
+      window.ftDiagLog('[Backup] FAILED:', message);
+      if (manual) showToast(`❌ Backup failed: ${message}`);
+      return false;
+    } finally {
+      autoBackupRunningRef.current = false;
+    }
+  };
+
+  // Phase-one automatic backup: check on startup, periodically while open,
+  // and immediately on Android resume. This reliably creates one snapshot
+  // per elapsed 24 hours without pretending JavaScript can wake a force-closed
+  // app at an exact clock time. Exact overnight execution while fully closed
+  // requires a native WorkManager task in the Android project.
+  useEffect(() => {
+    saveRaw('ft_auto_backup_enabled', autoBackupEnabled ? 'true' : 'false');
+    if (!autoBackupEnabled) return;
+    const DUE_MS = 24 * 60 * 60 * 1000;
+    const checkBackupDue = () => {
+      const previous = Date.parse(localStorage.getItem('ft_last_backup_at') || '');
+      if (!Number.isFinite(previous) || Date.now() - previous >= DUE_MS) writeAutomaticBackup();
+    };
+    const startupTimer = setTimeout(checkBackupDue, 5000);
+    const interval = setInterval(checkBackupDue, 60 * 60 * 1000);
+    let resumeListener = null;
+    const CapApp = window.Capacitor?.Plugins?.App;
+    if (CapApp && typeof CapApp.addListener === 'function') {
+      try {
+        const result = CapApp.addListener('resume', checkBackupDue);
+        if (result && typeof result.then === 'function') result.then(l => { resumeListener = l; }).catch(() => {});
+        else resumeListener = result;
+      } catch(e) {}
+    }
+    return () => {
+      clearTimeout(startupTimer);
+      clearInterval(interval);
+      if (resumeListener && typeof resumeListener.remove === 'function') resumeListener.remove();
+    };
+  }, [autoBackupEnabled]); // eslint-disable-line
+
+  const exportData = async () => {
+    showToast('💦 Preparing complete export…');
+    try {
+      if (pendingPhotoWrites.current.size) await Promise.allSettled([...pendingPhotoWrites.current]);
+      const data = await collectCompleteBackup();
+      const photoCount = Object.keys(data.photoMap || {}).length;
+      const galleryCount = (data.gallery || []).length;
       const filename = `friendshiptree-${new Date().toLocaleDateString('en-GB').replace(/\//g,'-')}.json`;
-      const data = { nodes, links, dimensions, photoMap, gallery: allGallery, version: 3, exportedAt: new Date().toISOString() };
       const jsonStr = JSON.stringify(data);
       const isNative = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
-      const ShareP = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Share;
-      const FilesystemP = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Filesystem;
+      const ShareP = window.Capacitor?.Plugins?.Share;
+      const FilesystemP = window.Capacitor?.Plugins?.Filesystem;
       if (isNative && FilesystemP && ShareP) {
-        const b64 = btoa(unescape(encodeURIComponent(jsonStr)));
-        await FilesystemP.writeFile({ path: filename, data: b64, directory: 'CACHE' });
+        await FilesystemP.writeFile({ path: filename, data: utf8ToBase64(jsonStr), directory: 'CACHE' });
         const uriResult = await FilesystemP.getUri({ path: filename, directory: 'CACHE' });
         await ShareP.share({
           title: 'FriendshipTree Backup',
-          text: `FriendshipTree backup — ${photoCount} profile photo${photoCount!==1?'s':''}, ${galleryCount} gallery image${galleryCount!==1?'s':''}`,
+          text: `Complete FriendshipTree backup — ${photoCount} profile photo${photoCount!==1?'s':''}, ${galleryCount} gallery image${galleryCount!==1?'s':''}`,
           url: uriResult.uri,
           dialogTitle: 'Save or share your FriendshipTree backup',
         });
-        showToast(`📤 Share sheet open! (${photoCount + galleryCount} photos)`);
+        showToast(`📤 Complete backup ready (${photoCount + galleryCount} photos)`);
       } else {
         const blob = new Blob([jsonStr], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url; a.download = filename; a.click();
         URL.revokeObjectURL(url);
-        showToast(`📦 Downloaded! (${photoCount + galleryCount} photos included)`);
+        showToast(`📦 Complete backup downloaded (${photoCount + galleryCount} photos)`);
       }
     } catch(err) {
       console.error('Export error:', err);
-      try {
-        const filename = `friendshiptree-${new Date().toLocaleDateString('en-GB').replace(/\//g,'-')}.json`;
-        const data = { nodes, links, dimensions, version: 1, exportedAt: new Date().toISOString() };
-        const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob); const a = document.createElement('a');
-        a.href = url; a.download = filename; a.click(); URL.revokeObjectURL(url);
-        showToast('📦 Exported (no photos — retry for full backup)');
-      } catch(e2) { showToast('❌ Export failed'); }
+      showToast(`❌ Export failed: ${err?.message || err}`);
     }
   };
 
@@ -7443,6 +7183,11 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
     reader.onload = async e => {
       try {
         const data = JSON.parse(e.target.result);
+        if (data.localStorageData && typeof data.localStorageData === 'object') {
+          Object.entries(data.localStorageData).forEach(([key, value]) => {
+            if (key.startsWith('ft_') && typeof value === 'string') localStorage.setItem(key, value);
+          });
+        }
         if (data.nodes) setNodes(data.nodes);
         if (data.links) setLinks(data.links);
         if (data.dimensions) setDimensions(prev => ({ ...prev, ...data.dimensions }));
@@ -7479,7 +7224,8 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
           } catch(galErr) { console.warn('Gallery restore failed:', galErr); }
         }
         const total = photoCount + galleryCount;
-        showToast(total > 0 ? `✅ Imported! (${total} photo${total!==1?'s':''} restored)` : '✅ Tree imported!');
+        showToast(total > 0 ? `✅ Complete backup restored (${total} photo${total!==1?'s':''}) — reloading…` : '✅ Complete backup restored — reloading…');
+        setTimeout(() => window.location.reload(), 900);
       } catch(e) { showToast('❌ Invalid file — could not import'); }
     };
     reader.readAsText(file);
@@ -8630,6 +8376,83 @@ Return only the JSON array. If nothing trackable is found, return [].`;
   };
 
 
+  // ── Bloom state (established / growing / flourishing) ───────────────────
+  // See handover doc section 21A. The pure decision function (getBloomState)
+  // and the node adapter around it were verified separately in
+  // regression-tests.js (24 tests) before being wired in here -- keep both
+  // copies in sync if this logic changes.
+  //
+  // NOTE: this deliberately does NOT reuse the getTrend() that sits at the
+  // very bottom of this file (module scope, near DEFAULT_DIMENSIONS). That
+  // function calls getTier(), but is itself defined outside AppInner where
+  // getTier isn't in scope -- and nothing in the app actually calls it, so
+  // it's dead code that would throw a ReferenceError if it were ever
+  // invoked. Worth a follow-up cleanup, but out of scope for this change.
+  // getBloomTrend below is a fresh, correctly-scoped copy of the same
+  // recent-vs-previous-window logic instead.
+  const getBloomTrend = (node, now = new Date()) => {
+    const log = node?.interactionLog || [];
+    const recent = log.filter(e => {
+      const d = new Date(e.date + ' ' + now.getFullYear());
+      return (now - d) < 1000 * 60 * 60 * 24 * 3;
+    }).reduce((s, e) => s + (e.pts || 0), 0);
+    const prev = log.filter(e => {
+      const d = new Date(e.date + ' ' + now.getFullYear());
+      const age = (now - d) / (1000 * 60 * 60 * 24);
+      return age >= 3 && age <= 5;
+    }).reduce((s, e) => s + (e.pts || 0), 0);
+    const currentTier = getTier(node?.interactionScore || 0, node);
+    const prevScore = (node?.interactionScore || 0) - recent;
+    const prevTier = getTier(Math.max(0, prevScore), node);
+    if (currentTier > prevTier) return 'levelup';
+    const diff = recent - prev;
+    if (diff > 40) return 'up2';
+    if (diff > 10) return 'up1';
+    if (diff < -40) return 'down2';
+    if (diff < -10) return 'down1';
+    return 'stable';
+  };
+
+  // Recent positive-action count + distinct active days, over the same
+  // 3-day window getBloomTrend() uses above, so "recent" means the same
+  // thing in both places.
+  const getBloomActivity = (node, now = new Date(), windowDays = 3) => {
+    const log = node?.interactionLog || [];
+    const windowMs = windowDays * 24 * 60 * 60 * 1000;
+    const recentPositive = log.filter(e => {
+      if (!e || !(e.pts > 0) || !e.date) return false;
+      const age = now - new Date(e.date + ' ' + now.getFullYear());
+      return age >= 0 && age < windowMs;
+    });
+    return {
+      recentPositiveActions: recentPositive.length,
+      activeDays: recentPositive.length ? new Set(recentPositive.map(e => e.date)).size : 0,
+    };
+  };
+
+  // Pure decision function -- takes plain primitives, not a node, so it
+  // stays decoupled from the date-parsing above. Design decisions (score
+  // doesn't gate flourishing; decline isn't given its own punitive state;
+  // activeDays is a burst guard against rapid-fire logging) are documented
+  // alongside its regression tests.
+  const getBloomState = ({ score = 0, trend = 'stable', recentPositiveActions = 0, activeDays = null } = {}) => {
+    const strongUpTrend = trend === 'levelup' || trend === 'up2';
+    const mildUpTrend = trend === 'up1';
+    const sustainedActivity = recentPositiveActions >= 3 && (activeDays === null || activeDays >= 2);
+    if (strongUpTrend || sustainedActivity) return 'flourishing';
+    if (mildUpTrend || recentPositiveActions >= 1) return 'growing';
+    return 'established';
+  };
+
+  const getBloomStateForNode = (node, now = new Date()) => {
+    if (!node) return 'established';
+    const score = node.interactionScore || 0;
+    const trend = getBloomTrend(node, now);
+    const { recentPositiveActions, activeDays } = getBloomActivity(node, now);
+    return getBloomState({ score, trend, recentPositiveActions, activeDays });
+  };
+
+
   const activeRenderNodesById = useMemo(() => {
     const m = new Map();
     activeRenderNodes.forEach(n => m.set(n.id, n));
@@ -9525,8 +9348,20 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           <input type="file" accept=".json" style={{display:'none'}} onChange={e=>{ if(e.target.files[0]) importData(e.target.files[0]); }}/>
                         </label>
                       </div>
-                      <div style={{fontSize:11,color:theme.darkMode?'#64748b':'#94a3b8',marginTop:5,lineHeight:1.4}}>
-                        Export saves all people, groups &amp; full-quality photos into one file. Share to Google Drive, WhatsApp, email etc. Import to restore on any device.
+                      <button onClick={() => writeAutomaticBackup({ manual: true })}
+                        style={{width:'100%',marginTop:8,padding:'8px 0',borderRadius:10,background:'#10b981',color:'white',border:'none',cursor:'pointer',fontSize:12,fontWeight:700}}>
+                        💾 Back Up Now to Phone Documents
+                      </button>
+                      <label style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,marginTop:9,fontSize:12,color:theme.darkMode?'#cbd5e1':pw.bodyText,cursor:'pointer'}}>
+                        <span><strong>Automatic daily backup</strong><br/><span style={{fontSize:10,color:theme.darkMode?'#64748b':'#94a3b8'}}>Runs when the app opens or resumes after 24 hours</span></span>
+                        <input type="checkbox" checked={autoBackupEnabled} onChange={e=>setAutoBackupEnabled(e.target.checked)} style={{width:18,height:18,accentColor:'#10b981'}}/>
+                      </label>
+                      <div style={{fontSize:10,color:lastBackupError?'#ef4444':(theme.darkMode?'#64748b':'#64748b'),marginTop:6,lineHeight:1.4,wordBreak:'break-word'}}>
+                        {lastBackupAt ? `Last successful backup: ${new Date(lastBackupAt).toLocaleString('en-GB')}` : 'No automatic device backup has completed yet.'}
+                        {lastBackupError ? <><br/>Last error: {lastBackupError}</> : null}
+                      </div>
+                      <div style={{fontSize:11,color:theme.darkMode?'#64748b':'#94a3b8',marginTop:7,lineHeight:1.4}}>
+                        Complete backups include all FriendshipTree saved keys, people, relationships, calendar, health and habit history, settings, profile photos and gallery photos. Seven dated phone snapshots are retained. Export &amp; Share can be saved to Google Drive manually.
                       </div>
                     </div>
                     {[{label:'🌱 Start Blank',btnLabel:'Reset',btnBg:'#64748b',onClick:()=>{setSettingsOpen(false);const doReset=()=>{clearTimeout(saveTimer.current);setNodes(INITIAL_NODES);setLinks(INITIAL_LINKS);setDimensions(DEFAULT_DIMENSIONS);try{localStorage.removeItem('ft_nodes');localStorage.removeItem('ft_links');localStorage.removeItem('ft_dimensions');}catch(e) {}clearPhotoDB();showToast('🌱 Fresh start!');};const run=()=>localStorage.getItem('ft_pin')?openPinModal('clear','Confirm Reset',doReset):doReset();setConfirmModal({title:'Start Blank?',message:'Removes all people, groups, photos and history.',danger:true,onConfirm:run});}},
@@ -9734,14 +9569,6 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   </div>
                 )}
                 </div>}
-
-
-                {/* App Updates */}
-                <button onClick={()=>setSettingsSections(p=>({...p,updates:!p.updates}))} style={{display:'flex',alignItems:'center',justifyContent:'space-between',width:'100%',padding:'12px 0',background:'none',border:'none',borderBottom:'1px solid '+(theme.darkMode?'#334155':'#e2e8f0'),cursor:'pointer',color:theme.darkMode?'#e2e8f0':pw.bodyText}}>
-                  <span style={{fontSize:13,fontWeight:800}}>⬇️ App Updates</span>
-                  <span style={{fontSize:12,color:theme.darkMode?'#475569':'#475569'}}>{settingsSections.updates?'▲':'▼'}</span>
-                </button>
-                {settingsSections.updates&&<AppUpdatePanel darkMode={theme.darkMode}/>} 
 
 
                 {/* Version */}
@@ -12618,6 +12445,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   const degraded=(score-scoreThen)<-50;
                   const flowerColor=degraded?'#ca8a04':(pf.petalColor||'#f59e0b');
                   const flowerOpacity=degraded?0.6:0.85;
+                  // established/growing/flourishing -- see handover 21A/21B.
+                  // 'growing' and 'flourishing' both use the existing open
+                  // petal shape unchanged for now; only 'established' swaps
+                  // in the closed-bud shape drawn in getSurroundFlowerRaster.
+                  const bloomState=getBloomStateForNode(node);
                   const hubId=nodeHubId;
                   const borderPts=(hubId&&!collapseInfo.hidden.has(hubId))?borderFlowerPositionsRef.current[hubId]:null;
                   const nodeR=node.radius||40;
@@ -12652,13 +12484,15 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         positions.push({x:node.renderX+(bx-node.renderX)*blend,y:node.renderY+(by-node.renderY)*blend});
                       }
                     }
+                    const budTilt=rand()*50-25; // -25..+25 degrees, deterministic per node+fi seed
                     for(const pos of positions) flowers.push({x:pos.x,y:pos.y,fr,petals,fpr,fpw,tipL,baseL,rotation:fi*0.5,
                       petalColor:flowerColor,centerColor:pf.centerColor||'#fef08a',opacity:flowerOpacity,
                       stamenCount:pf.stamenCount||0,stamenLength:fr*(pf.stamenLength??0.35),stamenColor:pf.stamenColor||'#fbbf24',
-                      pistilRadius:(pf.pistilSize||0)>0?fr*(pf.pistilSize??0)*0.35:0,pistilColor:pf.pistilColor||'#f59e0b'});
+                      pistilRadius:(pf.pistilSize||0)>0?fr*(pf.pistilSize??0)*0.35:0,pistilColor:pf.pistilColor||'#f59e0b',
+                      bloomState,budTilt});
                   }
                   const sig=[node.id,node.renderX.toFixed(1),node.renderY.toFixed(1),hubId||'',count,fancyQuality,
-                    flowerColor,flowerOpacity,pf.centerColor,pf.petals,pf.petalLength,pf.petalWidth,pf.petalCurve,pf.stamenCount,pf.stamenLength,pf.stamenColor,pf.pistilSize,pf.pistilColor,
+                    flowerColor,flowerOpacity,bloomState,pf.centerColor,pf.petals,pf.petalLength,pf.petalWidth,pf.petalCurve,pf.stamenCount,pf.stamenLength,pf.stamenColor,pf.pistilSize,pf.pistilColor,
                     flowers.map(f=>`${f.x.toFixed(1)},${f.y.toFixed(1)},${f.fr.toFixed(1)}`).join(';')].join('|');
                   const raster=getSurroundFlowerRaster(sig,flowers,fancyQualityConfig.flowerRasterScale);
                   return raster?<image key={'sf-'+node.id} href={raster.href} x={raster.x} y={raster.y} width={raster.width} height={raster.height} style={{pointerEvents:'none'}}/>:null;

@@ -943,6 +943,20 @@ Must be checked in the live code:
 
 7. The giant single file increases temporal-dead-zone, scope, and callback errors.
 
+8. Bloom-state bud rendering (established/growing/flourishing) implemented
+   2026-07-18 -- see section 26. Builds and syntax-checks cleanly but has
+   NOT been run on-device yet. Test before trusting.
+
+9. Pre-existing dead-code bug found while building bloom state: a
+   module-level getTrend() near the very end of App.jsx (outside AppInner,
+   next to DEFAULT_DIMENSIONS) calls getTier(), which is only defined
+   inside AppInner and is not in scope there. Nothing in the app currently
+   calls this getTrend(), so it's inert -- but it would throw a
+   ReferenceError if anything ever did call it. Not fixed as part of the
+   2026-07-18 change (out of scope). Should be deleted or fixed in a
+   follow-up. The bloom-state work added its own correctly-scoped copy
+   (getBloomTrend, inside AppInner) rather than reusing this one.
+
 ======================================================================
 20. IMMEDIATE NEXT STEPS
 ======================================================================
@@ -965,18 +979,24 @@ Recommended order:
 
 3. Add lightweight regression tests
 At minimum:
-- getLocalDateStr
+- getLocalDateStr [DONE, pre-existing]
 - Health-history value cycling
-- Health-list column calculations
+- Health-list column calculations [DONE, pre-existing]
 - Health-list drag-position calculations
-- Quality preset lookup
-- Relationship bloom-state calculation
-- Save/load compatibility
+- Quality preset lookup [DONE, pre-existing]
+- Relationship bloom-state calculation [DONE 2026-07-18 -- 61 tests total,
+  see section 26]
+- Save/load compatibility [DONE, pre-existing]
 
-4. Implement bloom states
+4. Implement bloom states [DONE 2026-07-18 -- see section 26. Established
+   only; growing/flourishing still render as the existing open flower.
+   NOT yet device-tested.]
 - Established
 - Growing
 - Flourishing
+
+4a. NEW -- device-test the 2026-07-18 bloom-state change before building
+    anything further on top of it.
 
 5. Implement one Canvas ambience layer
 - Start with bees or pollen
@@ -988,7 +1008,7 @@ At minimum:
 21. RECOMMENDED FIRST ECOSYSTEM IMPLEMENTATION
 ======================================================================
 
-A. Relationship bloom-state selector
+A. Relationship bloom-state selector [IMPLEMENTED 2026-07-18, see section 26]
 
 Inputs:
 - Current relationship score
@@ -1001,11 +1021,14 @@ Outputs:
 - growing
 - flourishing
 
-B. Flower openness
+B. Flower openness [PARTIALLY IMPLEMENTED 2026-07-18, see section 26]
 
-- Established: closed bud
-- Growing: partially open
-- Flourishing: open
+- Established: closed bud [DONE -- dedicated bud shape, not just a shrunk
+  flower]
+- Growing: partially open [NOT DONE -- currently renders as the existing
+  open flower, unchanged]
+- Flourishing: open [uses the existing open flower, unchanged -- this was
+  already the default look, so "done" only in the sense of "not broken"]
 
 C. Bees
 
@@ -1113,3 +1136,386 @@ Before adding the full ecosystem:
 Do not add bees, bats, swifts, owl, firefly clouds, pollen, seasons, and weather in one change.
 
 Build the forest one living system at a time.
+
+======================================================================
+26. BLOOM STATE IMPLEMENTATION LOG (2026-07-18)
+======================================================================
+
+Session summary: built the relationship bloom-state selector from section
+21A end-to-end -- pure function, regression tests, node adapter, adapter
+tests, bud visual design (iterated through several rounds with the user),
+then wired the established-state bud into live rendering. Followed the
+order section 20 recommends: logic verified and tested BEFORE touching
+anything visual, visual design approved BEFORE touching App.jsx.
+
+--- 26.1 Pure logic (regression-tests.js) ---
+
+Added to regression-tests.js, all passing (61 tests total in the file
+after this addition, up from 37 pre-existing):
+
+- getBloomState({score, trend, recentPositiveActions, activeDays}) -- pure
+  decision function, 16 tests covering edge cases.
+- getTrendAt / getTier / getRecentActivityStats / getBloomStateForNode --
+  a node adapter mapping a real interactionLog/interactionScore node to
+  the inputs above, 8 more tests.
+
+Key design decisions (see inline comments in regression-tests.js for full
+reasoning):
+- score does NOT gate flourishing -- a brand-new, zero-score relationship
+  can flourish immediately from a burst of attention, matching the
+  "immediate reward, under one second" principle in section 14.
+- declining trend does NOT get its own punitive bloom state -- it falls
+  to 'established', same as quiet/stable, matching "slow decay, not
+  punitive resets."
+- activeDays is a burst guard: reaching 'flourishing' via raw action count
+  (as opposed to via a strong score-tier-crossing trend swing) requires
+  the actions to be spread across >=2 distinct days, so rapid-fire
+  logging in one sitting can't instantly max out the flower.
+
+--- 26.2 Wired into App.jsx ---
+
+Added getBloomTrend / getBloomActivity / getBloomState / getBloomStateForNode
+inside AppInner, immediately after getLevel (so getTier is in scope --
+see the section 19 item 9 note above about why this is a fresh copy
+rather than reusing the existing module-level getTrend).
+
+--- 26.3 Bud visual design ---
+
+Went through several rounds with the user, starting from two directions
+(reuse the existing customisable petal shape at a smaller size, vs. a
+dedicated bud silhouette) before settling on a dedicated bud. Final
+approved design, driven by a real rose-bud reference photo the user
+supplied:
+
+- One continuous bulbous pointed body (not multiple separate visible
+  petal lobes) in the flower's own petalColor, with a lighter highlight
+  streak and a single curved seam-crease line near the top.
+- Two pointed sepal shapes in front of/overlapping the body (not behind
+  it), bases meeting with a slight overlap at the centre (no gap), inner
+  edges straight rather than curved, sized so their tips pull in fairly
+  close to the body rather than flaring wide.
+- A rounded green calyx bulb at the very base, also drawn in front of the
+  body.
+- No vein lines on the sepals (removed after user feedback).
+- Random tilt per bud so they don't all lean identically.
+
+--- 26.4 Wired into rendering ---
+
+The bud replaces the open-petal shape ONLY for nodes in the 'established'
+bloom state, inside the existing "surrounding flowers" ambient cluster
+(the decorative flowers scattered around each person node, already
+tier/score-driven via the existing degraded/flowerColor logic). 'growing'
+and 'flourishing' both still render as the existing open flower, unchanged
+-- deliberately not built yet, see section 21B above.
+
+Changes, all inside App.jsx:
+1. getSurroundFlowerRaster() (the canvas rasterizer, top of file, ~line
+   434): branches on f.bloomState. 'established' draws the bud (bulb,
+   highlight, seam crease, sepals, calyx bulb) via canvas bezier/ellipse
+   calls; everything else is the pre-existing open-petal + centre +
+   stamens + pistil drawing, untouched.
+2. Bounding-box calc in the same function: reach now takes
+   Math.max(f.fpr, f.fr*1.4) instead of just f.fpr, so the bud can't clip
+   at short pf.petalLength settings. Does not change sizing for the
+   existing open-flower case.
+3. The per-node flower-cluster loop (~line 12320): computes
+   bloomState = getBloomStateForNode(node) once per node, alongside the
+   existing degraded/flowerColor logic.
+4. Each pushed flower instance gets bloomState and a per-instance random
+   budTilt (-25..+25 degrees, from the same seeded rand() already used
+   for flower placement in that loop -- deterministic per node, not
+   Math.random()).
+5. bloomState was added to the raster cache signature (sig) -- REQUIRED
+   per section 23 lesson 3 ("cache keys must include only values that
+   affect output"). Without this, a bud could get stuck on screen after
+   the relationship's bloom state changed, because the cache wouldn't
+   know to invalidate.
+
+--- 26.5 Verification done ---
+
+- Full regression suite re-run after the App.jsx changes: 61/61 passing.
+- Modified App.jsx run through esbuild (--jsx=automatic) as a syntax/parse
+  check: builds clean, no errors.
+- Diffed against the original App.jsx to confirm only the intended
+  regions changed.
+
+--- 26.6 NOT done / explicitly out of scope this session ---
+
+- NOT device-tested. Builds and parses cleanly but has not been run in
+  the actual app. Per section 19 item 8, test before building further on
+  top of this.
+- growing/flourishing openness (section 21B) not implemented -- still
+  the existing open flower at existing settings.
+- Bees (section 21C) not started.
+- The dead module-level getTrend() bug (section 19 item 9) was found but
+  deliberately not fixed, to keep this change contained.
+- The user's own partnerFlower customiser (petal count/colour/pattern
+  chosen per person) is untouched and still fully respected for
+  growing/flourishing -- the bud only replaces the shape, not the
+  person's colour choice, for the established state.
+
+
+======================================================================
+27. OTA / CAPGO UPDATE PIPELINE INVESTIGATION -- RESOLVED, THEN
+    OVERTAKEN BY A CRITICAL INCIDENT (2026-07-17)
+======================================================================
+
+STATUS: Capgo integration is PAUSED INDEFINITELY. Do not resume, extend,
+or touch anything Capgo-related unless the user explicitly asks to revisit
+it. See 27B below for why -- this is not a minor caveat.
+
+--- 27A. The banner investigation itself: resolved ---
+
+Facts established during the forensic pass:
+- Vite base changed from '/FriendshipTree/' to './'.
+- notifyAppReady() exists and is called correctly.
+- Source index.html, dist/index.html, and the Android-packaged
+  index.html (android/app/src/main/assets/public/index.html) were all
+  confirmed byte-clean -- no banner text anywhere in any of them.
+- Select-String across the whole project for "Capgo Update Test" and
+  "capgo-test-banner" returned zero matches outside the already-fixed
+  files.
+- `npx @capgo/cli channel list` confirmed the production channel was
+  correctly pointed at the latest bundle (0.0.6 at time of check), not
+  stuck on an old version.
+- Despite ALL of the above being clean, the banner still rendered on
+  the physical device.
+
+Conclusion: this was device-side cached bundle state, not a project or
+server-side problem. Most likely cause: earlier in onboarding, `npx cap
+copy android` was used at a point where `npx cap sync android` was
+required (copy does not link in newly-added native plugin code; the
+Capgo updater plugin needs sync). This produced an inconsistent local
+state on the device that a plain reinstall-over-existing-app did not
+clear, since the OTA plugin's own bundle cache lives separately from
+the app's build output. The evidence trail here is a good example of
+the section 2 principle "do not make architectural assumptions based
+only on snippets" -- every individual file and server-side setting was
+correct in isolation; the fault was in accumulated device state that no
+single file inspection could reveal.
+
+--- 27B. THE ACTUAL INCIDENT: user data was wiped ---
+
+While attempting to clear the suspected device-side cache, `adb
+uninstall io.github.josephd93.friendshiptree` was suggested and run as
+the fix. This command was correctly flagged in advance as destructive
+-- but the warning was not placed clearly enough before the instruction,
+and it was run before being fully registered. Executing it wiped the
+app's data with no verified export/backup in place at the time.
+
+Recovery attempted via Android's own Auto Backup:
+- android:allowBackup="true" was confirmed present and correctly set in
+  AndroidManifest.xml -- backup was not disabled.
+- Per Android's own developer documentation, restore is supposed to
+  trigger automatically on a plain `adb install`, not only through the
+  Play Store.
+- A full uninstall/reinstall cycle was attempted specifically to trigger
+  this restore path.
+- Partial recovery only: one old, mostly-empty data point (a single
+  person, "Bumka") came back. The current, fuller dataset -- everyone
+  else added more recently, health tracking history, everything built
+  up since that old snapshot -- did not return and must be considered
+  permanently lost.
+
+Root lesson, now a hard rule, not a suggestion:
+WARNINGS MUST BE STATED CLEARLY, BEFORE THE INSTRUCTION, EVERY TIME,
+WITH NO EXCEPTIONS -- for any command that can delete or overwrite data.
+Explicit confirmation must be obtained before it is run. This applies
+regardless of how confident the diagnosis is or how urgent the fix
+feels. Section 29's existing rule ("do not uninstall or clear app data
+until a verified backup exists") was already written down before this
+incident happened, and was violated anyway under the pressure of active
+troubleshooting -- the rule alone was not enough; the delivery of it
+needs to force a real pause.
+
+--- 27C. Direct outcome: Capgo paused, automatic local backup now the
+priority ---
+
+Following the incident, the decision was made to pause Capgo/OTA work
+entirely and return to it, if at all, only on a calmer day, not while
+still recovering from data loss. The immediate priority became building
+a genuine safety net that does not depend on Android's opaque,
+single-snapshot Auto Backup system. See section 30 for the in-progress
+plan.
+
+======================================================================
+28. ENVIRONMENT SNAPSHOTS
+======================================================================
+
+Record:
+- Node
+- npm
+- Java
+- Gradle
+- Android Gradle Plugin
+- Capacitor
+- @capgo/capacitor-updater
+- Capgo CLI
+- Android SDK
+- Phone model
+- Android version
+- Git branch
+- Git commit
+- versionName
+- versionCode
+
+======================================================================
+29. BUILD / DEPLOYMENT RULES
+======================================================================
+
+Never assume deployment succeeded.
+
+Verify success after:
+1. npm run build
+2. Verify dist
+3. npx cap sync android
+4. Verify Android assets
+5. Build APK
+6. Install APK
+7. Verify package with ADB
+8. Launch app
+9. Verify active Capgo bundle
+
+Do not uninstall or clear app data until a verified backup exists.
+This rule existed before 2026-07-17 and was violated anyway during
+active Capgo troubleshooting -- see section 27B for exactly what
+happened and why "the rule was written down" was not sufficient on its
+own. Any command that can delete or overwrite data needs its warning
+stated clearly, BEFORE the instruction, every single time, with
+explicit confirmation obtained before it runs -- no exceptions, no
+matter how confident the diagnosis or how urgent the fix feels.
+
+======================================================================
+30. AUTOMATIC BACKUP SYSTEM -- IN PROGRESS, GOOGLE DRIVE OAUTH SETUP
+    STARTED (2026-07-18)
+======================================================================
+
+Direct response to the incident in section 27B. Two-phase plan.
+
+--- 30A. Phase 1: local timed backup (not yet built) ---
+
+Requirements agreed with the user:
+- Export all meaningful app data (nodes, links, health lists, habit
+  history) to a JSON file. Confirm with the user whether photos should
+  be included, given they have historically bloated save size
+  significantly (see earlier localStorage-size incidents elsewhere in
+  this doc).
+- Write to PUBLIC device storage via @capacitor/filesystem
+  (Directory.Documents or equivalent) -- explicitly NOT Directory.Data,
+  since the whole point is surviving an app uninstall or data clear,
+  which is exactly what section 27B's incident was.
+- Keep multiple dated snapshots (suggest last 5-10), never overwrite a
+  single file -- one bad moment must never be able to destroy the one
+  good backup, which is the specific failure mode of Android's own
+  Auto Backup (single snapshot, silently overwritten) that section 27B
+  ran into.
+- Trigger automatically on elapsed time since last backup (suggested:
+  24h), checked on app open/resume. MIRROR THE EXISTING HABIT-ROLLOVER
+  PATTERN already in the codebase (doHabitRollover, the setInterval +
+  Capacitor 'resume' listener combo) rather than building a new
+  mechanism from scratch -- that pattern is already proven reliable in
+  production.
+- @capacitor/filesystem is NOT currently a dependency. Needs adding to
+  package.json and a native sync (npx cap sync android) before it can
+  be used -- this is a native-plugin change, same category of change
+  that requires sync rather than copy (see 27A for why that distinction
+  matters).
+- Add a small "last backup: [time]" indicator in Settings so the user
+  has visible confirmation it is actually running, not a silent black
+  box.
+
+Status: agreed and scoped with the user, not yet implemented in
+App.jsx.
+
+--- 30B. Phase 2: genuine automatic Google Drive upload ---
+
+Requires Google Cloud OAuth setup (external, browser-based, cannot be
+done from inside the codebase). @capgo/capacitor-social-login is
+already a project dependency, so Google auth groundwork is not
+starting from zero.
+
+CONFIRMED VALUES -- already gathered, do not re-derive:
+
+  applicationId : io.github.josephd93.friendshiptree
+  Debug SHA-1   : 19:DC:35:18:E5:F2:B2:D1:36:7A:85:E3:63:D4:AC:4D:42:41:CF:45
+
+  (SHA-1 obtained via, for reference if it ever needs regenerating --
+  e.g. after a debug keystore reset:
+  & "C:\Program Files\Android\Android Studio\jbr\bin\keytool.exe" -list -v
+    -keystore "$env:USERPROFILE\.android\debug.keystore"
+    -alias androiddebugkey -storepass android -keypass android
+  Note: on this machine, `keytool` is not on PATH directly -- same
+  underlying cause as `gradlew` needing JAVA_HOME set manually each
+  session; use the full jbr\bin path shown above.)
+
+Remaining steps for the user, browser-side, before code work can
+resume on this:
+1. console.cloud.google.com -> create/select a project -> enable the
+   Google Drive API.
+2. Configure the OAuth consent screen (External, add the user as a
+   test user -- avoids Google's full app verification process since
+   this is single-user).
+3. Create an OAuth 2.0 Client ID, type Android, using the
+   applicationId and SHA-1 above.
+4. Send the resulting Client ID to whichever AI is continuing this
+   work.
+
+Status: user has been given these steps and the confirmed
+applicationId/SHA-1. Client ID not yet created as of this handover
+entry. No App.jsx code changes have been made for Phase 2 -- do not
+start writing Drive-upload code until the Client ID exists and is
+provided, per the standard "warnings/blockers before instructions"
+discipline reinforced in 27B.
+
+======================================================================
+
+======================================================================
+31. COMPLETE PHONE BACKUP IMPLEMENTATION (2026-07-18)
+======================================================================
+
+Implemented in the supplied App.jsx.
+
+Changes:
+- Replaced the partial manual export payload with backup format version 4.
+- The backup now captures every localStorage key beginning with ft_, so it
+  automatically includes calendar, habits, health lists/history, food diary,
+  layouts, settings and future app keys without maintaining a fragile list.
+- Current in-memory nodes, links and dimensions override any pending debounced
+  copies so the latest visible state is included.
+- Profile-photo and gallery IndexedDB stores are included.
+- Added safe UTF-8-to-base64 conversion for large JSON payloads.
+- Added "Back Up Now to Phone Documents" in Settings > Data.
+- Automatic daily backup is enabled by default and can be toggled in Settings.
+- Automatic backups run when the app starts or resumes after at least 24 hours,
+  and are checked hourly while the app remains open.
+- Backups are written under Documents/FriendshipTree Backups using dated names.
+- The newest seven automatic snapshots are retained; older automatic snapshots
+  are deleted only after a new backup succeeds.
+- Settings displays the last successful backup time and the last error.
+- Import now restores all ft_* localStorage keys, photos and gallery content,
+  then reloads the app so every React state is rebuilt from restored storage.
+- Older version 1-3 backups remain import-compatible through the retained
+  top-level nodes/links/dimensions/photoMap/gallery fields.
+
+Verification:
+- App.jsx parsed and transpiled successfully with the installed TypeScript JSX
+  parser after modification.
+- A full project build and physical Android device test were not possible from
+  the supplied files alone.
+
+Native dependency requirement:
+- The feature detects window.Capacitor.Plugins.Filesystem at runtime.
+- If @capacitor/filesystem is not already installed and synced in the actual
+  project, run:
+    npm install @capacitor/filesystem
+    npx cap sync android
+- Do not uninstall the existing app while testing. Install the rebuilt APK over
+  the existing installation so current app data remains intact.
+
+Limitation:
+- This phase does not wake a force-closed app at an exact night-time hour.
+  Exact overnight execution requires a native Android WorkManager task and a
+  native-readable complete snapshot. The current implementation truthfully
+  runs the backup on the next startup/resume after 24 hours.
+- Google Drive remains manual through Export & Share until Google OAuth/client
+  setup and the Drive upload implementation are completed.
