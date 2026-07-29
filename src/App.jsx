@@ -8,10 +8,12 @@ import {
 } from 'lucide-react';
 import { detectImageMimeFromBase64 } from './utils/image';
 import { getLocalDateStr, parseBirthdayDateGlobal } from './utils/date';
-import { saveData, loadData, saveRaw, utf8ToBase64 } from './services/persistence';
+import { saveData, loadData, saveRaw } from './services/persistence';
 
 
-const APP_VERSION = '3.1';
+const APP_VERSION = '3.2.1';
+const BUILD_ID = '2026-07-29-backup-location-inspector';
+const BUILD_DATE = '29 July 2026';
 
 // ─── Calendar Integration ─────────────────────────────────────────────────
 // Uses the Capgo calendar plugin (Capacitor) to read/write the phone's
@@ -2316,10 +2318,15 @@ function AppInner() {
   const [customPresets, setCustomPresets] = useState(() => {
     try { return JSON.parse(localStorage.getItem('ft_flower_presets') || '[]'); } catch(e) { return []; }
   });
-  const [settingsSections, setSettingsSections] = useState({appearance:false,toolbar:false,filters:false,data:false,reset:false,security:false,future:false,assistant:false});
+  const [settingsSections, setSettingsSections] = useState({appearance:false,toolbar:false,filters:false,data:false,reset:false,security:false,future:false,assistant:false,developer:false});
   const [autoBackupEnabled, setAutoBackupEnabled] = useState(() => localStorage.getItem('ft_auto_backup_enabled') !== 'false');
   const [lastBackupAt, setLastBackupAt] = useState(() => localStorage.getItem('ft_last_backup_at') || '');
   const [lastBackupError, setLastBackupError] = useState(() => localStorage.getItem('ft_last_backup_error') || '');
+  const [backupFolderName, setBackupFolderName] = useState(() => localStorage.getItem('ft_backup_folder_name') || 'FriendshipTree Backups');
+  const [backupLocationInfo, setBackupLocationInfo] = useState('Phone Documents / FriendshipTree Backups');
+  const [backupSnapshots, setBackupSnapshots] = useState([]);
+  const [backupManagerOpen, setBackupManagerOpen] = useState(null);
+  const [backupOperation, setBackupOperation] = useState('');
   const autoBackupRunningRef = useRef(false);
   const [fontSize, setFontSize] = useState(() => { try { return parseFloat(localStorage.getItem('ft_fontSize')||'1'); } catch(e) { return 1; } });
   useEffect(() => {
@@ -4616,6 +4623,25 @@ function AppInner() {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 4000);
   };
+
+
+  // One-time confirmation after installing this build. This makes it obvious
+  // on the phone that the new web bundle is actually running.
+  useEffect(() => {
+    const buildId = BUILD_ID;
+    const seenKey = `ft_seen_build_${buildId}`;
+    try {
+      if (!localStorage.getItem(seenKey)) {
+        const timer = setTimeout(() => {
+          showToast('✅ Update installed — Developer Info is now available');
+          localStorage.setItem(seenKey, '1');
+        }, 900);
+        return () => clearTimeout(timer);
+      }
+    } catch (error) {
+      console.warn('[FriendshipForest] Could not record update confirmation', error);
+    }
+  }, []);
   const loadDemoData = () => {
     const now = Date.now();
     const hoursAgo = (h) => now - h * 3600000;
@@ -7013,18 +7039,14 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
   };
 
 
-  const collectCompleteBackup = async () => {
-    // Capture every app-owned localStorage key rather than maintaining a
-    // fragile hand-written list. This includes calendar, health, habits,
-    // food diary, settings, layouts and future ft_* keys automatically.
+  const collectBackupParts = async () => {
+    // Keep the manifest small. Photos are returned as separate records so a
+    // large library is never concatenated into one enormous JavaScript string.
     const localStorageData = {};
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
       if (key && key.startsWith('ft_')) localStorageData[key] = localStorage.getItem(key);
     }
-
-    // Use the current in-memory core state as the authoritative latest copy,
-    // in case a debounced localStorage write has not fired yet.
     localStorageData.ft_nodes = JSON.stringify(nodes);
     localStorageData.ft_links = JSON.stringify(links);
     localStorageData.ft_dimensions = JSON.stringify(dimensions);
@@ -7034,23 +7056,74 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
       new Promise((res, rej) => { const tx = db.transaction('photos','readonly'); const req = tx.objectStore('photos').getAll(); req.onsuccess = e => res(e.target.result||[]); req.onerror = rej; }),
       new Promise((res, rej) => { const tx = db.transaction('gallery','readonly'); const req = tx.objectStore('gallery').getAll(); req.onsuccess = e => res(e.target.result||[]); req.onerror = rej; }),
     ]);
-    const photoMap = {};
-    allPhotos.forEach(p => { if (p && p.dataUrl) { const k = p.nodeId || p.key; if (k) photoMap[k] = p.dataUrl; } });
 
-    return {
-      format: 'FriendshipTreeBackup',
-      version: 4,
+    const safeName = value => String(value || 'item').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 100);
+    const photoFiles = allPhotos.filter(p => p && p.dataUrl).map((photo, index) => ({
+      name: `photos/profile-${String(index + 1).padStart(5, '0')}-${safeName(photo.nodeId || photo.key)}.json`,
+      record: photo,
+    }));
+    const galleryFiles = allGallery.filter(item => item && item.dataUrl).map((item, index) => ({
+      name: `photos/gallery-${String(index + 1).padStart(5, '0')}-${safeName(item.key || item.nodeId)}.json`,
+      record: item,
+    }));
+
+    const manifest = {
+      format: 'FriendshipTreeBackupPackage',
+      version: 5,
       appVersion: APP_VERSION,
       exportedAt: new Date().toISOString(),
       localStorageData,
-      // Keep these top-level fields for backwards compatibility with older
-      // FriendshipTree imports and easier human inspection.
       nodes,
       links,
       dimensions,
-      photoMap,
-      gallery: allGallery,
+      photoFiles: photoFiles.map(item => item.name),
+      galleryFiles: galleryFiles.map(item => item.name),
+      counts: { profilePhotos: photoFiles.length, galleryPhotos: galleryFiles.length },
     };
+    return { manifest, photoFiles, galleryFiles };
+  };
+
+  const writeBackupPackage = async ({ directory, rootPath, onProgress }) => {
+    const FilesystemP = window.Capacitor?.Plugins?.Filesystem;
+    if (!FilesystemP || typeof FilesystemP.writeFile !== 'function') throw new Error('Capacitor Filesystem is unavailable');
+    const parts = await collectBackupParts();
+    const assets = [...parts.photoFiles, ...parts.galleryFiles];
+    const total = assets.length + 1;
+    let completed = 0;
+    const report = label => { completed += 1; if (onProgress) onProgress(completed, total, label); };
+
+    // A marker lets us distinguish a completed package from an interrupted one.
+    await FilesystemP.writeFile({
+      path: `${rootPath}/manifest.json.partial`,
+      data: JSON.stringify({ format: parts.manifest.format, exportedAt: parts.manifest.exportedAt, status: 'writing' }),
+      directory,
+      encoding: 'utf8',
+      recursive: true,
+    });
+
+    for (const asset of assets) {
+      await FilesystemP.writeFile({
+        path: `${rootPath}/${asset.name}`,
+        data: JSON.stringify(asset.record),
+        directory,
+        encoding: 'utf8',
+        recursive: true,
+      });
+      report(asset.name);
+      // Yield periodically so Android can redraw progress and avoid a long frozen UI.
+      if (completed % 5 === 0) await new Promise(resolve => setTimeout(resolve, 0));
+    }
+
+    await FilesystemP.writeFile({
+      path: `${rootPath}/manifest.json`,
+      data: JSON.stringify(parts.manifest),
+      directory,
+      encoding: 'utf8',
+      recursive: true,
+    });
+    report('manifest.json');
+    await FilesystemP.deleteFile({ path: `${rootPath}/manifest.json.partial`, directory }).catch(() => {});
+    return { ...parts, rootPath };
   };
 
   const writeAutomaticBackup = async ({ manual = false } = {}) => {
@@ -7062,59 +7135,47 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
       if (!isNative || !FilesystemP || typeof FilesystemP.writeFile !== 'function') {
         throw new Error('Public device backup needs the Capacitor Filesystem plugin and a native Android build');
       }
-
-      if (manual) showToast('💾 Creating complete device backup…');
+      if (manual) { setBackupOperation('Preparing backup…'); showToast('💾 Preparing backup…'); }
       if (pendingPhotoWrites.current.size) await Promise.allSettled([...pendingPhotoWrites.current]);
-      const data = await collectCompleteBackup();
       const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const filename = `FriendshipTree Backups/friendshiptree-auto-${stamp}.json`;
-      await FilesystemP.writeFile({
-        path: filename,
-        data: utf8ToBase64(JSON.stringify(data)),
+      const folderName = `friendshiptree-auto-${stamp}`;
+      const safeFolder = String(backupFolderName || 'FriendshipTree Backups').trim().replace(/[\\/:*?"<>|]/g, '-').slice(0, 80) || 'FriendshipTree Backups';
+      const rootPath = `${safeFolder}/${folderName}`;
+      const result = await writeBackupPackage({
         directory: 'DOCUMENTS',
-        recursive: true,
+        rootPath,
+        onProgress: manual ? (done, total) => { setBackupOperation(`Saving backup ${done}/${total}…`); showToast(`💾 Saving backup ${done}/${total}…`); } : null,
       });
 
-      // Keep multiple snapshots, but cap them so storage cannot grow forever.
       try {
-        const listing = await FilesystemP.readdir({ path: 'FriendshipTree Backups', directory: 'DOCUMENTS' });
-        const files = (listing?.files || [])
-          .map(f => typeof f === 'string' ? f : f.name)
-          .filter(name => /^friendshiptree-auto-.*\.json$/.test(name))
-          .sort();
-        const excess = files.slice(0, Math.max(0, files.length - 7));
-        for (const name of excess) {
-          await FilesystemP.deleteFile({ path: `FriendshipTree Backups/${name}`, directory: 'DOCUMENTS' }).catch(() => {});
+        const safeFolder = String(backupFolderName || 'FriendshipTree Backups').trim().replace(/[\\/:*?"<>|]/g, '-').slice(0, 80) || 'FriendshipTree Backups';
+        const listing = await FilesystemP.readdir({ path: safeFolder, directory: 'DOCUMENTS' });
+        const folders = (listing?.files || []).map(f => typeof f === 'string' ? f : f.name)
+          .filter(name => /^friendshiptree-auto-/.test(name)).sort();
+        for (const name of folders.slice(0, Math.max(0, folders.length - 7))) {
+          await FilesystemP.rmdir({ path: `${safeFolder}/${name}`, directory: 'DOCUMENTS', recursive: true }).catch(() => {});
         }
-      } catch(e) {
-        window.ftDiagLog('[Backup] Snapshot rotation warning:', e.message);
-      }
+      } catch(e) { window.ftDiagLog('[Backup] Snapshot rotation warning:', e.message); }
 
       const completedAt = new Date().toISOString();
       saveRaw('ft_last_backup_at', completedAt);
       saveRaw('ft_last_backup_error', '');
       setLastBackupAt(completedAt);
       setLastBackupError('');
-      if (manual) showToast('✅ Backup saved in Documents/FriendshipTree Backups');
-      window.ftDiagLog('[Backup] Complete device backup saved:', filename);
+      setBackupLocationInfo(`Phone Documents / ${safeFolder} / ${folderName}`);
+      if (manual) { setBackupOperation(`Backup complete — ${result.manifest.counts.profilePhotos + result.manifest.counts.galleryPhotos} photos`); showToast(`✅ Backup complete: ${result.manifest.counts.profilePhotos + result.manifest.counts.galleryPhotos} photos`); }
+      window.ftDiagLog('[Backup] Complete package saved:', rootPath);
       return true;
     } catch(err) {
       const message = err?.message || String(err);
       saveRaw('ft_last_backup_error', message);
       setLastBackupError(message);
       window.ftDiagLog('[Backup] FAILED:', message);
-      if (manual) showToast(`❌ Backup failed: ${message}`);
+      if (manual) { setBackupOperation(`Backup failed: ${message}`); showToast(`❌ Backup failed: ${message}`); }
       return false;
-    } finally {
-      autoBackupRunningRef.current = false;
-    }
+    } finally { autoBackupRunningRef.current = false; }
   };
 
-  // Phase-one automatic backup: check on startup, periodically while open,
-  // and immediately on Android resume. This reliably creates one snapshot
-  // per elapsed 24 hours without pretending JavaScript can wake a force-closed
-  // app at an exact clock time. Exact overnight execution while fully closed
-  // requires a native WorkManager task in the Android project.
   useEffect(() => {
     saveRaw('ft_auto_backup_enabled', autoBackupEnabled ? 'true' : 'false');
     if (!autoBackupEnabled) return;
@@ -7135,100 +7196,177 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
       } catch(e) {}
     }
     return () => {
-      clearTimeout(startupTimer);
-      clearInterval(interval);
+      clearTimeout(startupTimer); clearInterval(interval);
       if (resumeListener && typeof resumeListener.remove === 'function') resumeListener.remove();
     };
   }, [autoBackupEnabled]); // eslint-disable-line
 
+  const inspectBackupLocation = async () => {
+    try {
+      const FilesystemP = window.Capacitor?.Plugins?.Filesystem;
+      if (!FilesystemP || typeof FilesystemP.readdir !== 'function') throw new Error('Capacitor Filesystem is unavailable');
+      const safeFolder = String(backupFolderName || 'FriendshipTree Backups').trim().replace(/[\/:*?"<>|]/g, '-').slice(0, 80) || 'FriendshipTree Backups';
+      localStorage.setItem('ft_backup_folder_name', safeFolder);
+      setBackupFolderName(safeFolder);
+      setBackupManagerOpen(null);
+      setBackupOperation('Scanning backup location…');
+      const listing = await FilesystemP.readdir({ path: safeFolder, directory: 'DOCUMENTS' }).catch(() => ({ files: [] }));
+      const names = (listing?.files || []).map(item => typeof item === 'string' ? item : item.name).filter(Boolean).sort().reverse();
+      const snapshots = [];
+      for (const name of names.filter(name => /^friendshiptree-auto-/.test(name)).slice(0, 20)) {
+        const root = `${safeFolder}/${name}`;
+        let manifest = null;
+        let manifestError = '';
+        let partialMarker = false;
+        let filesFound = 0;
+        let profileFilesFound = 0;
+        let galleryFilesFound = 0;
+        let approximateBytes = 0;
+        try {
+          await FilesystemP.stat({ path: `${root}/manifest.json.partial`, directory: 'DOCUMENTS' });
+          partialMarker = true;
+        } catch(e) {}
+        try {
+          const result = await FilesystemP.readFile({ path: `${root}/manifest.json`, directory: 'DOCUMENTS', encoding: 'utf8' });
+          manifest = JSON.parse(result.data || result);
+        } catch(e) { manifestError = e?.message || String(e); }
+        try {
+          const photoListing = await FilesystemP.readdir({ path: `${root}/photos`, directory: 'DOCUMENTS' });
+          const photoEntries = (photoListing?.files || []).map(item => typeof item === 'string' ? {name:item} : item).filter(item => item?.name);
+          filesFound = photoEntries.length;
+          profileFilesFound = photoEntries.filter(item => item.name.startsWith('profile-')).length;
+          galleryFilesFound = photoEntries.filter(item => item.name.startsWith('gallery-')).length;
+          for (const item of photoEntries) {
+            if (Number.isFinite(item.size)) approximateBytes += item.size;
+          }
+        } catch(e) {}
+        try {
+          const stat = await FilesystemP.stat({ path: `${root}/manifest.json`, directory: 'DOCUMENTS' });
+          if (Number.isFinite(stat?.size)) approximateBytes += stat.size;
+        } catch(e) {}
+        const validFormat = manifest?.format === 'FriendshipTreeBackupPackage' && Number(manifest?.version) >= 5;
+        const expectedProfile = Number(manifest?.counts?.profilePhotos || manifest?.photoFiles?.length || 0);
+        const expectedGallery = Number(manifest?.counts?.galleryPhotos || manifest?.galleryFiles?.length || 0);
+        const expectedFiles = expectedProfile + expectedGallery;
+        const fileCountMatches = !!manifest && filesFound === expectedFiles;
+        const complete = validFormat && !partialMarker && fileCountMatches;
+        const status = complete ? 'Valid and complete' : !manifest ? 'Manifest missing or unreadable' : partialMarker ? 'Interrupted while writing' : !validFormat ? 'Unsupported manifest format' : `Photo file count mismatch (${filesFound}/${expectedFiles})`;
+        snapshots.push({
+          name, complete, status, manifestError, partialMarker, filesFound, profileFilesFound, galleryFilesFound,
+          approximateBytes, expectedProfile, expectedGallery, expectedFiles,
+          exportedAt: manifest?.exportedAt || '', appVersion: manifest?.appVersion || '', formatVersion: manifest?.version || '',
+          peopleCount: Array.isArray(manifest?.nodes) ? manifest.nodes.filter(n => n?.type === 'person').length : null,
+          groupCount: Array.isArray(manifest?.nodes) ? manifest.nodes.filter(n => n?.type === 'group').length : null,
+          linkCount: Array.isArray(manifest?.links) ? manifest.links.length : null,
+        });
+      }
+      setBackupSnapshots(snapshots);
+      setBackupLocationInfo(`Phone Documents / ${safeFolder}`);
+      const validCount = snapshots.filter(item => item.complete).length;
+      setBackupOperation(snapshots.length ? `Found ${snapshots.length} snapshots — ${validCount} valid, ${snapshots.length-validCount} incomplete` : 'No backup snapshots found in this folder');
+    } catch(err) {
+      setBackupOperation(`Location scan failed: ${err?.message || err}`);
+    }
+  };
+
   const exportData = async () => {
-    showToast('💦 Preparing complete export…');
+    setBackupOperation('Preparing export package…');
+    showToast('📦 Preparing complete export package…');
     try {
       if (pendingPhotoWrites.current.size) await Promise.allSettled([...pendingPhotoWrites.current]);
-      const data = await collectCompleteBackup();
-      const photoCount = Object.keys(data.photoMap || {}).length;
-      const galleryCount = (data.gallery || []).length;
-      const filename = `friendshiptree-${new Date().toLocaleDateString('en-GB').replace(/\//g,'-')}.json`;
-      const jsonStr = JSON.stringify(data);
       const isNative = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
       const ShareP = window.Capacitor?.Plugins?.Share;
       const FilesystemP = window.Capacitor?.Plugins?.Filesystem;
-      if (isNative && FilesystemP && ShareP) {
-        await FilesystemP.writeFile({ path: filename, data: utf8ToBase64(jsonStr), directory: 'CACHE' });
-        const uriResult = await FilesystemP.getUri({ path: filename, directory: 'CACHE' });
-        await ShareP.share({
-          title: 'FriendshipTree Backup',
-          text: `Complete FriendshipTree backup — ${photoCount} profile photo${photoCount!==1?'s':''}, ${galleryCount} gallery image${galleryCount!==1?'s':''}`,
-          url: uriResult.uri,
-          dialogTitle: 'Save or share your FriendshipTree backup',
-        });
-        showToast(`📤 Complete backup ready (${photoCount + galleryCount} photos)`);
-      } else {
-        const blob = new Blob([jsonStr], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = filename; a.click();
-        URL.revokeObjectURL(url);
-        showToast(`📦 Complete backup downloaded (${photoCount + galleryCount} photos)`);
+      if (!isNative || !FilesystemP || !ShareP) throw new Error('Complete package export currently requires the Android app');
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const rootPath = `friendshiptree-export-${stamp}`;
+      const result = await writeBackupPackage({
+        directory: 'CACHE', rootPath,
+        onProgress: (done, total) => { setBackupOperation(`Preparing export ${done}/${total}…`); showToast(`📦 Preparing export ${done}/${total}…`); },
+      });
+      const filePaths = ['manifest.json', ...result.manifest.photoFiles, ...result.manifest.galleryFiles];
+      const uris = [];
+      for (const relativePath of filePaths) {
+        const uriResult = await FilesystemP.getUri({ path: `${rootPath}/${relativePath}`, directory: 'CACHE' });
+        uris.push(uriResult.uri);
       }
+      await ShareP.share({
+        title: 'FriendshipTree Backup Package',
+        text: `Complete FriendshipTree backup package — keep all ${uris.length} files together. Select all files when importing.`,
+        files: uris,
+        dialogTitle: 'Save or share your FriendshipTree backup package',
+      });
+      setBackupOperation(`Export share sheet opened — ${uris.length - 1} photos`);
+      showToast(`📤 Backup package ready (${uris.length - 1} photos)`);
     } catch(err) {
       console.error('Export error:', err);
+      setBackupOperation(`Export failed: ${err?.message || err}`);
       showToast(`❌ Export failed: ${err?.message || err}`);
     }
   };
 
+  const readTextFile = file => new Promise((resolve, reject) => {
+    const reader = new FileReader(); reader.onload = e => resolve(e.target.result); reader.onerror = reject; reader.readAsText(file);
+  });
 
-  const importData = (file) => {
-    const reader = new FileReader();
-    reader.onload = async e => {
-      try {
-        const data = JSON.parse(e.target.result);
-        if (data.localStorageData && typeof data.localStorageData === 'object') {
-          Object.entries(data.localStorageData).forEach(([key, value]) => {
-            if (key.startsWith('ft_') && typeof value === 'string') localStorage.setItem(key, value);
-          });
-        }
-        if (data.nodes) setNodes(data.nodes);
-        if (data.links) setLinks(data.links);
-        if (data.dimensions) setDimensions(prev => ({ ...prev, ...data.dimensions }));
-        const isNative = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
-        const FilesystemP = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Filesystem;
-        let photoCount = 0;
-        if (data.photoMap && Object.keys(data.photoMap).length > 0) {
-          try {
-            const db = idbRef.current || (idbRef.current = await openPhotoDB());
-            const tx = db.transaction('photos', 'readwrite');
-            const store = tx.objectStore('photos');
-            for (const [key, dataUrl] of Object.entries(data.photoMap)) {
-              store.put({ nodeId: key, key, dataUrl });
-              photoCount++;
-              if (isNative && FilesystemP) {
-                try {
-                  const b64 = dataUrl.split(',')[1];
-                  const ext = dataUrl.startsWith('data:image/png') ? 'png' : 'jpg';
-                  await FilesystemP.writeFile({ path: `ft_photo_${key}.${ext}`, data: b64, directory: 'DOCUMENTS', recursive: true });
-                } catch(fsErr) { console.warn('Filesystem photo write failed', fsErr); }
-              }
-            }
-            await new Promise((resolve, reject) => { tx.oncomplete = resolve; tx.onerror = reject; });
-          } catch(photoErr) { console.warn('Photo restore failed:', photoErr); }
-        }
-        let galleryCount = 0;
-        if (data.gallery && data.gallery.length > 0) {
-          try {
-            const db = idbRef.current || (idbRef.current = await openPhotoDB());
-            const tx = db.transaction('gallery', 'readwrite');
-            const store = tx.objectStore('gallery');
-            for (const item of data.gallery) { store.put(item); galleryCount++; }
-            await new Promise((resolve, reject) => { tx.oncomplete = resolve; tx.onerror = reject; });
-          } catch(galErr) { console.warn('Gallery restore failed:', galErr); }
-        }
-        const total = photoCount + galleryCount;
-        showToast(total > 0 ? `✅ Complete backup restored (${total} photo${total!==1?'s':''}) — reloading…` : '✅ Complete backup restored — reloading…');
-        setTimeout(() => window.location.reload(), 900);
-      } catch(e) { showToast('❌ Invalid file — could not import'); }
-    };
-    reader.readAsText(file);
+  const restoreBackupObject = async data => {
+    if (data.localStorageData && typeof data.localStorageData === 'object') {
+      Object.entries(data.localStorageData).forEach(([key, value]) => {
+        if (key.startsWith('ft_') && typeof value === 'string') localStorage.setItem(key, value);
+      });
+    }
+    if (data.nodes) setNodes(data.nodes);
+    if (data.links) setLinks(data.links);
+    if (data.dimensions) setDimensions(prev => ({ ...prev, ...data.dimensions }));
+    const db = idbRef.current || (idbRef.current = await openPhotoDB());
+    let photoCount = 0, galleryCount = 0;
+    if (data.photoMap) {
+      const tx = db.transaction('photos', 'readwrite');
+      for (const [key, dataUrl] of Object.entries(data.photoMap)) { tx.objectStore('photos').put({ nodeId:key, key, dataUrl }); photoCount++; }
+      await new Promise((resolve, reject) => { tx.oncomplete=resolve; tx.onerror=reject; });
+    }
+    if (data.gallery?.length) {
+      const tx = db.transaction('gallery', 'readwrite');
+      for (const item of data.gallery) { tx.objectStore('gallery').put(item); galleryCount++; }
+      await new Promise((resolve, reject) => { tx.oncomplete=resolve; tx.onerror=reject; });
+    }
+    return photoCount + galleryCount;
+  };
+
+  const importData = async fileList => {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+    try {
+      showToast(`📥 Reading ${files.length} backup file${files.length!==1?'s':''}…`);
+      const byRelativeName = new Map(files.map(file => [file.webkitRelativePath || file.name, file]));
+      const manifestFile = files.find(file => file.name === 'manifest.json') || files[0];
+      const manifest = JSON.parse(await readTextFile(manifestFile));
+      if (manifest.format !== 'FriendshipTreeBackupPackage' || manifest.version < 5) {
+        const total = await restoreBackupObject(manifest);
+        showToast(total ? `✅ Legacy backup restored (${total} photos) — reloading…` : '✅ Legacy backup restored — reloading…');
+        setTimeout(() => window.location.reload(), 900); return;
+      }
+      const findAsset = relative => files.find(file =>
+        (file.webkitRelativePath || '').endsWith(relative) || file.name === relative.split('/').pop()
+      );
+      const missing = [...(manifest.photoFiles||[]), ...(manifest.galleryFiles||[])].filter(name => !findAsset(name));
+      if (missing.length) throw new Error(`Select the complete package: ${missing.length} photo file${missing.length!==1?'s are':' is'} missing`);
+      await restoreBackupObject(manifest);
+      const db = idbRef.current || (idbRef.current = await openPhotoDB());
+      let restored = 0;
+      for (const name of manifest.photoFiles || []) {
+        const record = JSON.parse(await readTextFile(findAsset(name)));
+        await new Promise((resolve, reject) => { const tx=db.transaction('photos','readwrite'); tx.objectStore('photos').put(record); tx.oncomplete=resolve; tx.onerror=reject; });
+        restored++; if (restored % 5 === 0) showToast(`📥 Restoring photos ${restored}/${(manifest.photoFiles||[]).length+(manifest.galleryFiles||[]).length}…`);
+      }
+      for (const name of manifest.galleryFiles || []) {
+        const record = JSON.parse(await readTextFile(findAsset(name)));
+        await new Promise((resolve, reject) => { const tx=db.transaction('gallery','readwrite'); tx.objectStore('gallery').put(record); tx.oncomplete=resolve; tx.onerror=reject; });
+        restored++;
+      }
+      showToast(`✅ Complete package restored (${restored} photos) — reloading…`);
+      setTimeout(() => window.location.reload(), 900);
+    } catch(e) { showToast(`❌ Import failed: ${e?.message || e}`); }
   };
 
 
@@ -9339,17 +9477,17 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     <div style={{padding:'10px 0',borderBottom:`1px solid ${pw.border}`}}>
                       <div style={{fontSize:13,fontWeight:700,color:theme.darkMode?'#94a3b8':'#64748b',marginBottom:6}}>Backup &amp; Restore</div>
                       <div style={{display:'flex',gap:8}}>
-                        <button onClick={()=>{ exportData(); }}
-                          style={{flex:1,padding:'8px 0',borderRadius:10,background:'#3b82f6',color:'white',border:'none',cursor:'pointer',fontSize:12,fontWeight:700}}>
+                        <button onClick={()=>{ exportData(); }} disabled={!!backupOperation && /Preparing|Saving|Scanning/.test(backupOperation)}
+                          style={{flex:1,padding:'8px 0',borderRadius:10,background:'#3b82f6',color:'white',border:'none',cursor:'pointer',fontSize:12,fontWeight:700,opacity:(!!backupOperation && /Preparing|Saving|Scanning/.test(backupOperation))?0.6:1}}>
                           📤 Export &amp; Share
                         </button>
                         <label style={{flex:1,padding:'8px 0',borderRadius:10,background:theme.darkMode?'#334155':'#f1f5f9',color:theme.darkMode?'#e2e8f0':pw.bodyText,border:`1px solid ${pw.border}`,cursor:'pointer',fontSize:12,fontWeight:700,textAlign:'center',display:'flex',alignItems:'center',justifyContent:'center',gap:4}}>
                           📥 Import File
-                          <input type="file" accept=".json" style={{display:'none'}} onChange={e=>{ if(e.target.files[0]) importData(e.target.files[0]); }}/>
+                          <input type="file" accept=".json" multiple style={{display:'none'}} onChange={e=>{ if(e.target.files?.length) importData(e.target.files); e.target.value=''; }}/>
                         </label>
                       </div>
-                      <button onClick={() => writeAutomaticBackup({ manual: true })}
-                        style={{width:'100%',marginTop:8,padding:'8px 0',borderRadius:10,background:'#10b981',color:'white',border:'none',cursor:'pointer',fontSize:12,fontWeight:700}}>
+                      <button onClick={() => writeAutomaticBackup({ manual: true })} disabled={!!backupOperation && /Preparing|Saving|Scanning/.test(backupOperation)}
+                        style={{width:'100%',marginTop:8,padding:'8px 0',borderRadius:10,background:'#10b981',color:'white',border:'none',cursor:'pointer',fontSize:12,fontWeight:700,opacity:(!!backupOperation && /Preparing|Saving|Scanning/.test(backupOperation))?0.6:1}}>
                         💾 Back Up Now to Phone Documents
                       </button>
                       <label style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,marginTop:9,fontSize:12,color:theme.darkMode?'#cbd5e1':pw.bodyText,cursor:'pointer'}}>
@@ -9361,7 +9499,46 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         {lastBackupError ? <><br/>Last error: {lastBackupError}</> : null}
                       </div>
                       <div style={{fontSize:11,color:theme.darkMode?'#64748b':'#94a3b8',marginTop:7,lineHeight:1.4}}>
-                        Complete backups include all FriendshipTree saved keys, people, relationships, calendar, health and habit history, settings, profile photos and gallery photos. Seven dated phone snapshots are retained. Export &amp; Share can be saved to Google Drive manually.
+                        Complete backups use a memory-safe package: one small manifest plus separate photo files. Seven dated phone snapshots are retained. When importing an exported package, select every JSON file in the package together.
+                      </div>
+                      <div style={{marginTop:10,padding:10,borderRadius:10,border:`1px solid ${pw.border}`,background:theme.darkMode?'#0f172a':'#f8fafc'}}>
+                        <div style={{fontSize:12,fontWeight:800,color:theme.darkMode?'#e2e8f0':pw.bodyText}}>Backup location</div>
+                        <div style={{fontSize:10,color:theme.darkMode?'#94a3b8':'#64748b',marginTop:3,wordBreak:'break-word'}}>{backupLocationInfo}</div>
+                        <div style={{display:'flex',gap:6,marginTop:7}}>
+                          <input value={backupFolderName} onChange={e=>setBackupFolderName(e.target.value)}
+                            onBlur={()=>{ const safe=String(backupFolderName||'FriendshipTree Backups').trim().replace(/[\/:*?"<>|]/g,'-').slice(0,80)||'FriendshipTree Backups'; setBackupFolderName(safe); localStorage.setItem('ft_backup_folder_name',safe); setBackupLocationInfo(`Phone Documents / ${safe}`); }}
+                            aria-label="Backup folder name"
+                            style={{flex:1,minWidth:0,padding:'7px 8px',borderRadius:8,border:`1px solid ${pw.border}`,background:theme.darkMode?'#111827':'white',color:theme.darkMode?'#e2e8f0':pw.bodyText,fontSize:11}}/>
+                          <button onClick={inspectBackupLocation} style={{padding:'7px 10px',borderRadius:8,border:'none',background:'#64748b',color:'white',fontSize:11,fontWeight:700,cursor:'pointer'}}>Scan</button>
+                        </div>
+                        <div style={{fontSize:10,color:theme.darkMode?'#64748b':'#64748b',marginTop:5}}>Changing the folder name affects future backups only. Existing backups are not moved or overwritten.</div>
+                        {backupOperation && <div style={{fontSize:11,fontWeight:700,color:backupOperation.startsWith('Backup failed')||backupOperation.startsWith('Export failed')||backupOperation.startsWith('Location scan failed')?'#ef4444':'#10b981',marginTop:7,wordBreak:'break-word'}}>{backupOperation}</div>}
+                        {backupSnapshots.length>0 && <div style={{marginTop:8,maxHeight:310,overflowY:'auto'}}>
+                          {backupSnapshots.map(item=>{
+                            const expanded = backupManagerOpen === item.name;
+                            const sizeLabel = item.approximateBytes > 0 ? `${(item.approximateBytes/1024/1024).toFixed(item.approximateBytes>10*1024*1024?1:2)} MB counted` : 'Size unavailable';
+                            return <div key={item.name} style={{padding:'7px 0',borderTop:`1px solid ${pw.border}`,fontSize:10,color:theme.darkMode?'#cbd5e1':pw.bodyText}}>
+                              <button onClick={()=>setBackupManagerOpen(expanded?null:item.name)} style={{width:'100%',padding:0,border:'none',background:'transparent',color:'inherit',textAlign:'left',cursor:'pointer'}}>
+                                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8}}>
+                                  <div style={{fontWeight:800,wordBreak:'break-word'}}>{item.complete?'✅':'⚠️'} {item.name}</div>
+                                  <span style={{fontSize:11}}>{expanded?'▲':'▼'}</span>
+                                </div>
+                                <div style={{color:item.complete?'#10b981':'#f59e0b',fontWeight:700,marginTop:2}}>{item.status}</div>
+                              </button>
+                              {expanded && <div style={{marginTop:7,padding:8,borderRadius:8,background:theme.darkMode?'#111827':'white',border:`1px solid ${pw.border}`,lineHeight:1.55}}>
+                                <div><strong>Created:</strong> {item.exportedAt ? new Date(item.exportedAt).toLocaleString('en-GB') : 'Unknown'}</div>
+                                <div><strong>App / format:</strong> {item.appVersion || 'Unknown'} / v{item.formatVersion || '?'}</div>
+                                <div><strong>Tree:</strong> {item.peopleCount ?? '?'} people, {item.groupCount ?? '?'} groups, {item.linkCount ?? '?'} links</div>
+                                <div><strong>Expected photos:</strong> {item.expectedProfile} profile + {item.expectedGallery} gallery</div>
+                                <div><strong>Files found:</strong> {item.profileFilesFound} profile + {item.galleryFilesFound} gallery ({item.filesFound} total)</div>
+                                <div><strong>Partial marker:</strong> {item.partialMarker?'Yes — writing was interrupted':'No'}</div>
+                                <div><strong>Approximate size:</strong> {sizeLabel}</div>
+                                {item.manifestError && <div style={{color:'#ef4444',wordBreak:'break-word'}}><strong>Read error:</strong> {item.manifestError}</div>}
+                                <div style={{marginTop:6,color:theme.darkMode?'#64748b':'#64748b'}}>Read-only inspection. This screen cannot restore, delete, move or overwrite your current data.</div>
+                              </div>}
+                            </div>;
+                          })}
+                        </div>}
                       </div>
                     </div>
                     {[{label:'🌱 Start Blank',btnLabel:'Reset',btnBg:'#64748b',onClick:()=>{setSettingsOpen(false);const doReset=()=>{clearTimeout(saveTimer.current);setNodes(INITIAL_NODES);setLinks(INITIAL_LINKS);setDimensions(DEFAULT_DIMENSIONS);try{localStorage.removeItem('ft_nodes');localStorage.removeItem('ft_links');localStorage.removeItem('ft_dimensions');}catch(e) {}clearPhotoDB();showToast('🌱 Fresh start!');};const run=()=>localStorage.getItem('ft_pin')?openPinModal('clear','Confirm Reset',doReset):doReset();setConfirmModal({title:'Start Blank?',message:'Removes all people, groups, photos and history.',danger:true,onConfirm:run});}},
@@ -9571,9 +9748,45 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 </div>}
 
 
+                {/* Developer information */}
+                <button onClick={()=>setSettingsSections(p=>({...p,developer:!p.developer}))} style={{display:'flex',alignItems:'center',justifyContent:'space-between',width:'100%',padding:'12px 0',background:'none',border:'none',borderBottom:'1px solid '+(theme.darkMode?'#334155':'#e2e8f0'),cursor:'pointer',color:theme.darkMode?'#e2e8f0':pw.bodyText}}>
+                  <span style={{fontSize:13,fontWeight:800}}>🛠️ Developer Info</span>
+                  <span style={{fontSize:12,color:theme.darkMode?'#475569':'#475569'}}>{settingsSections.developer?'▲':'▼'}</span>
+                </button>
+                {settingsSections.developer&&<div style={{padding:'10px 0'}}>
+                  {(()=>{
+                    const isNative = !!(window.Capacitor?.isNativePlatform?.());
+                    const rows = [
+                      ['App version', APP_VERSION],
+                      ['Build ID', BUILD_ID],
+                      ['Build date', BUILD_DATE],
+                      ['Platform', isNative ? 'Android / Capacitor' : 'Web browser'],
+                      ['People loaded', String(nodes.filter(n=>n.type==='person').length)],
+                      ['Total nodes', String(nodes.length)],
+                      ['Local storage keys', String(localStorage.length)],
+                    ];
+                    const report = rows.map(([a,b])=>`${a}: ${b}`).join('\n');
+                    return <>
+                      <div style={{border:`1px solid ${pw.border}`,borderRadius:12,overflow:'hidden',background:theme.darkMode?'#111827':'#f8fafc'}}>
+                        {rows.map(([label,value],i)=><div key={label} style={{display:'flex',justifyContent:'space-between',gap:12,padding:'9px 11px',borderBottom:i===rows.length-1?'none':`1px solid ${pw.border}`}}>
+                          <span style={{fontSize:12,color:theme.darkMode?'#94a3b8':'#64748b'}}>{label}</span>
+                          <span style={{fontSize:12,fontWeight:700,color:theme.darkMode?'#e2e8f0':'#1e293b',textAlign:'right',wordBreak:'break-word'}}>{value}</span>
+                        </div>)}
+                      </div>
+                      <button onClick={async()=>{
+                        try { await navigator.clipboard.writeText(report); showToast('📋 Developer info copied'); }
+                        catch (_) { showToast('Developer info: '+BUILD_ID); }
+                      }} style={{width:'100%',marginTop:9,padding:'9px 12px',borderRadius:10,border:'none',background:'#10b981',color:'white',fontSize:12,fontWeight:800,cursor:'pointer'}}>
+                        Copy developer information
+                      </button>
+                      <div style={{fontSize:10,lineHeight:1.45,color:theme.darkMode?'#64748b':'#94a3b8',marginTop:8}}>Use the Build ID to confirm exactly which update is installed on your phone.</div>
+                    </>;
+                  })()}
+                </div>}
+
                 {/* Version */}
                 <div style={{textAlign:'center',paddingTop:16,paddingBottom:4}}>
-                  <span style={{fontSize:11,color:theme.darkMode?'#334155':'#cbd5e1'}}>🌳 FriendshipTree v{APP_VERSION}</span>
+                  <span style={{fontSize:11,color:theme.darkMode?'#334155':'#cbd5e1'}}>🌳 FriendshipTree v{APP_VERSION} · {BUILD_ID}</span>
                 </div>
 
 
