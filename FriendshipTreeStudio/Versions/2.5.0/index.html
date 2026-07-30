@@ -1,0 +1,165 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>FriendshipTree Studio</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header>
+  <div>
+    <h1>🌳 FriendshipTree Studio <small id="studioVersion">loading…</small></h1>
+    <p>Inspect first, simulate every change, then act with recovery available.</p>
+  </div>
+  <div class="header-actions">
+    <button id="exportReport">Export diagnostic report</button>
+    <button id="refreshAll">Refresh dashboard</button>
+  </div>
+</header>
+
+<main>
+
+  <section class="panel partner-panel">
+    <div class="partner-heading">
+      <div><h2>Development Partner</h2><p class="muted">A live, prioritised view of what matters most in FriendshipTree right now.</p></div>
+      <button id="refreshPartner">Refresh recommendations</button>
+    </div>
+    <div id="partnerDashboard"><p>Reading project intelligence…</p></div>
+  </section>
+
+
+  <section class="panel">
+    <h2>Project intelligence</h2>
+    <p class="muted">Builds a persistent catalogue of current files, records historical manifests, and compares the working project with earlier snapshots.</p>
+    <div class="actions">
+      <button id="buildKnowledge">Build project knowledge</button>
+      <button id="loadKnowledge">Refresh knowledge view</button>
+      <button id="openKnowledge">Open knowledge folder</button>
+    </div>
+    <div id="knowledge"></div>
+    <div id="history"></div>
+  </section>
+
+
+  <section class="panel">
+    <h2>Project DNA and AI workspace</h2>
+    <p class="muted">Analyses the source, displays the generated project brief directly inside Studio, copies ready-to-paste context, and exports one complete AI development package.</p>
+    <div class="actions">
+      <button id="buildDNA">Analyse source code</button>
+      <button id="loadDNA">Refresh DNA view</button>
+      <button id="openKnowledgeFile">Show context file in folder</button>
+      <button id="copyChatGPT">Copy for ChatGPT</button>
+      <button id="copyClaude">Copy for Claude</button>
+      <button id="exportAIPackage">Export AI package</button>
+    </div>
+    <div id="aiStatus"></div>
+    <div class="ai-tabs" role="tablist">
+      <button class="ai-tab active" data-ai-tab="summary">Project summary</button>
+      <button class="ai-tab" data-ai-tab="architecture">Architecture</button>
+      <button class="ai-tab" data-ai-tab="systems">Systems</button>
+      <button class="ai-tab" data-ai-tab="debt">Technical debt</button>
+      <button class="ai-tab" data-ai-tab="context">Full AI context</button>
+    </div>
+    <div id="aiWorkspace" class="ai-workspace"></div>
+    <details><summary>Project DNA diagnostics</summary><div id="dna"></div></details>
+  </section>
+
+  <section class="panel">
+    <h2>Project health</h2>
+    <div class="actions">
+      <button id="calculateHealth">Calculate health score</button>
+      <button id="runTests">Run Studio self-tests</button>
+    </div>
+    <div id="health"></div>
+    <div id="tests"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Dependency graph</h2>
+    <p class="muted">Indexes direct JavaScript and TypeScript imports, importers, unresolved local imports and possible orphan files.</p>
+    <button id="buildGraph">Build dependency graph</button>
+    <div id="graph"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Project manifest and explorer</h2>
+    <div class="actions">
+      <button id="buildManifest">Build or refresh manifest</button>
+      <button id="loadExplorer">Open project explorer</button>
+    </div>
+    <div id="manifestSummary"></div>
+    <div id="explorer"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Cleaner with mandatory dry run</h2>
+    <p class="muted">Select candidates, generate a plan, inspect every destination, then approve execution. Studio never deletes these files.</p>
+    <div class="actions">
+      <button id="scanCleaner">Analyse project</button>
+      <button id="exportCleanerAnalysis">Export project analysis</button>
+      <button id="createPlan" disabled>Create dry-run plan</button>
+      <button id="executePlan" disabled>Execute approved plan</button>
+      <button id="openQuarantine">Open quarantine folder</button>
+    </div>
+    <div id="cleaner"></div>
+    <div id="cleanupPlan"></div>
+  </section>
+
+  <section class="panel update-panel">
+    <h2>Seamless update centre</h2>
+    <p class="muted">Double-click a <code>.ftupdate</code> file, drag it below, or choose it manually. Studio verifies every hash, backs up changed files, installs transactionally and restarts itself.</p>
+    <div id="updateDropZone" class="update-drop-zone" tabindex="0"><b>Drop a .ftupdate package here</b><span>or double-click the package in Windows</span></div>
+    <div class="actions">
+      <button id="choosePackage">Choose update package</button>
+      <button id="installPackage" disabled>Install and restart</button>
+      <button id="openPackageHistory">Open installation history</button>
+    </div>
+    <div id="packageInspection"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Recovery centre</h2>
+    <p class="muted">Undo file transactions or restore files replaced by a package installation.</p>
+    <div class="actions">
+      <button id="refreshRecovery">Refresh recovery points</button>
+      <button id="openRecoveryFolder">Open recovery folder</button>
+    </div>
+    <div id="recovery"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Project organiser</h2>
+    <p class="muted">Finds useful files that are cluttering the project root and proposes sensible folders. Nothing moves until you select it and approve.</p>
+    <div class="actions">
+      <button id="scanMisplaced">Analyse root folder</button>
+      <button id="moveSelected" disabled>Move selected items</button>
+    </div>
+    <div id="moves"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Build and Android controls</h2>
+    <div class="button-grid">
+      <button data-action="npmInstall">Install Studio dependencies</button>
+      <button data-action="runDoctor">Run Doctor</button>
+      <button data-action="buildWeb">Build web app</button>
+      <button data-action="syncAndroid">Sync Android</button>
+      <button data-action="buildApk">Build APK</button>
+      <button data-action="installApk">Install APK on phone</button>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>File preview</h2>
+    <p class="muted">Use Preview beside a Cleaner or Explorer item. Studio shows metadata, hash, dependency counts and a read-only text preview.</p>
+    <div id="preview"><p class="muted">No file selected.</p></div>
+  </section>
+
+  <section class="panel">
+    <h2>Live log</h2>
+    <pre id="log">Ready.</pre>
+  </section>
+</main>
+<script src="renderer.js"></script>
+</body>
+</html>

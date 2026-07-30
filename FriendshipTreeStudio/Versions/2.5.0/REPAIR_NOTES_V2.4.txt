@@ -1,0 +1,12 @@
+FriendshipTree Studio V2.4
+
+Added:
+- Development Partner dashboard with live project health, active source status, import integrity and prioritised recommendations.
+- Best-next-action summary based on current Project DNA and dependency analysis.
+- Electron window remains hidden until ready, avoiding a blank startup flash.
+- Hidden-console launcher so the command window closes immediately.
+- Installer launches Studio automatically after updating.
+
+Safety:
+- Recommendations are advisory and do not move or edit project source.
+- Historical snapshots still require review before reversible archiving.

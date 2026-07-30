@@ -1,0 +1,32 @@
+FRIENDSHIPTREE STUDIO 3.0 — A/B SAFE LAUNCHER
+
+WHAT THIS CHANGES
+- Keeps Studio 2.5.0 as the fallback version.
+- Starts Studio 3.0.0 as the current version.
+- Waits for the new version to confirm that its window rendered.
+- If the new version crashes or remains stuck before becoming ready, it switches
+  studio-state.json back to 2.5.0 and opens that version.
+- Never overwrites the fallback version during startup.
+
+INSTALLATION
+1. Close FriendshipTree Studio.
+2. Extract this ZIP normally.
+3. Right-click INSTALL AB STUDIO.ps1 and choose:
+   Run with PowerShell
+4. A complete backup of the existing Studio folder is made automatically.
+5. From then on, use:
+   START FRIENDSHIPTREE STUDIO.bat
+
+RECOVERY BUTTONS
+- START LAST WORKING VERSION.bat bypasses the new version.
+- START IN SAFE MODE.bat sets the safe-mode environment flag.
+  The existing Studio does not yet disable individual features from this flag;
+  it is included as the stable entry point for that next stage.
+
+IMPORTANT
+This package does not contain node_modules because Electron is very large.
+It preserves and uses the node_modules folder already installed in your existing
+FriendshipTreeStudio folder.
+
+The A/B launcher and JavaScript files were syntax-checked here. The complete
+Windows/Electron launch path cannot be executed inside this environment.

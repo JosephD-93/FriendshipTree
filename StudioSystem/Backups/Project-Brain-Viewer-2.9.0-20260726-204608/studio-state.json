@@ -1,0 +1,17 @@
+﻿{
+    "schemaVersion":  1,
+    "current":  "2.8.1",
+    "lastGood":  "2.4.0-clean-workflow-test-1",
+    "pending":  null,
+    "failedVersions":  [
+
+                       ],
+    "projectRoot":  "C:\\Users\\Joe\\FriendshipTree",
+    "createdAt":  "2026-07-22T18:57:11.5535992+01:00",
+    "previous":  "2.8.0",
+    "pendingPackage":  "Studio-2.8.1-Version-and-Forge-Workflow.ftupdate",
+    "forgeVersion":  "2.1.2",
+    "protectedVersions":  [
+
+                          ]
+}

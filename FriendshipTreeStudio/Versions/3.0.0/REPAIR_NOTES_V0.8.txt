@@ -1,0 +1,18 @@
+FriendshipTree Studio V0.8 repair summary
+
+Fixed:
+- scanReferences was missing, causing Project Health and Cleaner to crash.
+- classifyFile was accidentally nested inside a duplicate declaration, hiding manifest and transaction functions at runtime.
+- listTransactionFiles was missing from Recovery Centre.
+- quarantineItem was missing from dry-run execution.
+- completeTransaction was missing from package installation.
+- Project Explorer now understands the grouped manifest response.
+- Project Health no longer runs automatically before the user requests it.
+- Self-test errors are displayed instead of becoming unhandled renderer failures.
+- Quarantine preserves relative folder structure and rolls back on hash failure.
+
+First use:
+1. Install V0.8.
+2. Open Studio.
+3. Click Run Studio self-tests.
+4. Do not clean anything unless all tests pass.

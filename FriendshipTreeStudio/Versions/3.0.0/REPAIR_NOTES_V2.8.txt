@@ -1,0 +1,12 @@
+FriendshipTree Studio V2.8
+
+Built against the Studio source uploaded on 22 July 2026.
+
+Repairs:
+- Fixes Create AI Sync Package failing with:
+  The "suffix" argument must be of type string. Received type number (0)
+- Root cause fixed: Array.map(path.basename) was passing the array index as path.basename's suffix.
+- Makes the Studio version appear immediately instead of remaining on "loading…".
+- Keeps the automatic update inbox and its startup recovery from V2.7.1.
+- Hardens the older Export AI Package ZIP routine.
+- Uses a new version and package ID so it can install after V2.6/V2.7 records.

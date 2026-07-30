@@ -1,0 +1,7 @@
+{
+  "name": "friendshiptree-launcher",
+  "version": "1.0.0",
+  "private": true,
+  "main": "main.js",
+  "description": "Modern FriendshipTree launcher frontend using the existing Forge engine."
+}

@@ -1,0 +1,9 @@
+FriendshipTree Studio V1.0
+
+Cleaner usability release:
+- Detects old extracted FriendshipTree_Studio_V0_* release folders as 99% confidence safe candidates.
+- Treats them as complete folder moves rather than hundreds of individual files.
+- Adds deterministic recursive folder hashing before and after quarantine.
+- Keeps the live FriendshipTreeStudio folder, app source, Android project, and configuration protected.
+- Hides file preview controls for folder candidates and clarifies dry-run wording.
+- All moves remain reversible through Recovery Centre.

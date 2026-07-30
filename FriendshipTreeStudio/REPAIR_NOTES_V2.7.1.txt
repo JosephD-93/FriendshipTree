@@ -1,0 +1,7 @@
+FriendshipTree Studio V2.7.1 Repair
+
+- Uses a new package ID, so it can be installed after the original V2.7 package.
+- Starts the automatic update watcher before the Studio window opens.
+- Retries watcher startup automatically if Windows temporarily refuses the folder watch.
+- The status check now attempts to restart the watcher instead of only reporting failure.
+- Removes the false startup warning caused by the renderer checking before the watcher was ready.

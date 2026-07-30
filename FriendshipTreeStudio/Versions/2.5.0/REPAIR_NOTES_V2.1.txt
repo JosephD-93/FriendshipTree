@@ -1,0 +1,3 @@
+FriendshipTree Studio V2.1
+
+Added Project DNA static source analysis, system grouping, React component and hook detection, storage API detection, large-file and complexity signals, repeated function-name review, Architecture.md generation, and FriendshipTree_AI_Context.md generation.

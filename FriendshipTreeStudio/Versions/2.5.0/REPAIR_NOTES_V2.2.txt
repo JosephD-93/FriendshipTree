@@ -1,0 +1,8 @@
+FriendshipTree Studio V2.2
+
+- Dynamic version display sourced from package.json.
+- Integrated AI Workspace; no external Markdown viewer required.
+- Project Summary, Architecture, Systems, Technical Debt and Full Context tabs.
+- Copy context for ChatGPT or Claude.
+- Export one ZIP containing AI context, architecture, DNA, rules, database, manifest and recent changes.
+- Show the generated context file directly in Windows Explorer.

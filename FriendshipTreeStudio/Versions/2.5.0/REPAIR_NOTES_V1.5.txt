@@ -1,0 +1,6 @@
+FriendshipTree Studio V1.5
+
+- Cleaner now recognises extracted Studio release folders for every version, including V1.0 and later.
+- Old Studio release folders are naturally sorted and remain reversible quarantine candidates.
+- Superseded Studio installer ZIPs are identified while the newest detected ZIP is kept.
+- Visible application version updated consistently to V1.5.

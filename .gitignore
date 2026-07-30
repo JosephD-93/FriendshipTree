@@ -1,32 +1,110 @@
+# ============================================================
+# FriendshipTree repository exclusions
+# ============================================================
+
 # Dependencies
 node_modules/
+**/node_modules/
 
-# Build output
+# Web build output
 dist/
+**/dist/
 
-# NOTE: android/ is intentionally NOT ignored, so your native config
-# (Kotlin fix, version numbers, manifest permissions) stays backed up
-# on GitHub. Only the heavy auto-generated build caches inside it are
-# ignored below.
+# Android generated files
+# android/ itself remains tracked because it contains native source
+# and configuration required to build the application.
 android/build/
 android/app/build/
 android/.gradle/
 android/.idea/
 android/local.properties
 android/captures/
+android/capacitor-cordova-android-plugins/
+
+# Studio and launcher dependencies/build output
+FriendshipTreeStudio/node_modules/
+FriendshipTreeStudio/dist/
+FriendshipTreeStudio/out/
+FriendshipTreeStudio/build/
+
+FriendshipTreeLauncher/node_modules/
+FriendshipTreeLauncher/dist/
+FriendshipTreeLauncher/out/
+FriendshipTreeLauncher/build/
+
+# Local FriendshipTree runtime state
+.friendshiptree/
+.studio/
+.cleanup-audit/
+.migration-v3/
+.friendshiptree-patches/
+
+# Generated and downloaded packages
+Generated Builds/
+downloads/
+Packages/
+Archive/
+
+# Studio runtime versions, deliveries and temporary transactions
+StudioSystem/Versions/
+StudioSystem/Delivery/
+StudioSystem/Updates/
+StudioSystem/studio-state*.json
+
+# Generated AI workspace exports
+AI/Exports/
+AI/WorkspaceExports/
+*.ftupdate
+
+# Temporary source copies and patch files
+*.diff
+*.patch
+*.bak
+*.backup
+*.tmp
+*~
+src.zip
+*.zip
+
+# Generated inventories and diagnostic output
+FriendshipTree_FileList.txt
+android/FriendshipTree_FileList.txt
+ft_diag_log.txt
+gcal_log.txt
+gcal_filtered.txt
+path-reference-scan.csv
+summary-by-class.csv
+summary-by-owner.csv
+top-level-after-scaffold.csv
+migration-proposal.csv
 
 # Logs
 *.log
 npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
-# OS files
-.DS_Store
-Thumbs.db
+# Test and report output
+coverage/
+TestResults/
+**/TestResults/
+.studio/Reports/
+.studio/TestResults/
 
-# Editor
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.keystore
+*.jks
+key.properties
+
+# Editors
 .vscode/
 .idea/
+*.code-workspace
 
-# Env
-.env
-.env.local
+# Operating-system files
+.DS_Store
+Thumbs.db
+desktop.ini

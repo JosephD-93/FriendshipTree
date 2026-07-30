@@ -1,0 +1,12 @@
+{
+  "name": "friendshiptree-studio",
+  "version": "3.0.0",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "dependencies": {
+    "electron": "^31.7.7"
+  },
+  "description": "FriendshipTree Studio 3.0 running under the A/B safe launcher with last-known-good rollback."
+}
