@@ -3,6 +3,9 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('studio', {
   appInfo: () => ipcRenderer.invoke('app-info'),
+  startupMark: (stage, detail) => ipcRenderer.invoke('startup-mark', stage, detail),
+  getStartupReport: () => ipcRenderer.invoke('startup-report'),
+  onStartupStage: cb => ipcRenderer.on('startup-stage', (_e, stage) => cb(stage)),
   getGitOverview: () => ipcRenderer.invoke('git-overview'),
   gitPush: () => ipcRenderer.invoke('git-push'),
   gitPull: () => ipcRenderer.invoke('git-pull'),
@@ -44,6 +47,7 @@ contextBridge.exposeInMainWorld('studio', {
   installApk: () => ipcRenderer.invoke('install-apk'),
   buildDependencyGraph: () => ipcRenderer.invoke('build-dependency-graph'),
   projectHealth: () => ipcRenderer.invoke('project-health'),
+  cachedProjectHealth: () => ipcRenderer.invoke('cached-project-health'),
   previewFile: relativePath => ipcRenderer.invoke('preview-file', relativePath),
   createCleanupPlan: selectedPaths => ipcRenderer.invoke('create-cleanup-plan', selectedPaths),
   executeCleanupPlan: plan => ipcRenderer.invoke('execute-cleanup-plan', plan),

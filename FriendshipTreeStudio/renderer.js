@@ -562,16 +562,45 @@ async function copyContext(target){
 }
 
 
+const DEVELOPMENT_PARTNER_CACHE_KEY = 'friendshiptree-development-partner-cache-v1';
+let recoveryLoadedThisSession = false;
+
+function paintDevelopmentPartner(data) {
+  const host = $('partnerDashboard');
+  const status = (data.status || []).map(x => `<div class="partner-status ${escapeHtml(x.state)}"><span>${escapeHtml(x.label)}</span><b>${escapeHtml(x.value)}</b></div>`).join('');
+  const recs = (data.recommendations || []).map((x,i) => `<article class="partner-recommendation priority-${x.priority}"><div class="partner-rank">${i+1}</div><div><div class="partner-system">${escapeHtml(x.system)} · Priority ${x.priority}</div><h3>${escapeHtml(x.title)}</h3><p>${escapeHtml(x.reason)}</p><details><summary>Recommended action</summary><p>${escapeHtml(x.action)}</p></details></div></article>`).join('');
+  host.innerHTML = `<div class="partner-status-grid">${status}</div><div class="partner-next"><span>Best next action</span><strong>${escapeHtml(data.nextBestAction?.title || 'No action required')}</strong></div><div class="partner-list">${recs}</div><p class="muted">Generated ${escapeHtml(data.generatedAt)}. ${escapeHtml(data.limitations || '')}</p>`;
+}
+
+function loadCachedDevelopmentPartner() {
+  const host = $('partnerDashboard');
+  try {
+    const cached = JSON.parse(localStorage.getItem(DEVELOPMENT_PARTNER_CACHE_KEY) || 'null');
+    if (cached?.data) {
+      paintDevelopmentPartner(cached.data);
+      host.insertAdjacentHTML('beforeend', '<p class="muted">Showing the most recent cached result. Use “Refresh recommendations” to run a new project analysis.</p>');
+      return true;
+    }
+  } catch {}
+  host.innerHTML = '<p class="muted">Recommendations are loaded on demand so Studio stays responsive. Select “Refresh recommendations” when you want a new project analysis.</p>';
+  return false;
+}
+
 async function renderDevelopmentPartner() {
   const host = $('partnerDashboard');
-  host.innerHTML = '<p>Reading project intelligence…</p>';
+  host.innerHTML = '<p>Analysing project intelligence… Studio remains available while this completes.</p>';
   try {
+    const startedAt = performance.now();
+    window.studio.startupMark?.('on-demand-job-requested', { job: 'Development Partner' });
     const result = await window.studio.getDevelopmentPartner();
     if (!result.ok) throw new Error(result.message || 'Development Partner could not load.');
     const data = result.data;
-    const status = (data.status || []).map(x => `<div class="partner-status ${escapeHtml(x.state)}"><span>${escapeHtml(x.label)}</span><b>${escapeHtml(x.value)}</b></div>`).join('');
-    const recs = (data.recommendations || []).map((x,i) => `<article class="partner-recommendation priority-${x.priority}"><div class="partner-rank">${i+1}</div><div><div class="partner-system">${escapeHtml(x.system)} · Priority ${x.priority}</div><h3>${escapeHtml(x.title)}</h3><p>${escapeHtml(x.reason)}</p><details><summary>Recommended action</summary><p>${escapeHtml(x.action)}</p></details></div></article>`).join('');
-    host.innerHTML = `<div class="partner-status-grid">${status}</div><div class="partner-next"><span>Best next action</span><strong>${escapeHtml(data.nextBestAction?.title || 'No action required')}</strong></div><div class="partner-list">${recs}</div><p class="muted">Generated ${escapeHtml(data.generatedAt)}. ${escapeHtml(data.limitations || '')}</p>`;
+    localStorage.setItem(DEVELOPMENT_PARTNER_CACHE_KEY, JSON.stringify({ savedAt: new Date().toISOString(), data }));
+    paintDevelopmentPartner(data);
+    window.studio.startupMark?.('on-demand-job-rendered', {
+      job: 'Development Partner',
+      durationMs: Math.round(performance.now() - startedAt)
+    });
   } catch (error) {
     host.innerHTML = `<p class="error-text">${escapeHtml(error.message)}</p>`;
   }
@@ -719,22 +748,19 @@ window.studio.onLog(text => {
 
 window.studio.appInfo()
   .then(info => {
-    const version = String(info?.version || '2.14.3');
+    const version = String(info?.version || '2.14.8');
     $('studioVersion').textContent = 'v' + version;
     document.title = `FriendshipTree Studio v${version}`;
   })
   .catch(() => {
-    $('studioVersion').textContent = 'v2.14.3';
-    document.title = 'FriendshipTree Studio v2.14.3';
+    $('studioVersion').textContent = 'v2.14.8';
+    document.title = 'FriendshipTree Studio v2.14.8';
   });
-// Keep first paint and navigation responsive. Project intelligence is useful, but
-// none of it is required before the Home page can be used. Run these jobs one at
-// a time after the browser has painted the interface instead of firing five IPC
-// and filesystem-heavy jobs together during startup.
+// Keep first paint and navigation responsive. Recovery and Development Partner
+// perform full-project synchronous scans, so they are deliberately on-demand.
+// The remaining reads use already-generated files and complete in milliseconds.
 function scheduleStudioBackgroundStartup() {
   const jobs = [
-    ['Recovery points', () => refreshRecovery()],
-    ['Development Partner', () => renderDevelopmentPartner()],
     ['Project knowledge', () => renderProjectKnowledge(false)],
     ['Project DNA', () => renderProjectDNA(false)],
     ['AI Workspace', () => loadAIWorkspace(false)]
@@ -744,12 +770,21 @@ function scheduleStudioBackgroundStartup() {
     const job = jobs.shift();
     if (!job) {
       document.documentElement.dataset.backgroundStartup = 'complete';
+      window.studio.startupMark?.('background-jobs-complete');
       return;
     }
+    const startedAt = performance.now();
+    window.studio.startupMark?.('background-job-start', { job: job[0] });
     Promise.resolve()
       .then(job[1])
       .catch(error => console.warn(`Background startup job failed: ${job[0]}`, error))
-      .finally(() => setTimeout(runNext, 120));
+      .finally(() => {
+        window.studio.startupMark?.('background-job-complete', {
+          job: job[0],
+          durationMs: Math.round(performance.now() - startedAt)
+        });
+        setTimeout(runNext, 120);
+      });
   };
 
   const begin = () => {
@@ -766,6 +801,13 @@ function scheduleStudioBackgroundStartup() {
 
 requestAnimationFrame(() => {
   document.documentElement.dataset.rendererReady = 'true';
+  window.studio.startupMark?.('renderer-ready');
+  const splash = document.getElementById('studioStartupSplash');
+  if (splash) {
+    splash.classList.add('is-complete');
+    setTimeout(() => splash.remove(), 280);
+  }
+  loadCachedDevelopmentPartner();
   scheduleStudioBackgroundStartup();
 });
 
@@ -1256,6 +1298,10 @@ function switchStudioPage(page, options = {}) {
   $('pageTitle').textContent = title;
   $('pageSubtitle').textContent = subtitle;
   document.body.dataset.activePage = target;
+  if (target === 'maintenance' && !recoveryLoadedThisSession) {
+    recoveryLoadedThisSession = true;
+    setTimeout(() => refreshRecovery(), 0);
+  }
   if (!options.keepScroll) window.scrollTo({ top: 0, behavior: options.instant ? 'auto' : 'smooth' });
 }
 
@@ -1287,7 +1333,7 @@ async function runHomeAction(label, action) {
   }
 }
 
-async function refreshHomeDashboard() {
+async function refreshHomeDashboard(options = {}) {
   const statusTarget = $('homeProjectStatus');
   try {
     const status = await window.studio.status();
@@ -1306,10 +1352,14 @@ async function refreshHomeDashboard() {
   }
 
   try {
-    const health = await window.studio.projectHealth();
+    const health = options.recalculateHealth
+      ? await window.studio.projectHealth()
+      : await window.studio.cachedProjectHealth();
     const orb = $('homeHealthOrb');
-    orb.querySelector('strong').textContent = Number.isFinite(health.score) ? `${health.score}%` : '—';
-    orb.title = health.grade || 'Project health';
+    orb.querySelector('strong').textContent = Number.isFinite(health?.score) ? `${health.score}%` : '—';
+    orb.title = health
+      ? `${health.grade || 'Project health'} · last checked ${health.generatedAt || 'previously'}`
+      : 'Run Refresh or Full health check to calculate project health.';
   } catch {}
 }
 
@@ -1344,12 +1394,9 @@ $('homeRunDoctor').onclick = () => runHomeAction('Doctor', () => window.studio.r
 
 const originalRefreshAll = $('refreshAll').onclick;
 $('refreshAll').onclick = async () => {
-  await Promise.all([
-    refreshHomeDashboard(),
-    calculateHealth(),
-    refreshRecovery(),
-    renderDevelopmentPartner()
-  ]);
+  await calculateHealth();
+  await refreshHomeDashboard();
+  await Promise.all([refreshRecovery(), renderDevelopmentPartner()]);
 };
 
 

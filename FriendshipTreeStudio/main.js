@@ -6,6 +6,34 @@ const crypto = require('crypto');
 const os = require('os');
 const { spawn } = require('child_process');
 
+const STARTUP_EPOCH = Date.now();
+const startupTimeline = [{ stage: 'process-start', elapsedMs: 0, at: new Date(STARTUP_EPOCH).toISOString() }];
+let startupReportTimer = null;
+
+function markStartup(stage, detail = {}) {
+  const record = {
+    stage,
+    elapsedMs: Date.now() - STARTUP_EPOCH,
+    at: new Date().toISOString(),
+    ...detail
+  };
+  startupTimeline.push(record);
+  try { mainWindow?.webContents?.send('startup-stage', record); } catch {}
+  clearTimeout(startupReportTimer);
+  startupReportTimer = setTimeout(() => {
+    try {
+      fs.mkdirSync(REPORTS, { recursive: true });
+      fs.writeFileSync(path.join(REPORTS, 'latest-startup-timeline.json'), JSON.stringify({
+        studioVersion: app.getVersion(),
+        createdAt: new Date().toISOString(),
+        stages: startupTimeline
+      }, null, 2), 'utf8');
+    } catch {}
+  }, 500);
+  startupReportTimer.unref?.();
+  return record;
+}
+
 const PROJECT = 'C:\\Users\\Joe\\FriendshipTree';
 const STUDIO = path.join(PROJECT, 'FriendshipTreeStudio');
 const DRIVE = 'G:\\My Drive\\FriendshipTree';
@@ -217,6 +245,7 @@ function writeEnvironmentReport() {
 }
 
 function createWindow() {
+  markStartup('window-create-start');
   const win = new BrowserWindow({
     width: 1240,
     height: 860,
@@ -231,7 +260,7 @@ function createWindow() {
     }
   });
   mainWindow = win;
-  win.loadFile('index.html');
+  win.loadFile('index.html').catch(error => markStartup('window-load-error', { error: error.message }));
   // Show as soon as the DOM exists. Waiting for every stylesheet, script and
   // startup task behind ready-to-show made a healthy Studio feel frozen.
   let shown = false;
@@ -240,9 +269,16 @@ function createWindow() {
     shown = true;
     win.show();
     win.focus();
+    markStartup('window-visible');
   };
-  win.webContents.once('dom-ready', showWindow);
-  win.once('ready-to-show', showWindow);
+  win.webContents.once('dom-ready', () => {
+    markStartup('dom-ready');
+    showWindow();
+  });
+  win.once('ready-to-show', () => {
+    markStartup('ready-to-show');
+    showWindow();
+  });
   setTimeout(showWindow, 1500);
   win.on('closed', () => { if (mainWindow === win) mainWindow = null; });
 }
@@ -2888,17 +2924,57 @@ async function getProjectBrainFile(query) {
 
 
 ipcMain.handle('get-development-partner', () => {
-  try { return { ok: true, data: getDevelopmentPartnerData() }; }
-  catch (error) { logEvent('development_partner.load', 'error', { message: error.message }); return { ok: false, message: error.message }; }
+  const startedAt = Date.now();
+  markStartup('on-demand-job-start', { job: 'Development Partner' });
+  try {
+    const data = getDevelopmentPartnerData();
+    markStartup('on-demand-job-complete', { job: 'Development Partner', durationMs: Date.now() - startedAt });
+    return { ok: true, data };
+  }
+  catch (error) {
+    markStartup('on-demand-job-error', { job: 'Development Partner', durationMs: Date.now() - startedAt, error: error.message });
+    logEvent('development_partner.load', 'error', { message: error.message });
+    return { ok: false, message: error.message };
+  }
 });
 
 ipcMain.handle('build-dependency-graph', () => buildDependencyGraphData());
-ipcMain.handle('project-health', () => calculateProjectHealth());
+ipcMain.handle('project-health', () => {
+  const startedAt = Date.now();
+  markStartup('on-demand-job-start', { job: 'Project health' });
+  try {
+    const health = calculateProjectHealth();
+    markStartup('on-demand-job-complete', { job: 'Project health', durationMs: Date.now() - startedAt });
+    return health;
+  } catch (error) {
+    markStartup('on-demand-job-error', { job: 'Project health', durationMs: Date.now() - startedAt, error: error.message });
+    throw error;
+  }
+});
+ipcMain.handle('cached-project-health', () => {
+  const healthFile = path.join(STUDIO_DATA, 'project-health.json');
+  try {
+    return exists(healthFile) ? JSON.parse(fs.readFileSync(healthFile, 'utf8')) : null;
+  } catch {
+    return null;
+  }
+});
 ipcMain.handle('export-cleaner-analysis', () => exportCleanerAnalysis());
 ipcMain.handle('preview-file', (_event, relativePath) => previewProjectFile(relativePath));
 ipcMain.handle('create-cleanup-plan', (_event, selectedPaths) => createCleanupPlan(selectedPaths));
 ipcMain.handle('execute-cleanup-plan', (_event, plan) => executeCleanupPlan(plan));
-ipcMain.handle('list-recovery-points', () => listRecoveryPoints());
+ipcMain.handle('list-recovery-points', () => {
+  const startedAt = Date.now();
+  markStartup('on-demand-job-start', { job: 'Recovery points' });
+  try {
+    const points = listRecoveryPoints();
+    markStartup('on-demand-job-complete', { job: 'Recovery points', durationMs: Date.now() - startedAt });
+    return points;
+  } catch (error) {
+    markStartup('on-demand-job-error', { job: 'Recovery points', durationMs: Date.now() - startedAt, error: error.message });
+    throw error;
+  }
+});
 ipcMain.handle('restore-package-installation', (_event, packageId) => restorePackageInstallation(packageId));
 ipcMain.handle('run-self-tests', () => runStudioSelfTests());
 ipcMain.handle('open-recovery-folder', () => { shell.openPath(RECOVERY); return true; });
@@ -3039,6 +3115,8 @@ ipcMain.handle('open-github', async () => {
 });
 
 ipcMain.handle('app-info', () => ({version: app.getVersion(), name: app.getName()}));
+ipcMain.handle('startup-mark', (_event, stage, detail = {}) => markStartup(String(stage || 'renderer-mark'), detail));
+ipcMain.handle('startup-report', () => startupTimeline.slice());
 ipcMain.handle('get-ai-workspace', () => { try{return {ok:true,data:getAIWorkspaceData()}}catch(err){return {ok:false,message:err.message}} });
 ipcMain.handle('copy-ai-context', (_e,target) => { try{return copyAIContext(target)}catch(err){return {ok:false,message:err.message}} });
 ipcMain.handle('export-ai-package', async () => { try{return await exportAIDevelopmentPackage()}catch(err){logEvent('ai_package.export','error',{message:err.message});return {ok:false,message:err.message}} });
@@ -3049,6 +3127,7 @@ ipcMain.handle('open-ai-context', () => { if(!exists(AI_CONTEXT_MD)) buildProjec
 
 
 app.whenReady().then(() => {
+  markStartup('electron-ready');
   launchPackagePath = detectLaunchPackagePath();
   createWindow();
 

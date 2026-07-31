@@ -1,11 +1,24 @@
 const path = require("path");
 const { execFile } = require("child_process");
+const { syncConfirmedStudio } = require("./canonical-studio-sync");
 
 const MAX_OUTPUT = 8 * 1024 * 1024;
 const UNSAFE_PARTS = new Set([
   "node_modules", ".git", "dist", "build", "backups", "logs", "incoming",
-  "updates", "reports", "cache", "caches", "temp", "tmp"
+  "updates", "reports", "cache", "caches", "temp", "tmp",
+  "bootstrapbackups", "generated builds", "downloads"
 ]);
+
+const UNSAFE_PREFIXES = [
+  ".cleanup-audit/",
+  ".friendshiptree-patches/",
+  ".migration-v3/",
+  ".studio/",
+  "ai/export/",
+  "friendshiptreestudio/versions/",
+  "studiosystem/delivery/",
+  "studiosystem/versions/"
+];
 
 function runGit(projectRoot, args, options = {}) {
   return new Promise((resolve, reject) => {
@@ -31,7 +44,9 @@ function normaliseRepoPath(value) {
 }
 
 function isUnsafe(repoPath) {
-  const parts = normaliseRepoPath(repoPath).toLowerCase().split("/").filter(Boolean);
+  const normalised = normaliseRepoPath(repoPath).toLowerCase();
+  if (UNSAFE_PREFIXES.some(prefix => normalised === prefix.slice(0, -1) || normalised.startsWith(prefix))) return true;
+  const parts = normalised.split("/").filter(Boolean);
   if (parts[0] === "studiosystem" && ["versions", "backups", "logs", "incoming", "updates"].includes(parts[1])) return true;
   if (parts[0] === ".studio") return true;
   return parts.some(part => UNSAFE_PARTS.has(part));
@@ -75,6 +90,7 @@ async function assertRepository(projectRoot) {
 
 async function getStatus(projectRoot) {
   await assertRepository(projectRoot);
+  const canonicalSync = syncConfirmedStudio(projectRoot);
   const [branch, remote, upstream, raw] = await Promise.all([
     runGit(projectRoot, ["branch", "--show-current"]),
     runGit(projectRoot, ["remote", "get-url", "origin"]).catch(() => ""),
@@ -88,7 +104,8 @@ async function getStatus(projectRoot) {
     upstream: upstream || null,
     entries,
     safeCount: entries.filter(entry => !entry.unsafe).length,
-    excludedCount: entries.filter(entry => entry.unsafe).length
+    excludedCount: entries.filter(entry => entry.unsafe).length,
+    canonicalSync
   };
 }
 

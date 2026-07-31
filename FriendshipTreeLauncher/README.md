@@ -20,4 +20,8 @@ Version 1.0.7 adds a controlled GitHub backup panel. It previews and explicitly
 selects changes, excludes runtime and generated paths, checks that the remote is
 not ahead, creates a descriptive commit, and uses a normal non-forced push.
 
+Version 1.0.9 synchronises the confirmed Forge Studio slot into the canonical
+`FriendshipTreeStudio` source before GitHub preview, and excludes AI exports,
+runtime versions, bootstrap backups and generated folders from selection.
+
 The installer searches for an existing Electron runtime in the FriendshipTree project and creates permanent Desktop and Start Menu shortcuts.

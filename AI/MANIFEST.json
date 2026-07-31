@@ -1,6 +1,6 @@
 {
   "format": "friendshiptree-complete-ai-handover-v1",
-  "generatedUtc": "2026-07-31T10:06:14.932Z",
+  "generatedUtc": "2026-07-31T10:33:32.572Z",
   "projectName": "FriendshipTree",
   "canonicalRoot": "C:\\Users\\Joe\\FriendshipTree",
   "aiRoot": "C:\\Users\\Joe\\FriendshipTree\\AI",
@@ -25,7 +25,7 @@
     "launcher": {
       "path": "C:\\Users\\Joe\\FriendshipTree\\FriendshipTreeLauncher",
       "role": "Electron launcher and installation/update dashboard",
-      "indexedFiles": 16,
+      "indexedFiles": 17,
       "inclusionNote": "Included as real current source even though it has not yet achieved its intended ease-of-use."
     },
     "forge": {
@@ -63,5 +63,5 @@
     "zip": "C:\\Users\\Joe\\FriendshipTree\\AI\\EXPORT\\FriendshipTree-AI-Workspace.zip",
     "requestedFiles": "C:\\Users\\Joe\\FriendshipTree\\AI\\EXPORT\\Requested-Files"
   },
-  "indexedFileCount": 1115
+  "indexedFileCount": 1117
 }

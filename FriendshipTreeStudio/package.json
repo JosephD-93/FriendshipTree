@@ -1,6 +1,6 @@
 {
   "name": "friendshiptree-studio",
-  "version": "2.14.4",
+  "version": "2.14.8",
   "main": "main.js",
   "scripts": {
     "start": "electron ."
@@ -8,5 +8,5 @@
   "dependencies": {
     "electron": "^31.7.7"
   },
-  "description": "FriendshipTree Studio v2.15.0: built-in Git source control status, history, push, pull and GitHub access."
+  "description": "FriendshipTree Studio v2.14.8: defers blocking recovery and Development Partner scans until requested."
 }

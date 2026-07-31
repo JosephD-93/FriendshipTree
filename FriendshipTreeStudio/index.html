@@ -3,14 +3,22 @@
 <head>
   <meta charset="UTF-8">
   <title>FriendshipTree Studio</title>
+  <meta name="theme-color" content="#111713">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+<div id="studioStartupSplash" class="studio-startup-splash" role="status" aria-live="polite">
+  <div class="startup-tree" aria-hidden="true">🌳</div>
+  <div>
+    <strong>FriendshipTree Studio</strong>
+    <span id="studioStartupStage">Preparing your workspace…</span>
+  </div>
+</div>
 <div class="studio-shell">
   <aside class="studio-sidebar">
     <div class="brand">
       <div class="brand-mark">🌳</div>
-      <div><b>FriendshipTree</b><span>Studio <span id="studioVersion">v2.15.0</span></span></div>
+      <div><b>FriendshipTree</b><span>Studio <span id="studioVersion">v2.14.8</span></span></div>
     </div>
 
     <nav class="studio-nav" aria-label="Studio sections">
@@ -18,7 +26,6 @@
       <button class="nav-button" data-nav-page="build"><span>📱</span>Build & Deploy</button>
       <button class="nav-button" data-nav-page="updates"><span>📦</span>Updates</button>
       <button class="nav-button" data-nav-page="project"><span>🗂</span>Project</button>
-      <button class="nav-button" data-nav-page="source"><span>⑂</span>Source Control</button>
       <button class="nav-button" data-nav-page="brain"><span>🧠</span>Project Brain</button>
       <button class="nav-button" data-nav-page="developer"><span>🩺</span>Developer Centre</button>
       <button class="nav-button" data-nav-page="ai"><span>🤖</span>AI Workspace</button>
@@ -472,23 +479,6 @@
       <button data-action="syncAndroid">Sync Android</button>
       <button data-action="buildApk">Build APK</button>
       <button data-action="installApk">Install APK on phone</button>
-    </div>
-  </section>
-
-  <section data-page="source" class="page-panel panel source-control-panel">
-    <div class="source-control-heading">
-      <div><h2>Source Control</h2><p class="muted">Current Git state for the FriendshipTree repository.</p></div>
-      <div class="actions"><button id="gitRefresh">Refresh</button><button id="gitOpenGithub" class="secondary-button">Open GitHub</button></div>
-    </div>
-    <div id="gitSummary" class="git-summary-grid"><p class="muted">Reading repository…</p></div>
-    <div class="git-action-row">
-      <button id="gitPush">Push</button>
-      <button id="gitPull" class="secondary-button">Pull</button>
-      <span id="gitActionStatus" class="muted">No Git operation running.</span>
-    </div>
-    <div class="git-columns">
-      <article><h3>Working tree</h3><div id="gitChanges" class="git-file-list"><p class="muted">No data yet.</p></div></article>
-      <article><h3>Recent commits</h3><div id="gitCommits" class="git-commit-list"><p class="muted">No data yet.</p></div></article>
     </div>
   </section>
 

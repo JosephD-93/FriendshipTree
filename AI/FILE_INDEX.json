@@ -1,6 +1,6 @@
 {
   "format": "friendshiptree-complete-file-index-v1",
-  "generatedUtc": "2026-07-31T10:06:14.932Z",
+  "generatedUtc": "2026-07-31T10:33:32.573Z",
   "canonicalRoot": "C:\\Users\\Joe\\FriendshipTree",
   "note": "Each record identifies the exact live file copied into SOURCE.",
   "fields": [
@@ -3175,9 +3175,9 @@
     {
       "path": ".studio/Reports/latest-startup-timeline.json",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\.studio\\Reports\\latest-startup-timeline.json",
-      "modifiedUtc": "2026-07-31T09:33:36.738Z",
-      "sizeBytes": 1929,
-      "sha256": "60414d74019d7243e6e5e4fa3c915a47f64554f090002262c5249115c92ef35d",
+      "modifiedUtc": "2026-07-31T10:09:32.487Z",
+      "sizeBytes": 1927,
+      "sha256": "f26e6ec601905a98ec50193acca03740907fd1b02989823a620127ce814a3719",
       "classification": "project-support-file",
       "system": "shared"
     },
@@ -4154,6 +4154,15 @@
       "system": "shared"
     },
     {
+      "path": ".studio/Reports/S-2026-07-31T10-09-30-646Z-762d4b-environment.json",
+      "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\.studio\\Reports\\S-2026-07-31T10-09-30-646Z-762d4b-environment.json",
+      "modifiedUtc": "2026-07-31T10:09:30.658Z",
+      "sizeBytes": 521,
+      "sha256": "eee32cd52af794f87e95575ad9110e59dfda40c8812b6596c2f7552f27f9bbd6",
+      "classification": "project-support-file",
+      "system": "shared"
+    },
+    {
       "path": ".studio/TestResults/self-test-1784656086364.json",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\.studio\\TestResults\\self-test-1784656086364.json",
       "modifiedUtc": "2026-07-21T17:48:06.361Z",
@@ -4552,9 +4561,9 @@
     {
       "path": "AI/CURRENT_STATE.md",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\AI\\CURRENT_STATE.md",
-      "modifiedUtc": "2026-07-31T10:06:13.703Z",
+      "modifiedUtc": "2026-07-31T10:33:31.361Z",
       "sizeBytes": 880,
-      "sha256": "ef673d8c294ae7e53d4a71c9b3ee27ca97602ff0e9d759a06d85ec54cdc1ebd2",
+      "sha256": "a4f13697ad4467347d605f521e87785207d5f15dd8a981791b957792682091da",
       "classification": "canonical-documentation",
       "system": "ai-handover"
     },
@@ -4570,9 +4579,9 @@
     {
       "path": "AI/FILE_INDEX.json",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\AI\\FILE_INDEX.json",
-      "modifiedUtc": "2026-07-31T10:06:13.703Z",
-      "sizeBytes": 502042,
-      "sha256": "3e22efa01ce1b735be5c988e2bf7a7519d950210ea445f3fbf0186d322b58587",
+      "modifiedUtc": "2026-07-31T10:33:31.361Z",
+      "sizeBytes": 502914,
+      "sha256": "693d5cbfbb8f1c08c5e7e9e32f41ae5a9a04757bf39d5e87bf0955ebc3b2fd13",
       "classification": "canonical-documentation",
       "system": "ai-handover"
     },
@@ -4588,9 +4597,9 @@
     {
       "path": "AI/MANIFEST.json",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\AI\\MANIFEST.json",
-      "modifiedUtc": "2026-07-31T10:06:13.689Z",
+      "modifiedUtc": "2026-07-31T10:33:31.361Z",
       "sizeBytes": 2269,
-      "sha256": "b2b2291e549ee96e157570ac9a504ad94c5ab6388096945ce626c67cfdfc7e16",
+      "sha256": "21ee8c74aa370596e5e532e02ab2179b02a006d9dcac3d3be078f2a1503cc776",
       "classification": "canonical-documentation",
       "system": "ai-handover"
     },
@@ -4624,27 +4633,27 @@
     {
       "path": "AI/SOURCE_COVERAGE.md",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\AI\\SOURCE_COVERAGE.md",
-      "modifiedUtc": "2026-07-31T10:06:14.533Z",
+      "modifiedUtc": "2026-07-31T10:33:32.159Z",
       "sizeBytes": 2019,
-      "sha256": "f09093914247e2540540f60b562a5021d87f5c60587e7b528d0a5df5d26e9e8a",
+      "sha256": "9f41e2c7f2f0876a0011f153b9064dce1af7c19641d348dfbb2998bd1708f70a",
       "classification": "canonical-documentation",
       "system": "ai-handover"
     },
     {
       "path": "AI/VALIDATION_REPORT.md",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\AI\\VALIDATION_REPORT.md",
-      "modifiedUtc": "2026-07-31T09:33:24.860Z",
+      "modifiedUtc": "2026-07-31T10:06:15.299Z",
       "sizeBytes": 1048,
-      "sha256": "f4f0344ef11bb185b573324dbd17d651f135dea827c5562183c183ecb70054e8",
+      "sha256": "e91554317b8dd8ff7d68879a3378b13c490a09ad45f6a76108f8c1dcbcf13961",
       "classification": "canonical-documentation",
       "system": "ai-handover"
     },
     {
       "path": "AI/WORKSPACE_STATUS.json",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\AI\\WORKSPACE_STATUS.json",
-      "modifiedUtc": "2026-07-31T09:33:24.859Z",
+      "modifiedUtc": "2026-07-31T10:06:15.299Z",
       "sizeBytes": 1785,
-      "sha256": "bec514ff6cdb43b4e4827b2f4757406810e37b288a65d167d51fad6fb017693c",
+      "sha256": "ce064646769eb5678e1666f2f913c5528957ff5fc52f8a86d1dcaf3e9913f0fe",
       "classification": "canonical-documentation",
       "system": "ai-handover"
     },
@@ -5209,7 +5218,7 @@
     {
       "path": "Documentation/STUDIO-AND-FORGE-HANDOVER.md",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\Documentation\\STUDIO-AND-FORGE-HANDOVER.md",
-      "modifiedUtc": "2026-07-31T09:33:34.868Z",
+      "modifiedUtc": "2026-07-31T10:09:30.651Z",
       "sizeBytes": 2449,
       "sha256": "f273b403d4cce30eec08d3d4b8f397f1c25406b49e14e15b9305191e7080284f",
       "classification": "project-support-file",
@@ -5702,6 +5711,15 @@
       "system": "launcher"
     },
     {
+      "path": "FriendshipTreeLauncher/canonical-studio-sync.js",
+      "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\FriendshipTreeLauncher\\canonical-studio-sync.js",
+      "modifiedUtc": "2026-07-31T11:20:40.000Z",
+      "sizeBytes": 2638,
+      "sha256": "fecc31921c8252e419e98a07e01de8b9eab699bdaa81d301c7558ed676b3abc9",
+      "classification": "exact-current-source",
+      "system": "launcher"
+    },
+    {
       "path": "FriendshipTreeLauncher/delivery-pipeline.js",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\FriendshipTreeLauncher\\delivery-pipeline.js",
       "modifiedUtc": "2026-07-28T09:12:39.322Z",
@@ -5722,25 +5740,25 @@
     {
       "path": "FriendshipTreeLauncher/github-backup.js",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\FriendshipTreeLauncher\\github-backup.js",
-      "modifiedUtc": "2026-07-31T10:48:56.000Z",
-      "sizeBytes": 6502,
-      "sha256": "34657a3673347b38544831977ab1f44cd17dbf24fa5071a3b9140dae1e62f1a0",
+      "modifiedUtc": "2026-07-31T11:20:40.000Z",
+      "sizeBytes": 7077,
+      "sha256": "2ffe393cc2477e910ae6ff72405f101039cbc25fd36280fed2166c61c9a649c7",
       "classification": "exact-current-source",
       "system": "launcher"
     },
     {
       "path": "FriendshipTreeLauncher/index.html",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\FriendshipTreeLauncher\\index.html",
-      "modifiedUtc": "2026-07-31T10:23:36.000Z",
-      "sizeBytes": 9166,
-      "sha256": "1c1ff22c69f96449b578ccda68beef3df50b950f938dd6ba38818e366042fb16",
+      "modifiedUtc": "2026-07-31T11:20:40.000Z",
+      "sizeBytes": 9257,
+      "sha256": "4ef4a453017a444ffe497658537220c0c6f50f1c6629eaee90037a8396290cf4",
       "classification": "exact-current-source",
       "system": "launcher"
     },
     {
       "path": "FriendshipTreeLauncher/main.js",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\FriendshipTreeLauncher\\main.js",
-      "modifiedUtc": "2026-07-31T10:22:56.000Z",
+      "modifiedUtc": "2026-07-31T11:20:40.000Z",
       "sizeBytes": 9511,
       "sha256": "d941b7d5ba0e0d977c049f1ed0d0d86f396c012f679b0a36c2486b9955d4c3f7",
       "classification": "exact-current-source",
@@ -5749,16 +5767,16 @@
     {
       "path": "FriendshipTreeLauncher/package.json",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\FriendshipTreeLauncher\\package.json",
-      "modifiedUtc": "2026-07-31T10:48:56.000Z",
-      "sizeBytes": 226,
-      "sha256": "95b17565c54004a47381babde98f7241c06d2a2d5189a350148280904fd6d588",
+      "modifiedUtc": "2026-07-31T11:20:40.000Z",
+      "sizeBytes": 258,
+      "sha256": "ab41f1c2f2c12ad9adc6971ef1ad70220e58bb4bb22938ec0d26fda802f3b456",
       "classification": "exact-current-source",
       "system": "launcher"
     },
     {
       "path": "FriendshipTreeLauncher/preload.js",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\FriendshipTreeLauncher\\preload.js",
-      "modifiedUtc": "2026-07-31T10:22:56.000Z",
+      "modifiedUtc": "2026-07-31T11:20:40.000Z",
       "sizeBytes": 1639,
       "sha256": "07d06011e6f415cbac5ce001fd4ad640afcb51b7682f1d8f7539ae8355549e0c",
       "classification": "exact-current-source",
@@ -5767,18 +5785,18 @@
     {
       "path": "FriendshipTreeLauncher/README.md",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\FriendshipTreeLauncher\\README.md",
-      "modifiedUtc": "2026-07-31T10:23:36.000Z",
-      "sizeBytes": 1416,
-      "sha256": "d5d1ebb3ddc677bba800d230b0564be6ace39cd6f6baa43cfdfc9f7a57e1fd1e",
+      "modifiedUtc": "2026-07-31T11:20:40.000Z",
+      "sizeBytes": 1647,
+      "sha256": "5004e2d70a6dfd1e28b4f488b3797ec113738ef897089e8d0c3098c5012e6463",
       "classification": "exact-current-source",
       "system": "launcher"
     },
     {
       "path": "FriendshipTreeLauncher/renderer.js",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\FriendshipTreeLauncher\\renderer.js",
-      "modifiedUtc": "2026-07-31T10:23:36.000Z",
-      "sizeBytes": 15519,
-      "sha256": "ab424a35616aeecd30db2fd212dd84923c6fd9e4deb15ebe45af4f13e3a1cbd9",
+      "modifiedUtc": "2026-07-31T11:20:40.000Z",
+      "sizeBytes": 15787,
+      "sha256": "fff8d52fd5f3af6278cb220985961f2e7d0139deb7e1cb35c426fcd40b21e6e8",
       "classification": "exact-current-source",
       "system": "launcher"
     },
@@ -5794,7 +5812,7 @@
     {
       "path": "FriendshipTreeLauncher/styles.css",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\FriendshipTreeLauncher\\styles.css",
-      "modifiedUtc": "2026-07-31T10:23:36.000Z",
+      "modifiedUtc": "2026-07-31T11:20:40.000Z",
       "sizeBytes": 10179,
       "sha256": "46a05bf5f6835851d4a457d4349f6f45aac2a08a194e5b04b0df3eb8ae208a7f",
       "classification": "exact-current-source",

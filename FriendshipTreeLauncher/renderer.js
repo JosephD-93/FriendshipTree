@@ -279,7 +279,10 @@ function renderGitHubChanges(status) {
   const summary = $('#githubSummary');
   const changes = $('#githubChanges');
   const pushButton = $('#pushGitHubBackup');
-  summary.textContent = `${status.branch} → ${status.upstream || 'no upstream'} · ${status.safeCount} selectable · ${status.excludedCount} excluded`;
+  const syncText = status.canonicalSync
+    ? ` · Studio ${status.canonicalSync.confirmedVersion} synced (${status.canonicalSync.copied.length} file${status.canonicalSync.copied.length === 1 ? '' : 's'} updated)`
+    : '';
+  summary.textContent = `${status.branch} → ${status.upstream || 'no upstream'} · ${status.safeCount} selectable · ${status.excludedCount} excluded${syncText}`;
   changes.innerHTML = '';
   if (!status.entries.length) {
     changes.innerHTML = '<p class="empty">Git is already up to date locally. There are no files to commit.</p>';
@@ -301,7 +304,7 @@ function renderGitHubChanges(status) {
 
 async function checkGitHubChanges() {
   const progress = $('#githubBackupProgress');
-  progress.textContent = 'Checking the local repository…';
+  progress.textContent = 'Syncing the confirmed Studio and checking the local repository…';
   try {
     const status = await window.launcher.getGitHubBackupStatus();
     renderGitHubChanges(status);
