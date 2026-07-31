@@ -1,0 +1,25 @@
+{
+  "id": "app",
+  "name": "FriendshipTree App",
+  "owner": "App",
+  "description": "React/Vite/Capacitor Android application.",
+  "pathHints": [
+    "src",
+    "public",
+    "android"
+  ],
+  "entryPointHints": [
+    "src/main.jsx",
+    "src/App.jsx",
+    "vite.config.js",
+    "capacitor.config"
+  ],
+  "dependsOn": [
+    "android-runtime",
+    "shared-assets"
+  ],
+  "produces": [
+    "web-build",
+    "android-apk"
+  ]
+}

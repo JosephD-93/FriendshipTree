@@ -1,0 +1,7 @@
+FriendshipTree Studio V1.2
+
+- Corrected visible application version from V0.9 to V1.2.
+- Added explicit quarantine execution progress, success receipts, and visible IPC errors.
+- Verifies that the source disappeared and destination exists after every move.
+- Displays the exact quarantine root path.
+- Rescans Cleaner after a successful move.

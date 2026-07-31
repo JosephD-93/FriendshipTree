@@ -1,0 +1,3 @@
+FriendshipTree Studio V2.0
+
+Adds the first Project Intelligence milestone: persistent file catalogue, project rules, historical manifest snapshots, file history statuses, and snapshot comparison. Existing Cleaner, Organiser, Recovery and package safety remain available.

@@ -1,0 +1,10 @@
+FriendshipTree Studio V2.6
+
+SEAMLESS STUDIO + APP WORKFLOW
+- Creates one AI Sync ZIP containing the current active project source and Studio knowledge.
+- Accepts verified app-update .ftupdate packages through the existing Seamless Update Centre.
+- Adds one-click web build, Capacitor sync, APK build and installation.
+- Supports USB or wireless ADB installation.
+- Publishes an APK plus latest.json checksum metadata to Google Drive or another synced folder.
+- Does not use Capgo or any paid OTA service.
+- Android still requires the phone owner to approve installation of an APK downloaded remotely.

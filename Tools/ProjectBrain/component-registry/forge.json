@@ -1,0 +1,25 @@
+{
+  "id": "forge",
+  "name": "Forge and Update Engine",
+  "owner": "Forge",
+  "description": "Build, package, update, recovery and deployment workflows.",
+  "pathHints": [
+    "Forge",
+    "delivery-pipeline",
+    "update-manager",
+    "PackageStaging"
+  ],
+  "entryPointHints": [
+    "delivery-pipeline.js",
+    "START FRIENDSHIPTREE FORGE"
+  ],
+  "dependsOn": [
+    "app",
+    "studio"
+  ],
+  "produces": [
+    "update-packages",
+    "apks",
+    "receipts"
+  ]
+}

@@ -1,0 +1,564 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>FriendshipTree Studio</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="studio-shell">
+  <aside class="studio-sidebar">
+    <div class="brand">
+      <div class="brand-mark">🌳</div>
+      <div><b>FriendshipTree</b><span>Studio <span id="studioVersion">v2.15.0</span></span></div>
+    </div>
+
+    <nav class="studio-nav" aria-label="Studio sections">
+      <button class="nav-button active" data-nav-page="home"><span>⌂</span>Home</button>
+      <button class="nav-button" data-nav-page="build"><span>📱</span>Build & Deploy</button>
+      <button class="nav-button" data-nav-page="updates"><span>📦</span>Updates</button>
+      <button class="nav-button" data-nav-page="project"><span>🗂</span>Project</button>
+      <button class="nav-button" data-nav-page="source"><span>⑂</span>Source Control</button>
+      <button class="nav-button" data-nav-page="brain"><span>🧠</span>Project Brain</button>
+      <button class="nav-button" data-nav-page="developer"><span>🩺</span>Developer Centre</button>
+      <button class="nav-button" data-nav-page="ai"><span>🤖</span>AI Workspace</button>
+      <button class="nav-button" data-nav-page="maintenance"><span>🛠</span>Maintenance</button>
+      <button class="nav-button" data-nav-page="diagnostics"><span>📊</span>Diagnostics</button>
+    </nav>
+
+    <div class="sidebar-footer">
+      <button id="sidebarOpenProject" class="sidebar-utility">Open project folder</button>
+      <button id="sidebarOpenDocs" class="sidebar-utility">Open documentation</button>
+    </div>
+  </aside>
+
+  <div class="studio-content">
+    <header class="studio-topbar">
+      <div>
+        <p class="eyebrow" id="pageEyebrow">Developer Hub</p>
+        <h1 id="pageTitle">Home</h1>
+        <p id="pageSubtitle">Your current project state and the actions you use most.</p>
+      </div>
+      <div class="studio-global-search universal-search-shell" role="search">
+        <span aria-hidden="true">⌕</span>
+        <input id="studioGlobalSearchInput" type="search" placeholder="Search all of Studio…" autocomplete="off"
+          aria-label="Search all of Studio" aria-autocomplete="list" aria-controls="studioUniversalSearchResults"
+          aria-expanded="false">
+        <button id="clearStudioGlobalSearch" class="studio-search-clear" title="Clear search" aria-label="Clear search">×</button>
+        <div id="studioUniversalSearchResults" class="universal-search-results" role="listbox" hidden></div>
+      </div>
+      <div class="header-actions">
+        <button id="exportReport" class="secondary-button">Export diagnostics</button>
+        <button id="refreshAll">Refresh</button>
+      </div>
+    
+      <button id="studioNotificationButton" class="notification-button" type="button"
+        aria-label="Open notifications" title="Notifications">
+        <span aria-hidden="true">🔔</span>
+        <b id="studioNotificationBadge" class="notification-badge" hidden>0</b>
+      </button>
+</header>
+
+    <main>
+      <section data-page="home" class="page-panel home-dashboard">
+        <div class="welcome-card">
+          <div>
+            <p class="eyebrow">FriendshipTree Developer Hub</p>
+            <h2>Everything you need, without the wall of tools.</h2>
+            <p class="muted">Build the app, inspect project health, create AI context and recover safely from one organised workspace.</p>
+          </div>
+          <div class="health-orb" id="homeHealthOrb"><strong>—</strong><span>Project health</span></div>
+        </div>
+
+        <div class="home-grid">
+          <article class="home-card current-focus-card">
+            <span class="card-kicker">Current focus</span>
+            <h3>Reliable backups and a smoother development workflow</h3>
+            <p>Use Studio to make contained, testable changes while preserving recovery points.</p>
+            <button data-go-page="build">Open Build & Deploy</button>
+          </article>
+
+          <article class="home-card">
+            <span class="card-kicker">Project status</span>
+            <div id="homeProjectStatus" class="home-status-list"><p class="muted">Checking paths…</p></div>
+          </article>
+
+          <article class="home-card quick-actions-card">
+            <span class="card-kicker">Quick actions</span>
+            <div class="quick-action-grid">
+              <button id="homeDeploy">Build + install app</button>
+              <button id="homeBuildApk">Build APK only</button>
+              <button id="homeExportAI">Export AI context</button>
+              <button id="homeRunDoctor">Run Doctor</button>
+              <button id="homeOpenUpdates">Open update inbox</button>
+              <button id="homeOpenDocs">Open documentation</button>
+            </div>
+          </article>
+
+          <article class="home-card">
+            <span class="card-kicker">Safety</span>
+            <h3>Recovery remains available</h3>
+            <p class="muted">Cleaner and update actions retain transaction history and recovery controls.</p>
+            <button class="secondary-button" data-go-page="maintenance">Open Recovery Centre</button>
+          </article>
+        </div>
+        <div id="homeActionStatus" class="status-box muted">Ready.</div>
+      </section>
+
+
+  <section data-page="home" class="page-panel panel partner-panel">
+    <div class="partner-heading">
+      <div><h2>Development Partner</h2><p class="muted">A live, prioritised view of what matters most in FriendshipTree right now.</p></div>
+      <button id="refreshPartner">Refresh recommendations</button>
+    </div>
+    <div id="partnerDashboard"><p>Reading project intelligence…</p></div>
+  </section>
+
+
+  <section data-page="project" class="page-panel panel">
+    <h2>Project intelligence</h2>
+    <p class="muted">Builds a persistent catalogue of current files, records historical manifests, and compares the working project with earlier snapshots.</p>
+    <div class="actions">
+      <button id="buildKnowledge">Build project knowledge</button>
+      <button id="loadKnowledge">Refresh knowledge view</button>
+      <button id="openKnowledge">Open knowledge folder</button>
+    </div>
+    <div id="knowledge"></div>
+    <div id="history"></div>
+  </section>
+
+
+
+  <section data-page="brain" class="page-panel panel project-brain-panel">
+    <div class="brain-heading">
+      <div>
+        <h2>Project Brain Explorer</h2>
+        <p class="muted">Search the live dependency graph, inspect files and see what a change could affect.</p>
+      </div>
+      <div id="brainFreshness" class="brain-freshness">Not loaded</div>
+    </div>
+
+    <div class="actions">
+      <button id="loadProjectBrain">Refresh Brain</button>
+      <button id="openProjectBrainFolder">Open Brain folder</button>
+    </div>
+
+    <div id="brainStatus" class="status-box muted">Reading the Project Brain…</div>
+    <div id="brainOverview" class="brain-stat-grid"></div>
+
+    <div class="brain-explorer-layout">
+      <aside class="brain-card brain-explorer-sidebar">
+        <div class="brain-card-heading">
+          <div>
+            <h3>Find a file</h3>
+            <p class="muted">Search by filename, path or owning component.</p>
+          </div>
+        </div>
+        <div class="brain-search-shell">
+          <div class="brain-search-row">
+            <input id="brainSearchInput" type="search" placeholder="renderer.js, Studio, capacitor…" autocomplete="off" aria-autocomplete="list" aria-controls="brainSearchSuggestions" aria-expanded="false">
+            <button id="brainSearchButton">Search</button>
+          </div>
+          <div id="brainSearchSuggestions" class="brain-search-suggestions" role="listbox" hidden></div>
+        </div>
+        <div class="brain-filter-row">
+          <button class="brain-filter active" data-brain-filter="search">Results</button>
+          <button class="brain-filter" data-brain-filter="unknown">Unknown</button>
+          <button class="brain-filter" data-brain-filter="unresolved">Unresolved</button>
+          <button class="brain-filter" data-brain-filter="orphans">Orphans</button>
+        </div>
+        <div id="brainSearchMeta" class="muted brain-search-meta">Enter a search term or choose a filter.</div>
+        <div id="brainSearchResults" class="brain-result-list"></div>
+      </aside>
+
+      <main class="brain-card brain-explorer-detail">
+        <div id="brainEmptyDetail" class="brain-empty-detail">
+          <div class="brain-empty-icon">🧠</div>
+          <h3>Select a file</h3>
+          <p class="muted">Its ownership, dependencies, dependents and impact will appear here.</p>
+        </div>
+        <div id="brainFileDetail" hidden>
+          <div class="brain-detail-heading">
+            <div>
+              <div class="brain-detail-toolbar">
+                <button id="brainBackButton" class="secondary-button" title="Previous file" disabled>←</button>
+                <button id="brainForwardButton" class="secondary-button" title="Next file" disabled>→</button>
+                <div id="brainFileOwner" class="brain-owner-pill">Unknown</div>
+              </div>
+              <h3 id="brainFileName">File</h3>
+              <code id="brainFilePath"></code>
+            </div>
+            <button id="brainOpenSelected">Open folder</button>
+          </div>
+          <div id="brainFileFacts" class="brain-fact-grid"></div>
+          <div class="brain-risk-card">
+            <div>
+              <span class="muted">Change impact</span>
+              <strong id="brainImpactRisk">LOW</strong>
+            </div>
+            <div>
+              <span class="muted">Affected downstream files</span>
+              <strong id="brainImpactCount">0</strong>
+            </div>
+          </div>
+          <section class="brain-graph-section">
+            <div class="brain-card-heading">
+              <div>
+                <h4>Dependency map</h4>
+                <p class="muted">Click a connected file to move through the graph.</p>
+              </div>
+              <div class="brain-graph-legend">
+                <span><i class="brain-legend-dot incoming"></i>Used by</span>
+                <span><i class="brain-legend-dot selected"></i>Selected</span>
+                <span><i class="brain-legend-dot outgoing"></i>Depends on</span>
+              </div>
+            </div>
+            <div class="brain-relation-filter-row">
+              <button class="brain-relation-filter active" data-brain-relation-filter="all">All relationships</button>
+              <button class="brain-relation-filter" data-brain-relation-filter="imports">Imports</button>
+              <button class="brain-relation-filter" data-brain-relation-filter="requires">Requires</button>
+              <button class="brain-relation-filter" data-brain-relation-filter="references-path">Path references</button>
+            </div>
+            <div id="brainDependencyGraph" class="brain-dependency-graph" aria-label="Dependency map"></div>
+          </section>
+          <div class="brain-detail-columns">
+            <section>
+              <h4>Depends on</h4>
+              <div id="brainDependencies" class="brain-relation-list"></div>
+            </section>
+            <section>
+              <h4>Used by</h4>
+              <div id="brainDependents" class="brain-relation-list"></div>
+            </section>
+          </div>
+          <section class="brain-impact-section">
+            <h4>Impact chain</h4>
+            <div id="brainImpactLevels"></div>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <div class="brain-two-column">
+      <article class="brain-card">
+        <h3>Component ownership</h3>
+        <p class="muted">How indexed files are currently assigned.</p>
+        <div id="brainOwners"></div>
+      </article>
+      <article class="brain-card">
+        <h3>File state</h3>
+        <p class="muted">Active source versus archive, backup and generated material.</p>
+        <div id="brainStates"></div>
+      </article>
+    </div>
+
+    <article class="brain-card">
+      <div class="brain-card-heading">
+        <div><h3>Strongest component relationships</h3><p class="muted">The largest detected flows between project subsystems.</p></div>
+      </div>
+      <div id="brainRelationships"></div>
+    </article>
+  </section>
+
+  
+  <section data-page="developer" class="page-panel panel developer-centre-panel">
+    <div class="developer-centre-heading">
+      <div>
+        <p class="eyebrow">System visibility</p>
+        <h2>Developer Diagnostics Centre</h2>
+        <p class="muted">See what Studio is doing, test the full Project Brain path and pinpoint where a feature fails.</p>
+      </div>
+      <div class="developer-centre-actions">
+        <button id="runDeveloperChecks">Run full health check</button>
+        <button id="clearDeveloperActivity" class="secondary-button">Clear activity</button>
+      </div>
+    </div>
+
+    <div id="developerOverallStatus" class="developer-overall-status">
+      <div class="developer-health-ring"><strong id="developerHealthScore">—</strong><span>System health</span></div>
+      <div>
+        <h3 id="developerHealthTitle">Not checked yet</h3>
+        <p id="developerHealthSummary" class="muted">Run the health check to test Studio, IPC, Project Brain, search and dependency inspection.</p>
+      </div>
+    </div>
+
+    <div class="developer-tab-row" role="tablist">
+      <button class="developer-tab active" data-developer-tab="overview">Overview</button>
+      <button class="developer-tab" data-developer-tab="activity">Activity</button>
+      <button class="developer-tab" data-developer-tab="tests">Self-tests</button>
+      <button class="developer-tab" data-developer-tab="search">Search diagnosis</button>
+    </div>
+
+    <div data-developer-panel="overview" class="developer-tab-panel">
+      <div id="developerSubsystemGrid" class="developer-subsystem-grid">
+        <article class="developer-subsystem-card pending"><span class="developer-status-light"></span><div><b>Studio renderer</b><small>Waiting for check</small></div></article>
+        <article class="developer-subsystem-card pending"><span class="developer-status-light"></span><div><b>IPC bridge</b><small>Waiting for check</small></div></article>
+        <article class="developer-subsystem-card pending"><span class="developer-status-light"></span><div><b>Project Brain</b><small>Waiting for check</small></div></article>
+        <article class="developer-subsystem-card pending"><span class="developer-status-light"></span><div><b>Query Engine</b><small>Waiting for check</small></div></article>
+        <article class="developer-subsystem-card pending"><span class="developer-status-light"></span><div><b>Search</b><small>Waiting for check</small></div></article>
+        <article class="developer-subsystem-card pending"><span class="developer-status-light"></span><div><b>Dependency inspection</b><small>Waiting for check</small></div></article>
+      </div>
+      <div class="developer-two-column">
+        <article class="developer-detail-card">
+          <div class="developer-card-heading"><h3>Recent meaningful activity</h3><button class="text-button" data-open-developer-tab="activity">View all</button></div>
+          <div id="developerActivityPreview" class="developer-activity-list"></div>
+        </article>
+        <article class="developer-detail-card">
+          <div class="developer-card-heading"><h3>Current findings</h3></div>
+          <div id="developerFindings" class="developer-findings"><p class="muted">No test results yet.</p></div>
+        </article>
+      </div>
+    </div>
+
+    <div data-developer-panel="activity" class="developer-tab-panel" hidden>
+      <div class="developer-toolbar">
+        <div class="developer-filter-row">
+          <button class="developer-filter active" data-developer-filter="all">All</button>
+          <button class="developer-filter" data-developer-filter="success">Success</button>
+          <button class="developer-filter" data-developer-filter="warning">Warnings</button>
+          <button class="developer-filter" data-developer-filter="error">Errors</button>
+          <button class="developer-filter" data-developer-filter="action">Actions</button>
+        </div>
+        <span id="developerActivityCount" class="muted">0 events</span>
+      </div>
+      <div id="developerActivityTimeline" class="developer-activity-list developer-activity-full"></div>
+    </div>
+
+    <div data-developer-panel="tests" class="developer-tab-panel" hidden>
+      <div class="developer-card-heading">
+        <div><h3>Self-test results</h3><p class="muted">Each check records its duration and the exact result returned.</p></div>
+      </div>
+      <div id="developerTestResults" class="developer-test-results"><p class="muted">Run the full health check to begin.</p></div>
+    </div>
+
+    <div data-developer-panel="search" class="developer-tab-panel" hidden>
+      <div class="developer-search-diagnostic">
+        <div>
+          <h3>Search pipeline diagnosis</h3>
+          <p class="muted">This tests the same renderer → IPC → Query Engine → Project Brain path used by the file search.</p>
+        </div>
+        <div class="developer-search-probe">
+          <input id="developerSearchProbeInput" value="app" aria-label="Diagnostic search term">
+          <button id="runDeveloperSearchProbe">Test search</button>
+        </div>
+      </div>
+      <div id="developerSearchProbeResult" class="developer-pipeline">
+        <p class="muted">Run a test to see each stage.</p>
+      </div>
+    </div>
+  </section>
+
+
+  <section data-page="ai" class="page-panel panel">
+    <h2>Project DNA and AI workspace</h2>
+    <p class="muted">Analyses the source, displays the generated project brief directly inside Studio, copies ready-to-paste context, and exports one complete AI development package.</p>
+    <div class="actions">
+      <button id="buildDNA">Analyse source code</button>
+      <button id="loadDNA">Refresh DNA view</button>
+      <button id="openKnowledgeFile">Show context file in folder</button>
+      <button id="copyChatGPT">Copy for ChatGPT</button>
+      <button id="copyClaude">Copy for Claude</button>
+      <button id="exportAIPackage">Export AI package</button>
+    </div>
+    <div id="aiStatus"></div>
+    <div class="ai-tabs" role="tablist">
+      <button class="ai-tab active" data-ai-tab="summary">Project summary</button>
+      <button class="ai-tab" data-ai-tab="architecture">Architecture</button>
+      <button class="ai-tab" data-ai-tab="systems">Systems</button>
+      <button class="ai-tab" data-ai-tab="debt">Technical debt</button>
+      <button class="ai-tab" data-ai-tab="context">Full AI context</button>
+    </div>
+    <div id="aiWorkspace" class="ai-workspace"></div>
+    <details><summary>Project DNA diagnostics</summary><div id="dna"></div></details>
+  </section>
+
+  <section data-page="diagnostics" class="page-panel panel">
+    <h2>Project health</h2>
+    <div class="actions">
+      <button id="calculateHealth">Calculate health score</button>
+      <button id="runTests">Run Studio self-tests</button>
+    </div>
+    <div id="health"></div>
+    <div id="tests"></div>
+  </section>
+
+  <section data-page="diagnostics" class="page-panel panel">
+    <h2>Dependency graph</h2>
+    <p class="muted">Indexes direct JavaScript and TypeScript imports, importers, unresolved local imports and possible orphan files.</p>
+    <button id="buildGraph">Build dependency graph</button>
+    <div id="graph"></div>
+  </section>
+
+  <section data-page="project" class="page-panel panel">
+    <h2>Project manifest and explorer</h2>
+    <div class="actions">
+      <button id="buildManifest">Build or refresh manifest</button>
+      <button id="loadExplorer">Open project explorer</button>
+    </div>
+    <div id="manifestSummary"></div>
+    <div id="explorer"></div>
+  </section>
+
+  <section data-page="maintenance" class="page-panel panel">
+    <h2>Cleaner with mandatory dry run</h2>
+    <p class="muted">Select candidates, generate a plan, inspect every destination, then approve execution. Studio never deletes these files.</p>
+    <div class="actions">
+      <button id="scanCleaner">Analyse project</button>
+      <button id="exportCleanerAnalysis">Export project analysis</button>
+      <button id="createPlan" disabled>Create dry-run plan</button>
+      <button id="executePlan" disabled>Execute approved plan</button>
+      <button id="openQuarantine">Open quarantine folder</button>
+    </div>
+    <div id="cleaner"></div>
+    <div id="cleanupPlan"></div>
+  </section>
+
+  <section data-page="updates" class="page-panel panel update-panel">
+    <h2>Seamless update centre</h2>
+    <p class="muted">Double-click a <code>.ftupdate</code> file, drag it below, or choose it manually. Studio verifies every hash, backs up changed files, installs transactionally and restarts itself.</p>
+    <div id="updateDropZone" class="update-drop-zone" tabindex="0"><b>Drop a .ftupdate package here</b><span>or double-click the package in Windows</span></div>
+    <div class="actions">
+      <button id="choosePackage">Choose update package</button>
+      <button id="installPackage" disabled>Install and restart</button>
+      <button id="openPackageHistory">Open installation history</button>
+      <button id="createForgeTestPackage">Create safe Forge test update</button>
+    </div>
+    <div id="packageInspection"></div>
+  </section>
+
+  <section data-page="maintenance" class="page-panel panel">
+    <h2>Recovery centre</h2>
+    <p class="muted">Undo file transactions or restore files replaced by a package installation.</p>
+    <div class="actions">
+      <button id="refreshRecovery">Refresh recovery points</button>
+      <button id="openRecoveryFolder">Open recovery folder</button>
+    </div>
+    <div id="recovery"></div>
+  </section>
+
+  <section data-page="maintenance" class="page-panel panel">
+    <h2>Project organiser</h2>
+    <p class="muted">Finds useful files that are cluttering the project root and proposes sensible folders. Nothing moves until you select it and approve.</p>
+    <div class="actions">
+      <button id="scanMisplaced">Analyse root folder</button>
+      <button id="moveSelected" disabled>Move selected items</button>
+    </div>
+    <div id="moves"></div>
+  </section>
+
+  <section data-page="build" class="page-panel panel seamless-app-panel">
+    <h2>FriendshipTree seamless app workflow</h2>
+    <p class="muted">One report out, one verified update back, then one-click build and installation. Capgo is not required.</p>
+    <div class="workflow-grid">
+      <div class="workflow-step"><b>1. Sync with ChatGPT</b><span>Exports the current active source, Project DNA, architecture and diagnostics as one ZIP.</span><button id="exportAiSync">Create AI Sync package</button></div>
+      <div class="workflow-step"><b>2. Install returned update</b><span>Drop the returned <code>.ftupdate</code> into the Seamless Update Centre above. App updates are backed up and applied transactionally.</span></div>
+      <div class="workflow-step"><b>3. Build and deploy</b><span>Builds the web app, syncs Capacitor, creates the APK and installs it over USB or wireless ADB.</span><button id="deployAppOneClick">Build + install FriendshipTree</button></div>
+      <div class="workflow-step"><b>4. Free remote delivery</b><span>Copies the APK and checksum into a Google Drive or other synced folder so it can be downloaded on your phone.</span><button id="publishApkFree">Publish APK to synced folder</button></div>
+    </div>
+    <div class="wireless-row">
+      <input id="wirelessAddress" placeholder="Phone IP:port, e.g. 192.168.1.42:5555">
+      <button id="connectWireless">Connect wireless ADB</button>
+      <button id="checkDevices">Check connected devices</button>
+    </div>
+    <div id="seamlessAppStatus" class="status-box muted">Ready.</div>
+  </section>
+
+  <section data-page="build" class="page-panel panel">
+    <h2>Build and Android controls</h2>
+    <div class="button-grid">
+      <button data-action="npmInstall">Install Studio dependencies</button>
+      <button data-action="runDoctor">Run Doctor</button>
+      <button data-action="buildWeb">Build web app</button>
+      <button data-action="syncAndroid">Sync Android</button>
+      <button data-action="buildApk">Build APK</button>
+      <button data-action="installApk">Install APK on phone</button>
+    </div>
+  </section>
+
+  <section data-page="source" class="page-panel panel source-control-panel">
+    <div class="source-control-heading">
+      <div><h2>Source Control</h2><p class="muted">Current Git state for the FriendshipTree repository.</p></div>
+      <div class="actions"><button id="gitRefresh">Refresh</button><button id="gitOpenGithub" class="secondary-button">Open GitHub</button></div>
+    </div>
+    <div id="gitSummary" class="git-summary-grid"><p class="muted">Reading repository…</p></div>
+    <div class="git-action-row">
+      <button id="gitPush">Push</button>
+      <button id="gitPull" class="secondary-button">Pull</button>
+      <span id="gitActionStatus" class="muted">No Git operation running.</span>
+    </div>
+    <div class="git-columns">
+      <article><h3>Working tree</h3><div id="gitChanges" class="git-file-list"><p class="muted">No data yet.</p></div></article>
+      <article><h3>Recent commits</h3><div id="gitCommits" class="git-commit-list"><p class="muted">No data yet.</p></div></article>
+    </div>
+  </section>
+
+  <section data-page="project" class="page-panel panel">
+    <h2>File preview</h2>
+    <p class="muted">Use Preview beside a Cleaner or Explorer item. Studio shows metadata, hash, dependency counts and a read-only text preview.</p>
+    <div id="preview"><p class="muted">No file selected.</p></div>
+  </section>
+
+  <section data-page="diagnostics" class="page-panel panel">
+    <h2>Live log</h2>
+    <pre id="log">Ready.</pre>
+  </section>
+</main>
+  </div>
+</div>
+<div id="studioCommandPalette" class="command-palette-backdrop" hidden>
+  <section class="command-palette-dialog" role="dialog" aria-modal="true" aria-labelledby="commandPaletteTitle">
+    <header class="command-palette-header">
+      <div>
+        <p class="eyebrow">Studio commands</p>
+        <h2 id="commandPaletteTitle">Run a command</h2>
+      </div>
+      <button id="closeCommandPalette" class="icon-button" type="button" aria-label="Close command palette">×</button>
+    </header>
+    <div class="command-palette-search">
+      <span aria-hidden="true">⌘</span>
+      <input id="commandPaletteInput" type="search" autocomplete="off"
+        placeholder="Type a command, action or keyword…" aria-label="Search Studio commands"
+        aria-controls="commandPaletteResults" aria-autocomplete="list">
+    </div>
+    <div id="commandPaletteResults" class="command-palette-results" role="listbox"></div>
+    <footer class="command-palette-footer">
+      <span>↑ ↓ choose</span>
+      <span>Enter run</span>
+      <span>★ favourite</span>
+      <span>Esc close</span>
+    </footer>
+  </section>
+</div>
+
+
+<div id="studioNotificationDrawer" class="notification-drawer-backdrop" hidden>
+  <aside class="notification-drawer" role="dialog" aria-modal="true" aria-labelledby="notificationDrawerTitle">
+    <header class="notification-drawer-header">
+      <div>
+        <p class="eyebrow">Studio activity</p>
+        <h2 id="notificationDrawerTitle">Notifications</h2>
+      </div>
+      <div class="notification-header-actions">
+        <button id="markAllNotificationsRead" type="button">Mark all read</button>
+        <button id="clearAllNotifications" type="button">Clear</button>
+        <button id="closeNotificationDrawer" class="icon-button" type="button" aria-label="Close notifications">×</button>
+      </div>
+    </header>
+    <div id="notificationFilterBar" class="notification-filter-bar" role="group" aria-label="Notification filters">
+      <button type="button" data-notification-filter="all" class="active">All</button>
+      <button type="button" data-notification-filter="unread">Unread</button>
+      <button type="button" data-notification-filter="success">Success</button>
+      <button type="button" data-notification-filter="warning">Warnings</button>
+      <button type="button" data-notification-filter="error">Errors</button>
+    </div>
+    <div id="studioNotificationList" class="notification-list"></div>
+  </aside>
+</div>
+
+<script src="renderer.js"></script>
+<script src="studio-core.js"></script>
+<script src="universal-search.js"></script>
+<script src="command-registry.js"></script>
+<script src="notification-centre.js"></script>
+</body>
+</html>

@@ -1,0 +1,31 @@
+You are the technical partner for the FriendshipTree software project.
+
+READING ORDER
+1. Read AI/AI_SPECIFICATION.md.
+2. Read AI/MANIFEST.json.
+3. Read AI/ARCHITECTURE.md and AI/DEVELOPMENT_RULES.md.
+4. Read AI/CURRENT_STATE.md, AI/KNOWN_ISSUES.md and AI/NEXT_TASKS.md.
+5. Use AI/FILE_INDEX.json to locate files.
+6. Inspect the exact relevant source file before editing.
+
+SOURCE OF TRUTH
+- Exact current source overrides summaries.
+- Canonical AI documents override old chat summaries.
+- Never ask for information already present in the workspace.
+- Never invent paths, package formats, IPC contracts, launchers, update systems, recovery systems, build commands or architecture.
+- Flag conflicts and prefer exact current source plus the canonical AI specification.
+
+SYSTEM BOUNDARIES
+- FriendshipTree app: React/Vite, packaged for Android with Capacitor.
+- FriendshipTree Studio: developer-facing desktop environment.
+- Electron Launcher: user-facing dashboard and taskbar entry.
+- Forge: canonical Studio update, validation, confirmation and rollback engine.
+- Do not create competing launchers, updaters, Core applications or parallel Studio projects.
+
+SAFETY
+- Inspect the live Forge source before creating .ftupdate packages.
+- Preserve rollback and backups.
+- Preserve user data and existing persistence.
+- State exact paths and working directories.
+- Use complete copy-pasteable PowerShell where PowerShell is required.
+- Update canonical AI documentation after architectural or workflow changes.

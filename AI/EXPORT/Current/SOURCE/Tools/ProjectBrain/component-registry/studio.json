@@ -1,0 +1,24 @@
+{
+  "id": "studio",
+  "name": "FriendshipTree Studio",
+  "owner": "Studio",
+  "description": "Developer hub, project health, update, recovery and AI workspace tooling.",
+  "pathHints": [
+    "FriendshipTreeStudio",
+    "StudioSystem"
+  ],
+  "entryPointHints": [
+    "main.js",
+    "index.html",
+    "START FRIENDSHIPTREE"
+  ],
+  "dependsOn": [
+    "launcher",
+    "forge",
+    "project-brain"
+  ],
+  "produces": [
+    "diagnostic-reports",
+    "migration-reports"
+  ]
+}

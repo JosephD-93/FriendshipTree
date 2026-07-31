@@ -271,3 +271,75 @@ window.launcher.onStudioUpdateProgress?.(event => {
   const progress = $('#studioPackagerProgress');
   if (progress) progress.textContent = event.message;
 });
+
+let githubBackupState = null;
+
+function renderGitHubChanges(status) {
+  githubBackupState = status;
+  const summary = $('#githubSummary');
+  const changes = $('#githubChanges');
+  const pushButton = $('#pushGitHubBackup');
+  summary.textContent = `${status.branch} → ${status.upstream || 'no upstream'} · ${status.safeCount} selectable · ${status.excludedCount} excluded`;
+  changes.innerHTML = '';
+  if (!status.entries.length) {
+    changes.innerHTML = '<p class="empty">Git is already up to date locally. There are no files to commit.</p>';
+    pushButton.disabled = true;
+    return;
+  }
+  status.entries.forEach(entry => {
+    const row = document.createElement('label');
+    row.className = `github-change ${entry.unsafe ? 'excluded' : ''}`;
+    row.innerHTML = `
+      <input type="checkbox" data-github-path="${escapeText(entry.path)}" ${entry.includedByDefault ? 'checked' : ''} ${entry.unsafe ? 'disabled' : ''}>
+      <span class="github-change-status">${escapeText(entry.status.trim() || '??')}</span>
+      <span class="github-change-path">${escapeText(entry.path)}</span>
+      ${entry.unsafe ? `<small>${escapeText(entry.reason)}</small>` : ''}`;
+    changes.appendChild(row);
+  });
+  pushButton.disabled = !status.upstream || !status.safeCount;
+}
+
+async function checkGitHubChanges() {
+  const progress = $('#githubBackupProgress');
+  progress.textContent = 'Checking the local repository…';
+  try {
+    const status = await window.launcher.getGitHubBackupStatus();
+    renderGitHubChanges(status);
+    progress.textContent = status.remote ? `Remote: ${status.remote}` : 'No origin remote is configured.';
+  } catch (error) {
+    progress.textContent = `Cannot check Git: ${error.message || error}`;
+    toast(error.message || String(error), true);
+  }
+}
+
+$('#checkGitHubChanges')?.addEventListener('click', checkGitHubChanges);
+$('#pushGitHubBackup')?.addEventListener('click', async () => {
+  const button = $('#pushGitHubBackup');
+  const progress = $('#githubBackupProgress');
+  const paths = [...document.querySelectorAll('[data-github-path]:checked')].map(input => input.dataset.githubPath);
+  const message = $('#githubCommitMessage').value.trim();
+  if (!paths.length) return toast('Select at least one safe change.', true);
+  if (!message) return toast('Enter a short backup description.', true);
+  const preview = paths.slice(0, 8).join('\n');
+  const remainder = paths.length > 8 ? `\n…and ${paths.length - 8} more` : '';
+  if (!confirm(`Commit and push these ${paths.length} change(s)?\n\n${preview}${remainder}\n\nMessage: ${message}`)) return;
+  button.disabled = true;
+  progress.textContent = 'Starting controlled GitHub backup…';
+  try {
+    const result = await window.launcher.pushGitHubBackup({ paths, message });
+    const success = `Pushed commit ${result.commit} to ${result.upstream}.`;
+    progress.textContent = success;
+    toast(success);
+    $('#githubCommitMessage').value = '';
+    await checkGitHubChanges();
+  } catch (error) {
+    progress.textContent = `Backup stopped: ${error.message || error}`;
+    toast(error.message || String(error), true);
+  } finally {
+    button.disabled = !githubBackupState?.upstream || !githubBackupState?.safeCount;
+  }
+});
+window.launcher.onGitHubBackupProgress?.(event => {
+  const progress = $('#githubBackupProgress');
+  if (progress) progress.textContent = event.message;
+});

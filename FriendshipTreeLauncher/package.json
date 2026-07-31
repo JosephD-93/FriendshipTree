@@ -1,7 +1,7 @@
 {
   "name": "friendshiptree-launcher",
-  "version": "1.0.5",
+  "version": "1.0.8",
   "private": true,
   "main": "main.js",
-  "description": "FriendshipTree Launcher 1.0.5: supports Windows half-screen snapping and reliably opens Forge recovery controls."
+  "description": "FriendshipTree Launcher 1.0.8: corrects Git status path parsing and makes failed staging self-cleaning."
 }

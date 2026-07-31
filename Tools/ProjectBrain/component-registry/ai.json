@@ -1,0 +1,22 @@
+{
+  "id": "ai",
+  "name": "AI Workspace",
+  "owner": "AI",
+  "description": "Authoritative AI knowledge, context generation and validation material.",
+  "pathHints": [
+    "AI",
+    "SOURCE/AI"
+  ],
+  "entryPointHints": [
+    "AI/MANIFEST.json",
+    "AI/CURRENT_STATE.md"
+  ],
+  "dependsOn": [
+    "app",
+    "studio",
+    "documentation"
+  ],
+  "produces": [
+    "ai-workspace-export"
+  ]
+}

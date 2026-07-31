@@ -1,0 +1,63 @@
+{
+  "validatedUtc": "2026-07-31T10:06:15.304Z",
+  "healthy": true,
+  "passed": 11,
+  "failed": 0,
+  "results": [
+    {
+      "check": "Required canonical file",
+      "target": "C:\\Users\\Joe\\FriendshipTree\\AI\\AI_SPECIFICATION.md",
+      "passed": true
+    },
+    {
+      "check": "Required canonical file",
+      "target": "C:\\Users\\Joe\\FriendshipTree\\AI\\MANIFEST.json",
+      "passed": true
+    },
+    {
+      "check": "Required canonical file",
+      "target": "C:\\Users\\Joe\\FriendshipTree\\AI\\ARCHITECTURE.md",
+      "passed": true
+    },
+    {
+      "check": "Required canonical file",
+      "target": "C:\\Users\\Joe\\FriendshipTree\\AI\\DEVELOPMENT_RULES.md",
+      "passed": true
+    },
+    {
+      "check": "Required canonical file",
+      "target": "C:\\Users\\Joe\\FriendshipTree\\AI\\CURRENT_STATE.md",
+      "passed": true
+    },
+    {
+      "check": "Required canonical file",
+      "target": "C:\\Users\\Joe\\FriendshipTree\\AI\\KNOWN_ISSUES.md",
+      "passed": true
+    },
+    {
+      "check": "Required canonical file",
+      "target": "C:\\Users\\Joe\\FriendshipTree\\AI\\NEXT_TASKS.md",
+      "passed": true
+    },
+    {
+      "check": "Required canonical file",
+      "target": "C:\\Users\\Joe\\FriendshipTree\\AI\\CHANGELOG.md",
+      "passed": true
+    },
+    {
+      "check": "Required canonical file",
+      "target": "C:\\Users\\Joe\\FriendshipTree\\AI\\FILE_INDEX.json",
+      "passed": true
+    },
+    {
+      "check": "Canonical Forge source",
+      "target": "C:\\Users\\Joe\\FriendshipTree\\StudioSystem\\Bootstrap\\FriendshipTree-Forge.ps1",
+      "passed": true
+    },
+    {
+      "check": "Electron Launcher main process",
+      "target": "C:\\Users\\Joe\\FriendshipTree\\FriendshipTreeLauncher\\main.js",
+      "passed": true
+    }
+  ]
+}

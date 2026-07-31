@@ -1,0 +1,10 @@
+FriendshipTree Studio V0.9
+
+Fixes:
+- Manifest button now displays progress, completion, file count and errors.
+- Manifest IPC returns a consistent result object.
+- Dependency analysis excludes Studio, node_modules, update-manager backups, internal metadata and generated Android web assets.
+- Cleaner explicitly explains when no dry-run is available because no candidates exist.
+- Added Export project analysis in the Cleaner section.
+- APK health check inspects the actual Android output locations even though build folders are excluded from source analysis.
+- Disabled buttons now use a clear unavailable cursor instead of appearing busy.

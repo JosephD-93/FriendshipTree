@@ -12,4 +12,12 @@ Version 1.0.5 lowers the Launcher's minimum window dimensions so Windows can
 snap it into either half of a standard 1920-pixel display. The existing
 responsive layout takes over automatically at the narrower snapped width.
 
+Version 1.0.6 lowers the native minimum dimensions further so Windows can use
+an exact half-screen snap at common 125% and 150% display scaling levels. It
+also adds a compact responsive layout for those narrower logical widths.
+
+Version 1.0.7 adds a controlled GitHub backup panel. It previews and explicitly
+selects changes, excludes runtime and generated paths, checks that the remote is
+not ahead, creates a descriptive commit, and uses a normal non-forced push.
+
 The installer searches for an existing Electron runtime in the FriendshipTree project and creates permanent Desktop and Start Menu shortcuts.

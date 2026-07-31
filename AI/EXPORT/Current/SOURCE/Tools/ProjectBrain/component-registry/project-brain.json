@@ -1,0 +1,18 @@
+{
+  "id": "project-brain",
+  "name": "Project Brain",
+  "owner": "Studio",
+  "description": "Persistent SQLite index of project files, components, relationships and scan history.",
+  "pathHints": [
+    ".studio/project-brain"
+  ],
+  "entryPointHints": [
+    "project-brain.db"
+  ],
+  "dependsOn": [],
+  "produces": [
+    "project-brain.db",
+    "brain-summary.json",
+    "brain-export.zip"
+  ]
+}

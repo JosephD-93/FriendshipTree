@@ -112,6 +112,24 @@
           <div id="studioPackagerProgress" class="delivery-progress"></div>
         </article>
 
+        <article class="card panel github-backup-panel" id="githubBackup">
+          <div class="panel-heading">
+            <div><p class="eyebrow">CONTROLLED CLOUD BACKUP</p><h3>GitHub backup</h3></div>
+            <button class="secondary" id="checkGitHubChanges">Check changes</button>
+          </div>
+          <p class="muted">Review the exact files first. Runtime versions, backups, logs, dependencies and generated folders are excluded automatically.</p>
+          <div class="github-summary" id="githubSummary">Not checked yet.</div>
+          <div class="github-changes" id="githubChanges"></div>
+          <label class="github-message">
+            <span>Backup description</span>
+            <input id="githubCommitMessage" maxlength="120" placeholder="e.g. Save Studio and Launcher improvements">
+          </label>
+          <div class="github-actions">
+            <button class="primary large" id="pushGitHubBackup" disabled>Commit selected files &amp; push</button>
+          </div>
+          <div id="githubBackupProgress" class="delivery-progress"></div>
+        </article>
+
         <article class="card panel">
           <div class="panel-heading">
             <div><p class="eyebrow">INSTALLED STUDIOS</p><h3>Versions</h3></div>

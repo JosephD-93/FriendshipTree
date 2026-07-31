@@ -1,0 +1,10 @@
+FriendshipTree Studio safer self-test upgrade
+
+Adds non-destructive diagnostic coverage only.
+Does not build, install, restore, move, quarantine, delete, or repair project files.
+The only temporary files created by tests are isolated probes that are deleted immediately.
+
+Backup:
+C:\Users\Joe\FriendshipTree\FriendshipTreeStudio\.friendshiptree-patches\main-before-safer-self-test-2026-07-24T14-28-21-229Z.js
+Installed:
+2026-07-24T14:28:21.325Z

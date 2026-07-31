@@ -1,0 +1,8 @@
+FriendshipTree Studio V2.3
+
+- Traces active source recursively from src/main.jsx (or the detected entry file).
+- Separates active, test/support, unreferenced and historical snapshot files.
+- Detects large unreferenced files structurally similar to active source.
+- Excludes historical copies from systems, line totals, components and technical-debt counts.
+- Filters generic repeated function names.
+- Never moves a source file automatically; candidates remain review-only.

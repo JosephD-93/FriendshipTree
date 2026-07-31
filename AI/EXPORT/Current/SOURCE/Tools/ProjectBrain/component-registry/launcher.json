@@ -1,0 +1,20 @@
+{
+  "id": "launcher",
+  "name": "FriendshipTree Launcher",
+  "owner": "Launcher",
+  "description": "Top-level launch and delivery interface.",
+  "pathHints": [
+    "FriendshipTreeLauncher"
+  ],
+  "entryPointHints": [
+    "FriendshipTreeLauncher/main.js",
+    "FriendshipTreeLauncher/renderer.js"
+  ],
+  "dependsOn": [
+    "studio",
+    "forge"
+  ],
+  "produces": [
+    "launcher-runtime"
+  ]
+}

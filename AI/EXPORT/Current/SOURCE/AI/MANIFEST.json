@@ -1,0 +1,67 @@
+{
+  "format": "friendshiptree-complete-ai-handover-v1",
+  "generatedUtc": "2026-07-30T22:10:28.688Z",
+  "projectName": "FriendshipTree",
+  "canonicalRoot": "C:\\Users\\Joe\\FriendshipTree",
+  "aiRoot": "C:\\Users\\Joe\\FriendshipTree\\AI",
+  "purpose": "Transfer the meaningful live source and documentation into a ChatGPT Project.",
+  "sourceAuthority": "Files classified exact-current-source were copied from the canonical project root.",
+  "systems": {
+    "app": {
+      "path": "C:\\Users\\Joe\\FriendshipTree",
+      "role": "React/Vite application packaged with Capacitor Android",
+      "indexedFiles": 20
+    },
+    "android": {
+      "path": "C:\\Users\\Joe\\FriendshipTree\\android",
+      "role": "Capacitor Android project and native widget implementation",
+      "indexedFiles": 42
+    },
+    "studio": {
+      "path": "C:\\Users\\Joe\\FriendshipTree\\FriendshipTreeStudio",
+      "versions": "C:\\Users\\Joe\\FriendshipTree\\StudioSystem\\Versions",
+      "indexedFiles": 379
+    },
+    "launcher": {
+      "path": "C:\\Users\\Joe\\FriendshipTree\\FriendshipTreeLauncher",
+      "role": "Electron launcher and installation/update dashboard",
+      "indexedFiles": 15,
+      "inclusionNote": "Included as real current source even though it has not yet achieved its intended ease-of-use."
+    },
+    "forge": {
+      "path": "C:\\Users\\Joe\\FriendshipTree\\StudioSystem\\Bootstrap\\FriendshipTree-Forge.ps1",
+      "role": "Canonical update and recovery engine",
+      "indexedFiles": 3
+    }
+  },
+  "exclusions": {
+    "generatedAndDependencyFolders": [
+      "node_modules",
+      "build",
+      "dist",
+      ".gradle",
+      ".git",
+      ".idea",
+      "coverage",
+      "cache",
+      "tmp"
+    ],
+    "historicalAndRecoveryFolders": [
+      "Archive",
+      "backups",
+      ".update-manager",
+      "quarantine",
+      "unnecessary"
+    ],
+    "exportFolders": [
+      "AI/EXPORT"
+    ],
+    "oversizedFiles": "Files larger than 10485760 bytes"
+  },
+  "export": {
+    "currentFolder": "C:\\Users\\Joe\\FriendshipTree\\AI\\EXPORT\\Current",
+    "zip": "C:\\Users\\Joe\\FriendshipTree\\AI\\EXPORT\\FriendshipTree-AI-Workspace.zip",
+    "requestedFiles": "C:\\Users\\Joe\\FriendshipTree\\AI\\EXPORT\\Requested-Files"
+  },
+  "indexedFileCount": 1068
+}

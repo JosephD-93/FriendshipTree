@@ -4,6 +4,7 @@ const fs = require("fs");
 const { spawn } = require("child_process");
 const delivery = require("./delivery-pipeline");
 const studioPackager = require("./studio-update-packager");
+const githubBackup = require("./github-backup");
 
 const PROJECT_ROOT = "C:\\Users\\Joe\\FriendshipTree";
 const SYSTEM_ROOT = path.join(PROJECT_ROOT, "StudioSystem");
@@ -125,8 +126,8 @@ function createWindow() {
   win = new BrowserWindow({
     width: 1180,
     height: 790,
-    minWidth: 720,
-    minHeight: 560,
+    minWidth: 520,
+    minHeight: 480,
     backgroundColor: "#0c1711",
     title: "FriendshipTree Launcher",
     webPreferences: {
@@ -237,6 +238,13 @@ ipcMain.handle("logs:tail", () => {
   if (!files.length) return [];
   const lines = fs.readFileSync(files[0].p, "utf8").split(/\r?\n/).filter(Boolean);
   return lines.slice(-8).reverse();
+});
+
+ipcMain.handle("github-backup:status", async () => githubBackup.getStatus(PROJECT_ROOT));
+ipcMain.handle("github-backup:push", async (_event, request) => {
+  return githubBackup.commitAndPush(PROJECT_ROOT, request?.paths, request?.message, message => {
+    try { win?.webContents?.send("github-backup:progress", { message, at: new Date().toISOString() }); } catch {}
+  });
 });
 
 app.whenReady().then(createWindow);

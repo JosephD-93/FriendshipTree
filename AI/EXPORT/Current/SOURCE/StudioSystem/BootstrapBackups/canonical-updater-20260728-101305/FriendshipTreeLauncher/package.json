@@ -1,0 +1,7 @@
+{
+  "name": "friendshiptree-launcher",
+  "version": "1.0.1",
+  "private": true,
+  "main": "main.js",
+  "description": "FriendshipTree Launcher 1.0.1: installs Studio updates into versioned slots and activates the new slot safely."
+}

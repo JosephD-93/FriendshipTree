@@ -1,0 +1,11 @@
+FriendshipTree Studio V1.4
+
+Cleaner presentation update:
+- Candidates are naturally sorted, including numerical version order.
+- Folders are listed before individual files.
+- Each candidate has a compact numbered row.
+- Evidence and cautions are collapsed under a Details control.
+- Added Select safe, Select all, Clear, and a live selected count.
+- Full paths are visually shortened but remain available in each row.
+
+No Cleaner safety or quarantine behaviour was weakened.

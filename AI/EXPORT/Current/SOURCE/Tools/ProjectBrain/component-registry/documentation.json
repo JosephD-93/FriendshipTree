@@ -1,0 +1,16 @@
+{
+  "id": "documentation",
+  "name": "Documentation",
+  "owner": "Documentation",
+  "description": "Human-readable project, developer and architectural documentation.",
+  "pathHints": [
+    "Docs",
+    "Documentation"
+  ],
+  "entryPointHints": [],
+  "dependsOn": [],
+  "produces": [
+    "guides",
+    "decisions"
+  ]
+}

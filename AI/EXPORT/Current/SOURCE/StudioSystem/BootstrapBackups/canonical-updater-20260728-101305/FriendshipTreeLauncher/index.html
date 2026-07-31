@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>FriendshipTree Launcher</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="ambient ambient-one"></div>
+  <div class="ambient ambient-two"></div>
+
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="tree-mark">🌳</div>
+        <div>
+          <p class="eyebrow">FRIENDSHIPTREE</p>
+          <h1>Launcher</h1>
+        </div>
+      </div>
+      <div class="global-search" role="search">
+        <span aria-hidden="true">⌕</span>
+        <input id="globalSearchInput" type="search" placeholder="Search Launcher…" autocomplete="off" aria-label="Search Launcher">
+        <button id="clearGlobalSearch" class="search-clear" title="Clear search" aria-label="Clear search">×</button>
+      </div>
+      <div class="top-actions">
+        <button class="icon-button" id="refreshButton" title="Refresh">↻</button>
+        <button class="secondary" data-folder="forge">Forge folder</button>
+      </div>
+    </header>
+
+    <section class="hero card">
+      <div>
+        <div class="status-line"><span class="pulse"></span><span id="heroStatus">Checking system…</span></div>
+        <h2>FriendshipTree Studio <span id="currentVersion">—</span></h2>
+        <p>Build, update and recover your FriendshipTree development environment from one place.</p>
+        <div class="hero-actions">
+          <button class="primary large" id="launchCurrent">▶ Launch Studio</button>
+          <button class="secondary large" id="openClassicForge">Manage updates & recovery</button>
+        </div>
+      </div>
+      <div class="version-orbit">
+        <div class="orbit-ring"></div>
+        <div class="orbit-core">FT</div>
+        <span class="orbit-dot dot-a"></span>
+        <span class="orbit-dot dot-b"></span>
+        <span class="orbit-dot dot-c"></span>
+      </div>
+    </section>
+
+    <section class="metrics">
+      <article class="metric card">
+        <span class="metric-icon">●</span>
+        <div><p>Studio</p><strong id="studioHealth">Checking</strong></div>
+      </article>
+      <article class="metric card">
+        <span class="metric-icon">◆</span>
+        <div><p>Forge engine</p><strong id="forgeHealth">Checking</strong></div>
+      </article>
+      <article class="metric card">
+        <span class="metric-icon">▣</span>
+        <div><p>Updates waiting</p><strong id="updateCount">0</strong></div>
+      </article>
+      <article class="metric card">
+        <span class="metric-icon">⌁</span>
+        <div><p>Android project</p><strong id="androidHealth">Checking</strong></div>
+      </article>
+    </section>
+
+    <section class="workspace">
+      <div class="left-column">
+        <article class="card panel">
+          <div class="panel-heading">
+            <div><p class="eyebrow">QUICK ACCESS</p><h3>Project tools</h3></div>
+          </div>
+          <div class="action-grid">
+            <button class="tool-button" id="refreshAIWorkspace"><span>🤖</span><div><strong>Refresh AI Workspace</strong><small>Update knowledge, validate and export</small></div></button>
+            <button class="tool-button" id="validateAIWorkspace"><span>✓</span><div><strong>Validate AI Workspace</strong><small>Check required knowledge and system files</small></div></button>
+            <button class="tool-button" id="exportRequestedFile"><span>📄</span><div><strong>Export requested file</strong><small>Copy an exact source file with receipt</small></div></button>
+            <button class="tool-button" id="openAIWorkspace"><span>📂</span><div><strong>Open AI Workspace</strong><small>Open the permanent canonical folder</small></div></button>
+            <button class="tool-button" id="copyAIInstructions"><span>📋</span><div><strong>Copy Project instructions</strong><small>Copy the canonical AI rules</small></div></button>
+            <button class="tool-button" id="exportChatGPTProject"><span>🤖</span><div><strong>Export for ChatGPT</strong><small>One-file Project handover</small></div></button>
+            <button class="tool-button" data-folder="project"><span>📁</span><div><strong>Project</strong><small>Open FriendshipTree files</small></div></button>
+            <button class="tool-button" data-folder="android"><span>📱</span><div><strong>Android</strong><small>Open the Android project</small></div></button>
+            <button class="tool-button" data-folder="docs"><span>📘</span><div><strong>Documentation</strong><small>Handbook and handover</small></div></button>
+            <button class="tool-button" data-folder="inbox"><span>📦</span><div><strong>Update Inbox</strong><small>Add .ftupdate packages</small></div></button>
+            <button class="tool-button" data-folder="versions"><span>🗂️</span><div><strong>Versions</strong><small>Browse installed Studios</small></div></button>
+            <button class="tool-button" data-folder="logs"><span>🧾</span><div><strong>Logs</strong><small>Inspect Forge activity</small></div></button>
+          </div>
+        </article>
+
+
+        <article class="card panel delivery-panel" id="deliveryCentre">
+          <div class="panel-heading">
+            <div><p class="eyebrow">PHONE → CLOUD → LAPTOP</p><h3>Delivery Centre</h3></div>
+            <button class="secondary" id="scanDeliveries">Refresh now</button>
+          </div>
+          <p class="muted">Save a FriendshipTree <code>.ftupdate</code> or <code>.zip</code> from ChatGPT into either incoming folder. Launcher checks when it opens and every minute.</p>
+          <div class="delivery-folders">
+            <button class="folder-chip" data-delivery-folder="cloud"><b>Google Drive incoming</b><small id="cloudIncomingPath">G:\My Drive\FriendshipTree\Incoming</small></button>
+            <button class="folder-chip" data-delivery-folder="local"><b>Local incoming</b><small id="localIncomingPath">C:\Users\Joe\FriendshipTree\StudioSystem\Incoming</small></button>
+          </div>
+          <div class="delivery-summary"><strong id="deliverySummary">Scanning for deliveries…</strong><span id="deliveryLastScan"></span></div>
+          <div id="deliveryProgress" class="delivery-progress"></div>
+          <div id="deliveryItems" class="delivery-items"><p class="empty">Scanning…</p></div>
+        </article>
+
+        <article class="card panel">
+          <div class="panel-heading">
+            <div><p class="eyebrow">INSTALLED STUDIOS</p><h3>Versions</h3></div>
+            <span class="subtle" id="versionCount">0 versions</span>
+          </div>
+          <div id="versions" class="version-list"></div>
+        </article>
+      </div>
+
+      <aside class="right-column">
+        <article class="card panel">
+          <div class="panel-heading"><div><p class="eyebrow">STATUS</p><h3>Release state</h3></div></div>
+          <dl class="release-list">
+            <div><dt>Current</dt><dd id="releaseCurrent">—</dd></div>
+            <div><dt>Candidate</dt><dd id="releaseCandidate">None</dd></div>
+            <div><dt>Last working</dt><dd id="releaseLast">—</dd></div>
+          </dl>
+          <button class="secondary full" id="manageRelease">Open recovery controls</button>
+        </article>
+
+        <article class="card panel activity-panel">
+          <div class="panel-heading"><div><p class="eyebrow">RECENT ACTIVITY</p><h3>Forge log</h3></div></div>
+          <div id="activity" class="activity"><p class="empty">No recent entries.</p></div>
+        </article>
+      </aside>
+    </section>
+
+    <div id="toast" class="toast"></div>
+  </main>
+  <script src="renderer.js"></script>
+</body>
+</html>

@@ -16,6 +16,9 @@ contextBridge.exposeInMainWorld("launcher", {
   scanDeliveries: () => ipcRenderer.invoke("delivery:scan"),
   installDelivery: packagePath => ipcRenderer.invoke("delivery:install", packagePath),
   openDeliveryFolder: key => ipcRenderer.invoke("delivery:open-folder", key),
+  getGitHubBackupStatus: () => ipcRenderer.invoke("github-backup:status"),
+  pushGitHubBackup: request => ipcRenderer.invoke("github-backup:push", request),
   onStudioUpdateProgress: callback => ipcRenderer.on("studio-update:progress", (_event, payload) => callback(payload)),
-  onDeliveryProgress: callback => ipcRenderer.on("delivery:progress", (_event, payload) => callback(payload))
+  onDeliveryProgress: callback => ipcRenderer.on("delivery:progress", (_event, payload) => callback(payload)),
+  onGitHubBackupProgress: callback => ipcRenderer.on("github-backup:progress", (_event, payload) => callback(payload))
 });

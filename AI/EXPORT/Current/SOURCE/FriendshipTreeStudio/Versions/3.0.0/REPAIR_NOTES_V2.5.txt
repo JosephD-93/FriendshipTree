@@ -1,0 +1,5 @@
+FriendshipTree Studio V2.5
+
+- Adds .ftupdate packages, drag-and-drop updates and double-click association.
+- Verifies hashes, backs up changed files, rolls back failures and restarts automatically.
+- This is the final one-time manual bootstrap package.

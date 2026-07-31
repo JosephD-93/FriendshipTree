@@ -1,0 +1,12 @@
+{
+  "name": "friendshiptree-studio",
+  "version": "2.5.0",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "dependencies": {
+    "electron": "^31.7.7"
+  },
+  "description": "FriendshipTree Studio V2.5 introduces seamless verified .ftupdate packages, drag-and-drop updates, double-click file association, automatic backup, rollback, installation and restart."
+}

@@ -1,0 +1,6 @@
+FriendshipTree Studio V1.3
+
+- Fixes the demonstrated quarantine failure: hash verification used the project scanner, which excludes .studio, so every moved folder appeared empty after being placed in quarantine.
+- Adds a dedicated hashing walker that includes quarantine contents.
+- Adds a regression self-test for equivalent folder hashes inside .studio/Quarantine.
+- Expected self-test result is now 7 passed, 0 failed.

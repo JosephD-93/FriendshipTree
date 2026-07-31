@@ -1,0 +1,7 @@
+FriendshipTree Studio V1.6
+
+- Added Project Organiser for root-folder clutter.
+- Groups documentation, reports, releases, design assets, animation packs and archives.
+- Compact numbered list with collapsible details and multi-select moves.
+- Every move is recorded as a reversible transaction.
+- Cleaner remains deliberately conservative and handles disposal/quarantine; Organiser handles useful-but-misplaced files.

@@ -1,0 +1,6 @@
+FriendshipTree Studio V1.1
+
+- Redirects Electron and Chromium caches to .studio/ElectronData to prevent Windows Access denied cache errors.
+- Quarantine now falls back to verified copy-and-delete when Windows blocks a rename.
+- Cleanup completion shows exact source, destination, and move method.
+- Adds Open quarantine folder button.

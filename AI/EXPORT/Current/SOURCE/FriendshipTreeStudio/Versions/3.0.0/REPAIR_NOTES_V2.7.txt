@@ -1,0 +1,12 @@
+FriendshipTree Studio V2.7
+
+AUTOMATIC UPDATE INBOX
+- Watches C:\Users\Joe\FriendshipTree\Updates\Inbox while Studio is running.
+- Any .ftupdate saved there is processed automatically after the file becomes stable.
+- The package manifest determines whether Studio itself or the FriendshipTree app is updated.
+- Every package is hash-verified before installation.
+- Existing target files are backed up and installation remains transactional.
+- Successful packages move to Updates\Processed.
+- Invalid or failed packages move to Updates\Rejected.
+- Studio updates restart Studio automatically.
+- App updates patch the project and remain ready for Build + install FriendshipTree.
