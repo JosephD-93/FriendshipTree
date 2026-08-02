@@ -52,7 +52,7 @@ jobs:
         id: package
         shell: bash
         run: |
-          VERSION_NAME="$(awk '/versionName/ { value=$2; gsub(/["'"']/, "", value); print value; exit }' android/app/build.gradle)"
+          VERSION_NAME="$(awk '/versionName/ { gsub(/"/, "", $2); print $2; exit }' android/app/build.gradle)"
           test -n "$VERSION_NAME"
           APK_NAME="FriendshipTree-v${VERSION_NAME}-debug.apk"
           cp android/app/build/outputs/apk/debug/app-debug.apk "$APK_NAME"
