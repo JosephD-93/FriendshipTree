@@ -36,7 +36,9 @@ jobs:
         shell: bash
         env:
           ANDROID_DEBUG_KEYSTORE_BASE64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
+          EXPECTED_SIGNING_SHA256: D2D6C289FEDB1B0DDD55809CE6A2D78E96FA99F9070085053A3728C339FFF813
         run: |
+          set -euo pipefail
           if [ -z "$ANDROID_DEBUG_KEYSTORE_BASE64" ]; then
             echo "::error::ANDROID_DEBUG_KEYSTORE_BASE64 is not configured. Add the laptop's existing Android debug.keystore as this encrypted repository secret before publishing a phone-installable APK."
             exit 1
@@ -44,10 +46,15 @@ jobs:
           mkdir -p "$HOME/.android"
           printf '%s' "$ANDROID_DEBUG_KEYSTORE_BASE64" | base64 --decode > "$HOME/.android/debug.keystore"
           chmod 600 "$HOME/.android/debug.keystore"
-          keytool -list \
+          ACTUAL_SIGNING_SHA256="$(keytool -list -v \
             -keystore "$HOME/.android/debug.keystore" \
             -storepass android \
-            -alias androiddebugkey >/dev/null
+            -alias androiddebugkey | awk -F': ' '/SHA256:/{gsub(":", "", $2); print toupper($2); exit}')"
+          if [ "$ACTUAL_SIGNING_SHA256" != "$EXPECTED_SIGNING_SHA256" ]; then
+            echo "::error::The restored signing key does not match the FriendshipTree app installed on Joe's phone. Expected $EXPECTED_SIGNING_SHA256 but received ${ACTUAL_SIGNING_SHA256:-no fingerprint}. Replace ANDROID_DEBUG_KEYSTORE_BASE64 with C:\\Users\\Joe\\.android\\debug.keystore."
+            exit 1
+          fi
+          echo "Trusted FriendshipTree signing certificate verified: $ACTUAL_SIGNING_SHA256"
 
       - name: Install dependencies
         run: npm ci
@@ -66,10 +73,41 @@ jobs:
         working-directory: android
         run: ./gradlew assembleDebug
 
+      - name: Explicitly sign and verify phone-update APK
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        shell: bash
+        env:
+          EXPECTED_SIGNING_SHA256: D2D6C289FEDB1B0DDD55809CE6A2D78E96FA99F9070085053A3728C339FFF813
+        run: |
+          set -euo pipefail
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)"
+          if [ -z "$APKSIGNER" ]; then
+            echo "::error::Android apksigner was not found on the GitHub runner."
+            exit 1
+          fi
+          SOURCE_APK="android/app/build/outputs/apk/debug/app-debug.apk"
+          SIGNED_APK="android/app/build/outputs/apk/debug/app-debug-trusted.apk"
+          "$APKSIGNER" sign \
+            --ks "$HOME/.android/debug.keystore" \
+            --ks-key-alias androiddebugkey \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --out "$SIGNED_APK" \
+            "$SOURCE_APK"
+          "$APKSIGNER" verify --verbose --print-certs "$SIGNED_APK"
+          APK_SIGNING_SHA256="$("$APKSIGNER" verify --print-certs "$SIGNED_APK" | awk -F': ' '/certificate SHA-256 digest:/{gsub(":", "", $2); print toupper($2); exit}')"
+          if [ "$APK_SIGNING_SHA256" != "$EXPECTED_SIGNING_SHA256" ]; then
+            echo "::error::Finished APK has the wrong signing certificate. Expected $EXPECTED_SIGNING_SHA256 but received ${APK_SIGNING_SHA256:-no fingerprint}. Nothing will be published."
+            exit 1
+          fi
+          mv "$SIGNED_APK" "$SOURCE_APK"
+          echo "Finished APK signing certificate verified: $APK_SIGNING_SHA256"
+
       - name: Name APK and create checksum
         id: package
         shell: bash
         run: |
+          set -euo pipefail
           VERSION_NAME="$(awk '/versionName/ { gsub(/"/, "", $2); print $2; exit }' android/app/build.gradle)"
           test -n "$VERSION_NAME"
           APK_NAME="FriendshipTree-v${VERSION_NAME}-debug.apk"

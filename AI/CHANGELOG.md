@@ -2,3 +2,7 @@
 
 ## 2026-07-23
 - Created the permanent FriendshipTree AI subsystem.
+
+## 2026-08-02
+- Hardened the GitHub Android build against unusable cloud APKs. Main-branch builds now require the established FriendshipTree signing certificate, explicitly sign the finished APK with the encrypted laptop keystore, and verify the final APK fingerprint before upload or Release publication.
+- The required SHA-256 signing certificate is `D2:D6:C2:89:FE:DB:1B:0D:DD:55:80:9C:E6:A2:D7:8E:96:FA:99:F9:07:00:85:05:3A:37:28:C3:39:FF:F8:13`.
