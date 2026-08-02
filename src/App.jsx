@@ -11,9 +11,10 @@ import { getLocalDateStr, parseBirthdayDateGlobal } from './utils/date';
 import { saveData, loadData, saveRaw } from './services/persistence';
 
 
-const APP_VERSION = '3.2.1';
-const BUILD_ID = '2026-07-29-backup-location-inspector';
-const BUILD_DATE = '29 July 2026';
+const APP_VERSION = '4.3.2';
+const BUILD_ID = '2026-08-02-github-update-test';
+const BUILD_DATE = '2 August 2026';
+const WHATS_NEW = 'Added an App information card so cloud-built updates are easy to identify.';
 
 // ─── Calendar Integration ─────────────────────────────────────────────────
 // Uses the Capgo calendar plugin (Capacitor) to read/write the phone's
@@ -2318,7 +2319,7 @@ function AppInner() {
   const [customPresets, setCustomPresets] = useState(() => {
     try { return JSON.parse(localStorage.getItem('ft_flower_presets') || '[]'); } catch(e) { return []; }
   });
-  const [settingsSections, setSettingsSections] = useState({appearance:false,toolbar:false,filters:false,data:false,reset:false,security:false,future:false,assistant:false,developer:false});
+  const [settingsSections, setSettingsSections] = useState({appearance:false,toolbar:false,filters:false,data:false,reset:false,security:false,future:false,assistant:false,developer:true});
   const [autoBackupEnabled, setAutoBackupEnabled] = useState(() => localStorage.getItem('ft_auto_backup_enabled') !== 'false');
   const [lastBackupAt, setLastBackupAt] = useState(() => localStorage.getItem('ft_last_backup_at') || '');
   const [lastBackupError, setLastBackupError] = useState(() => localStorage.getItem('ft_last_backup_error') || '');
@@ -9840,9 +9841,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 </div>}
 
 
-                {/* Developer information */}
+                {/* App information */}
                 <button onClick={()=>setSettingsSections(p=>({...p,developer:!p.developer}))} style={{display:'flex',alignItems:'center',justifyContent:'space-between',width:'100%',padding:'12px 0',background:'none',border:'none',borderBottom:'1px solid '+(theme.darkMode?'#334155':'#e2e8f0'),cursor:'pointer',color:theme.darkMode?'#e2e8f0':pw.bodyText}}>
-                  <span style={{fontSize:13,fontWeight:800}}>🛠️ Developer Info</span>
+                  <span style={{fontSize:13,fontWeight:800}}>ℹ️ App information</span>
                   <span style={{fontSize:12,color:theme.darkMode?'#475569':'#475569'}}>{settingsSections.developer?'▲':'▼'}</span>
                 </button>
                 {settingsSections.developer&&<div style={{padding:'10px 0'}}>
@@ -9850,6 +9851,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     const isNative = !!(window.Capacitor?.isNativePlatform?.());
                     const rows = [
                       ['App version', APP_VERSION],
+                      ['What\'s new', WHATS_NEW],
                       ['Build ID', BUILD_ID],
                       ['Build date', BUILD_DATE],
                       ['Platform', isNative ? 'Android / Capacitor' : 'Web browser'],
@@ -9866,10 +9868,10 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         </div>)}
                       </div>
                       <button onClick={async()=>{
-                        try { await navigator.clipboard.writeText(report); showToast('📋 Developer info copied'); }
-                        catch (_) { showToast('Developer info: '+BUILD_ID); }
+                        try { await navigator.clipboard.writeText(report); showToast('📋 Version information copied'); }
+                        catch (_) { showToast('Version information: '+BUILD_ID); }
                       }} style={{width:'100%',marginTop:9,padding:'9px 12px',borderRadius:10,border:'none',background:'#10b981',color:'white',fontSize:12,fontWeight:800,cursor:'pointer'}}>
-                        Copy developer information
+                        Copy version information
                       </button>
                       <div style={{fontSize:10,lineHeight:1.45,color:theme.darkMode?'#64748b':'#94a3b8',marginTop:8}}>Use the Build ID to confirm exactly which update is installed on your phone.</div>
                     </>;

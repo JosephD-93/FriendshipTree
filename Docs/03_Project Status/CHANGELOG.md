@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-08-02 — Android 4.3.2 app information card
+
+- Added a clearly labelled App information section in Settings, expanded by default.
+- The card shows the app version, build identity, build date, platform and a concise What’s new description.
+- Added a Copy version information button for reporting the exact installed build.
+- Advanced Android to `4.3.2` (`versionCode 6`) for the controlled GitHub cloud-update test.
+- Source validation is required before packaging; phone installation must occur only from the GitHub-built APK while the existing phone app remains on 4.3.1.
+
 ## 2026-08-01 — GitHub cloud APK delivery
 
 - Expanded the Android GitHub Actions workflow to run for pull requests, manual requests and approved pushes to `main`.
