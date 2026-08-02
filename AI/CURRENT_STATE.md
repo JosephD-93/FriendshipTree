@@ -29,3 +29,13 @@ keystore and the final published APK against the certificate already installed
 on the phone. Main-branch publication must stop if either fingerprint differs.
 The workflow repair is source-validated; a fresh GitHub Actions run and phone
 update remain required for end-to-end confirmation.
+
+### Fingerprint parser correction — 2026-08-02
+
+The first protected cloud build stopped before publication because the final
+APK parser captured the intermediate label `certificate SHA-256 digest` from
+the `V2 Signer:` output format. The parser now extracts the final hexadecimal
+digest regardless of whether `apksigner` prefixes it with `Signer #1` or
+`V2 Signer`. The three setup actions were also advanced to their Node 24-based
+v5 releases. A new GitHub Actions run is still required; do not rerun the old
+failed run.

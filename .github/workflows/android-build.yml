@@ -18,14 +18,14 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 20
           cache: npm
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
@@ -95,7 +95,11 @@ jobs:
             --out "$SIGNED_APK" \
             "$SOURCE_APK"
           "$APKSIGNER" verify --verbose --print-certs "$SIGNED_APK"
-          APK_SIGNING_SHA256="$("$APKSIGNER" verify --print-certs "$SIGNED_APK" | awk -F': ' '/certificate SHA-256 digest:/{gsub(":", "", $2); print toupper($2); exit}')"
+          APK_SIGNING_SHA256="$("$APKSIGNER" verify --print-certs "$SIGNED_APK" \
+            | sed -nE 's/.*certificate SHA-256 digest:[[:space:]]*([0-9A-Fa-f:]+)[[:space:]]*$/\1/p' \
+            | head -n 1 \
+            | tr -d ':' \
+            | tr '[:lower:]' '[:upper:]')"
           if [ "$APK_SIGNING_SHA256" != "$EXPECTED_SIGNING_SHA256" ]; then
             echo "::error::Finished APK has the wrong signing certificate. Expected $EXPECTED_SIGNING_SHA256 but received ${APK_SIGNING_SHA256:-no fingerprint}. Nothing will be published."
             exit 1
