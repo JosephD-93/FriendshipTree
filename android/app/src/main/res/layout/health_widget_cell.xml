@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ImageButton xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/health_widget_circle" android:layout_width="wrap_content"
+    android:layout_height="wrap_content" android:minWidth="40dp"
+    android:minHeight="40dp" android:padding="1dp" android:background="@android:color/transparent"
+    android:scaleType="centerInside" android:adjustViewBounds="true"
+    android:contentDescription="Health tracker item" />

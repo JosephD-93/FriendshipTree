@@ -1,4 +1,4 @@
-# FriendshipTree Electron Launcher 1.0.0
+# FriendshipTree Electron Launcher 1.1.0
 
 This is a modern frontend for the existing PowerShell Forge engine.
 
@@ -20,7 +20,10 @@ Version 1.0.7 adds a controlled GitHub backup panel. It previews and explicitly
 selects changes, excludes runtime and generated paths, checks that the remote is
 not ahead, creates a descriptive commit, and uses a normal non-forced push.
 
-Version 1.0.9 synchronises the confirmed Forge Studio slot into the canonical
+Version 1.1.0 automatically finds ADB in the Android SDK, confirms an authorised
+phone before starting an app delivery build, and provides a one-click retry to
+send an already-built APK without rebuilding. It also retains the 1.0.9
+behaviour that synchronises the confirmed Forge Studio slot into the canonical
 `FriendshipTreeStudio` source before GitHub preview, and excludes AI exports,
 runtime versions, bootstrap backups and generated folders from selection.
 

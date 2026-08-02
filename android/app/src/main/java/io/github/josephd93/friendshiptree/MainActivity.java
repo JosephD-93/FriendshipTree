@@ -13,6 +13,16 @@ import com.getcapacitor.BridgeActivity;
 public class MainActivity extends BridgeActivity implements ModifiedMainActivityForSocialLoginPlugin {
 
     @Override
+    public void onPause() {
+        super.onPause();
+        // Refresh the home-screen tracker after in-app changes have been
+        // mirrored to Capacitor Preferences.
+        Intent refreshWidget = new Intent(this, HealthWidgetProvider.class);
+        refreshWidget.setAction(HealthWidgetProvider.ACTION_REFRESH);
+        sendBroadcast(refreshWidget);
+    }
+
+    @Override
     public void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
 

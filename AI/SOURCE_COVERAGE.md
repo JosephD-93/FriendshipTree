@@ -1,6 +1,6 @@
 # Source Coverage
 
-Generated: 31/07/2026, 11:33:32
+Generated: 01/08/2026, 10:10:59
 
 This handover contains the meaningful editable source and documentation
 from the live FriendshipTree project. It is not a byte-for-byte backup.
@@ -8,8 +8,8 @@ from the live FriendshipTree project. It is not a byte-for-byte backup.
 ## Included systems
 
 - App source and configuration: 20 files
-- Android project and widget source: 42 files
-- FriendshipTree Studio: 415 files
+- Android project and widget source: 51 files
+- FriendshipTree Studio: 426 files
 - FriendshipTree Launcher: 17 files
 - Forge update/recovery system: 3 files
 - Canonical AI documentation: 14 files

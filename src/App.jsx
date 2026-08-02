@@ -3443,16 +3443,20 @@ function AppInner() {
     } catch(e) { return {}; }
   });
   const [habitLastResetDate, setHabitLastResetDate] = useState(() => {
-    const yesterday = (() => { const d = new Date(); d.setDate(d.getDate()-1); return getLocalDateStr(d); })();
+    const today = getLocalDateStr();
     let raw = null;
     try { raw = localStorage.getItem('ft_habit_last_reset'); } catch(e) {}
-    window.ftDiagLog('[FT-DIAG] habitLastResetDate initializer - raw stored value:', JSON.stringify(raw), 'using:', raw || yesterday);
-    return raw || yesterday;
+    window.ftDiagLog('[FT-DIAG] habitLastResetDate initializer - raw stored value:', JSON.stringify(raw), 'using:', raw || today);
+    return raw || today;
   });
   // habitHistory: { [dateStr]: { [listId]: { [categoryId]: count } } }
   const [habitHistory, setHabitHistory] = useState(() => {
     try { return JSON.parse(localStorage.getItem('ft_habit_history_v2') || '{}'); } catch(e) { return {}; }
   });
+  // Native Android widgets cannot read WebView localStorage directly. Keep a
+  // compact copy of the tracker state in Capacitor Preferences, and merge any
+  // home-screen changes back into React whenever the app resumes.
+  const [healthWidgetBridgeReady, setHealthWidgetBridgeReady] = useState(false);
   // listScores: { [listId]: number } -- persistent score that grows when you
   // exceed your own daily targets and decays when you fall short, updated
   // once per day at rollover. This is deliberately simple to start with:
@@ -6583,52 +6587,140 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
   useEffect(() => { saveData('ft_health_lists', healthLists); }, [healthLists]);
   useEffect(() => { saveData('ft_habit_today_v2', habitToday); }, [habitToday]);
   useEffect(() => { saveData('ft_habit_history_v2', habitHistory); }, [habitHistory]);
+  useEffect(() => {
+    const prefs = window.Capacitor?.Plugins?.Preferences;
+    if (!prefs || typeof prefs.set !== 'function' || !healthWidgetBridgeReady) return;
+    const updatedAt = Date.now();
+    const value = JSON.stringify({
+      version: 2,
+      updatedAt,
+      lastResetDate: habitLastResetDate,
+      lists: healthLists,
+      today: habitToday,
+      history: habitHistory,
+    });
+    prefs.set({ key: 'ft_widget_health_state', value }).then(() => {
+      saveRaw('ft_widget_last_applied', String(updatedAt));
+    }).catch(() => {});
+  }, [healthLists, habitToday, habitHistory, habitLastResetDate, healthWidgetBridgeReady]);
+
+  useEffect(() => {
+    const prefs = window.Capacitor?.Plugins?.Preferences;
+    if (!prefs || typeof prefs.get !== 'function') {
+      setHealthWidgetBridgeReady(true);
+      return;
+    }
+    let active = true;
+    const pullWidgetState = async () => {
+      try {
+        const result = await prefs.get({ key: 'ft_widget_health_state' });
+        if (result?.value) {
+          const state = JSON.parse(result.value);
+          const lastApplied = Number(localStorage.getItem('ft_widget_last_applied') || 0);
+          if ((state?.version === 1 || state?.version === 2) && Number(state.updatedAt || 0) > lastApplied) {
+            if (Array.isArray(state.lists)) setHealthLists(state.lists);
+            if (state.today && typeof state.today === 'object') setHabitToday(state.today);
+            if (state.history && typeof state.history === 'object') setHabitHistory(state.history);
+            if (state.lastResetDate) {
+              setHabitLastResetDate(state.lastResetDate);
+              saveRaw('ft_habit_last_reset', state.lastResetDate);
+            }
+            saveRaw('ft_widget_last_applied', String(state.updatedAt || Date.now()));
+          }
+        }
+      } catch(e) {
+        window.ftDiagLog('[FT-DIAG] Health widget sync failed:', e.message);
+      } finally {
+        if (active) setHealthWidgetBridgeReady(true);
+      }
+    };
+    pullWidgetState();
+    let listener = null;
+    const CapApp = window.Capacitor?.Plugins?.App;
+    if (CapApp && typeof CapApp.addListener === 'function') {
+      Promise.resolve(CapApp.addListener('resume', pullWidgetState)).then(l => { listener = l; }).catch(() => {});
+    }
+    return () => {
+      active = false;
+      if (listener && typeof listener.remove === 'function') listener.remove();
+    };
+  }, []); // eslint-disable-line
   useEffect(() => { saveData('ft_food_diary', foodDiaryEntries); }, [foodDiaryEntries]);
   useEffect(() => { saveData('ft_list_scores', listScores); }, [listScores]);
   const healthListsRef = useRef(healthLists);
   healthListsRef.current = healthLists;
+  const habitHistoryRef = useRef(habitHistory);
+  habitHistoryRef.current = habitHistory;
+  const listScoresRef = useRef(listScores);
+  listScoresRef.current = listScores;
+  const habitLastResetDateRef = useRef(habitLastResetDate);
+  habitLastResetDateRef.current = habitLastResetDate;
   // Midnight rollover: archive today's counts into history for every list,
   // update each list's persistent score based on how today's actual points
   // compared to its baseline (hitting every target exactly = no change,
   // exceeding it = score grows, falling short = score decays), then reset
   // today's counts to zero for a fresh start.
   const doHabitRollover = (dateToArchive) => {
+    const todayStr = getLocalDateStr();
+    if (!dateToArchive || dateToArchive === todayStr || habitLastResetDateRef.current === todayStr) return false;
     const todayCountsByList = habitTodayRef.current;
-    setHabitHistory(prev => ({ ...prev, [dateToArchive]: todayCountsByList }));
-    setListScores(prev => {
-      const next = { ...prev };
+    // Never overwrite an already archived date. This makes rollover safe if
+    // the interval, Android resume event and native widget all wake together.
+    const nextHistory = habitHistoryRef.current[dateToArchive]
+      ? habitHistoryRef.current
+      : { ...habitHistoryRef.current, [dateToArchive]: todayCountsByList };
+    const nextScores = { ...listScoresRef.current };
+    if (!habitHistoryRef.current[dateToArchive]) {
       healthListsRef.current.forEach(list => {
         const dayPoints = computeListDayPoints(list, todayCountsByList[list.id]);
         const baseline = computeListBaselinePoints(list);
         const delta = dayPoints - baseline;
-        next[list.id] = Math.max(0, (prev[list.id] || 0) + delta);
+        nextScores[list.id] = Math.max(0, (listScoresRef.current[list.id] || 0) + delta);
       });
-      return next;
-    });
+    }
+    habitHistoryRef.current = nextHistory;
+    listScoresRef.current = nextScores;
+    habitTodayRef.current = {};
+    habitLastResetDateRef.current = todayStr;
+    // Persist the complete rollover immediately. React effects still mirror
+    // later changes, but end-of-day safety no longer depends on a later render.
+    saveData('ft_habit_history_v2', nextHistory);
+    saveData('ft_habit_today_v2', {});
+    saveData('ft_list_scores', nextScores);
+    saveRaw('ft_habit_last_reset', todayStr);
+    setHabitHistory(nextHistory);
+    setListScores(nextScores);
     setHabitToday({});
+    setHabitLastResetDate(todayStr);
+    const prefs = window.Capacitor?.Plugins?.Preferences;
+    if (prefs && typeof prefs.set === 'function') {
+      const updatedAt = Date.now();
+      prefs.set({ key: 'ft_widget_health_state', value: JSON.stringify({
+        version: 2, updatedAt, lastResetDate: todayStr, lists: healthListsRef.current,
+        today: {}, history: nextHistory,
+      }) }).then(() => saveRaw('ft_widget_last_applied', String(updatedAt))).catch(() => {});
+    }
+    return true;
   };
   useEffect(() => {
+    // First reconcile any newer native-widget state. Starting rollover before
+    // that asynchronous pull finishes could archive stale WebView counts.
+    if (!healthWidgetBridgeReady) return;
     const todayStr = getLocalDateStr();
     window.ftDiagLog('[FT-DIAG] Habit rollover ON-MOUNT check: habitLastResetDate=', habitLastResetDate, 'todayStr=', todayStr);
     if (habitLastResetDate !== todayStr) {
       window.ftDiagLog('[FT-DIAG] Habit rollover TRIGGERED on mount, archiving', habitLastResetDate);
       doHabitRollover(habitLastResetDate);
-      setHabitLastResetDate(todayStr);
-      saveRaw('ft_habit_last_reset', todayStr);
     }
     const checkAndRollover = (source) => {
       const now = getLocalDateStr();
       window.ftDiagLog(`[FT-DIAG] Habit rollover check via ${source}, now=`, now);
-      setHabitLastResetDate(prevDate => {
-        window.ftDiagLog(`[FT-DIAG] Habit rollover check via ${source} - prevDate=`, prevDate, 'now=', now);
-        if (prevDate !== now) {
-          window.ftDiagLog(`[FT-DIAG] Habit rollover TRIGGERED via ${source}, archiving`, prevDate);
-          doHabitRollover(prevDate);
-          saveRaw('ft_habit_last_reset', now);
-          return now;
-        }
-        return prevDate;
-      });
+      const prevDate = habitLastResetDateRef.current;
+      window.ftDiagLog(`[FT-DIAG] Habit rollover check via ${source} - prevDate=`, prevDate, 'now=', now);
+      if (prevDate !== now) {
+        window.ftDiagLog(`[FT-DIAG] Habit rollover TRIGGERED via ${source}, archiving`, prevDate);
+        doHabitRollover(prevDate);
+      }
     };
     // Also re-check periodically in case the app stays open across midnight
     const iv = setInterval(() => checkAndRollover('interval'), 60000); // check every minute
@@ -6656,7 +6748,7 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
       clearInterval(iv);
       if (resumeListener && typeof resumeListener.remove === 'function') resumeListener.remove();
     };
-  }, []); // eslint-disable-line
+  }, [healthWidgetBridgeReady]); // eslint-disable-line
   useEffect(() => {
     if (calRecurring.length === 0) return;
     const today = new Date();

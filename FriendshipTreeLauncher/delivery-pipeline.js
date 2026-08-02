@@ -67,6 +67,78 @@ function run(command, args, options = {}) {
   });
 }
 
+async function findAdb() {
+  const androidHome = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT || '';
+  const localAppData = process.env.LOCALAPPDATA || '';
+  const candidates = [
+    androidHome && path.join(androidHome, 'platform-tools', 'adb.exe'),
+    localAppData && path.join(localAppData, 'Android', 'Sdk', 'platform-tools', 'adb.exe'),
+    path.join(PROJECT_ROOT, 'tools', 'platform-tools', 'adb.exe')
+  ].filter(Boolean);
+  const direct = candidates.find(fs.existsSync);
+  if (direct) return direct;
+  try {
+    const located = await run('where.exe', ['adb.exe'], { cwd: PROJECT_ROOT });
+    return located.stdout.split(/\r?\n/).map(value => value.trim()).find(value => value && fs.existsSync(value)) || null;
+  } catch {
+    return null;
+  }
+}
+
+function authorisedDevices(output) {
+  return String(output || '').split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(line => /\sdevice$/.test(line));
+}
+
+async function getAndroidConnection() {
+  const adb = await findAdb();
+  if (!adb) {
+    return { adb: null, devices: [], message: 'ADB could not be found in the Android SDK. Open Android Studio once or install Android SDK Platform-Tools.' };
+  }
+  try {
+    const result = await run(adb, ['devices'], { cwd: PROJECT_ROOT });
+    const devices = authorisedDevices(result.stdout);
+    return {
+      adb,
+      devices,
+      message: devices.length ? `${devices.length} authorised Android phone${devices.length === 1 ? '' : 's'} connected.` : 'No authorised Android phone is connected. Reconnect Wireless debugging or USB debugging, then try again.'
+    };
+  } catch (error) {
+    return { adb, devices: [], message: `ADB could not check the phone: ${error.message}` };
+  }
+}
+
+async function installBuiltApk(progress = () => {}, apkPath = '') {
+  const apk = apkPath || path.join(PROJECT_ROOT, 'android', 'app', 'build', 'outputs', 'apk', 'debug', 'app-debug.apk');
+  if (!fs.existsSync(apk)) throw new Error('The built APK was not found. Build the app before sending it to the phone.');
+  progress('Checking for an authorised Android phone');
+  const connection = await getAndroidConnection();
+  if (!connection.devices.length) {
+    return { apk, phoneInstalled: false, phoneVerified: false, phoneMessage: connection.message, adbPath: connection.adb };
+  }
+  try {
+    progress('Installing APK on connected phone');
+    const installResult = await run(connection.adb, ['install', '-r', apk], { cwd: PROJECT_ROOT });
+    const installOutput = `${installResult.stdout}\n${installResult.stderr}`;
+    if (!/\bSuccess\b/i.test(installOutput)) {
+      return { apk, phoneInstalled: false, phoneVerified: false, phoneMessage: installOutput.trim() || 'ADB did not report a successful installation.', adbPath: connection.adb };
+    }
+    progress('Verifying FriendshipTree on the phone');
+    const verification = await run(connection.adb, ['shell', 'pm', 'path', 'io.github.josephd93.friendshiptree'], { cwd: PROJECT_ROOT });
+    const verified = /package:/i.test(verification.stdout);
+    return {
+      apk,
+      phoneInstalled: verified,
+      phoneVerified: verified,
+      phoneMessage: verified ? 'FriendshipTree was installed and verified on Android.' : 'ADB installed the APK, but Android did not confirm the FriendshipTree package.',
+      adbPath: connection.adb
+    };
+  } catch (error) {
+    return { apk, phoneInstalled: false, phoneVerified: false, phoneMessage: error.message, adbPath: connection.adb };
+  }
+}
+
 async function extractPackage(packagePath) {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'friendshiptree-delivery-'));
   const zipPath = path.join(temp, 'package.zip');
@@ -138,6 +210,9 @@ function archive(source, folder, suffix = '') {
 }
 
 async function buildAndInstallApp(progress) {
+  progress('Checking phone and Android SDK before build');
+  const connection = await getAndroidConnection();
+  if (!connection.devices.length) throw new Error(connection.message);
   progress('Building FriendshipTree web app');
   await run('cmd.exe', ['/d','/s','/c','npm run build'], { cwd: PROJECT_ROOT });
   progress('Synchronising Capacitor Android project');
@@ -146,32 +221,7 @@ async function buildAndInstallApp(progress) {
   await run('cmd.exe', ['/d','/s','/c','gradlew.bat assembleDebug'], { cwd: path.join(PROJECT_ROOT,'android') });
   const apk = path.join(PROJECT_ROOT,'android','app','build','outputs','apk','debug','app-debug.apk');
   if (!fs.existsSync(apk)) throw new Error('APK build completed but app-debug.apk was not found.');
-  progress('Checking for an authorised Android phone');
-  try {
-    const devices = await run('cmd.exe', ['/d','/s','/c','adb devices'], { cwd: PROJECT_ROOT });
-    const authorised = devices.stdout.split(/\r?\n/).slice(1).map(line => line.trim()).filter(line => /\tdevice$/.test(line));
-    if (!authorised.length) {
-      return { apk, phoneInstalled: false, phoneVerified: false, phoneMessage: 'No authorised Android phone was available.' };
-    }
-
-    progress('Installing APK on connected phone');
-    const installResult = await run('cmd.exe', ['/d','/s','/c',`adb install -r "${apk}"`], { cwd: PROJECT_ROOT });
-    const installOutput = `${installResult.stdout}\n${installResult.stderr}`;
-    if (!/\bSuccess\b/i.test(installOutput)) {
-      return { apk, phoneInstalled: false, phoneVerified: false, phoneMessage: installOutput.trim() || 'ADB did not report a successful installation.' };
-    }
-
-    progress('Verifying FriendshipTree on the phone');
-    const verification = await run('cmd.exe', ['/d','/s','/c','adb shell pm path io.github.josephd93.friendshiptree'], { cwd: PROJECT_ROOT });
-    const verified = /package:/i.test(verification.stdout);
-    if (!verified) {
-      return { apk, phoneInstalled: false, phoneVerified: false, phoneMessage: 'ADB reported success, but Android did not confirm the FriendshipTree package.' };
-    }
-
-    return { apk, phoneInstalled: true, phoneVerified: true, phoneMessage: 'FriendshipTree was installed and verified on Android.' };
-  } catch (e) {
-    return { apk, phoneInstalled: false, phoneVerified: false, phoneMessage: e.message };
-  }
+  return installBuiltApk(progress, apk);
 }
 
 
@@ -345,4 +395,4 @@ async function install(packagePath, progress = () => {}) {
   } finally { fs.rmSync(extracted.temp, { recursive: true, force: true }); }
 }
 
-module.exports = { ensureDirs, scan, inspect, install, folders: { cloud: DRIVE_INCOMING, local: LOCAL_INCOMING, legacy: LEGACY_INBOX, processed: PROCESSED, rejected: REJECTED } };
+module.exports = { ensureDirs, scan, inspect, install, installBuiltApk, getAndroidConnection, folders: { cloud: DRIVE_INCOMING, local: LOCAL_INCOMING, legacy: LEGACY_INBOX, processed: PROCESSED, rejected: REJECTED } };

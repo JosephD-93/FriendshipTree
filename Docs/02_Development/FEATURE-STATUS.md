@@ -1,6 +1,6 @@
 # Feature Status
 
-**Last updated:** 2026-07-22  
+**Last updated:** 2026-08-01
 **Rule:** This file must not mark a feature as tested without evidence from the current app or user verification.
 
 | Area | Feature | Status | Evidence / next check |
@@ -12,7 +12,7 @@
 | Health | Health-list circular controls | Tested historically | User confirmed core interactions worked. |
 | Health | Variable columns and draggable lists | Implemented; current review advised | Past runtime errors occurred around list movement. |
 | Health | Previous-day padlock editing | Tested historically | User reported it worked very well. |
-| Widgets | Health tracker Android widget | Planned | Design direction agreed. |
+| Widgets | Health tracker Android widget | Android 4.3 implemented; device test required | Responsive circular controls, per-widget tracker selection, 1–8 rows, 1–6 columns, list switching and resize-aware sizing. |
 | Widgets | Daily-use mascot widget | Planned | Mole mascot direction agreed. |
 | Mascots | Mole character family | Design direction confirmed | Social, health and knowledge variants; pink noses; avoid visible mouths/teeth. |
 | Mascots | Lottie animation page/assets | Planned or partial | Exact current asset integration must be inspected. |
@@ -31,7 +31,7 @@
 | Backup | Automatic local backups | Planned / next app priority | User selected this as a major task. |
 | Backup | Google Drive backup | Planned | One-tap and automatic nightly direction discussed. |
 | Restore | Restore photos and data together | Needs work | Historical import restored data but not photos. |
-| Android | Build and install through Gradle/ADB | Tested historically | Existing workflow has worked. |
+| Android | Build and install through Gradle/ADB | Tested historically; 4.3 not yet tested | Existing workflow has worked. The new responsive widget build must pass independently. |
 | Studio | Canonical documentation | Tested | Installed into project on 2026-07-22. |
 | Studio | Developer Hub / Mission Control | Planned; current priority | Intended next Studio feature. |
 | Studio | Export AI context pack | Planned | This pack is currently manual. |
@@ -45,4 +45,5 @@
 1. Complete canonical documentation and context-pack workflow.
 2. Build the first Developer Hub page in Studio.
 3. Prove the Forge Inbox workflow with a harmless package.
-4. Return to app storage and backup reliability.
+4. Build, install and phone-test Android 4.3 responsive configurable health widgets and rollover repair.
+5. Return to app storage and backup reliability.

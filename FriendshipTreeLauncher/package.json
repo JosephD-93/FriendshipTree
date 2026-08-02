@@ -1,7 +1,7 @@
 {
   "name": "friendshiptree-launcher",
-  "version": "1.0.9",
+  "version": "1.2.0",
   "private": true,
   "main": "main.js",
-  "description": "FriendshipTree Launcher 1.0.9: syncs confirmed Studio source before controlled GitHub backup and tightens generated-content exclusions."
+  "description": "FriendshipTree Launcher 1.2.0: restores its last snapped or manually positioned window bounds."
 }

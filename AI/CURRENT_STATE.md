@@ -1,13 +1,13 @@
 # Current State
 
-Generated from the live project: 31/07/2026, 11:33:32
+Generated from the live project: 01/08/2026, 10:10:59
 
 - Canonical root: `C:\Users\Joe\FriendshipTree`
 - Canonical AI folder: `C:\Users\Joe\FriendshipTree\AI`
-- Meaningful source and documentation files indexed: 1117
+- Meaningful source and documentation files indexed: 1139
 - App files: 20
-- Android files: 42
-- Studio files: 415
+- Android files: 51
+- Studio files: 426
 - Launcher files: 17
 - Forge files: 3
 - Current export folder: `C:\Users\Joe\FriendshipTree\AI\EXPORT\Current`

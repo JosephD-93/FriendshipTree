@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, shell , dialog, clipboard} = require("elect
 const path = require("path");
 const fs = require("fs");
 const { spawn } = require("child_process");
+const { screen } = require("electron");
 const delivery = require("./delivery-pipeline");
 const studioPackager = require("./studio-update-packager");
 const githubBackup = require("./github-backup");
@@ -18,6 +19,29 @@ const ANDROID_ROOT = path.join(PROJECT_ROOT, "android");
 const DOCS_ROOT = path.join(PROJECT_ROOT, "Documentation");
 
 let win;
+let windowStateTimer = null;
+const WINDOW_STATE_PATH = path.join(SYSTEM_ROOT, "launcher-window-state.json");
+
+function readWindowBounds(defaults) {
+  const saved = safeReadJson(WINDOW_STATE_PATH);
+  if (![saved.x, saved.y, saved.width, saved.height].every(Number.isFinite)) return defaults;
+  const candidate = { x: saved.x, y: saved.y, width: Math.max(520, saved.width), height: Math.max(480, saved.height) };
+  const visible = screen.getAllDisplays().some(({ workArea }) =>
+    candidate.x < workArea.x + workArea.width - 80 && candidate.x + candidate.width > workArea.x + 80 &&
+    candidate.y < workArea.y + workArea.height - 80 && candidate.y + candidate.height > workArea.y + 80);
+  return visible ? candidate : defaults;
+}
+
+function rememberWindowBounds(target) {
+  clearTimeout(windowStateTimer);
+  windowStateTimer = setTimeout(() => {
+    if (!target || target.isDestroyed() || target.isMinimized() || target.isMaximized() || target.isFullScreen()) return;
+    try {
+      fs.mkdirSync(SYSTEM_ROOT, { recursive: true });
+      fs.writeFileSync(WINDOW_STATE_PATH, JSON.stringify(target.getBounds(), null, 2), "utf8");
+    } catch {}
+  }, 350);
+}
 
 function safeReadJson(filePath) {
   try {
@@ -123,9 +147,9 @@ function launchStudio(version) {
 
 function createWindow() {
   delivery.ensureDirs();
+  const bounds = readWindowBounds({ width: 1180, height: 790 });
   win = new BrowserWindow({
-    width: 1180,
-    height: 790,
+    ...bounds,
     minWidth: 520,
     minHeight: 480,
     backgroundColor: "#0c1711",
@@ -138,6 +162,9 @@ function createWindow() {
   });
   win.setMenuBarVisibility(false);
   win.loadFile("index.html");
+  win.on("move", () => rememberWindowBounds(win));
+  win.on("resize", () => rememberWindowBounds(win));
+  win.on("close", () => rememberWindowBounds(win));
 }
 
 ipcMain.handle("project:export", () => {
@@ -198,6 +225,11 @@ ipcMain.handle("delivery:install", async (_event, packagePath) => {
   return delivery.install(packagePath, message => {
     try { win?.webContents?.send("delivery:progress", { message, at: new Date().toISOString() }); } catch {}
   });
+});
+ipcMain.handle("delivery:send-built-apk", async (_event, apkPath) => {
+  return delivery.installBuiltApk(message => {
+    try { win?.webContents?.send("delivery:progress", { message, at: new Date().toISOString() }); } catch {}
+  }, apkPath);
 });
 ipcMain.handle("delivery:open-folder", (_event, key) => {
   const folder = delivery.folders[key];

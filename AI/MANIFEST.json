@@ -1,6 +1,6 @@
 {
   "format": "friendshiptree-complete-ai-handover-v1",
-  "generatedUtc": "2026-07-31T10:33:32.572Z",
+  "generatedUtc": "2026-08-01T09:10:59.732Z",
   "projectName": "FriendshipTree",
   "canonicalRoot": "C:\\Users\\Joe\\FriendshipTree",
   "aiRoot": "C:\\Users\\Joe\\FriendshipTree\\AI",
@@ -15,12 +15,12 @@
     "android": {
       "path": "C:\\Users\\Joe\\FriendshipTree\\android",
       "role": "Capacitor Android project and native widget implementation",
-      "indexedFiles": 42
+      "indexedFiles": 51
     },
     "studio": {
       "path": "C:\\Users\\Joe\\FriendshipTree\\FriendshipTreeStudio",
       "versions": "C:\\Users\\Joe\\FriendshipTree\\StudioSystem\\Versions",
-      "indexedFiles": 415
+      "indexedFiles": 426
     },
     "launcher": {
       "path": "C:\\Users\\Joe\\FriendshipTree\\FriendshipTreeLauncher",
@@ -63,5 +63,5 @@
     "zip": "C:\\Users\\Joe\\FriendshipTree\\AI\\EXPORT\\FriendshipTree-AI-Workspace.zip",
     "requestedFiles": "C:\\Users\\Joe\\FriendshipTree\\AI\\EXPORT\\Requested-Files"
   },
-  "indexedFileCount": 1117
+  "indexedFileCount": 1139
 }

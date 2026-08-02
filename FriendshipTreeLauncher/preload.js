@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld("launcher", {
   buildStudioUpdate: () => ipcRenderer.invoke("studio-update:build"),
   scanDeliveries: () => ipcRenderer.invoke("delivery:scan"),
   installDelivery: packagePath => ipcRenderer.invoke("delivery:install", packagePath),
+  sendBuiltApk: apkPath => ipcRenderer.invoke("delivery:send-built-apk", apkPath),
   openDeliveryFolder: key => ipcRenderer.invoke("delivery:open-folder", key),
   getGitHubBackupStatus: () => ipcRenderer.invoke("github-backup:status"),
   pushGitHubBackup: request => ipcRenderer.invoke("github-backup:push", request),

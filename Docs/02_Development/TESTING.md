@@ -1,6 +1,6 @@
 # Testing
 
-**Last updated:** 2026-07-22
+**Last updated:** 2026-07-31
 
 ## Testing rule
 
@@ -23,6 +23,26 @@ A feature is only marked **Tested** when its behaviour has been observed in the 
 | Canonical docs installation | Passed | Project root showed expected documentation structure folders on 2026-07-22. |
 
 ## Tests still required
+
+### Android 4.2 circular selectable health widget
+
+- add a new widget and confirm the tracker-selection screen lists every saved tracker;
+- add two widget instances assigned to different trackers and confirm each retains its own choice;
+- confirm the title, emoji order, list colour and saved column count match the in-app tracker;
+- confirm circles are comfortably tappable and darken progressively at `count / target`;
+- tap the switch control and confirm only that widget advances to the next list;
+- tap categories in the widget and app and confirm both surfaces reconcile the same counts;
+- test rollover with a controlled prior reset date: archive the prior day once, preserve existing history, clear today and retain the new date after app restart;
+- leave the app backgrounded across midnight (or use the controlled fixture), tap the widget first, then confirm the prior day was saved before the new count was added;
+- confirm Launcher's Vite, Capacitor and Gradle stages complete and the Pixel 10 installation succeeds.
+
+### Android 4.1 health widget row visibility retest
+
+- install the widget row-visibility fix through Launcher;
+- remove and re-add the widget if Android retains the old RemoteViews layout;
+- confirm all six item icons, labels and current/target counts are visible;
+- tap at least one row and confirm its displayed count increments once;
+- open FriendshipTree and confirm that increment appears in the in-app health list.
 
 ### Forge Inbox end-to-end
 
@@ -64,6 +84,21 @@ For each button:
 - confirm failures produce a useful message;
 - confirm no button alters source unexpectedly.
 
+### Android 4.1 health widget
+
+- install the update through Launcher's `app-update` workflow;
+- confirm Vite build, Capacitor sync and Gradle debug build all pass;
+- confirm Launcher reports the APK installed and verifies the package on the phone;
+- add the FriendshipTree Health widget from Android's widget picker;
+- confirm the first health list and up to six items appear;
+- tap each displayed item and confirm its count increments once per tap;
+- open FriendshipTree and confirm widget changes reconcile into today's health counts;
+- change a count in the app, leave the app and confirm the widget refreshes;
+- test a date rollover or controlled date fixture and confirm the previous day is retained once in history;
+- restart the app and phone, then confirm counts remain consistent;
+- confirm the widget heading opens FriendshipTree;
+- record PASS / FAIL / PARTIAL below with device and build evidence.
+
 ## Test log template
 
 Add entries below rather than rewriting historical evidence.
@@ -83,6 +118,6 @@ Follow-up:
 
 ## Current test blockers
 
-- Current app version and exact source state are not yet recorded in the dashboard.
+- Android 4.1 compiled and installed; its first phone test proved the data bridge but found invisible row text. Android 4.2 supersedes that temporary layout and requires a fresh Launcher build and phone test.
 - Forge has not been proven end to end.
 - Storage behaviour must be re-tested against the latest Android build.

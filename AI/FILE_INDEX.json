@@ -1,6 +1,6 @@
 {
   "format": "friendshiptree-complete-file-index-v1",
-  "generatedUtc": "2026-07-31T10:33:32.573Z",
+  "generatedUtc": "2026-08-01T09:10:59.732Z",
   "canonicalRoot": "C:\\Users\\Joe\\FriendshipTree",
   "note": "Each record identifies the exact live file copied into SOURCE.",
   "fields": [
@@ -829,6 +829,15 @@
       "modifiedUtc": "2026-07-22T15:52:40.091Z",
       "sizeBytes": 120035,
       "sha256": "225a08c4309bdc996fac3e8a8eef9502458873fa9a1dc64e3c3be085ce0eb2f6",
+      "classification": "project-support-file",
+      "system": "shared"
+    },
+    {
+      "path": ".github/workflows/android-build.yml",
+      "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\.github\\workflows\\android-build.yml",
+      "modifiedUtc": "2026-08-01T00:35:44.000Z",
+      "sizeBytes": 1012,
+      "sha256": "b6f57207f94de8ee46e443f6cf8eac0464d1b109055dfeaf8d38b11d0d7bdafc",
       "classification": "project-support-file",
       "system": "shared"
     },
@@ -3175,9 +3184,9 @@
     {
       "path": ".studio/Reports/latest-startup-timeline.json",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\.studio\\Reports\\latest-startup-timeline.json",
-      "modifiedUtc": "2026-07-31T10:09:32.487Z",
-      "sizeBytes": 1927,
-      "sha256": "f26e6ec601905a98ec50193acca03740907fd1b02989823a620127ce814a3719",
+      "modifiedUtc": "2026-07-31T10:33:37.777Z",
+      "sizeBytes": 1928,
+      "sha256": "9461f2e0bc4f670497bff8c3f4501201b68f63fdf333c1a74344db63d6607536",
       "classification": "project-support-file",
       "system": "shared"
     },
@@ -4163,6 +4172,15 @@
       "system": "shared"
     },
     {
+      "path": ".studio/Reports/S-2026-07-31T10-33-35-940Z-34d463-environment.json",
+      "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\.studio\\Reports\\S-2026-07-31T10-33-35-940Z-34d463-environment.json",
+      "modifiedUtc": "2026-07-31T10:33:35.948Z",
+      "sizeBytes": 521,
+      "sha256": "2e28304ea2aa4b018a957fb54a5bc3bc8005a30199f1d142dfc6a7137f97766f",
+      "classification": "project-support-file",
+      "system": "shared"
+    },
+    {
       "path": ".studio/TestResults/self-test-1784656086364.json",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\.studio\\TestResults\\self-test-1784656086364.json",
       "modifiedUtc": "2026-07-21T17:48:06.361Z",
@@ -4561,9 +4579,9 @@
     {
       "path": "AI/CURRENT_STATE.md",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\AI\\CURRENT_STATE.md",
-      "modifiedUtc": "2026-07-31T10:33:31.361Z",
+      "modifiedUtc": "2026-08-01T09:10:58.342Z",
       "sizeBytes": 880,
-      "sha256": "a4f13697ad4467347d605f521e87785207d5f15dd8a981791b957792682091da",
+      "sha256": "deebcf75f331c76371a1254e4955b13f83bda5cf465ffd883bcf550958b77873",
       "classification": "canonical-documentation",
       "system": "ai-handover"
     },
@@ -4579,9 +4597,9 @@
     {
       "path": "AI/FILE_INDEX.json",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\AI\\FILE_INDEX.json",
-      "modifiedUtc": "2026-07-31T10:33:31.361Z",
-      "sizeBytes": 502914,
-      "sha256": "693d5cbfbb8f1c08c5e7e9e32f41ae5a9a04757bf39d5e87bf0955ebc3b2fd13",
+      "modifiedUtc": "2026-08-01T09:10:58.342Z",
+      "sizeBytes": 512444,
+      "sha256": "2c8d8728f2997759af6a54c6edcacb881c259296c4edc3a46eb5e40a579aa970",
       "classification": "canonical-documentation",
       "system": "ai-handover"
     },
@@ -4597,9 +4615,9 @@
     {
       "path": "AI/MANIFEST.json",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\AI\\MANIFEST.json",
-      "modifiedUtc": "2026-07-31T10:33:31.361Z",
+      "modifiedUtc": "2026-08-01T09:10:58.342Z",
       "sizeBytes": 2269,
-      "sha256": "21ee8c74aa370596e5e532e02ab2179b02a006d9dcac3d3be078f2a1503cc776",
+      "sha256": "c3f537e898e5e61c86034a6a2bbf1584f1026dae325a13fe431fca42af19b473",
       "classification": "canonical-documentation",
       "system": "ai-handover"
     },
@@ -4633,27 +4651,27 @@
     {
       "path": "AI/SOURCE_COVERAGE.md",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\AI\\SOURCE_COVERAGE.md",
-      "modifiedUtc": "2026-07-31T10:33:32.159Z",
+      "modifiedUtc": "2026-08-01T09:10:59.279Z",
       "sizeBytes": 2019,
-      "sha256": "9f41e2c7f2f0876a0011f153b9064dce1af7c19641d348dfbb2998bd1708f70a",
+      "sha256": "53632cef1008a1b1967e9190f67da00f6352ac35ae08d8eea6afb398ba1b84d7",
       "classification": "canonical-documentation",
       "system": "ai-handover"
     },
     {
       "path": "AI/VALIDATION_REPORT.md",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\AI\\VALIDATION_REPORT.md",
-      "modifiedUtc": "2026-07-31T10:06:15.299Z",
+      "modifiedUtc": "2026-08-01T09:08:56.273Z",
       "sizeBytes": 1048,
-      "sha256": "e91554317b8dd8ff7d68879a3378b13c490a09ad45f6a76108f8c1dcbcf13961",
+      "sha256": "6ed82af27047ab75a49d3f76ec8259b3febe9f35878c6662000e84006a388042",
       "classification": "canonical-documentation",
       "system": "ai-handover"
     },
     {
       "path": "AI/WORKSPACE_STATUS.json",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\AI\\WORKSPACE_STATUS.json",
-      "modifiedUtc": "2026-07-31T10:06:15.299Z",
+      "modifiedUtc": "2026-08-01T09:08:56.273Z",
       "sizeBytes": 1785,
-      "sha256": "ce064646769eb5678e1666f2f913c5528957ff5fc52f8a86d1dcaf3e9913f0fe",
+      "sha256": "370abe95f28364e6622023e89715560df057d53c99ca253db1424bc6af8a17a1",
       "classification": "canonical-documentation",
       "system": "ai-handover"
     },
@@ -4678,16 +4696,16 @@
     {
       "path": "android/app/build.gradle",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\android\\app\\build.gradle",
-      "modifiedUtc": "2026-06-10T14:39:48.293Z",
+      "modifiedUtc": "2026-08-01T12:26:18.000Z",
       "sizeBytes": 2160,
-      "sha256": "ae6e6f09001ae00a4fe73f82bf043ab20a79808d6cc2b379612417f7d37624e1",
+      "sha256": "7c0f3b90fb0b6cb7ac6939f7b47a16b22529b8d3ee0e7edc5c42f747a34be7e9",
       "classification": "exact-current-source",
       "system": "android"
     },
     {
       "path": "android/app/capacitor.build.gradle",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\android\\app\\capacitor.build.gradle",
-      "modifiedUtc": "2026-07-25T14:29:51.660Z",
+      "modifiedUtc": "2026-08-01T08:07:17.015Z",
       "sizeBytes": 968,
       "sha256": "27d2458b2cfb2cb8d7343fb4d8b78b04c909fbb5f9f83494aa5c5d8f2eb52821",
       "classification": "exact-current-source",
@@ -4705,16 +4723,16 @@
     {
       "path": "android/app/src/main/AndroidManifest.xml",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\android\\app\\src\\main\\AndroidManifest.xml",
-      "modifiedUtc": "2026-07-06T17:59:37.095Z",
-      "sizeBytes": 3046,
-      "sha256": "b55bac52ba3c24b4b88892ce5c5223d34efd233b9a7eb769b3c9d9483a3ea3e8",
+      "modifiedUtc": "2026-08-01T12:26:18.000Z",
+      "sizeBytes": 3812,
+      "sha256": "beb77a02490e201fcedf8b0bb19a690ffd2d855d2c3ccc5ee4083dd7323cf227",
       "classification": "exact-current-source",
       "system": "android"
     },
     {
       "path": "android/app/src/main/assets/capacitor.config.json",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\android\\app\\src\\main\\assets\\capacitor.config.json",
-      "modifiedUtc": "2026-07-29T10:28:37.943Z",
+      "modifiedUtc": "2026-08-01T08:07:16.843Z",
       "sizeBytes": 331,
       "sha256": "ae134824ad45c2804f96a6f534a65607fd2e4bdf97cde5adec7866d4e88981a6",
       "classification": "exact-current-source",
@@ -4723,43 +4741,43 @@
     {
       "path": "android/app/src/main/assets/capacitor.plugins.json",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\android\\app\\src\\main\\assets\\capacitor.plugins.json",
-      "modifiedUtc": "2026-07-25T14:29:51.581Z",
+      "modifiedUtc": "2026-08-01T08:07:16.953Z",
       "sizeBytes": 1207,
       "sha256": "1623b9083ef2e3683013bae69e614f76e6eba61035ecbb6676bd08350b6bfe96",
       "classification": "exact-current-source",
       "system": "android"
     },
     {
-      "path": "android/app/src/main/assets/public/assets/index-C4VbIqGQ.js",
-      "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\android\\app\\src\\main\\assets\\public\\assets\\index-C4VbIqGQ.js",
-      "modifiedUtc": "2026-07-29T10:28:35.895Z",
-      "sizeBytes": 896800,
-      "sha256": "d1025b474f321929e907c9db21e178c74fe76226b9ad7e83440c50f5f939d121",
-      "classification": "exact-current-source",
-      "system": "android"
-    },
-    {
       "path": "android/app/src/main/assets/public/assets/index-Da52NCW5.css",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\android\\app\\src\\main\\assets\\public\\assets\\index-Da52NCW5.css",
-      "modifiedUtc": "2026-07-29T10:28:35.894Z",
+      "modifiedUtc": "2026-08-01T08:07:14.842Z",
       "sizeBytes": 22197,
       "sha256": "adbc232740b04037871d8f37644a90e9b3011e07161df0e94e0ed1a7fc1256dc",
       "classification": "exact-current-source",
       "system": "android"
     },
     {
-      "path": "android/app/src/main/assets/public/assets/web-DJYJSKlo.js",
-      "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\android\\app\\src\\main\\assets\\public\\assets\\web-DJYJSKlo.js",
-      "modifiedUtc": "2026-07-29T10:28:35.894Z",
+      "path": "android/app/src/main/assets/public/assets/index-Dg1g1dnj.js",
+      "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\android\\app\\src\\main\\assets\\public\\assets\\index-Dg1g1dnj.js",
+      "modifiedUtc": "2026-08-01T08:07:14.843Z",
+      "sizeBytes": 898920,
+      "sha256": "f3d56cb35bc836b53e7e698075f31b4e4c7f342f9ba02988255418ee7affee69",
+      "classification": "exact-current-source",
+      "system": "android"
+    },
+    {
+      "path": "android/app/src/main/assets/public/assets/web-BkCZqZiL.js",
+      "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\android\\app\\src\\main\\assets\\public\\assets\\web-BkCZqZiL.js",
+      "modifiedUtc": "2026-08-01T08:07:14.842Z",
       "sizeBytes": 5345,
-      "sha256": "403b7120f499d7076e93da51f33e49081a9b921a73f5eae8d2360da1d0baf9fa",
+      "sha256": "a552da025cfcd564f68e3cd5645aeda6670dc5d732d1f2b297ae22d01014f730",
       "classification": "exact-current-source",
       "system": "android"
     },
     {
       "path": "android/app/src/main/assets/public/cordova_plugins.js",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\android\\app\\src\\main\\assets\\public\\cordova_plugins.js",
-      "modifiedUtc": "2026-07-29T10:28:37.955Z",
+      "modifiedUtc": "2026-08-01T08:07:17.015Z",
       "sizeBytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "classification": "exact-current-source",
@@ -4768,7 +4786,7 @@
     {
       "path": "android/app/src/main/assets/public/cordova.js",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\android\\app\\src\\main\\assets\\public\\cordova.js",
-      "modifiedUtc": "2026-07-29T10:28:37.954Z",
+      "modifiedUtc": "2026-08-01T08:07:17.015Z",
       "sizeBytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "classification": "exact-current-source",
@@ -4786,9 +4804,9 @@
     {
       "path": "android/app/src/main/assets/public/index.html",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\android\\app\\src\\main\\assets\\public\\index.html",
-      "modifiedUtc": "2026-07-29T10:28:35.894Z",
+      "modifiedUtc": "2026-08-01T08:07:14.842Z",
       "sizeBytes": 843,
-      "sha256": "fee03aafbc4a7390e4993359d23e630f65ab5e461633e19b4916926ee29bf23c",
+      "sha256": "521e10e623663306c38b26fa071dcb685c6e1e3d2dd3bd9ca31d6e71ebaf1386",
       "classification": "exact-current-source",
       "system": "android"
     },
@@ -4811,11 +4829,29 @@
       "system": "android"
     },
     {
+      "path": "android/app/src/main/java/io/github/josephd93/friendshiptree/HealthWidgetConfigureActivity.java",
+      "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\android\\app\\src\\main\\java\\io\\github\\josephd93\\friendshiptree\\HealthWidgetConfigureActivity.java",
+      "modifiedUtc": "2026-08-01T12:26:18.000Z",
+      "sizeBytes": 3073,
+      "sha256": "5edcb7c880fd384c86071a80b98cd1274c9c386c6678e590bb3c7ce03342732b",
+      "classification": "exact-current-source",
+      "system": "android"
+    },
+    {
+      "path": "android/app/src/main/java/io/github/josephd93/friendshiptree/HealthWidgetProvider.java",
+      "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\android\\app\\src\\main\\java\\io\\github\\josephd93\\friendshiptree\\HealthWidgetProvider.java",
+      "modifiedUtc": "2026-08-01T12:26:18.000Z",
+      "sizeBytes": 13023,
+      "sha256": "1ec2336d1338be724af094286dfa1bc6d8818932d0053b2d477cbd436aeedcda",
+      "classification": "exact-current-source",
+      "system": "android"
+    },
+    {
       "path": "android/app/src/main/java/io/github/josephd93/friendshiptree/MainActivity.java",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\android\\app\\src\\main\\java\\io\\github\\josephd93\\friendshiptree\\MainActivity.java",
-      "modifiedUtc": "2026-07-05T17:55:19.672Z",
-      "sizeBytes": 1631,
-      "sha256": "ea1f328d198b0435b36819d7e40e9a8a219b6eb9462080c33ed2d2d54db3dcf3",
+      "modifiedUtc": "2026-08-01T01:42:58.000Z",
+      "sizeBytes": 2011,
+      "sha256": "9da00f513e3ed4b957136c21904548f84c6e0e34843aaba644132991567280f6",
       "classification": "exact-current-source",
       "system": "android"
     },
@@ -4825,6 +4861,24 @@
       "modifiedUtc": "2026-06-02T16:07:57.000Z",
       "sizeBytes": 1880,
       "sha256": "a8514094f754b099d3e55ce1d6e0b2de79db418b2eeacb0fc2a6bb0bfadef221",
+      "classification": "exact-current-source",
+      "system": "android"
+    },
+    {
+      "path": "android/app/src/main/res/drawable/health_widget_background.xml",
+      "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\android\\app\\src\\main\\res\\drawable\\health_widget_background.xml",
+      "modifiedUtc": "2026-08-01T00:35:44.000Z",
+      "sizeBytes": 280,
+      "sha256": "7c7a9f9046efcd9cb9eb30a47aa042c589b33386614f7ce131100cca92fec0d1",
+      "classification": "exact-current-source",
+      "system": "android"
+    },
+    {
+      "path": "android/app/src/main/res/drawable/health_widget_item_background.xml",
+      "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\android\\app\\src\\main\\res\\drawable\\health_widget_item_background.xml",
+      "modifiedUtc": "2026-08-01T02:04:58.000Z",
+      "sizeBytes": 218,
+      "sha256": "fa94d38cbe03b963209d16ef0755caad96f2d8310def157c9670b1b7f042f2ce",
       "classification": "exact-current-source",
       "system": "android"
     },
@@ -4847,6 +4901,33 @@
       "system": "android"
     },
     {
+      "path": "android/app/src/main/res/layout/health_widget_cell.xml",
+      "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\android\\app\\src\\main\\res\\layout\\health_widget_cell.xml",
+      "modifiedUtc": "2026-08-01T12:26:18.000Z",
+      "sizeBytes": 496,
+      "sha256": "5a3144fd08de2fc76237bda55819cd224728a692bc79e9d1c93e102ca018545c",
+      "classification": "exact-current-source",
+      "system": "android"
+    },
+    {
+      "path": "android/app/src/main/res/layout/health_widget_row.xml",
+      "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\android\\app\\src\\main\\res\\layout\\health_widget_row.xml",
+      "modifiedUtc": "2026-08-01T12:26:18.000Z",
+      "sizeBytes": 311,
+      "sha256": "211fb6873239e5d61ad86521241e897f920d2e5c2971941602471766edb0f1b7",
+      "classification": "exact-current-source",
+      "system": "android"
+    },
+    {
+      "path": "android/app/src/main/res/layout/health_widget.xml",
+      "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\android\\app\\src\\main\\res\\layout\\health_widget.xml",
+      "modifiedUtc": "2026-08-01T12:26:18.000Z",
+      "sizeBytes": 1797,
+      "sha256": "ea280ab765dc4a4708292afd5400361afd48c3f5df664cfd7d1cd46a6f18afaa",
+      "classification": "exact-current-source",
+      "system": "android"
+    },
+    {
       "path": "android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\android\\app\\src\\main\\res\\mipmap-anydpi-v26\\ic_launcher_round.xml",
       "modifiedUtc": "2026-06-02T16:07:57.000Z",
@@ -4865,6 +4946,15 @@
       "system": "android"
     },
     {
+      "path": "android/app/src/main/res/values/health_widget_styles.xml",
+      "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\android\\app\\src\\main\\res\\values\\health_widget_styles.xml",
+      "modifiedUtc": "2026-08-01T02:04:58.000Z",
+      "sizeBytes": 918,
+      "sha256": "bb7719e74f836f50fba7e1de38cf1c2e9f5f9e181e66482e53423734fea1087d",
+      "classification": "exact-current-source",
+      "system": "android"
+    },
+    {
       "path": "android/app/src/main/res/values/ic_launcher_background.xml",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\android\\app\\src\\main\\res\\values\\ic_launcher_background.xml",
       "modifiedUtc": "2026-06-02T16:07:57.000Z",
@@ -4876,9 +4966,9 @@
     {
       "path": "android/app/src/main/res/values/strings.xml",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\android\\app\\src\\main\\res\\values\\strings.xml",
-      "modifiedUtc": "2026-06-10T13:39:11.255Z",
-      "sizeBytes": 336,
-      "sha256": "b8758b9edd9a99f1500cc08d8d324141f86f05c1dfefd6dbe293eb046be2b48d",
+      "modifiedUtc": "2026-08-01T00:35:44.000Z",
+      "sizeBytes": 450,
+      "sha256": "505e284a8ef854f893af2f14a1dab75abdb0fc88af8d3d26a8e222c7c08c369e",
       "classification": "exact-current-source",
       "system": "android"
     },
@@ -4894,7 +4984,7 @@
     {
       "path": "android/app/src/main/res/xml/config.xml",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\android\\app\\src\\main\\res\\xml\\config.xml",
-      "modifiedUtc": "2026-07-29T10:28:37.961Z",
+      "modifiedUtc": "2026-08-01T08:07:17.015Z",
       "sizeBytes": 185,
       "sha256": "e9dcda493e663c5c4db9e3cb3bd968477a6e90aa8840bcbba40d72ed54b767ce",
       "classification": "exact-current-source",
@@ -4906,6 +4996,15 @@
       "modifiedUtc": "2026-06-02T16:07:57.000Z",
       "sizeBytes": 213,
       "sha256": "a46ed43ef65c90cb6778f4581decf3556e3f0055aad8f36d69dae16f9a0e99aa",
+      "classification": "exact-current-source",
+      "system": "android"
+    },
+    {
+      "path": "android/app/src/main/res/xml/health_widget_info.xml",
+      "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\android\\app\\src\\main\\res\\xml\\health_widget_info.xml",
+      "modifiedUtc": "2026-08-01T12:26:18.000Z",
+      "sizeBytes": 614,
+      "sha256": "a603d9894475753d0ad79eccd5728c5b4a7466c5f981f38a3233098406671ffd",
       "classification": "exact-current-source",
       "system": "android"
     },
@@ -4930,7 +5029,7 @@
     {
       "path": "android/capacitor-cordova-android-plugins/build.gradle",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\android\\capacitor-cordova-android-plugins\\build.gradle",
-      "modifiedUtc": "2026-07-25T14:29:51.660Z",
+      "modifiedUtc": "2026-08-01T08:07:17.015Z",
       "sizeBytes": 1661,
       "sha256": "8f5cea7b546643b388fc1f3a83633cc12657fea59fec8ae19d76253cb6c13cc1",
       "classification": "exact-current-source",
@@ -4939,7 +5038,7 @@
     {
       "path": "android/capacitor-cordova-android-plugins/cordova.variables.gradle",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\android\\capacitor-cordova-android-plugins\\cordova.variables.gradle",
-      "modifiedUtc": "2026-07-25T14:29:51.660Z",
+      "modifiedUtc": "2026-08-01T08:07:17.015Z",
       "sizeBytes": 312,
       "sha256": "268844885a8d04cf34044ffbe362499ca14836fd1123d05e64f94b12798a8bb9",
       "classification": "exact-current-source",
@@ -4948,7 +5047,7 @@
     {
       "path": "android/capacitor-cordova-android-plugins/src/main/AndroidManifest.xml",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\android\\capacitor-cordova-android-plugins\\src\\main\\AndroidManifest.xml",
-      "modifiedUtc": "2026-07-29T10:28:37.966Z",
+      "modifiedUtc": "2026-08-01T08:07:17.015Z",
       "sizeBytes": 210,
       "sha256": "2e3e383475f0e6cb76f0a7b46017a546663fba8e5bd1ef2a537412afac2ee9b5",
       "classification": "exact-current-source",
@@ -4957,7 +5056,7 @@
     {
       "path": "android/capacitor.settings.gradle",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\android\\capacitor.settings.gradle",
-      "modifiedUtc": "2026-07-25T14:29:51.660Z",
+      "modifiedUtc": "2026-08-01T08:07:17.015Z",
       "sizeBytes": 1795,
       "sha256": "f68ea7f598034da166bc25fb00d9d7f8722997bb8cb0d115f3277a70a3a259d9",
       "classification": "exact-current-source",
@@ -5119,9 +5218,9 @@
     {
       "path": "Docs/02_Development/FEATURE-STATUS.md",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\Docs\\02_Development\\FEATURE-STATUS.md",
-      "modifiedUtc": "2026-07-22T20:18:51.701Z",
-      "sizeBytes": 4056,
-      "sha256": "5e735f58134175e04c86e013e222395150345b40bdb5aa54c212671f08a45151",
+      "modifiedUtc": "2026-08-01T12:26:18.000Z",
+      "sizeBytes": 4412,
+      "sha256": "62266177f8ff3147b3d02d7e1e7c4c0fa6535252fdf3706b82916aad78ef4ee3",
       "classification": "project-support-file",
       "system": "shared"
     },
@@ -5137,27 +5236,27 @@
     {
       "path": "Docs/02_Development/TESTING.md",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\Docs\\02_Development\\TESTING.md",
-      "modifiedUtc": "2026-07-22T20:18:51.577Z",
-      "sizeBytes": 2856,
-      "sha256": "f5dfca0827898698506698c8a599dcffafa45200fa78b9f618ff5e71810b4316",
+      "modifiedUtc": "2026-08-01T12:26:18.000Z",
+      "sizeBytes": 5344,
+      "sha256": "b1e9b52387d2180907d67be59a1e2e7b2a7ceb8c1d5e42f91d0708c745d4c132",
       "classification": "project-support-file",
       "system": "shared"
     },
     {
       "path": "Docs/03_Project Status/CHANGELOG.md",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\Docs\\03_Project Status\\CHANGELOG.md",
-      "modifiedUtc": "2026-07-22T20:18:51.859Z",
-      "sizeBytes": 1293,
-      "sha256": "75d8018031beb712d0251f9d0070b9abee20e5a295a99119bad5f9ae885e6c62",
+      "modifiedUtc": "2026-08-01T12:26:18.000Z",
+      "sizeBytes": 3914,
+      "sha256": "fb377b2e8109e5bf19724608163d43e50d9d42139d0c3453cb2239a770580215",
       "classification": "project-support-file",
       "system": "shared"
     },
     {
       "path": "Docs/03_Project Status/CURRENT-STATUS.md",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\Docs\\03_Project Status\\CURRENT-STATUS.md",
-      "modifiedUtc": "2026-07-22T20:18:51.735Z",
-      "sizeBytes": 1753,
-      "sha256": "2da3e5104f76852260b3e859aca7a5586d0ee2e49c4ef7ffcec392c2b59bc5e8",
+      "modifiedUtc": "2026-08-01T12:26:18.000Z",
+      "sizeBytes": 2326,
+      "sha256": "d958063716e4eaac64cbcb05b52f879c4be4b8f15fb7d8091dfe0114a8ddb63d",
       "classification": "project-support-file",
       "system": "shared"
     },
@@ -5173,9 +5272,9 @@
     {
       "path": "Docs/03_Project Status/ROADMAP.md",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\Docs\\03_Project Status\\ROADMAP.md",
-      "modifiedUtc": "2026-07-22T20:18:51.812Z",
-      "sizeBytes": 1228,
-      "sha256": "3e2107b85369b82c41383e295cf2032a5661424feb0471e6601fe8aac91a1c85",
+      "modifiedUtc": "2026-08-01T12:26:18.000Z",
+      "sizeBytes": 1814,
+      "sha256": "540b684d720cb322f322f4e074b5b44caf78093b3865ecb309206e4b6d178604",
       "classification": "project-support-file",
       "system": "shared"
     },
@@ -5218,7 +5317,7 @@
     {
       "path": "Documentation/STUDIO-AND-FORGE-HANDOVER.md",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\Documentation\\STUDIO-AND-FORGE-HANDOVER.md",
-      "modifiedUtc": "2026-07-31T10:09:30.651Z",
+      "modifiedUtc": "2026-07-31T10:33:35.940Z",
       "sizeBytes": 2449,
       "sha256": "f273b403d4cce30eec08d3d4b8f397f1c25406b49e14e15b9305191e7080284f",
       "classification": "project-support-file",
@@ -5722,9 +5821,9 @@
     {
       "path": "FriendshipTreeLauncher/delivery-pipeline.js",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\FriendshipTreeLauncher\\delivery-pipeline.js",
-      "modifiedUtc": "2026-07-28T09:12:39.322Z",
-      "sizeBytes": 16306,
-      "sha256": "445c31256baa11f4aceb0904a2deed2e45cd36e6d6e5d2e15b59cf5f31340a7c",
+      "modifiedUtc": "2026-08-01T13:36:10.000Z",
+      "sizeBytes": 18419,
+      "sha256": "579083a1b60d1fa74eb42cdbcb46ea2a2f04ef860e659a9cbfeab7a0b9218318",
       "classification": "exact-current-source",
       "system": "launcher"
     },
@@ -5758,45 +5857,45 @@
     {
       "path": "FriendshipTreeLauncher/main.js",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\FriendshipTreeLauncher\\main.js",
-      "modifiedUtc": "2026-07-31T11:20:40.000Z",
-      "sizeBytes": 9511,
-      "sha256": "d941b7d5ba0e0d977c049f1ed0d0d86f396c012f679b0a36c2486b9955d4c3f7",
+      "modifiedUtc": "2026-08-01T13:36:10.000Z",
+      "sizeBytes": 11154,
+      "sha256": "920b574781b8bc5e5091f31a23f449d5cc406c0c8c6a480225a7ae946c8a92c2",
       "classification": "exact-current-source",
       "system": "launcher"
     },
     {
       "path": "FriendshipTreeLauncher/package.json",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\FriendshipTreeLauncher\\package.json",
-      "modifiedUtc": "2026-07-31T11:20:40.000Z",
-      "sizeBytes": 258,
-      "sha256": "ab41f1c2f2c12ad9adc6971ef1ad70220e58bb4bb22938ec0d26fda802f3b456",
+      "modifiedUtc": "2026-08-01T13:36:10.000Z",
+      "sizeBytes": 217,
+      "sha256": "91eecb3b2643b21087ef3c27c5bbe2b430f5cd5f364f1810da5bad1f2613e482",
       "classification": "exact-current-source",
       "system": "launcher"
     },
     {
       "path": "FriendshipTreeLauncher/preload.js",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\FriendshipTreeLauncher\\preload.js",
-      "modifiedUtc": "2026-07-31T11:20:40.000Z",
-      "sizeBytes": 1639,
-      "sha256": "07d06011e6f415cbac5ce001fd4ad640afcb51b7682f1d8f7539ae8355549e0c",
+      "modifiedUtc": "2026-08-01T13:36:10.000Z",
+      "sizeBytes": 1722,
+      "sha256": "f43a63284705066fbd030df990836182d10b3f74b2f98ca9541c7c9dc86fc617",
       "classification": "exact-current-source",
       "system": "launcher"
     },
     {
       "path": "FriendshipTreeLauncher/README.md",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\FriendshipTreeLauncher\\README.md",
-      "modifiedUtc": "2026-07-31T11:20:40.000Z",
-      "sizeBytes": 1647,
-      "sha256": "5004e2d70a6dfd1e28b4f488b3797ec113738ef897089e8d0c3098c5012e6463",
+      "modifiedUtc": "2026-08-01T13:36:10.000Z",
+      "sizeBytes": 1880,
+      "sha256": "ad9e78607fdfe1b8f788cd2b48933456fff093a68d1b068165c0460ed6ed4324",
       "classification": "exact-current-source",
       "system": "launcher"
     },
     {
       "path": "FriendshipTreeLauncher/renderer.js",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\FriendshipTreeLauncher\\renderer.js",
-      "modifiedUtc": "2026-07-31T11:20:40.000Z",
-      "sizeBytes": 15787,
-      "sha256": "fff8d52fd5f3af6278cb220985961f2e7d0139deb7e1cb35c426fcd40b21e6e8",
+      "modifiedUtc": "2026-08-01T13:36:10.000Z",
+      "sizeBytes": 16922,
+      "sha256": "d3c7647c71ab2b3f6f59858dc6eae745afe0c34e76f50d3f48b7fb5536c57769",
       "classification": "exact-current-source",
       "system": "launcher"
     },
@@ -5857,18 +5956,18 @@
     {
       "path": "FriendshipTreeStudio/index.html",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\FriendshipTreeStudio\\index.html",
-      "modifiedUtc": "2026-07-30T12:49:58.000Z",
-      "sizeBytes": 28606,
-      "sha256": "74b49d4dfec3542ca7276a1445e98ba4a246ec3f15cc27ccdfac848788766686",
+      "modifiedUtc": "2026-07-31T09:50:36.000Z",
+      "sizeBytes": 27809,
+      "sha256": "d9e3c408f73c87b348cce0dc3889d56edb81c30ea0bbaf3f410e19329da27538",
       "classification": "exact-current-source",
       "system": "studio"
     },
     {
       "path": "FriendshipTreeStudio/main.js",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\FriendshipTreeStudio\\main.js",
-      "modifiedUtc": "2026-07-30T12:49:58.000Z",
-      "sizeBytes": 136344,
-      "sha256": "010ae0b46ce1418705869fc4b9ab664a1ec4f7466eaf6c5d5e3258b721079f50",
+      "modifiedUtc": "2026-07-31T09:51:18.000Z",
+      "sizeBytes": 139186,
+      "sha256": "700a413d99aa41c138c7f173d87ed1f11361110d4de73e491bbacb66152b0b68",
       "classification": "exact-current-source",
       "system": "studio"
     },
@@ -5893,18 +5992,18 @@
     {
       "path": "FriendshipTreeStudio/package.json",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\FriendshipTreeStudio\\package.json",
-      "modifiedUtc": "2026-07-30T12:49:58.000Z",
-      "sizeBytes": 304,
-      "sha256": "7381011ef1b387df007a0706069f0f3245b9654f0b185672015ffced2b83eabc",
+      "modifiedUtc": "2026-07-31T09:50:36.000Z",
+      "sizeBytes": 302,
+      "sha256": "4df915991ce11190eec0de89bebafe15e8d06f16701cd0b7010ef01dc64ec178",
       "classification": "exact-current-source",
       "system": "studio"
     },
     {
       "path": "FriendshipTreeStudio/preload.js",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\FriendshipTreeStudio\\preload.js",
-      "modifiedUtc": "2026-07-30T12:49:58.000Z",
-      "sizeBytes": 4835,
-      "sha256": "6055a216f9f10738ece29e76455d4147f1aae37d95de9aa64cbe1d3f54d72f48",
+      "modifiedUtc": "2026-07-31T09:51:18.000Z",
+      "sizeBytes": 5141,
+      "sha256": "5cbd3cccae29fe65856c8731fbe1280fd86a775a80519aae99678f871ab88113",
       "classification": "exact-current-source",
       "system": "studio"
     },
@@ -5920,9 +6019,9 @@
     {
       "path": "FriendshipTreeStudio/renderer.js",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\FriendshipTreeStudio\\renderer.js",
-      "modifiedUtc": "2026-07-30T12:49:58.000Z",
-      "sizeBytes": 98671,
-      "sha256": "19cdfef4682c8477dca92da709c232c0acaff73f0f6f8dc54b207c5620a8c5a3",
+      "modifiedUtc": "2026-07-31T09:51:36.000Z",
+      "sizeBytes": 100861,
+      "sha256": "cf3e863c326fefcd9a8079354ec041027d387f2f54dec501d82c0bc6aae02dfc",
       "classification": "exact-current-source",
       "system": "studio"
     },
@@ -6181,9 +6280,9 @@
     {
       "path": "FriendshipTreeStudio/styles.css",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\FriendshipTreeStudio\\styles.css",
-      "modifiedUtc": "2026-07-30T12:49:58.000Z",
-      "sizeBytes": 48461,
-      "sha256": "455b884231428258204819cc2892917de03156fce3c1754c3d62e48fa64803ab",
+      "modifiedUtc": "2026-07-31T09:49:54.000Z",
+      "sizeBytes": 47604,
+      "sha256": "408c69517b17bf760529f65e8b37d002b204b4a0caac19f7bf42a02b093faf90",
       "classification": "exact-current-source",
       "system": "studio"
     },
@@ -6811,9 +6910,9 @@
     {
       "path": "src/App.jsx",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\src\\App.jsx",
-      "modifiedUtc": "2026-07-29T10:26:24.479Z",
-      "sizeBytes": 1451183,
-      "sha256": "f985bfe2885a9f28d54c0ef6aee4fccf9e6f9c397be113b6cae9f2b1cd829a72",
+      "modifiedUtc": "2026-08-01T12:26:18.000Z",
+      "sizeBytes": 1455677,
+      "sha256": "a741fa5cd00cd5b6dd5525a49153fa32a9694f3088cd0ba315966b95f333e7b4",
       "classification": "exact-current-source",
       "system": "app"
     },
@@ -7061,6 +7160,15 @@
       "system": "studio-support"
     },
     {
+      "path": "StudioSystem/launcher-window-state.json",
+      "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\StudioSystem\\launcher-window-state.json",
+      "modifiedUtc": "2026-08-01T09:09:00.511Z",
+      "sizeBytes": 57,
+      "sha256": "511409168bb9503c136f433f987f151c05e21840b3ad60e328b56468ebfa3437",
+      "classification": "exact-current-source",
+      "system": "studio-support"
+    },
+    {
       "path": "StudioSystem/README.txt",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\StudioSystem\\README.txt",
       "modifiedUtc": "2026-07-22T17:52:47.402Z",
@@ -7198,9 +7306,9 @@
     {
       "path": "StudioSystem/studio-state.json",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\StudioSystem\\studio-state.json",
-      "modifiedUtc": "2026-07-31T09:19:03.143Z",
-      "sizeBytes": 512,
-      "sha256": "30ad7f51376dfa32734dabb30f22bf70d32cca3dfb49161684dcee7d5109934c",
+      "modifiedUtc": "2026-08-01T09:10:51.075Z",
+      "sizeBytes": 383,
+      "sha256": "5fe56f51fe91bfe8ecb90e1b5461e50f99a83bedac13885142bfcd7a4d3c2b57",
       "classification": "exact-current-source",
       "system": "studio-support"
     },
@@ -8386,6 +8494,96 @@
     {
       "path": "StudioSystem/Versions/2.14.8/universal-search.js",
       "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\StudioSystem\\Versions\\2.14.8\\universal-search.js",
+      "modifiedUtc": "2026-07-31T08:51:40.000Z",
+      "sizeBytes": 15228,
+      "sha256": "ce51dafdaf9e7dce98efac56dcd83f6e1ed784d07c51df3f2d843b379e6f6c06",
+      "classification": "exact-current-source",
+      "system": "studio-support"
+    },
+    {
+      "path": "StudioSystem/Versions/2.14.9/command-registry.js",
+      "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\StudioSystem\\Versions\\2.14.9\\command-registry.js",
+      "modifiedUtc": "2026-07-31T08:51:40.000Z",
+      "sizeBytes": 13677,
+      "sha256": "5493860301177fee89f009c7b3bbf07c15b8beff0e61486eadb5ddab78472d3a",
+      "classification": "exact-current-source",
+      "system": "studio-support"
+    },
+    {
+      "path": "StudioSystem/Versions/2.14.9/index.html",
+      "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\StudioSystem\\Versions\\2.14.9\\index.html",
+      "modifiedUtc": "2026-07-31T09:50:36.000Z",
+      "sizeBytes": 27809,
+      "sha256": "d9e3c408f73c87b348cce0dc3889d56edb81c30ea0bbaf3f410e19329da27538",
+      "classification": "exact-current-source",
+      "system": "studio-support"
+    },
+    {
+      "path": "StudioSystem/Versions/2.14.9/main.js",
+      "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\StudioSystem\\Versions\\2.14.9\\main.js",
+      "modifiedUtc": "2026-08-01T13:36:10.000Z",
+      "sizeBytes": 140404,
+      "sha256": "6fc93c9243beef57cc90c7777084692343c99153c14994df7151141c9e8ea1a9",
+      "classification": "exact-current-source",
+      "system": "studio-support"
+    },
+    {
+      "path": "StudioSystem/Versions/2.14.9/notification-centre.js",
+      "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\StudioSystem\\Versions\\2.14.9\\notification-centre.js",
+      "modifiedUtc": "2026-07-31T08:51:40.000Z",
+      "sizeBytes": 11500,
+      "sha256": "22c06deec748016eb713f11fe8289a0f685f0890bfcef8a9524be674adc231a2",
+      "classification": "exact-current-source",
+      "system": "studio-support"
+    },
+    {
+      "path": "StudioSystem/Versions/2.14.9/package.json",
+      "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\StudioSystem\\Versions\\2.14.9\\package.json",
+      "modifiedUtc": "2026-08-01T13:36:10.000Z",
+      "sizeBytes": 294,
+      "sha256": "bb0cfe65ec99e070c47de6ae7378074d5b17be1cb1cbf174b9649952c4ebd586",
+      "classification": "exact-current-source",
+      "system": "studio-support"
+    },
+    {
+      "path": "StudioSystem/Versions/2.14.9/preload.js",
+      "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\StudioSystem\\Versions\\2.14.9\\preload.js",
+      "modifiedUtc": "2026-07-31T09:51:18.000Z",
+      "sizeBytes": 5141,
+      "sha256": "5cbd3cccae29fe65856c8731fbe1280fd86a775a80519aae99678f871ab88113",
+      "classification": "exact-current-source",
+      "system": "studio-support"
+    },
+    {
+      "path": "StudioSystem/Versions/2.14.9/renderer.js",
+      "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\StudioSystem\\Versions\\2.14.9\\renderer.js",
+      "modifiedUtc": "2026-07-31T09:51:36.000Z",
+      "sizeBytes": 100861,
+      "sha256": "cf3e863c326fefcd9a8079354ec041027d387f2f54dec501d82c0bc6aae02dfc",
+      "classification": "exact-current-source",
+      "system": "studio-support"
+    },
+    {
+      "path": "StudioSystem/Versions/2.14.9/studio-core.js",
+      "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\StudioSystem\\Versions\\2.14.9\\studio-core.js",
+      "modifiedUtc": "2026-07-31T08:51:40.000Z",
+      "sizeBytes": 1270,
+      "sha256": "21b7a4b2aee00d9fd2f90ec14cdb537390391a612ad6ccfa2607c6bd1fc5ede7",
+      "classification": "exact-current-source",
+      "system": "studio-support"
+    },
+    {
+      "path": "StudioSystem/Versions/2.14.9/styles.css",
+      "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\StudioSystem\\Versions\\2.14.9\\styles.css",
+      "modifiedUtc": "2026-07-31T09:49:54.000Z",
+      "sizeBytes": 47604,
+      "sha256": "408c69517b17bf760529f65e8b37d002b204b4a0caac19f7bf42a02b093faf90",
+      "classification": "exact-current-source",
+      "system": "studio-support"
+    },
+    {
+      "path": "StudioSystem/Versions/2.14.9/universal-search.js",
+      "canonicalPath": "C:\\Users\\Joe\\FriendshipTree\\StudioSystem\\Versions\\2.14.9\\universal-search.js",
       "modifiedUtc": "2026-07-31T08:51:40.000Z",
       "sizeBytes": 15228,
       "sha256": "ce51dafdaf9e7dce98efac56dcd83f6e1ed784d07c51df3f2d843b379e6f6c06",

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="HealthWidgetItem">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">0dp</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:layout_marginTop">2dp</item>
+        <item name="android:layout_marginBottom">2dp</item>
+        <item name="android:gravity">start|center_vertical</item>
+        <item name="android:paddingLeft">12dp</item>
+        <item name="android:paddingRight">12dp</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:textColor">#ECFDF5</item>
+        <item name="android:textSize">12sp</item>
+        <item name="android:background">@drawable/health_widget_item_background</item>
+        <item name="android:minHeight">28dp</item>
+        <item name="android:clickable">true</item>
+    </style>
+</resources>

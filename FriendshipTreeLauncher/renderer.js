@@ -175,6 +175,31 @@ function deliveryTypeLabel(type) {
   return ({'app-update':'FriendshipTree App','studio-update':'FriendshipTree Studio','launcher-update':'Launcher','ai-workspace-update':'AI Workspace'})[type] || 'Unknown package';
 }
 
+function showApkRetry(apk, reason) {
+  const progress = $('#deliveryProgress');
+  progress.textContent = '';
+  const message = document.createElement('span');
+  message.textContent = `${reason || 'The APK is built, but was not installed.'} `;
+  const button = document.createElement('button');
+  button.className = 'primary';
+  button.textContent = 'Send built APK to phone again';
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    button.textContent = 'Sending…';
+    try {
+      const result = await window.launcher.sendBuiltApk(apk);
+      if (!result.phoneInstalled) throw new Error(result.phoneMessage || 'The phone installation was not verified.');
+      const done = 'FriendshipTree was installed and verified on your phone.';
+      progress.textContent = done;
+      toast(done);
+    } catch (error) {
+      showApkRetry(apk, error.message || String(error));
+      toast(error.message || String(error), true);
+    }
+  });
+  progress.append(message, button);
+}
+
 async function refreshDeliveries() {
   const items = $('#deliveryItems');
   try {
@@ -211,13 +236,14 @@ async function refreshDeliveries() {
           const installed = await window.launcher.installDelivery(item.path);
           let message = `${installed.displayName} installed.`;
           if (installed.build?.phoneInstalled) message += ' APK built and installed on your phone.';
-          else if (installed.build?.apk) message += ' APK built; phone was unavailable, so it is ready for later installation.';
+          else if (installed.build?.apk) message += ` APK built; ${installed.build.phoneMessage || 'phone installation was not completed.'}`;
           if (installed.packageType === 'studio-update' && installed.studioInstall) {
             message += ` Activated Studio ${installed.studioInstall.currentVersion}; ${installed.studioInstall.verifiedFiles.length} file(s) verified.`;
           }
           if (installed.restartRequired) message += ' Restart the Launcher/Studio to load the updated interface.';
           toast(message);
-          $('#deliveryProgress').textContent = message;
+          if (installed.build?.apk && !installed.build.phoneInstalled) showApkRetry(installed.build.apk, message);
+          else $('#deliveryProgress').textContent = message;
           await refreshDeliveries();
           await refresh();
         } catch (error) {

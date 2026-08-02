@@ -1,5 +1,6 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
+    <string name="health_widget_description">Log your FriendshipTree health tracker from the home screen</string>
     <string name="app_name">FriendshipTree</string>
     <string name="title_activity_main">FriendshipTree</string>
     <string name="package_name">io.github.josephd93.friendshiptree</string>

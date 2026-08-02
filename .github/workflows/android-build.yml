@@ -1,0 +1,84 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: android-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-debug-apk:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web app
+        run: npm run build
+
+      - name: Sync Capacitor Android project
+        run: npx cap sync android
+
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug
+
+      - name: Name APK and create checksum
+        id: package
+        shell: bash
+        run: |
+          VERSION_NAME="$(awk '/versionName/ { value=$2; gsub(/["'"']/, "", value); print value; exit }' android/app/build.gradle)"
+          test -n "$VERSION_NAME"
+          APK_NAME="FriendshipTree-v${VERSION_NAME}-debug.apk"
+          cp android/app/build/outputs/apk/debug/app-debug.apk "$APK_NAME"
+          sha256sum "$APK_NAME" > "$APK_NAME.sha256"
+          echo "version=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+          echo "apk_name=$APK_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: FriendshipTree-v${{ steps.package.outputs.version }}-debug-apk
+          path: |
+            ${{ steps.package.outputs.apk_name }}
+            ${{ steps.package.outputs.apk_name }}.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish phone-downloadable APK release
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APK_NAME: ${{ steps.package.outputs.apk_name }}
+          VERSION_NAME: ${{ steps.package.outputs.version }}
+        shell: bash
+        run: |
+          TAG="android-v${VERSION_NAME}-build-${GITHUB_RUN_NUMBER}"
+          gh release create "$TAG" \
+            "$APK_NAME" \
+            "$APK_NAME.sha256" \
+            --target "$GITHUB_SHA" \
+            --title "FriendshipTree Android ${VERSION_NAME} (build ${GITHUB_RUN_NUMBER})" \
+            --notes "Automatic debug APK built from verified main commit ${GITHUB_SHA}. Download the APK asset directly on the Android phone and install it. The SHA-256 file is included for integrity checking." \
+            --latest

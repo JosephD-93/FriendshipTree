@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:padding="8dp"
+    android:background="@drawable/health_widget_background">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:gravity="center_vertical">
+        <LinearLayout android:id="@+id/health_widget_header" android:layout_width="0dp"
+            android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">
+            <TextView android:id="@+id/health_widget_title" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:text="FriendshipTree Health"
+                android:textColor="#F8FAFC" android:textSize="16sp" android:textStyle="bold" />
+            <TextView android:id="@+id/health_widget_hint" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:text="Tap a circle to add one"
+                android:textColor="#A7F3D0" android:textSize="10sp" />
+        </LinearLayout>
+        <TextView android:id="@+id/health_widget_next" android:layout_width="44dp"
+            android:layout_height="44dp" android:gravity="center" android:text="↻"
+            android:textColor="#F8FAFC" android:textSize="24sp" android:contentDescription="Show next tracker" />
+        <TextView android:id="@+id/health_widget_settings" android:layout_width="38dp"
+            android:layout_height="44dp" android:gravity="center" android:text="⚙"
+            android:textColor="#F8FAFC" android:textSize="20sp" android:contentDescription="Widget settings" />
+    </LinearLayout>
+    <LinearLayout android:id="@+id/health_widget_grid" android:layout_width="match_parent"
+        android:layout_height="0dp" android:layout_weight="1" android:orientation="vertical"
+        android:gravity="center" android:paddingTop="2dp" />
+</LinearLayout>

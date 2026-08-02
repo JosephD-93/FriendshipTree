@@ -1,5 +1,5 @@
 
-const { app, BrowserWindow, ipcMain, dialog, shell, clipboard } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -84,6 +84,8 @@ app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
 
 let launchPackagePath = null;
 let mainWindow = null;
+let windowStateTimer = null;
+const WINDOW_STATE_PATH = path.join(STUDIO_DATA, 'studio-window-state.json');
 let updateInboxWatcher = null;
 const updateInboxQueue = new Set();
 
@@ -246,9 +248,19 @@ function writeEnvironmentReport() {
 
 function createWindow() {
   markStartup('window-create-start');
+  let bounds = { width: 1240, height: 860 };
+  try {
+    const saved = JSON.parse(fs.readFileSync(WINDOW_STATE_PATH, 'utf8'));
+    if ([saved.x, saved.y, saved.width, saved.height].every(Number.isFinite)) {
+      const candidate = { x: saved.x, y: saved.y, width: Math.max(620, saved.width), height: Math.max(500, saved.height) };
+      const visible = screen.getAllDisplays().some(({ workArea }) =>
+        candidate.x < workArea.x + workArea.width - 80 && candidate.x + candidate.width > workArea.x + 80 &&
+        candidate.y < workArea.y + workArea.height - 80 && candidate.y + candidate.height > workArea.y + 80);
+      if (visible) bounds = candidate;
+    }
+  } catch {}
   const win = new BrowserWindow({
-    width: 1240,
-    height: 860,
+    ...bounds,
     minWidth: 620,
     minHeight: 500,
     backgroundColor: '#111713',
@@ -280,6 +292,16 @@ function createWindow() {
     showWindow();
   });
   setTimeout(showWindow, 1500);
+  const rememberBounds = () => {
+    clearTimeout(windowStateTimer);
+    windowStateTimer = setTimeout(() => {
+      if (win.isDestroyed() || win.isMinimized() || win.isMaximized() || win.isFullScreen()) return;
+      try { fs.writeFileSync(WINDOW_STATE_PATH, JSON.stringify(win.getBounds(), null, 2), 'utf8'); } catch {}
+    }, 350);
+  };
+  win.on('move', rememberBounds);
+  win.on('resize', rememberBounds);
+  win.on('close', rememberBounds);
   win.on('closed', () => { if (mainWindow === win) mainWindow = null; });
 }
 
