@@ -15016,7 +15016,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             <div
               onTouchStart={onSwipeStart}
               onTouchEnd={onSwipeEnd}
-              style={{position:'absolute',inset:0,zIndex:55,display:'flex',flexDirection:'column',
+              style={{position:'absolute',inset:'0 0 calc(64px + env(safe-area-inset-bottom, 0px)) 0',zIndex:55,display:'flex',flexDirection:'column',
               background:dm?'#0f172a':'#f8fafc',overflowY:'auto',touchAction:'pan-y'}}>
               {/* Header */}
               <div style={{padding:'14px 16px 10px',
