@@ -23659,7 +23659,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 <path d="M11 19 L11 10 M11 14 C11 14 7 12 6 8 C9 7 12 10 11 14 M11 12 C11 12 15 10 16 6 C13 5 10 8 11 12" stroke={active?'#10b981':'currentColor'} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
                 <circle cx="11" cy="19" r="1.5" fill={active?'#10b981':'currentColor'}/>
               </svg>
-              <span style={{position:'absolute',top:-5,right:-10,fontSize:7,fontWeight:800,background:'#10b981',color:'white',borderRadius:99,padding:'1px 3px',lineHeight:1.3,pointerEvents:'none'}}>v{APP_VERSION}</span>
+              <span style={{position:'absolute',top:-5,right:-10,fontSize:7,fontWeight:800,background:'#10b981',color:'white',borderRadius:99,padding:'1px 3px',lineHeight:1.3,pointerEvents:'none'}}>v{APP_VERSION} TEST</span>
             </div>
           )},
           { id: 'calendar', label: 'Calendar', icon: (active) => <CalendarIcon className="w-5 h-5" /> },
