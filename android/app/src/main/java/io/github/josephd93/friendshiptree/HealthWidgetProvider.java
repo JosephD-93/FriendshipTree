@@ -31,6 +31,7 @@ public class HealthWidgetProvider extends AppWidgetProvider {
     private static final String ROWS_KEY_PREFIX = "rows_";
     private static final String COLS_KEY_PREFIX = "cols_";
     private static final String COLOR_KEY_PREFIX = "color_";
+    private static final String FORMAT_KEY_PREFIX = "format_";
     private static final int MAX_ITEMS = 24;
 
     @Override
@@ -44,7 +45,7 @@ public class HealthWidgetProvider extends AppWidgetProvider {
         SharedPreferences.Editor editor = context.getSharedPreferences(WIDGET_PREFS, Context.MODE_PRIVATE).edit();
         for (int widgetId : widgetIds) editor.remove(LIST_KEY_PREFIX + widgetId)
             .remove(ROWS_KEY_PREFIX + widgetId).remove(COLS_KEY_PREFIX + widgetId)
-            .remove(COLOR_KEY_PREFIX + widgetId);
+            .remove(COLOR_KEY_PREFIX + widgetId).remove(FORMAT_KEY_PREFIX + widgetId);
         editor.apply();
     }
 
@@ -91,7 +92,17 @@ public class HealthWidgetProvider extends AppWidgetProvider {
 
     public static String getColorMode(Context context, int widgetId) {
         return context.getSharedPreferences(WIDGET_PREFS, Context.MODE_PRIVATE)
-            .getString(COLOR_KEY_PREFIX + widgetId, "green");
+            .getString(COLOR_KEY_PREFIX + widgetId, "tracker");
+    }
+
+    public static void setFormat(Context context, int widgetId, String format) {
+        context.getSharedPreferences(WIDGET_PREFS, Context.MODE_PRIVATE)
+            .edit().putString(FORMAT_KEY_PREFIX + widgetId, format).apply();
+    }
+
+    public static String getFormat(Context context, int widgetId) {
+        return context.getSharedPreferences(WIDGET_PREFS, Context.MODE_PRIVATE)
+            .getString(FORMAT_KEY_PREFIX + widgetId, "grid");
     }
 
     public static int getRows(Context context, int widgetId, int fallback) {
@@ -131,66 +142,122 @@ public class HealthWidgetProvider extends AppWidgetProvider {
             && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S;
         views.setInt(R.id.health_widget_root, "setBackgroundResource",
             matchWallpaper ? R.drawable.health_widget_background_dynamic : R.drawable.health_widget_background);
-        String circleColor = list == null ? "#10b981" : list.optString("color", "#10b981");
-        if (matchWallpaper) {
-            circleColor = String.format("#%06X",
-                0xFFFFFF & context.getColor(android.R.color.system_accent1_300));
-        }
+        String circleColor = accentColor(context, widgetId, list, matchWallpaper);
 
         views.removeAllViews(R.id.health_widget_grid);
         if (categories != null && categories.length() > 0) {
             SharedPreferences prefs = context.getSharedPreferences(WIDGET_PREFS, Context.MODE_PRIVATE);
-            int columns = prefs.getInt(COLS_KEY_PREFIX + widgetId, Math.max(1, Math.min(6, list.optInt("gridCols", 3))));
-            int rows = prefs.getInt(ROWS_KEY_PREFIX + widgetId, Math.max(1, (int) Math.ceil(Math.min(MAX_ITEMS, categories.length()) / (double) columns)));
-            columns = Math.max(1, Math.min(6, columns));
-            rows = Math.max(1, Math.min(8, rows));
-            int shown = Math.min(Math.min(MAX_ITEMS, categories.length()), rows * columns);
+            int columns = Math.max(1, Math.min(6,
+                prefs.getInt(COLS_KEY_PREFIX + widgetId, Math.max(1, Math.min(6, list.optInt("gridCols", 3))))));
+            int rows = Math.max(1, Math.min(8,
+                prefs.getInt(ROWS_KEY_PREFIX + widgetId,
+                    Math.max(1, (int) Math.ceil(Math.min(MAX_ITEMS, categories.length()) / (double) columns)))));
+            boolean listFormat = "list".equals(getFormat(context, widgetId));
+            int shown = Math.min(Math.min(MAX_ITEMS, categories.length()),
+                listFormat ? rows : rows * columns);
             android.os.Bundle options = manager.getAppWidgetOptions(widgetId);
-            // Android reports a size range. In portrait, the useful widget size is
-            // normally MIN_WIDTH x MAX_HEIGHT; using MIN_HEIGHT here made circles
-            // unnecessarily small because that is the landscape height.
             int widthDp = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 250);
             int heightDp = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT,
                 options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 180));
-            int availableWidth = Math.max(72, widthDp - 12);
-            int availableHeight = Math.max(64, heightDp - 12);
-            int cellDp = Math.max(40, Math.min(120,
-                Math.min(availableWidth / columns, availableHeight / rows)));
-            int bitmapPx = Math.max(96, Math.round(cellDp * context.getResources().getDisplayMetrics().density));
-            for (int start = 0; start < shown; start += columns) {
-                RemoteViews row = new RemoteViews(context.getPackageName(), R.layout.health_widget_row);
-                for (int i = start; i < Math.min(start + columns, shown); i++) {
+
+            if (listFormat) {
+                for (int i = 0; i < shown; i++) {
                     JSONObject category = categories.optJSONObject(i);
                     String categoryId = category.optString("id", "");
                     int count = counts == null ? 0 : counts.optInt(categoryId, 0);
                     int target = Math.max(1, category.optInt("target", 1));
-                    RemoteViews cell = new RemoteViews(context.getPackageName(), R.layout.health_widget_cell);
-                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-                        // A fixed square cell keeps neighbouring circles close. The old
-                        // weighted cells filled the entire row and created large gaps.
-                        cell.setViewLayoutWidth(R.id.health_widget_circle, cellDp,
-                            android.util.TypedValue.COMPLEX_UNIT_DIP);
-                        cell.setViewLayoutHeight(R.id.health_widget_circle, cellDp,
-                            android.util.TypedValue.COMPLEX_UNIT_DIP);
-                    }
-                    cell.setImageViewBitmap(R.id.health_widget_circle,
-                        circleBitmap(circleColor, count, target, category.optString("icon", "✓"), bitmapPx));
-                    cell.setContentDescription(R.id.health_widget_circle,
+                    RemoteViews item = new RemoteViews(context.getPackageName(), R.layout.health_widget_list_item);
+                    item.setTextViewText(R.id.health_widget_list_icon, category.optString("icon", "✓"));
+                    item.setTextViewText(R.id.health_widget_list_label, category.optString("label", "Item"));
+                    item.setImageViewBitmap(R.id.health_widget_list_dots, dotsBitmap(circleColor, count, target));
+                    item.setContentDescription(R.id.health_widget_list_item,
                         category.optString("label", "Item") + ", " + count + " of " + target);
-                    Intent increment = new Intent(context, HealthWidgetProvider.class)
-                        .setAction(ACTION_INCREMENT)
-                        .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId)
-                        .putExtra("listId", listId)
-                        .putExtra("categoryId", categoryId);
-                    PendingIntent pending = PendingIntent.getBroadcast(context,
-                        widgetId * 100 + i, increment, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-                    cell.setOnClickPendingIntent(R.id.health_widget_circle, pending);
-                    row.addView(R.id.health_widget_row, cell);
+                    item.setOnClickPendingIntent(R.id.health_widget_list_item,
+                        incrementIntent(context, widgetId, i, listId, categoryId));
+                    views.addView(R.id.health_widget_grid, item);
                 }
-                views.addView(R.id.health_widget_grid, row);
+            } else {
+                int availableWidth = Math.max(72, widthDp - 12);
+                int availableHeight = Math.max(64, heightDp - 12);
+                int cellDp = Math.max(40, Math.min(120,
+                    Math.min(availableWidth / columns, availableHeight / rows)));
+                int bitmapPx = Math.max(96,
+                    Math.round(cellDp * context.getResources().getDisplayMetrics().density));
+                for (int rowStart = 0; rowStart < shown; rowStart += columns) {
+                    RemoteViews row = new RemoteViews(context.getPackageName(), R.layout.health_widget_row);
+                    for (int i = rowStart; i < Math.min(rowStart + columns, shown); i++) {
+                        JSONObject category = categories.optJSONObject(i);
+                        String categoryId = category.optString("id", "");
+                        int count = counts == null ? 0 : counts.optInt(categoryId, 0);
+                        int target = Math.max(1, category.optInt("target", 1));
+                        RemoteViews cell = new RemoteViews(context.getPackageName(), R.layout.health_widget_cell);
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                            cell.setViewLayoutWidth(R.id.health_widget_circle, cellDp,
+                                android.util.TypedValue.COMPLEX_UNIT_DIP);
+                            cell.setViewLayoutHeight(R.id.health_widget_circle, cellDp,
+                                android.util.TypedValue.COMPLEX_UNIT_DIP);
+                        }
+                        cell.setImageViewBitmap(R.id.health_widget_circle,
+                            circleBitmap(circleColor, count, target, category.optString("icon", "✓"), bitmapPx));
+                        cell.setContentDescription(R.id.health_widget_circle,
+                            category.optString("label", "Item") + ", " + count + " of " + target);
+                        cell.setOnClickPendingIntent(R.id.health_widget_circle,
+                            incrementIntent(context, widgetId, i, listId, categoryId));
+                        row.addView(R.id.health_widget_row, cell);
+                    }
+                    views.addView(R.id.health_widget_grid, row);
+                }
             }
         }
         manager.updateAppWidget(widgetId, views);
+    }
+
+    private static PendingIntent incrementIntent(Context context, int widgetId, int itemIndex,
+                                                 String listId, String categoryId) {
+        Intent increment = new Intent(context, HealthWidgetProvider.class)
+            .setAction(ACTION_INCREMENT)
+            .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId)
+            .putExtra("listId", listId)
+            .putExtra("categoryId", categoryId);
+        return PendingIntent.getBroadcast(context, widgetId * 100 + itemIndex, increment,
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+    }
+
+    private static String accentColor(Context context, int widgetId, JSONObject list, boolean matchWallpaper) {
+        if (matchWallpaper) {
+            return String.format("#%06X",
+                0xFFFFFF & context.getColor(android.R.color.system_accent1_300));
+        }
+        String mode = getColorMode(context, widgetId);
+        if ("emerald".equals(mode) || "green".equals(mode)) return "#10B981";
+        if ("blue".equals(mode)) return "#3B82F6";
+        if ("purple".equals(mode)) return "#A855F7";
+        if ("pink".equals(mode)) return "#EC4899";
+        if ("orange".equals(mode)) return "#F97316";
+        return list == null ? "#10B981" : list.optString("color", "#10B981");
+    }
+
+    private static Bitmap dotsBitmap(String colorString, int count, int target) {
+        final int displayedTarget = Math.max(1, Math.min(12, target));
+        final int width = 224;
+        final int height = 64;
+        Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(bitmap);
+        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        int baseColor;
+        try { baseColor = Color.parseColor(colorString); }
+        catch (Exception ignored) { baseColor = Color.rgb(16, 185, 129); }
+        float spacing = width / (float) displayedTarget;
+        float radius = Math.min(13f, spacing * 0.30f);
+        for (int i = 0; i < displayedTarget; i++) {
+            boolean filled = i < Math.min(count, target);
+            paint.setStyle(filled ? Paint.Style.FILL : Paint.Style.STROKE);
+            paint.setStrokeWidth(4f);
+            paint.setColor(filled ? baseColor
+                : Color.argb(150, Color.red(baseColor), Color.green(baseColor), Color.blue(baseColor)));
+            canvas.drawCircle(spacing * (i + 0.5f), height / 2f, radius, paint);
+        }
+        return bitmap;
     }
 
     private static Bitmap circleBitmap(String colorString, int count, int target, String icon, int requestedSize) {
