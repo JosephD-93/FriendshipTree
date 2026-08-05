@@ -25,7 +25,6 @@ import java.util.Locale;
 public class HealthWidgetProvider extends AppWidgetProvider {
     private static final String ACTION_INCREMENT = "io.github.josephd93.friendshiptree.HEALTH_INCREMENT";
     private static final String ACTION_NEXT_LIST = "io.github.josephd93.friendshiptree.HEALTH_NEXT_LIST";
-    private static final String ACTION_SETTINGS = "io.github.josephd93.friendshiptree.HEALTH_SETTINGS";
     public static final String ACTION_REFRESH = "io.github.josephd93.friendshiptree.HEALTH_REFRESH";
     private static final String CAPACITOR_PREFS = "CapacitorStorage";
     private static final String WIDGET_PREFS = "FriendshipTreeHealthWidgets";
@@ -58,12 +57,6 @@ public class HealthWidgetProvider extends AppWidgetProvider {
             increment(context, intent.getStringExtra("listId"), intent.getStringExtra("categoryId"));
         } else if (ACTION_NEXT_LIST.equals(action)) {
             selectNextList(context, widgetId);
-        } else if (ACTION_SETTINGS.equals(action)) {
-            Intent settings = new Intent(context, HealthWidgetConfigureActivity.class)
-                .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            context.startActivity(settings);
-            return;
         } else if (!ACTION_REFRESH.equals(action)) {
             return;
         }
@@ -127,8 +120,6 @@ public class HealthWidgetProvider extends AppWidgetProvider {
         String listId = list == null ? "" : list.optString("id", "");
         JSONObject counts = today == null ? null : today.optJSONObject(listId);
 
-        views.setTextViewText(R.id.health_widget_title,
-            list == null ? "FriendshipTree Health" : list.optString("icon", ""));
         views.setTextViewText(R.id.health_widget_hint,
             list == null ? "Open FriendshipTree to create a tracker" : "Tap a circle to add one");
 
@@ -147,12 +138,6 @@ public class HealthWidgetProvider extends AppWidgetProvider {
         views.setOnClickPendingIntent(R.id.health_widget_next, next);
         views.setViewVisibility(R.id.health_widget_next,
             state != null && state.optJSONArray("lists") != null && state.optJSONArray("lists").length() > 1 ? View.VISIBLE : View.GONE);
-
-        Intent settingsIntent = new Intent(context, HealthWidgetProvider.class)
-            .setAction(ACTION_SETTINGS)
-            .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId);
-        views.setOnClickPendingIntent(R.id.health_widget_settings, PendingIntent.getBroadcast(context,
-            7000 + widgetId, settingsIntent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE));
 
         views.removeAllViews(R.id.health_widget_grid);
         if (categories != null && categories.length() > 0) {
