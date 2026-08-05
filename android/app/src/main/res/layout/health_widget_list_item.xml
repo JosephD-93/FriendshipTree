@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/health_widget_list_item"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:minHeight="42dp"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:paddingLeft="6dp"
+    android:paddingRight="6dp"
+    android:paddingTop="2dp"
+    android:paddingBottom="2dp">
+    <TextView
+        android:id="@+id/health_widget_list_icon"
+        android:layout_width="38dp"
+        android:layout_height="38dp"
+        android:gravity="center"
+        android:textSize="24sp"
+        android:textColor="#FFFFFFFF"
+        android:maxLines="1" />
+    <TextView
+        android:id="@+id/health_widget_list_label"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:layout_marginLeft="6dp"
+        android:layout_marginRight="8dp"
+        android:textColor="#FFF8FAFC"
+        android:textSize="15sp"
+        android:maxLines="1"
+        android:ellipsize="end" />
+    <ImageView
+        android:id="@+id/health_widget_list_dots"
+        android:layout_width="112dp"
+        android:layout_height="32dp"
+        android:scaleType="fitCenter"
+        android:contentDescription="Daily progress" />
+</LinearLayout>
