@@ -55,7 +55,7 @@ public class HealthWidgetConfigureActivity extends Activity {
         root.setPadding(36, 36, 36, 28);
         root.setBackgroundColor(Color.rgb(15, 23, 42));
 
-        TextView heading = label("Choose tracker, grid and colour", 22);
+        TextView heading = label("Choose tracker, format and colour", 22);
         root.addView(heading);
         Spinner tracker = new Spinner(this);
         tracker.setAdapter(new ArrayAdapter<String>(this, android.R.layout.simple_spinner_dropdown_item, labels) {
@@ -69,19 +69,22 @@ public class HealthWidgetConfigureActivity extends Activity {
         });
         root.addView(tracker, new LinearLayout.LayoutParams(-1, -2));
 
-        root.addView(label("Colour scheme", 16));
+        root.addView(label("Widget format", 16));
+        Spinner formats = new Spinner(this);
+        List<String> formatLabels = java.util.Arrays.asList("Circle grid", "List with progress dots");
+        formats.setAdapter(spinnerAdapter(formatLabels));
+        formats.setSelection("list".equals(HealthWidgetProvider.getFormat(this, widgetId)) ? 1 : 0);
+        root.addView(formats, new LinearLayout.LayoutParams(-1, -2));
+
+        root.addView(label("Accent colour", 16));
         Spinner colours = new Spinner(this);
-        List<String> colourLabels = java.util.Arrays.asList("Green (default)", "Match wallpaper");
-        colours.setAdapter(new ArrayAdapter<String>(this, android.R.layout.simple_spinner_dropdown_item, colourLabels) {
-            @Override public View getView(int position, View convertView, android.view.ViewGroup parent) {
-                TextView view = (TextView) super.getView(position, convertView, parent);
-                view.setTextColor(Color.WHITE);
-                view.setTextSize(17);
-                view.setPadding(16, 18, 16, 18);
-                return view;
-            }
-        });
-        colours.setSelection("wallpaper".equals(HealthWidgetProvider.getColorMode(this, widgetId)) ? 1 : 0);
+        List<String> colourLabels = java.util.Arrays.asList(
+            "Tracker colour", "Emerald", "Blue", "Purple", "Pink", "Orange", "Match wallpaper");
+        List<String> colourModes = java.util.Arrays.asList(
+            "tracker", "emerald", "blue", "purple", "pink", "orange", "wallpaper");
+        colours.setAdapter(spinnerAdapter(colourLabels));
+        int colourPosition = colourModes.indexOf(HealthWidgetProvider.getColorMode(this, widgetId));
+        colours.setSelection(colourPosition >= 0 ? colourPosition : 0);
         root.addView(colours, new LinearLayout.LayoutParams(-1, -2));
 
         String selectedId = HealthWidgetProvider.getSelectedListId(this, widgetId);
@@ -102,7 +105,7 @@ public class HealthWidgetConfigureActivity extends Activity {
         pickers.addView(pickerGroup("Rows", rows), new LinearLayout.LayoutParams(0, -2, 1));
         root.addView(pickers, new LinearLayout.LayoutParams(-1, 0, 1));
 
-        TextView help = label("Resize the widget on your home screen afterwards. The circles will grow or shrink to fill the available box with minimal gaps.", 14);
+        TextView help = label("Grid uses both row and column settings. List format uses the row count; each tap fills the next daily progress dot.", 14);
         help.setTextColor(Color.rgb(167, 243, 208));
         root.addView(help);
         Button save = new Button(this);
@@ -112,8 +115,10 @@ public class HealthWidgetConfigureActivity extends Activity {
             int position = tracker.getSelectedItemPosition();
             HealthWidgetProvider.setSelectedList(this, widgetId, ids.get(Math.max(0, position)));
             HealthWidgetProvider.setGrid(this, widgetId, rows.getValue(), columns.getValue());
+            HealthWidgetProvider.setFormat(this, widgetId,
+                formats.getSelectedItemPosition() == 1 ? "list" : "grid");
             HealthWidgetProvider.setColorMode(this, widgetId,
-                colours.getSelectedItemPosition() == 1 ? "wallpaper" : "green");
+                colourModes.get(Math.max(0, colours.getSelectedItemPosition())));
             AppWidgetManager manager = AppWidgetManager.getInstance(this);
             HealthWidgetProvider.render(this, manager, widgetId);
             Intent result = new Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId);
@@ -123,6 +128,18 @@ public class HealthWidgetConfigureActivity extends Activity {
         root.addView(save, new LinearLayout.LayoutParams(-1, -2));
         setTitle("Choose a health tracker");
         setContentView(root);
+    }
+
+    private ArrayAdapter<String> spinnerAdapter(List<String> labels) {
+        return new ArrayAdapter<String>(this, android.R.layout.simple_spinner_dropdown_item, labels) {
+            @Override public View getView(int position, View convertView, android.view.ViewGroup parent) {
+                TextView view = (TextView) super.getView(position, convertView, parent);
+                view.setTextColor(Color.WHITE);
+                view.setTextSize(17);
+                view.setPadding(16, 18, 16, 18);
+                return view;
+            }
+        };
     }
 
     private TextView label(String text, int size) {
