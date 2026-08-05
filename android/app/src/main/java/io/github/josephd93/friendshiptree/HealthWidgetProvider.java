@@ -128,7 +128,7 @@ public class HealthWidgetProvider extends AppWidgetProvider {
         JSONObject counts = today == null ? null : today.optJSONObject(listId);
 
         views.setTextViewText(R.id.health_widget_title,
-            list == null ? "FriendshipTree Health" : list.optString("icon", "") + " " + list.optString("name", "Health"));
+            list == null ? "FriendshipTree Health" : list.optString("icon", ""));
         views.setTextViewText(R.id.health_widget_hint,
             list == null ? "Open FriendshipTree to create a tracker" : "Tap a circle to add one");
 
