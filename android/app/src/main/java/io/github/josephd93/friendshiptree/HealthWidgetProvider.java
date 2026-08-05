@@ -12,7 +12,6 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Typeface;
-import android.view.View;
 import android.widget.RemoteViews;
 
 import org.json.JSONArray;
@@ -24,7 +23,6 @@ import java.util.Locale;
 
 public class HealthWidgetProvider extends AppWidgetProvider {
     private static final String ACTION_INCREMENT = "io.github.josephd93.friendshiptree.HEALTH_INCREMENT";
-    private static final String ACTION_NEXT_LIST = "io.github.josephd93.friendshiptree.HEALTH_NEXT_LIST";
     public static final String ACTION_REFRESH = "io.github.josephd93.friendshiptree.HEALTH_REFRESH";
     private static final String CAPACITOR_PREFS = "CapacitorStorage";
     private static final String WIDGET_PREFS = "FriendshipTreeHealthWidgets";
@@ -55,8 +53,6 @@ public class HealthWidgetProvider extends AppWidgetProvider {
         int widgetId = intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID);
         if (ACTION_INCREMENT.equals(action)) {
             increment(context, intent.getStringExtra("listId"), intent.getStringExtra("categoryId"));
-        } else if (ACTION_NEXT_LIST.equals(action)) {
-            selectNextList(context, widgetId);
         } else if (!ACTION_REFRESH.equals(action)) {
             return;
         }
@@ -120,25 +116,6 @@ public class HealthWidgetProvider extends AppWidgetProvider {
         String listId = list == null ? "" : list.optString("id", "");
         JSONObject counts = today == null ? null : today.optJSONObject(listId);
 
-        views.setTextViewText(R.id.health_widget_hint,
-            list == null ? "Open FriendshipTree to create a tracker" : "Tap a circle to add one");
-
-        Intent launch = context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());
-        if (launch != null) {
-            PendingIntent open = PendingIntent.getActivity(context, 9000 + widgetId, launch,
-                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-            views.setOnClickPendingIntent(R.id.health_widget_header, open);
-        }
-
-        Intent nextIntent = new Intent(context, HealthWidgetProvider.class)
-            .setAction(ACTION_NEXT_LIST)
-            .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId);
-        PendingIntent next = PendingIntent.getBroadcast(context, 8000 + widgetId, nextIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        views.setOnClickPendingIntent(R.id.health_widget_next, next);
-        views.setViewVisibility(R.id.health_widget_next,
-            state != null && state.optJSONArray("lists") != null && state.optJSONArray("lists").length() > 1 ? View.VISIBLE : View.GONE);
-
         views.removeAllViews(R.id.health_widget_grid);
         if (categories != null && categories.length() > 0) {
             SharedPreferences prefs = context.getSharedPreferences(WIDGET_PREFS, Context.MODE_PRIVATE);
@@ -155,7 +132,7 @@ public class HealthWidgetProvider extends AppWidgetProvider {
             int heightDp = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT,
                 options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 180));
             int availableWidth = Math.max(72, widthDp - 12);
-            int availableHeight = Math.max(64, heightDp - 52);
+            int availableHeight = Math.max(64, heightDp - 12);
             int cellDp = Math.max(40, Math.min(120,
                 Math.min(availableWidth / columns, availableHeight / rows)));
             int bitmapPx = Math.max(96, Math.round(cellDp * context.getResources().getDisplayMetrics().density));
@@ -287,20 +264,4 @@ public class HealthWidgetProvider extends AppWidgetProvider {
         return first;
     }
 
-    private static void selectNextList(Context context, int widgetId) {
-        JSONObject state = readState(context);
-        if (state == null) return;
-        JSONArray lists = state.optJSONArray("lists");
-        if (lists == null || lists.length() < 2) return;
-        JSONObject current = selectedList(context, state, widgetId);
-        String currentId = current == null ? "" : current.optString("id", "");
-        int nextIndex = 0;
-        for (int i = 0; i < lists.length(); i++) {
-            if (currentId.equals(lists.optJSONObject(i).optString("id", ""))) {
-                nextIndex = (i + 1) % lists.length();
-                break;
-            }
-        }
-        setSelectedList(context, widgetId, lists.optJSONObject(nextIndex).optString("id", ""));
-    }
 }
