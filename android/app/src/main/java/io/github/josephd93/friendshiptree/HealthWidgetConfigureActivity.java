@@ -55,7 +55,7 @@ public class HealthWidgetConfigureActivity extends Activity {
         root.setPadding(36, 36, 36, 28);
         root.setBackgroundColor(Color.rgb(15, 23, 42));
 
-        TextView heading = label("Choose tracker and grid", 22);
+        TextView heading = label("Choose tracker, grid and colour", 22);
         root.addView(heading);
         Spinner tracker = new Spinner(this);
         tracker.setAdapter(new ArrayAdapter<String>(this, android.R.layout.simple_spinner_dropdown_item, labels) {
@@ -68,6 +68,21 @@ public class HealthWidgetConfigureActivity extends Activity {
             }
         });
         root.addView(tracker, new LinearLayout.LayoutParams(-1, -2));
+
+        root.addView(label("Colour scheme", 16));
+        Spinner colours = new Spinner(this);
+        List<String> colourLabels = java.util.Arrays.asList("Green (default)", "Match wallpaper");
+        colours.setAdapter(new ArrayAdapter<String>(this, android.R.layout.simple_spinner_dropdown_item, colourLabels) {
+            @Override public View getView(int position, View convertView, android.view.ViewGroup parent) {
+                TextView view = (TextView) super.getView(position, convertView, parent);
+                view.setTextColor(Color.WHITE);
+                view.setTextSize(17);
+                view.setPadding(16, 18, 16, 18);
+                return view;
+            }
+        });
+        colours.setSelection("wallpaper".equals(HealthWidgetProvider.getColorMode(this, widgetId)) ? 1 : 0);
+        root.addView(colours, new LinearLayout.LayoutParams(-1, -2));
 
         String selectedId = HealthWidgetProvider.getSelectedListId(this, widgetId);
         int selectedPosition = ids.indexOf(selectedId);
@@ -97,6 +112,8 @@ public class HealthWidgetConfigureActivity extends Activity {
             int position = tracker.getSelectedItemPosition();
             HealthWidgetProvider.setSelectedList(this, widgetId, ids.get(Math.max(0, position)));
             HealthWidgetProvider.setGrid(this, widgetId, rows.getValue(), columns.getValue());
+            HealthWidgetProvider.setColorMode(this, widgetId,
+                colours.getSelectedItemPosition() == 1 ? "wallpaper" : "green");
             AppWidgetManager manager = AppWidgetManager.getInstance(this);
             HealthWidgetProvider.render(this, manager, widgetId);
             Intent result = new Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId);

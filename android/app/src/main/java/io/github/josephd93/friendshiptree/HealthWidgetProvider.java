@@ -30,6 +30,7 @@ public class HealthWidgetProvider extends AppWidgetProvider {
     private static final String LIST_KEY_PREFIX = "list_";
     private static final String ROWS_KEY_PREFIX = "rows_";
     private static final String COLS_KEY_PREFIX = "cols_";
+    private static final String COLOR_KEY_PREFIX = "color_";
     private static final int MAX_ITEMS = 24;
 
     @Override
@@ -42,7 +43,8 @@ public class HealthWidgetProvider extends AppWidgetProvider {
     public void onDeleted(Context context, int[] widgetIds) {
         SharedPreferences.Editor editor = context.getSharedPreferences(WIDGET_PREFS, Context.MODE_PRIVATE).edit();
         for (int widgetId : widgetIds) editor.remove(LIST_KEY_PREFIX + widgetId)
-            .remove(ROWS_KEY_PREFIX + widgetId).remove(COLS_KEY_PREFIX + widgetId);
+            .remove(ROWS_KEY_PREFIX + widgetId).remove(COLS_KEY_PREFIX + widgetId)
+            .remove(COLOR_KEY_PREFIX + widgetId);
         editor.apply();
     }
 
@@ -82,6 +84,16 @@ public class HealthWidgetProvider extends AppWidgetProvider {
             .getString(LIST_KEY_PREFIX + widgetId, "");
     }
 
+    public static void setColorMode(Context context, int widgetId, String mode) {
+        context.getSharedPreferences(WIDGET_PREFS, Context.MODE_PRIVATE)
+            .edit().putString(COLOR_KEY_PREFIX + widgetId, mode).apply();
+    }
+
+    public static String getColorMode(Context context, int widgetId) {
+        return context.getSharedPreferences(WIDGET_PREFS, Context.MODE_PRIVATE)
+            .getString(COLOR_KEY_PREFIX + widgetId, "green");
+    }
+
     public static int getRows(Context context, int widgetId, int fallback) {
         return context.getSharedPreferences(WIDGET_PREFS, Context.MODE_PRIVATE)
             .getInt(ROWS_KEY_PREFIX + widgetId, fallback);
@@ -115,6 +127,15 @@ public class HealthWidgetProvider extends AppWidgetProvider {
         JSONObject today = state == null ? null : state.optJSONObject("today");
         String listId = list == null ? "" : list.optString("id", "");
         JSONObject counts = today == null ? null : today.optJSONObject(listId);
+        boolean matchWallpaper = "wallpaper".equals(getColorMode(context, widgetId))
+            && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S;
+        views.setInt(R.id.health_widget_root, "setBackgroundResource",
+            matchWallpaper ? R.drawable.health_widget_background_dynamic : R.drawable.health_widget_background);
+        String circleColor = list == null ? "#10b981" : list.optString("color", "#10b981");
+        if (matchWallpaper) {
+            circleColor = String.format("#%06X",
+                0xFFFFFF & context.getColor(android.R.color.system_accent1_300));
+        }
 
         views.removeAllViews(R.id.health_widget_grid);
         if (categories != null && categories.length() > 0) {
@@ -153,7 +174,7 @@ public class HealthWidgetProvider extends AppWidgetProvider {
                             android.util.TypedValue.COMPLEX_UNIT_DIP);
                     }
                     cell.setImageViewBitmap(R.id.health_widget_circle,
-                        circleBitmap(list.optString("color", "#10b981"), count, target, category.optString("icon", "✓"), bitmapPx));
+                        circleBitmap(circleColor, count, target, category.optString("icon", "✓"), bitmapPx));
                     cell.setContentDescription(R.id.health_widget_circle,
                         category.optString("label", "Item") + ", " + count + " of " + target);
                     Intent increment = new Intent(context, HealthWidgetProvider.class)
