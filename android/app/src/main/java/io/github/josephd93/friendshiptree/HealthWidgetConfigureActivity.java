@@ -207,8 +207,8 @@ public class HealthWidgetConfigureActivity extends Activity {
                 if (event.getAction() != android.view.MotionEvent.ACTION_UP) return true;
                 float cellWidth = getWidth() / (float) MAX_COLUMNS;
                 float cellHeight = getHeight() / (float) MAX_ROWS;
-                columns = Math.max(1, Math.min(MAX_COLUMNS, (int) (event.getX() / cellWidth) + 1));
-                rows = Math.max(1, Math.min(MAX_ROWS, (int) (event.getY() / cellHeight) + 1));
+                GridSizePreview.this.columns = Math.max(1, Math.min(MAX_COLUMNS, (int) (event.getX() / cellWidth) + 1));
+                GridSizePreview.this.rows = Math.max(1, Math.min(MAX_ROWS, (int) (event.getY() / cellHeight) + 1));
                 updateDescription();
                 announceForAccessibility(getContentDescription());
                 invalidate();
