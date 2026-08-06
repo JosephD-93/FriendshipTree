@@ -8071,13 +8071,20 @@ Return only the JSON array. If nothing trackable is found, return [].`;
     // ---- Position top-level bundles: keep each bundle's true bearing from the
     // social node, pull it inward to touch the edge (shortest vine), and push it
     // outward only as much as needed to clear neighbours or the me node. ----
+    const BUNDLE_R = 60;          // bundle footprint radius for spacing
+    // Minimized flower bundles must treat every unrelated visible map node as
+    // occupied space. Previously only the Me node and other bundles blocked
+    // placement, which allowed a bundle to land directly on another person.
+    const visibleNodeBlockers = nodes
+      .filter(n => !n.hidden && !hidden.has(n.id) && !minimisedNodes.includes(n.id) && n.type !== 'mole')
+      .map(n => ({ id: n.id, x: n.x, y: n.y, r: getNodeRadius(n) || 30 }))
+      .filter(n => Number.isFinite(n.x) && Number.isFinite(n.y));
+
     const socialNode = nodes.find(n => n.id === 'flower_social');
     if (socialNode) {
       const sR = getNodeRadius(socialNode) || 80;
       const social = bundles.filter(b => b.anchorNodeId === 'flower_social');
-      const meNode = nodes.find(n => n.id === 'me');
       const TWO_PI = Math.PI * 2;
-      const BUNDLE_R = 60;          // bundle footprint radius for spacing
       const edgeDist = sR + BUNDLE_R - 6; // distance for "touching" the edge
 
 
@@ -8094,10 +8101,6 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       social.sort((a, b) => distOf(a) - distOf(b));
 
 
-      // me node centre (a blocker the bundle must clear)
-      const meBlock = meNode ? { x: meNode.x, y: meNode.y, r: (getNodeRadius(meNode) || 80) + BUNDLE_R - 10 } : null;
-
-
       const placedB = []; // already-positioned bundles to test against
       social.forEach(b => {
         const ang = bearing(b);
@@ -8108,8 +8111,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           const cx = socialNode.x + ux * dist;
           const cy = socialNode.y + uy * dist;
           let clear = true;
-          // clear of the me node?
-          if (meBlock && Math.hypot(cx - meBlock.x, cy - meBlock.y) < meBlock.r) clear = false;
+          // Clear every unrelated visible person, group and dimension
+          // flower. The anchor itself is deliberately excluded so the small
+          // flower can remain tucked against its own parent.
+          if (visibleNodeBlockers.some(n =>
+            n.id !== b.anchorNodeId &&
+            Math.hypot(cx - n.x, cy - n.y) < n.r + BUNDLE_R - 6
+          )) clear = false;
           // clear of already-placed bundles?
           if (clear) {
             for (const p of placedB) {
@@ -8130,9 +8138,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
     }
 
 
-    // Resolve overlaps among the remaining (non-social-anchored) bundles.
+    // Resolve overlaps among the remaining (non-social-anchored) bundles
+    // and visible nodes together. Alternating both checks prevents separating
+    // two bundles from pushing either one back on top of a person.
     const MIN_SEP = 78;
-    for (let iter = 0; iter < 24; iter++) {
+    for (let iter = 0; iter < 36; iter++) {
       let moved = false;
       for (let i = 0; i < bundles.length; i++) {
         for (let j = i + 1; j < bundles.length; j++) {
@@ -8143,15 +8153,50 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           if (aSocial && bSocial) continue;
           let dx = b.cx - a.cx, dy = b.cy - a.cy;
           let d = Math.hypot(dx, dy);
-          if (d < MIN_SEP && d > 0.0001) {
-            const push = (MIN_SEP - d) / 2;
+          if (d < MIN_SEP) {
+            if (d < 0.0001) {
+              const fallbackAngle = b.baseAngle + Math.PI * 0.5;
+              dx = Math.cos(fallbackAngle);
+              dy = Math.sin(fallbackAngle);
+              d = 1;
+            }
+            const push = MIN_SEP - d;
             const ux = dx / d, uy = dy / d;
-            if (!aSocial) { a.cx -= ux * push; a.cy -= uy * push; }
-            if (!bSocial) { b.cx += ux * push; b.cy += uy * push; }
+            if (aSocial) {
+              b.cx += ux * push; b.cy += uy * push;
+            } else if (bSocial) {
+              a.cx -= ux * push; a.cy -= uy * push;
+            } else {
+              a.cx -= ux * push * 0.5; a.cy -= uy * push * 0.5;
+              b.cx += ux * push * 0.5; b.cy += uy * push * 0.5;
+            }
             moved = true;
           }
         }
       }
+
+      bundles.forEach(b => {
+        // Social bundles were already searched outward along their original
+        // bearing. Move only the other bundles here, and never repel one from
+        // the parent it is intentionally tucked against.
+        if (b.anchorNodeId === 'flower_social') return;
+        visibleNodeBlockers.forEach(n => {
+          if (n.id === b.anchorNodeId) return;
+          let dx = b.cx - n.x, dy = b.cy - n.y;
+          let d = Math.hypot(dx, dy);
+          const required = n.r + BUNDLE_R - 6;
+          if (d >= required) return;
+          if (d < 0.0001) {
+            dx = Math.cos(b.baseAngle || 0);
+            dy = Math.sin(b.baseAngle || 0);
+            d = 1;
+          }
+          const push = required - d;
+          b.cx += (dx / d) * push;
+          b.cy += (dy / d) * push;
+          moved = true;
+        });
+      });
       if (!moved) break;
     }
     return { hidden, bundles };
