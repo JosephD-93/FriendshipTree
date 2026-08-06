@@ -11,10 +11,10 @@ import { getLocalDateStr, parseBirthdayDateGlobal } from './utils/date';
 import { saveData, loadData, saveRaw } from './services/persistence';
 
 
-const APP_VERSION = '4.3.3';
-const BUILD_ID = '2026-08-06-minimised-flower-clearance';
+const APP_VERSION = '4.3.4';
+const BUILD_ID = '2026-08-06-tucked-minimised-flowers';
 const BUILD_DATE = '6 August 2026';
-const WHATS_NEW = 'Minimised flowers now keep a clear gap around every visible person and group.';
+const WHATS_NEW = 'Minimised flowers now tuck beside their connected person or group with short edge-to-edge connectors.';
 
 // ─── Calendar Integration ─────────────────────────────────────────────────
 // Uses the Capgo calendar plugin (Capacitor) to read/write the phone's
@@ -3260,7 +3260,7 @@ function AppInner() {
   // algorithm could otherwise persist indefinitely (the cache only ever
   // checked whether the PARENT moved, never whether the logic computing the
   // position had changed underneath it).
-  const MINIMISED_LAYOUT_VERSION = 'v7-wide-node-clearance';
+  const MINIMISED_LAYOUT_VERSION = 'v8-tucked-near-parent';
   useEffect(() => { saveData('ft_feed_positions', feedPositions); }, [feedPositions]);
   // Prune ghost entries -- a feedPositions key is `${dimKey}:${nodeId}`, and
   // if that nodeId no longer exists in `nodes` (deleted, merged away, or
@@ -19253,7 +19253,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         // Keep a deliberately visible gap, not merely mathematical
                         // non-intersection. This same margin is used by candidate
                         // validation, directional gap calculation and fallbacks.
-                        const MINIMISED_NODE_GAP = 24;
+                        const MINIMISED_NODE_GAP = 6;
                         const clearOfEverything = (x, y, rad, excludeIds) => {
                           const excl = Array.isArray(excludeIds) ? excludeIds : [excludeIds];
                           const clearOfNodes = !Object.entries(allNodePos).some(([nid, npos]) => {
@@ -19327,7 +19327,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         // computed screen position rather than a flat, one-level-only
                         // lookup that breaks the moment a parent has no grid anchor of
                         // its own (because it's minimised too).
-                        const renderMinimisedFlower = (id, anchorX, anchorY, depth, parentX, parentY) => {
+                        const renderMinimisedFlower = (id, anchorX, anchorY, depth, parentX, parentY, parentRadius = 0) => {
                           const mNode = nodes.find(n => n.id === id);
                           if (!mNode) return null;
                           const parentId = parentOf[id];
@@ -19386,12 +19386,25 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           );
                           return (
                             <React.Fragment key={`min-${id}`}>
-                              {parentX != null && parentY != null && (
-                                <svg style={{position:'absolute', left:0, top:0, width:'100%', height:'100%', pointerEvents:'none', overflow:'visible', zIndex:4}}>
-                                  <line x1={parentX} y1={parentY} x2={anchorX} y2={anchorY}
-                                    stroke="#22c55e" strokeWidth={1.5} opacity={0.55} strokeDasharray="4 3"/>
-                                </svg>
-                              )}
+                              {parentX != null && parentY != null && (() => {
+                                // Draw only through the open gap between the two
+                                // shapes. Centre-to-centre dotted lines crossed the
+                                // parent and could pass over unrelated people.
+                                const dx = anchorX - parentX, dy = anchorY - parentY;
+                                const dist = Math.hypot(dx, dy) || 1;
+                                const ux = dx / dist, uy = dy / dist;
+                                const x1 = parentX + ux * (parentRadius + 2);
+                                const y1 = parentY + uy * (parentRadius + 2);
+                                const x2 = anchorX - ux * (R + 2);
+                                const y2 = anchorY - uy * (R + 2);
+                                if (Math.hypot(x2 - x1, y2 - y1) < 3) return null;
+                                return (
+                                  <svg style={{position:'absolute', left:0, top:0, width:'100%', height:'100%', pointerEvents:'none', overflow:'visible', zIndex:4}}>
+                                    <line x1={x1} y1={y1} x2={x2} y2={y2}
+                                      stroke="#22c55e" strokeWidth={1.5} opacity={0.55} strokeDasharray="4 3"/>
+                                  </svg>
+                                );
+                              })()}
                               <div
                                 data-min-flower={id}
                                 onPointerDown={(e) => {
@@ -19528,7 +19541,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                 sx = Math.max(30, Math.min(stripW - 24, sx));
                                 minimisedFlowerPosCache.current[satCacheKey] = { x: sx, y: sy, parentX: anchorX, parentY: anchorY };
                                 freshPositions[child.id] = { x: sx, y: sy, r: childR };
-                                return renderMinimisedFlower(child.id, sx, sy, depth + 1, anchorX, anchorY);
+                                return renderMinimisedFlower(child.id, sx, sy, depth + 1, anchorX, anchorY, R);
                               })}
                             </React.Fragment>
                           );
@@ -19657,6 +19670,30 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                             cx = tx; cy = ty; found = true;
                           }
                           if (!found) {
+                            // Stay tucked to the connected person/group whenever
+                            // possible. Search around the parent's nearest clear ring,
+                            // beginning at the real relationship bearing and fanning
+                            // out in small alternating angle steps. Only the angle
+                            // changes here; distance remains the minimum edge gap.
+                            const nearAngles = [realAngleToSelf];
+                            for (let dd = 10; dd <= 180; dd += 10) {
+                              nearAngles.push(realAngleToSelf + dd * Math.PI / 180);
+                              nearAngles.push(realAngleToSelf - dd * Math.PI / 180);
+                            }
+                            for (const nearAngle of nearAngles) {
+                              const { innerDist: nearDist } = gapBounds(
+                                parentAnchor.x, parentAnchor.y, parentR,
+                                nearAngle, ownR, [parentId, id]
+                              );
+                              const nearX = parentAnchor.x + Math.cos(nearAngle) * nearDist;
+                              const nearY = parentAnchor.y + Math.sin(nearAngle) * nearDist;
+                              if (nearX < 30 || nearX > stripW - 24) continue;
+                              if (clearOfEverything(nearX, nearY, ownR, [id])) {
+                                cx = nearX; cy = nearY; found = true; break;
+                              }
+                            }
+                          }
+                          if (!found) {
                             // Extremely tight squeeze (e.g. parent has almost no gap
                             // in this direction at all) -- fall back to whichever
                             // position along this same line has the least overlap,
@@ -19723,7 +19760,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                        : hasOwnBranch ? baseFlowerR * 1.3
                                        : baseFlowerR;
                           freshPositions[id] = { x: cx, y: cy, r: rootR };
-                          return renderMinimisedFlower(id, cx, cy, 0, parentAnchor.x, parentAnchor.y);
+                          return renderMinimisedFlower(id, cx, cy, 0, parentAnchor.x, parentAnchor.y, parentR);
                         });
 
                         // ---- SECOND PASS: curved names, positioned relative to the
