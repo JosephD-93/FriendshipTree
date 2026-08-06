@@ -11,8 +11,8 @@ import { getLocalDateStr, parseBirthdayDateGlobal } from './utils/date';
 import { saveData, loadData, saveRaw } from './services/persistence';
 
 
-const APP_VERSION = '4.3.9';
-const BUILD_ID = '2026-08-06-standard-branch-view';
+const APP_VERSION = '4.3.10';
+const BUILD_ID = '2026-08-06-compact-branch-cards';
 
 const MAP_VIEW_FAMILIES = [
   { key:'map', emoji:'🗺️', name:'Map', desc:'You in the centre', variants:[{key:'simple',name:'Standard'},{key:'full',name:'Fancy'}] },
@@ -20,7 +20,7 @@ const MAP_VIEW_FAMILIES = [
   { key:'stack', emoji:'📚', name:'Stack', desc:'Groups arranged in stacked sections', variants:[{key:'feed',name:'Standard'},{key:'feedDetailed',name:'Fancy'}] },
 ];
 const BUILD_DATE = '6 August 2026';
-const WHATS_NEW = 'Standard Branch view places you on the left and arranges every connection into readable columns to the right.';
+const WHATS_NEW = 'Branch view now uses compact photo cards and much tighter rows and columns so large relationship trees remain usable.';
 
 // ─── Calendar Integration ─────────────────────────────────────────────────
 // Uses the Capgo calendar plugin (Capacitor) to read/write the phone's
@@ -3205,7 +3205,7 @@ function AppInner() {
 
   useEffect(() => {
     if (mapStyle !== 'branch') return;
-    setTransform({ x:90, y:Math.max(160, window.innerHeight/2), scale:0.62 });
+    setTransform({ x:95, y:Math.max(160, window.innerHeight/2), scale:0.82 });
   }, [mapStyle]);
 
   // Living Forest: adjusts decorative density from a sampled frame-rate window.
@@ -8261,8 +8261,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
     const positions = new Map();
     let cursorY = 0;
-    const columnGap = 330;
-    const rowGap = 190;
+    const columnGap = 220;
+    const rowGap = 78;
     const place = id => {
       const kids = children.get(id) || [];
       let y;
@@ -12128,9 +12128,12 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   if (mapStyle === 'branch') {
                     const edgeKey = [src.id,tgt.id].sort().join('::');
                     const primary = branchLayout?.treeEdges.has(edgeKey);
-                    const midX = (src.renderX + tgt.renderX) / 2;
+                    const direction = Math.sign(tgt.renderX-src.renderX) || 1;
+                    const startX = src.renderX + direction*78;
+                    const endX = tgt.renderX - direction*78;
+                    const midX = (startX + endX) / 2;
                     return <path key={`branch-link-${i}`}
-                      d={`M ${src.renderX},${src.renderY} C ${midX},${src.renderY} ${midX},${tgt.renderY} ${tgt.renderX},${tgt.renderY}`}
+                      d={`M ${startX},${src.renderY} C ${midX},${src.renderY} ${midX},${tgt.renderY} ${endX},${tgt.renderY}`}
                       fill="none" stroke={lineColor} strokeWidth={primary?(flowerEnd?3:2.5):1.5}
                       strokeDasharray={primary?undefined:'8 7'} opacity={primary?(flowerEnd?0.9:0.82):0.34}
                       style={{pointerEvents:'none'}}/>;
@@ -14115,6 +14118,20 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 const myGroupId = nodeGroupMap[node.id];
                 const groupColor = node.personalColor || (myGroupId ? resolveHubColor(myGroupId) : null);
                 const ringColor = isHub ? hubColor : isFlower ? flowerColor : (groupColor || (theme.darkMode ? '#475569' : '#94a3b8'));
+                if (mapStyle === 'branch') {
+                  const cardW=156, cardH=58, avatarR=22;
+                  const cardLabel=node.label.length>17?node.label.substring(0,16)+'…':node.label;
+                  const cardFill=isHub?(theme.darkMode?'#17251f':'#f0fdf4'):isFlower?(theme.darkMode?'#172033':'#f8fafc'):(theme.darkMode?'#1e293b':'white');
+                  return <g key={`branch-card-${node.id}`} transform={`translate(${node.renderX},${node.renderY}) scale(${isLifted?1.06:1})`}
+                    style={{cursor:'pointer',transition:isLifted?'none':'transform 0.15s ease',opacity:node.hidden?0:1}}
+                    onPointerDown={e=>handlePointerDown(e,node.id)}>
+                    <defs><clipPath id={`branchAvatar-${node.id}`}><circle cx={-cardW/2+31} cy="0" r={avatarR}/></clipPath></defs>
+                    <rect x={-cardW/2} y={-cardH/2} width={cardW} height={cardH} rx="14" fill={cardFill} stroke={ringColor} strokeWidth={node.id==='me'?3:2}/>
+                    <circle cx={-cardW/2+31} cy="0" r={avatarR} fill={isHub?hubColor:isFlower?flowerColor:(theme.darkMode?'#334155':'#e2e8f0')}/>
+                    {isHub?<text x={-cardW/2+31} y="8" textAnchor="middle" fontSize="25">🌳</text>:isFlower?<text x={-cardW/2+31} y="8" textAnchor="middle" fontSize="25">{dim?.emoji||'🌸'}</text>:node.img?<image href={node.img} x={-cardW/2+9} y={-22} width="44" height="44" clipPath={`url(#branchAvatar-${node.id})`} preserveAspectRatio="xMidYMid slice"/>:<text x={-cardW/2+31} y="7" textAnchor="middle" fontSize="18" fontWeight="800" fill={theme.darkMode?'#e2e8f0':'#475569'}>{initials}</text>}
+                    <text x={-cardW/2+62} y="5" fontSize="13" fontWeight="800" fill={theme.darkMode?'#f8fafc':'#1e293b'} style={{pointerEvents:'none',userSelect:'none'}}>{cardLabel}</text>
+                  </g>;
+                }
                 const shortLabel = node.label.length > 12 ? node.label.substring(0, 11) + '…' : node.label;
                 const labelY = r * 0.55;
                 const bandH = r * 0.48;
