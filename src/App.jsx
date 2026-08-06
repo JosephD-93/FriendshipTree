@@ -11,10 +11,16 @@ import { getLocalDateStr, parseBirthdayDateGlobal } from './utils/date';
 import { saveData, loadData, saveRaw } from './services/persistence';
 
 
-const APP_VERSION = '4.3.7';
-const BUILD_ID = '2026-08-06-remove-ghost-blockers';
+const APP_VERSION = '4.3.8';
+const BUILD_ID = '2026-08-06-layout-family-chooser';
+
+const MAP_VIEW_FAMILIES = [
+  { key:'map', emoji:'🗺️', name:'Map', desc:'You in the centre', variants:[{key:'simple',name:'Standard'},{key:'full',name:'Fancy'}] },
+  { key:'branch', emoji:'🌿', name:'Branch', desc:'You at the side; connections branch right', comingSoon:true, variants:[{key:'branch',name:'Standard'},{key:'branchDetailed',name:'Fancy'}] },
+  { key:'stack', emoji:'📚', name:'Stack', desc:'Groups arranged in stacked sections', variants:[{key:'feed',name:'Standard'},{key:'feedDetailed',name:'Fancy'}] },
+];
 const BUILD_DATE = '6 August 2026';
-const WHATS_NEW = 'Invisible minimised cells no longer block drops or force flowers into overlapping fallback positions.';
+const WHATS_NEW = 'The view chooser now groups Map, Branch and Stack layouts, with Standard and Fancy directly beneath each.';
 
 // ─── Calendar Integration ─────────────────────────────────────────────────
 // Uses the Capgo calendar plugin (Capacitor) to read/write the phone's
@@ -692,29 +698,22 @@ function FabMenu(props) {
     <>
       {fabOpen&&<div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:149}} onClick={()=>setFabOpen(false)}/>}
 
-      {/* Map style picker -- opened by the eye icon in the FAB. Three buttons for
-          Detailed (full), Simple, and Stacked (feed) views. */}
+      {/* Layout first, then Standard/Fancy directly beneath it. */}
       {showMapStylePicker && (
         <>
           <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:154}}
             onClick={()=>setShowMapStylePicker(false)}/>
-          <div style={{position:'fixed', left:cx-100, top:cy-220, width:200, zIndex:155,
+          <div style={{position:'fixed', left:Math.max(8,Math.min(W-268,cx-130)), top:Math.max(8,Math.min(H-500,cy-250)), width:260, maxHeight:'calc(100vh - 90px)', overflowY:'auto', zIndex:155,
             background:bg, borderRadius:16, boxShadow:'0 8px 32px rgba(0,0,0,0.4)',
-            border:`1px solid ${dm?'#334155':'#e2e8f0'}`, overflow:'hidden'}}>
-            {[
-              {key:'full', emoji:'🌿', name:'Detailed'},
-              {key:'simple', emoji:'⚪', name:'Simple'},
-              {key:'feed', emoji:'📜', name:'Stacked'},
-              {key:'feedDetailed', emoji:'🌱', name:'Stacked + Detailed'},
-            ].map(opt => (
-              <button key={opt.key}
-                onClick={()=>{ setMapStyle(opt.key); setSimpleMode(opt.key === 'simple'); setShowMapStylePicker(false); setFabOpen(false); }}
-                style={{display:'flex',alignItems:'center',gap:10,width:'100%',padding:'12px 16px',
-                  background:mapStyle===opt.key?(dm?'#0f2d1a':'#ecfdf5'):'none',border:'none',cursor:'pointer',
-                  borderBottom:`1px solid ${dm?'#334155':'#f1f5f9'}`,textAlign:'left'}}>
-                <span style={{fontSize:18}}>{opt.emoji}</span>
-                <span style={{fontSize:14,fontWeight:700,color:mapStyle===opt.key?'#10b981':col}}>{opt.name}</span>
-              </button>
+            border:`1px solid ${dm?'#334155':'#e2e8f0'}`, padding:10}}>
+            <div style={{fontSize:12,fontWeight:900,color:dm?'#94a3b8':'#64748b',padding:'2px 4px 8px',textTransform:'uppercase',letterSpacing:0.6}}>Choose view</div>
+            {MAP_VIEW_FAMILIES.map(family => (
+              <div key={family.key} style={{padding:'9px 8px',borderTop:`1px solid ${dm?'#334155':'#e2e8f0'}`,opacity:family.comingSoon?0.62:1}}>
+                <div style={{display:'flex',gap:9,alignItems:'center'}}><span style={{fontSize:20}}>{family.emoji}</span><div><div style={{fontSize:14,fontWeight:800,color:col}}>{family.name}{family.comingSoon?' · Coming next':''}</div><div style={{fontSize:10,color:dm?'#94a3b8':'#64748b'}}>{family.desc}</div></div></div>
+                <div style={{display:'flex',flexDirection:'column',gap:5,margin:'8px 0 0 29px'}}>
+                  {family.variants.map(opt => <button key={opt.key} disabled={family.comingSoon} onClick={()=>{setMapStyle(opt.key);setSimpleMode(opt.key==='simple');setShowMapStylePicker(false);setFabOpen(false);}} style={{padding:'8px 10px',borderRadius:8,textAlign:'left',fontSize:12,fontWeight:800,border:`1px solid ${mapStyle===opt.key?'#10b981':(dm?'#475569':'#cbd5e1')}`,color:mapStyle===opt.key?'white':col,background:mapStyle===opt.key?'#10b981':(dm?'#0f172a':'#f8fafc')}}>{opt.name}</button>)}
+                </div>
+              </div>
             ))}
           </div>
         </>
@@ -9358,32 +9357,14 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       <span style={{fontSize:12, color:theme.darkMode?'#64748b':'#94a3b8'}}>view →</span>
                     </button>
 
-                    {/* ---- Map style picker ---- */}
+                    {/* ---- Map view chooser ---- */}
                     <div style={{padding:'12px 0',borderBottom:`1px solid ${pw.border}`}}>
-                      <div style={{fontSize:12,fontWeight:700,color:theme.darkMode?'#94a3b8':'#64748b',marginBottom:10,textTransform:'uppercase',letterSpacing:0.5}}>🗺️ Map Style</div>
-                      <div style={{display:'flex',flexDirection:'column',gap:6}}>
-                        {[
-                          {key:'full', emoji:'🌿', name:'Full', desc:'Vines, leaves, fireflies — the decorated canvas'},
-                          {key:'simple', emoji:'⚪', name:'Simple', desc:'Plain circles on the same free-roaming canvas'},
-                          {key:'feed', emoji:'📜', name:'Feed', desc:'Stacked sections by dimension, scroll vertically'},
-                          {key:'feedDetailed', emoji:'🌱', name:'Feed (Detailed)', desc:'Same stacked layout, with vines, leaves & coloured borders'},
-                        ].map(opt => {
-                          const active = mapStyle === opt.key;
-                          return (
-                            <button key={opt.key}
-                              onClick={()=>{ setMapStyle(opt.key); setSimpleMode(opt.key === 'simple'); }}
-                              style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',borderRadius:10,
-                                border:`2px solid ${active?'#10b981':pw.border}`,
-                                background:active?(theme.darkMode?'#0f2d1a':'#ecfdf5'):(theme.darkMode?'#1e293b':'#f8fafc'),
-                                cursor:'pointer',textAlign:'left'}}>
-                              <span style={{fontSize:20}}>{opt.emoji}</span>
-                              <div>
-                                <div style={{fontSize:13,fontWeight:700,color:active?'#10b981':(theme.darkMode?'#e2e8f0':'#1e293b')}}>{opt.name}</div>
-                                <div style={{fontSize:11,color:theme.darkMode?'#94a3b8':'#64748b'}}>{opt.desc}</div>
-                              </div>
-                            </button>
-                          );
-                        })}
+                      <div style={{fontSize:12,fontWeight:700,color:theme.darkMode?'#94a3b8':'#64748b',marginBottom:10,textTransform:'uppercase',letterSpacing:0.5}}>🗺️ Map View</div>
+                      <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                        {MAP_VIEW_FAMILIES.map(family => <div key={family.key} style={{padding:10,borderRadius:12,border:`1px solid ${pw.border}`,background:theme.darkMode?'#1e293b':'#f8fafc',opacity:family.comingSoon?0.62:1}}>
+                          <div style={{display:'flex',alignItems:'center',gap:9}}><span style={{fontSize:20}}>{family.emoji}</span><div><div style={{fontSize:13,fontWeight:800,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>{family.name}{family.comingSoon?' · Coming next':''}</div><div style={{fontSize:11,color:theme.darkMode?'#94a3b8':'#64748b'}}>{family.desc}</div></div></div>
+                          <div style={{display:'flex',flexDirection:'column',gap:5,margin:'8px 0 0 29px'}}>{family.variants.map(opt=>{const active=mapStyle===opt.key;return <button key={opt.key} disabled={family.comingSoon} onClick={()=>{setMapStyle(opt.key);setSimpleMode(opt.key==='simple');}} style={{padding:'8px 10px',borderRadius:8,border:`2px solid ${active?'#10b981':pw.border}`,background:active?'#10b981':(theme.darkMode?'#0f172a':'white'),color:active?'white':(theme.darkMode?'#e2e8f0':'#334155'),fontSize:12,fontWeight:800,textAlign:'left'}}>{opt.name}</button>;})}</div>
+                        </div>)}
                       </div>
                     </div>
 
@@ -23950,7 +23931,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         })}
       </div>
 
-      {/* Section revealed by holding the Map tab -- same 3 view options as the FAB's eye picker */}
+      {/* Section revealed by holding Map -- layout families with styles underneath. */}
       {showMapStyleBar && (
         <>
           <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:198}}
@@ -23959,23 +23940,12 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             background:theme.darkMode?'#1e293b':'white', borderRadius:16,
             boxShadow:'0 -4px 24px rgba(0,0,0,0.35)',
             border:`1px solid ${theme.darkMode?'#334155':'#e2e8f0'}`,
-            display:'flex', overflow:'hidden'}}>
-            {[
-              {key:'full', emoji:'🌿', name:'Detailed'},
-              {key:'simple', emoji:'⚪', name:'Simple'},
-              {key:'feed', emoji:'📜', name:'Stacked'},
-              {key:'feedDetailed', emoji:'🌱', name:'Stacked+'},
-            ].map((opt, oi) => (
-              <button key={opt.key}
-                onClick={()=>{ setMapStyle(opt.key); setSimpleMode(opt.key === 'simple'); setShowMapStyleBar(false); if (viewMode !== 'canvas') setViewMode('canvas'); }}
-                style={{flex:1, display:'flex', flexDirection:'column', alignItems:'center', gap:4,
-                  padding:'14px 8px', background:mapStyle===opt.key?(theme.darkMode?'#0f2d1a':'#ecfdf5'):'none',
-                  border:'none', borderRight: oi<3 ? `1px solid ${theme.darkMode?'#334155':'#f1f5f9'}` : 'none',
-                  cursor:'pointer'}}>
-                <span style={{fontSize:22}}>{opt.emoji}</span>
-                <span style={{fontSize:12,fontWeight:700,color:mapStyle===opt.key?'#10b981':(theme.darkMode?'#e2e8f0':'#334155')}}>{opt.name}</span>
-              </button>
-            ))}
+            display:'flex', flexDirection:'column', gap:6, padding:10, maxHeight:'70vh', overflowY:'auto'}}>
+            <div style={{fontSize:12,fontWeight:900,color:theme.darkMode?'#94a3b8':'#64748b',padding:'1px 2px 4px',textTransform:'uppercase',letterSpacing:0.6}}>Choose view</div>
+            {MAP_VIEW_FAMILIES.map(family => <div key={family.key} style={{display:'grid',gridTemplateColumns:'112px 1fr',gap:8,alignItems:'start',padding:8,borderRadius:10,border:`1px solid ${theme.darkMode?'#334155':'#e2e8f0'}`,opacity:family.comingSoon?0.62:1}}>
+              <div style={{display:'flex',gap:7}}><span style={{fontSize:19}}>{family.emoji}</span><div><div style={{fontSize:13,fontWeight:800,color:theme.darkMode?'#e2e8f0':'#334155'}}>{family.name}</div><div style={{fontSize:9,color:theme.darkMode?'#94a3b8':'#64748b'}}>{family.comingSoon?'Coming next':family.desc}</div></div></div>
+              <div style={{display:'flex',flexDirection:'column',gap:4}}>{family.variants.map(opt=><button key={opt.key} disabled={family.comingSoon} onClick={()=>{setMapStyle(opt.key);setSimpleMode(opt.key==='simple');setShowMapStyleBar(false);if(viewMode!=='canvas')setViewMode('canvas');}} style={{padding:'7px 9px',borderRadius:7,border:`1px solid ${mapStyle===opt.key?'#10b981':(theme.darkMode?'#475569':'#cbd5e1')}`,background:mapStyle===opt.key?'#10b981':(theme.darkMode?'#0f172a':'#f8fafc'),color:mapStyle===opt.key?'white':(theme.darkMode?'#e2e8f0':'#334155'),fontSize:11,fontWeight:800,textAlign:'left'}}>{opt.name}</button>)}</div>
+            </div>)}
           </div>
         </>
       )}
