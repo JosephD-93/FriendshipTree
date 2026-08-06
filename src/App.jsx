@@ -11,16 +11,16 @@ import { getLocalDateStr, parseBirthdayDateGlobal } from './utils/date';
 import { saveData, loadData, saveRaw } from './services/persistence';
 
 
-const APP_VERSION = '4.3.8';
-const BUILD_ID = '2026-08-06-layout-family-chooser';
+const APP_VERSION = '4.3.9';
+const BUILD_ID = '2026-08-06-standard-branch-view';
 
 const MAP_VIEW_FAMILIES = [
   { key:'map', emoji:'🗺️', name:'Map', desc:'You in the centre', variants:[{key:'simple',name:'Standard'},{key:'full',name:'Fancy'}] },
-  { key:'branch', emoji:'🌿', name:'Branch', desc:'You at the side; connections branch right', comingSoon:true, variants:[{key:'branch',name:'Standard'},{key:'branchDetailed',name:'Fancy'}] },
+  { key:'branch', emoji:'🌿', name:'Branch', desc:'You at the side; connections branch right', variants:[{key:'branch',name:'Standard'},{key:'branchDetailed',name:'Fancy · Coming next',disabled:true}] },
   { key:'stack', emoji:'📚', name:'Stack', desc:'Groups arranged in stacked sections', variants:[{key:'feed',name:'Standard'},{key:'feedDetailed',name:'Fancy'}] },
 ];
 const BUILD_DATE = '6 August 2026';
-const WHATS_NEW = 'The view chooser now groups Map, Branch and Stack layouts, with Standard and Fancy directly beneath each.';
+const WHATS_NEW = 'Standard Branch view places you on the left and arranges every connection into readable columns to the right.';
 
 // ─── Calendar Integration ─────────────────────────────────────────────────
 // Uses the Capgo calendar plugin (Capacitor) to read/write the phone's
@@ -708,10 +708,10 @@ function FabMenu(props) {
             border:`1px solid ${dm?'#334155':'#e2e8f0'}`, padding:10}}>
             <div style={{fontSize:12,fontWeight:900,color:dm?'#94a3b8':'#64748b',padding:'2px 4px 8px',textTransform:'uppercase',letterSpacing:0.6}}>Choose view</div>
             {MAP_VIEW_FAMILIES.map(family => (
-              <div key={family.key} style={{padding:'9px 8px',borderTop:`1px solid ${dm?'#334155':'#e2e8f0'}`,opacity:family.comingSoon?0.62:1}}>
-                <div style={{display:'flex',gap:9,alignItems:'center'}}><span style={{fontSize:20}}>{family.emoji}</span><div><div style={{fontSize:14,fontWeight:800,color:col}}>{family.name}{family.comingSoon?' · Coming next':''}</div><div style={{fontSize:10,color:dm?'#94a3b8':'#64748b'}}>{family.desc}</div></div></div>
+              <div key={family.key} style={{padding:'9px 8px',borderTop:`1px solid ${dm?'#334155':'#e2e8f0'}`}}>
+                <div style={{display:'flex',gap:9,alignItems:'center'}}><span style={{fontSize:20}}>{family.emoji}</span><div><div style={{fontSize:14,fontWeight:800,color:col}}>{family.name}</div><div style={{fontSize:10,color:dm?'#94a3b8':'#64748b'}}>{family.desc}</div></div></div>
                 <div style={{display:'flex',flexDirection:'column',gap:5,margin:'8px 0 0 29px'}}>
-                  {family.variants.map(opt => <button key={opt.key} disabled={family.comingSoon} onClick={()=>{setMapStyle(opt.key);setSimpleMode(opt.key==='simple');setShowMapStylePicker(false);setFabOpen(false);}} style={{padding:'8px 10px',borderRadius:8,textAlign:'left',fontSize:12,fontWeight:800,border:`1px solid ${mapStyle===opt.key?'#10b981':(dm?'#475569':'#cbd5e1')}`,color:mapStyle===opt.key?'white':col,background:mapStyle===opt.key?'#10b981':(dm?'#0f172a':'#f8fafc')}}>{opt.name}</button>)}
+                  {family.variants.map(opt => <button key={opt.key} disabled={opt.disabled} onClick={()=>{setMapStyle(opt.key);setSimpleMode(opt.key==='simple'||opt.key==='branch');setShowMapStylePicker(false);setFabOpen(false);}} style={{padding:'8px 10px',borderRadius:8,textAlign:'left',fontSize:12,fontWeight:800,border:`1px solid ${mapStyle===opt.key?'#10b981':(dm?'#475569':'#cbd5e1')}`,color:mapStyle===opt.key?'white':col,background:mapStyle===opt.key?'#10b981':(dm?'#0f172a':'#f8fafc'),opacity:opt.disabled?0.52:1}}>{opt.name}</button>)}
                 </div>
               </div>
             ))}
@@ -3200,8 +3200,13 @@ function AppInner() {
   const [hubFlowerMenuOpen, setHubFlowerMenuOpen] = useState(false);
   const [showVineBorders, setShowVineBorders] = useState((() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); return s.showVineBorders !== undefined ? s.showVineBorders : true; } catch(e) { return true; } })());
   const [simpleMode, setSimpleMode] = useState((() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); return s.simpleMode || false; } catch(e) { return false; } })());
-  // mapStyle: 'full' (decorated canvas) | 'simple' (plain circles, same canvas) | 'feed' (stacked dimension sections, vertical scroll)
+  // mapStyle: full/simple (free map), branch (sideways tree), feed/feedDetailed (stacked sections)
   const [mapStyle, setMapStyle] = useState((() => { try { const s=JSON.parse(localStorage.getItem('ft_settings')||'{}'); if (s.mapStyle) return s.mapStyle; return s.simpleMode ? 'simple' : 'full'; } catch(e) { return 'full'; } })());
+
+  useEffect(() => {
+    if (mapStyle !== 'branch') return;
+    setTransform({ x:90, y:Math.max(160, window.innerHeight/2), scale:0.62 });
+  }, [mapStyle]);
 
   // Living Forest: adjusts decorative density from a sampled frame-rate window.
   // The sampler uses a plain interval and a small requestAnimationFrame counter,
@@ -8205,6 +8210,82 @@ Return only the JSON array. If nothing trackable is found, return [].`;
   const nodeTransition = (nodeId) =>
     liftedNodeId === nodeId ? 'transform 0.15s ease-out, opacity 0.15s ease-out' : 'transform 0.25s cubic-bezier(0.34,1.56,0.64,1), opacity 0.25s ease';
 
+  // Branch is a read-only projection of the same graph data: breadth-first
+  // columns establish how far each item is from Me, while a post-order pass
+  // centres every parent over its children. Cycles and extra relationships do
+  // not duplicate people; they remain visible later as lighter cross-links.
+  const branchLayout = useMemo(() => {
+    if (mapStyle !== 'branch' || viewMode !== 'canvas') return null;
+    const visible = nodes.filter(n => !collapseInfo.hidden.has(n.id));
+    const byId = new Map(visible.map(n => [n.id, n]));
+    const adjacency = new Map(visible.map(n => [n.id, []]));
+    links.forEach(link => {
+      if (!byId.has(link.source) || !byId.has(link.target)) return;
+      adjacency.get(link.source).push(link.target);
+      adjacency.get(link.target).push(link.source);
+    });
+    const rank = id => {
+      const n = byId.get(id);
+      if (n?.type === 'flower') return 0;
+      if (n?.type === 'hub') return 1;
+      return 2;
+    };
+    adjacency.forEach(ids => ids.sort((a,b) => rank(a)-rank(b) || String(byId.get(a)?.label||'').localeCompare(String(byId.get(b)?.label||''))));
+
+    const visited = new Set();
+    const parent = new Map();
+    const depth = new Map();
+    const children = new Map(visible.map(n => [n.id, []]));
+    const roots = [];
+    const growComponent = rootId => {
+      roots.push(rootId);
+      visited.add(rootId);
+      depth.set(rootId, rootId === 'me' ? 0 : 1);
+      const queue = [rootId];
+      while (queue.length) {
+        const id = queue.shift();
+        (adjacency.get(id) || []).forEach(nextId => {
+          if (visited.has(nextId)) return;
+          visited.add(nextId);
+          parent.set(nextId, id);
+          depth.set(nextId, (depth.get(id) || 0) + 1);
+          children.get(id).push(nextId);
+          queue.push(nextId);
+        });
+      }
+    };
+    if (byId.has('me')) growComponent('me');
+    visible.slice().sort((a,b)=>String(a.label||'').localeCompare(String(b.label||''))).forEach(n => {
+      if (!visited.has(n.id)) growComponent(n.id);
+    });
+
+    const positions = new Map();
+    let cursorY = 0;
+    const columnGap = 330;
+    const rowGap = 190;
+    const place = id => {
+      const kids = children.get(id) || [];
+      let y;
+      if (!kids.length) {
+        y = cursorY;
+        cursorY += rowGap;
+      } else {
+        kids.forEach(place);
+        y = kids.reduce((sum,kid)=>sum+positions.get(kid).y,0) / kids.length;
+      }
+      positions.set(id, { x:(depth.get(id)||0)*columnGap, y });
+    };
+    roots.forEach((rootId, index) => {
+      if (index) cursorY += rowGap * 0.8;
+      place(rootId);
+    });
+    const meY = positions.get('me')?.y || 0;
+    positions.forEach(pos => { pos.y -= meY; });
+    const treeEdges = new Set();
+    parent.forEach((parentId,id) => treeEdges.add([parentId,id].sort().join('::')));
+    return { positions, treeEdges };
+  }, [mapStyle, viewMode, nodes, links, collapseInfo.hidden]);
+
 
   // Keep this array referentially stable. It feeds the most expensive
   // fancy-map memos; rebuilding it on every unrelated state change forced all
@@ -8213,8 +8294,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
     if (viewMode === 'calendar') return calendarRenderNodes;
     return nodes
       .filter(node => !collapseInfo.hidden.has(node.id))
-      .map(node => ({ ...node, renderX: node.x, renderY: node.y, radius: getNodeRadius(node) }));
-  }, [viewMode, calendarRenderNodes, nodes, collapseInfo.hidden, getNodeRadius]);
+      .map(node => {
+        const branchPos = branchLayout?.positions.get(node.id);
+        return { ...node, renderX:branchPos?.x ?? node.x, renderY:branchPos?.y ?? node.y, radius:getNodeRadius(node) };
+      });
+  }, [viewMode, calendarRenderNodes, nodes, collapseInfo.hidden, getNodeRadius, branchLayout]);
 
 
   // ---- Butterfly / firefly perch points (photo edges + flowers) ----
@@ -9361,9 +9445,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     <div style={{padding:'12px 0',borderBottom:`1px solid ${pw.border}`}}>
                       <div style={{fontSize:12,fontWeight:700,color:theme.darkMode?'#94a3b8':'#64748b',marginBottom:10,textTransform:'uppercase',letterSpacing:0.5}}>🗺️ Map View</div>
                       <div style={{display:'flex',flexDirection:'column',gap:8}}>
-                        {MAP_VIEW_FAMILIES.map(family => <div key={family.key} style={{padding:10,borderRadius:12,border:`1px solid ${pw.border}`,background:theme.darkMode?'#1e293b':'#f8fafc',opacity:family.comingSoon?0.62:1}}>
-                          <div style={{display:'flex',alignItems:'center',gap:9}}><span style={{fontSize:20}}>{family.emoji}</span><div><div style={{fontSize:13,fontWeight:800,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>{family.name}{family.comingSoon?' · Coming next':''}</div><div style={{fontSize:11,color:theme.darkMode?'#94a3b8':'#64748b'}}>{family.desc}</div></div></div>
-                          <div style={{display:'flex',flexDirection:'column',gap:5,margin:'8px 0 0 29px'}}>{family.variants.map(opt=>{const active=mapStyle===opt.key;return <button key={opt.key} disabled={family.comingSoon} onClick={()=>{setMapStyle(opt.key);setSimpleMode(opt.key==='simple');}} style={{padding:'8px 10px',borderRadius:8,border:`2px solid ${active?'#10b981':pw.border}`,background:active?'#10b981':(theme.darkMode?'#0f172a':'white'),color:active?'white':(theme.darkMode?'#e2e8f0':'#334155'),fontSize:12,fontWeight:800,textAlign:'left'}}>{opt.name}</button>;})}</div>
+                        {MAP_VIEW_FAMILIES.map(family => <div key={family.key} style={{padding:10,borderRadius:12,border:`1px solid ${pw.border}`,background:theme.darkMode?'#1e293b':'#f8fafc'}}>
+                          <div style={{display:'flex',alignItems:'center',gap:9}}><span style={{fontSize:20}}>{family.emoji}</span><div><div style={{fontSize:13,fontWeight:800,color:theme.darkMode?'#e2e8f0':'#1e293b'}}>{family.name}</div><div style={{fontSize:11,color:theme.darkMode?'#94a3b8':'#64748b'}}>{family.desc}</div></div></div>
+                          <div style={{display:'flex',flexDirection:'column',gap:5,margin:'8px 0 0 29px'}}>{family.variants.map(opt=>{const active=mapStyle===opt.key;return <button key={opt.key} disabled={opt.disabled} onClick={()=>{setMapStyle(opt.key);setSimpleMode(opt.key==='simple'||opt.key==='branch');}} style={{padding:'8px 10px',borderRadius:8,border:`2px solid ${active?'#10b981':pw.border}`,background:active?'#10b981':(theme.darkMode?'#0f172a':'white'),color:active?'white':(theme.darkMode?'#e2e8f0':'#334155'),fontSize:12,fontWeight:800,textAlign:'left',opacity:opt.disabled?0.52:1}}>{opt.name}</button>;})}</div>
                         </div>)}
                       </div>
                     </div>
@@ -11989,7 +12073,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             {/* Simple mode: faint grid overlay across the visible viewport, matching
                 the same hex/square style used for node snapping. Purely decorative
                 background -- sits behind everything, no pointer events. */}
-            {viewMode === 'canvas' && simpleMode && (() => {
+            {viewMode === 'canvas' && simpleMode && mapStyle !== 'branch' && (() => {
               const sw = window.innerWidth, sh = window.innerHeight;
               // Visible canvas-space bounds, with one extra cell of padding all round
               const vx1 = (-transform.x - HEX_SIZE * 2) / transform.scale;
@@ -12041,13 +12125,20 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                   const lineColor = flowerEnd
                     ? (dimensions[flowerEnd.dimKey]?.color || (theme.darkMode ? '#475569' : '#cbd5e1'))
                     : (theme.darkMode ? '#475569' : '#cbd5e1');
-                  return (
-                    <line key={`simple-link-${i}`}
-                      x1={src.renderX} y1={src.renderY} x2={tgt.renderX} y2={tgt.renderY}
-                      stroke={lineColor} strokeWidth={flowerEnd ? 2.5 : 2}
-                      opacity={flowerEnd ? 0.85 : 1}
-                      style={{pointerEvents:'none'}}/>
-                  );
+                  if (mapStyle === 'branch') {
+                    const edgeKey = [src.id,tgt.id].sort().join('::');
+                    const primary = branchLayout?.treeEdges.has(edgeKey);
+                    const midX = (src.renderX + tgt.renderX) / 2;
+                    return <path key={`branch-link-${i}`}
+                      d={`M ${src.renderX},${src.renderY} C ${midX},${src.renderY} ${midX},${tgt.renderY} ${tgt.renderX},${tgt.renderY}`}
+                      fill="none" stroke={lineColor} strokeWidth={primary?(flowerEnd?3:2.5):1.5}
+                      strokeDasharray={primary?undefined:'8 7'} opacity={primary?(flowerEnd?0.9:0.82):0.34}
+                      style={{pointerEvents:'none'}}/>;
+                  }
+                  return <line key={`simple-link-${i}`}
+                    x1={src.renderX} y1={src.renderY} x2={tgt.renderX} y2={tgt.renderY}
+                    stroke={lineColor} strokeWidth={flowerEnd ? 2.5 : 2}
+                    opacity={flowerEnd ? 0.85 : 1} style={{pointerEvents:'none'}}/>;
                 })}
               </g>
             )}
@@ -13982,7 +14073,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               {/* Simple mode: a plain mole icon instead of the decorative hill, using the
                   exact same pointer handler so double-tap-to-summon / single-tap-to-reopen
                   still work identically. */}
-              {viewMode === 'canvas' && simpleMode && (
+              {viewMode === 'canvas' && simpleMode && mapStyle !== 'branch' && (
                 <g transform={`translate(${molePos.x},${molePos.y})`}
                   style={{cursor:'grab'}}
                   onPointerDown={e => handlePointerDown(e, 'mole')}>
@@ -23942,9 +24033,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             border:`1px solid ${theme.darkMode?'#334155':'#e2e8f0'}`,
             display:'flex', flexDirection:'column', gap:6, padding:10, maxHeight:'70vh', overflowY:'auto'}}>
             <div style={{fontSize:12,fontWeight:900,color:theme.darkMode?'#94a3b8':'#64748b',padding:'1px 2px 4px',textTransform:'uppercase',letterSpacing:0.6}}>Choose view</div>
-            {MAP_VIEW_FAMILIES.map(family => <div key={family.key} style={{display:'grid',gridTemplateColumns:'112px 1fr',gap:8,alignItems:'start',padding:8,borderRadius:10,border:`1px solid ${theme.darkMode?'#334155':'#e2e8f0'}`,opacity:family.comingSoon?0.62:1}}>
-              <div style={{display:'flex',gap:7}}><span style={{fontSize:19}}>{family.emoji}</span><div><div style={{fontSize:13,fontWeight:800,color:theme.darkMode?'#e2e8f0':'#334155'}}>{family.name}</div><div style={{fontSize:9,color:theme.darkMode?'#94a3b8':'#64748b'}}>{family.comingSoon?'Coming next':family.desc}</div></div></div>
-              <div style={{display:'flex',flexDirection:'column',gap:4}}>{family.variants.map(opt=><button key={opt.key} disabled={family.comingSoon} onClick={()=>{setMapStyle(opt.key);setSimpleMode(opt.key==='simple');setShowMapStyleBar(false);if(viewMode!=='canvas')setViewMode('canvas');}} style={{padding:'7px 9px',borderRadius:7,border:`1px solid ${mapStyle===opt.key?'#10b981':(theme.darkMode?'#475569':'#cbd5e1')}`,background:mapStyle===opt.key?'#10b981':(theme.darkMode?'#0f172a':'#f8fafc'),color:mapStyle===opt.key?'white':(theme.darkMode?'#e2e8f0':'#334155'),fontSize:11,fontWeight:800,textAlign:'left'}}>{opt.name}</button>)}</div>
+            {MAP_VIEW_FAMILIES.map(family => <div key={family.key} style={{display:'grid',gridTemplateColumns:'112px 1fr',gap:8,alignItems:'start',padding:8,borderRadius:10,border:`1px solid ${theme.darkMode?'#334155':'#e2e8f0'}`}}>
+              <div style={{display:'flex',gap:7}}><span style={{fontSize:19}}>{family.emoji}</span><div><div style={{fontSize:13,fontWeight:800,color:theme.darkMode?'#e2e8f0':'#334155'}}>{family.name}</div><div style={{fontSize:9,color:theme.darkMode?'#94a3b8':'#64748b'}}>{family.desc}</div></div></div>
+              <div style={{display:'flex',flexDirection:'column',gap:4}}>{family.variants.map(opt=><button key={opt.key} disabled={opt.disabled} onClick={()=>{setMapStyle(opt.key);setSimpleMode(opt.key==='simple'||opt.key==='branch');setShowMapStyleBar(false);if(viewMode!=='canvas')setViewMode('canvas');}} style={{padding:'7px 9px',borderRadius:7,border:`1px solid ${mapStyle===opt.key?'#10b981':(theme.darkMode?'#475569':'#cbd5e1')}`,background:mapStyle===opt.key?'#10b981':(theme.darkMode?'#0f172a':'#f8fafc'),color:mapStyle===opt.key?'white':(theme.darkMode?'#e2e8f0':'#334155'),fontSize:11,fontWeight:800,textAlign:'left',opacity:opt.disabled?0.52:1}}>{opt.name}</button>)}</div>
             </div>)}
           </div>
         </>
