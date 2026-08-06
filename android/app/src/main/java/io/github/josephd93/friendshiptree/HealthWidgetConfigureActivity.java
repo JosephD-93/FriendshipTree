@@ -3,14 +3,16 @@ package io.github.josephd93.friendshiptree;
 import android.app.Activity;
 import android.appwidget.AppWidgetManager;
 import android.content.Intent;
+import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Paint;
 import android.os.Bundle;
 import android.view.View;
 import android.view.Gravity;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.LinearLayout;
-import android.widget.NumberPicker;
+import android.widget.AdapterView;
 import android.widget.Spinner;
 import android.widget.TextView;
 
@@ -91,21 +93,36 @@ public class HealthWidgetConfigureActivity extends Activity {
         int selectedPosition = ids.indexOf(selectedId);
         if (selectedPosition >= 0) tracker.setSelection(selectedPosition);
 
-        LinearLayout pickers = new LinearLayout(this);
-        pickers.setOrientation(LinearLayout.HORIZONTAL);
-        pickers.setGravity(Gravity.CENTER);
         int listPosition = selectedPosition >= 0 ? selectedPosition : 0;
         JSONObject selectedList = lists.optJSONObject(listPosition);
         int defaultColumns = Math.max(1, Math.min(6, selectedList == null ? 3 : selectedList.optInt("gridCols", 3)));
-        int itemCount = selectedList == null || selectedList.optJSONArray("categories") == null ? 1 : selectedList.optJSONArray("categories").length();
+        int itemCount = categoryCount(selectedList);
         int defaultRows = Math.max(1, Math.min(8, (int) Math.ceil(itemCount / (double) defaultColumns)));
-        NumberPicker columns = picker(1, 6, HealthWidgetProvider.getColumns(this, widgetId, defaultColumns));
-        NumberPicker rows = picker(1, 8, HealthWidgetProvider.getRows(this, widgetId, defaultRows));
-        pickers.addView(pickerGroup("Columns", columns), new LinearLayout.LayoutParams(0, -2, 1));
-        pickers.addView(pickerGroup("Rows", rows), new LinearLayout.LayoutParams(0, -2, 1));
-        root.addView(pickers, new LinearLayout.LayoutParams(-1, 0, 1));
+        GridSizePreview gridPreview = new GridSizePreview(
+            HealthWidgetProvider.getRows(this, widgetId, defaultRows),
+            HealthWidgetProvider.getColumns(this, widgetId, defaultColumns));
+        gridPreview.setItemCount(itemCount);
+        gridPreview.setAccent(resolveAccent(colourModes.get(colours.getSelectedItemPosition()), selectedList));
+        root.addView(label("Tap a circle to choose the widget grid", 16));
+        root.addView(gridPreview, new LinearLayout.LayoutParams(-1, dp(360)));
 
-        TextView help = label("Grid uses both row and column settings. List format uses the row count; each tap fills the next daily progress dot.", 14);
+        tracker.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                JSONObject chosen = lists.optJSONObject(position);
+                gridPreview.setItemCount(categoryCount(chosen));
+                gridPreview.setAccent(resolveAccent(colourModes.get(Math.max(0, colours.getSelectedItemPosition())), chosen));
+            }
+            @Override public void onNothingSelected(AdapterView<?> parent) {}
+        });
+        colours.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                JSONObject chosen = lists.optJSONObject(Math.max(0, tracker.getSelectedItemPosition()));
+                gridPreview.setAccent(resolveAccent(colourModes.get(Math.max(0, position)), chosen));
+            }
+            @Override public void onNothingSelected(AdapterView<?> parent) {}
+        });
+
+        TextView help = label("Coloured circles show tracker items. Pale circles are spare spaces. List format uses the selected row count.", 14);
         help.setTextColor(Color.rgb(167, 243, 208));
         root.addView(help);
         Button save = new Button(this);
@@ -114,7 +131,7 @@ public class HealthWidgetConfigureActivity extends Activity {
         save.setOnClickListener(view -> {
             int position = tracker.getSelectedItemPosition();
             HealthWidgetProvider.setSelectedList(this, widgetId, ids.get(Math.max(0, position)));
-            HealthWidgetProvider.setGrid(this, widgetId, rows.getValue(), columns.getValue());
+            HealthWidgetProvider.setGrid(this, widgetId, gridPreview.getRows(), gridPreview.getColumns());
             HealthWidgetProvider.setFormat(this, widgetId,
                 formats.getSelectedItemPosition() == 1 ? "list" : "grid");
             HealthWidgetProvider.setColorMode(this, widgetId,
@@ -151,21 +168,92 @@ public class HealthWidgetConfigureActivity extends Activity {
         return view;
     }
 
-    private NumberPicker picker(int min, int max, int value) {
-        NumberPicker picker = new NumberPicker(this);
-        picker.setMinValue(min);
-        picker.setMaxValue(max);
-        picker.setValue(value);
-        picker.setWrapSelectorWheel(false);
-        return picker;
+    private int categoryCount(JSONObject list) {
+        JSONArray categories = list == null ? null : list.optJSONArray("categories");
+        return categories == null ? 0 : categories.length();
     }
 
-    private LinearLayout pickerGroup(String name, NumberPicker picker) {
-        LinearLayout group = new LinearLayout(this);
-        group.setOrientation(LinearLayout.VERTICAL);
-        group.setGravity(Gravity.CENTER);
-        group.addView(label(name, 16));
-        group.addView(picker);
-        return group;
+    private int resolveAccent(String mode, JSONObject list) {
+        if ("emerald".equals(mode)) return Color.rgb(16, 185, 129);
+        if ("blue".equals(mode)) return Color.rgb(59, 130, 246);
+        if ("purple".equals(mode)) return Color.rgb(168, 85, 247);
+        if ("pink".equals(mode)) return Color.rgb(236, 72, 153);
+        if ("orange".equals(mode)) return Color.rgb(249, 115, 22);
+        if ("wallpaper".equals(mode) && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S)
+            return getColor(android.R.color.system_accent1_300);
+        try { return Color.parseColor(list == null ? "#10B981" : list.optString("color", "#10B981")); }
+        catch (Exception ignored) { return Color.rgb(16, 185, 129); }
+    }
+
+    private int dp(int value) {
+        return Math.round(value * getResources().getDisplayMetrics().density);
+    }
+
+    private final class GridSizePreview extends View {
+        private static final int MAX_COLUMNS = 6;
+        private static final int MAX_ROWS = 8;
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private int rows;
+        private int columns;
+        private int itemCount;
+        private int accent = Color.rgb(16, 185, 129);
+
+        GridSizePreview(int rows, int columns) {
+            super(HealthWidgetConfigureActivity.this);
+            this.rows = Math.max(1, Math.min(MAX_ROWS, rows));
+            this.columns = Math.max(1, Math.min(MAX_COLUMNS, columns));
+            updateDescription();
+            setOnTouchListener((view, event) -> {
+                if (event.getAction() != android.view.MotionEvent.ACTION_UP) return true;
+                float cellWidth = getWidth() / (float) MAX_COLUMNS;
+                float cellHeight = getHeight() / (float) MAX_ROWS;
+                GridSizePreview.this.columns = Math.max(1, Math.min(MAX_COLUMNS, (int) (event.getX() / cellWidth) + 1));
+                GridSizePreview.this.rows = Math.max(1, Math.min(MAX_ROWS, (int) (event.getY() / cellHeight) + 1));
+                updateDescription();
+                announceForAccessibility(getContentDescription());
+                invalidate();
+                return true;
+            });
+        }
+
+        int getRows() { return rows; }
+        int getColumns() { return columns; }
+        void setItemCount(int count) { itemCount = Math.max(0, count); invalidate(); }
+        void setAccent(int color) { accent = color; invalidate(); }
+        private void updateDescription() {
+            setContentDescription(columns + " by " + rows + " grid, " + (rows * columns) + " spaces");
+        }
+
+        @Override protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            float cellWidth = getWidth() / (float) MAX_COLUMNS;
+            float cellHeight = (getHeight() - dp(24)) / (float) MAX_ROWS;
+            float radius = Math.min(cellWidth, cellHeight) * 0.32f;
+            int selectedSpaces = rows * columns;
+            int paleAccent = Color.argb(75, Color.red(accent), Color.green(accent), Color.blue(accent));
+            int outside = Color.argb(85, 148, 163, 184);
+            for (int row = 0; row < MAX_ROWS; row++) {
+                for (int column = 0; column < MAX_COLUMNS; column++) {
+                    int selectedIndex = row * columns + column;
+                    boolean inside = row < rows && column < columns;
+                    float x = column * cellWidth + cellWidth / 2f;
+                    float y = row * cellHeight + cellHeight / 2f;
+                    paint.setStyle(Paint.Style.FILL);
+                    paint.setColor(!inside ? Color.argb(18, 148, 163, 184)
+                        : selectedIndex < Math.min(itemCount, selectedSpaces) ? accent : paleAccent);
+                    canvas.drawCircle(x, y, radius, paint);
+                    paint.setStyle(Paint.Style.STROKE);
+                    paint.setStrokeWidth(dp(inside ? 2 : 1));
+                    paint.setColor(inside ? accent : outside);
+                    canvas.drawCircle(x, y, radius, paint);
+                }
+            }
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(Color.WHITE);
+            paint.setTextAlign(Paint.Align.CENTER);
+            paint.setTextSize(dp(15));
+            canvas.drawText(columns + " × " + rows + "  •  " + selectedSpaces + " spaces",
+                getWidth() / 2f, getHeight() - dp(3), paint);
+        }
     }
 }
