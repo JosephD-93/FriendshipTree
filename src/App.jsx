@@ -11,10 +11,10 @@ import { getLocalDateStr, parseBirthdayDateGlobal } from './utils/date';
 import { saveData, loadData, saveRaw } from './services/persistence';
 
 
-const APP_VERSION = '4.3.2';
-const BUILD_ID = '2026-08-02-github-update-test';
-const BUILD_DATE = '2 August 2026';
-const WHATS_NEW = 'Added an App information card so cloud-built updates are easy to identify.';
+const APP_VERSION = '4.3.3';
+const BUILD_ID = '2026-08-06-minimised-flower-clearance';
+const BUILD_DATE = '6 August 2026';
+const WHATS_NEW = 'Minimised flowers now keep a clear gap around every visible person and group.';
 
 // ─── Calendar Integration ─────────────────────────────────────────────────
 // Uses the Capgo calendar plugin (Capacitor) to read/write the phone's
@@ -3260,7 +3260,7 @@ function AppInner() {
   // algorithm could otherwise persist indefinitely (the cache only ever
   // checked whether the PARENT moved, never whether the logic computing the
   // position had changed underneath it).
-  const MINIMISED_LAYOUT_VERSION = 'v6-parent-clearance';
+  const MINIMISED_LAYOUT_VERSION = 'v7-wide-node-clearance';
   useEffect(() => { saveData('ft_feed_positions', feedPositions); }, [feedPositions]);
   // Prune ghost entries -- a feedPositions key is `${dimKey}:${nodeId}`, and
   // if that nodeId no longer exists in `nodes` (deleted, merged away, or
@@ -19250,14 +19250,18 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         // happened to coincide) had no way to know about each other at
                         // all, since each was only ever checked against the static grid.
                         const placedFlowers = [];
+                        // Keep a deliberately visible gap, not merely mathematical
+                        // non-intersection. This same margin is used by candidate
+                        // validation, directional gap calculation and fallbacks.
+                        const MINIMISED_NODE_GAP = 24;
                         const clearOfEverything = (x, y, rad, excludeIds) => {
                           const excl = Array.isArray(excludeIds) ? excludeIds : [excludeIds];
                           const clearOfNodes = !Object.entries(allNodePos).some(([nid, npos]) => {
                             if (excl.includes(nid)) return false; // only the minimised node's own now-empty reserved cell is ignored
-                            return Math.hypot(x - npos.x, y - npos.y) < npos.r + rad + 1;
+                            return Math.hypot(x - npos.x, y - npos.y) < npos.r + rad + MINIMISED_NODE_GAP;
                           });
                           if (!clearOfNodes) return false;
-                          return !placedFlowers.some(f => Math.hypot(x - f.x, y - f.y) < rad + f.r + 1);
+                          return !placedFlowers.some(f => Math.hypot(x - f.x, y - f.y) < rad + f.r + 8);
                         };
 
                         // Given a parent position, its radius, and an angle, find the
@@ -19298,7 +19302,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         const gapBounds = (parentX, parentY, parentR, angle, flowerR, excludeIds) => {
                           const excl = Array.isArray(excludeIds) ? excludeIds : [excludeIds];
                           const dx = Math.cos(angle), dy = Math.sin(angle);
-                          const innerDist = parentR + flowerR + 10;
+                          const innerDist = parentR + flowerR + MINIMISED_NODE_GAP;
                           let outerDist = stripW;
                           Object.entries(allNodePos).forEach(([nid, npos]) => {
                             if (excl.includes(nid)) return;
@@ -19306,7 +19310,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                             const along = relX * dx + relY * dy;
                             if (along <= 0) return;
                             const perpSq = relX*relX + relY*relY - along*along;
-                            const needed = npos.r + flowerR;
+                            const needed = npos.r + flowerR + MINIMISED_NODE_GAP;
                             if (perpSq > needed * needed) return;
                             const nearEdge = along - Math.sqrt(Math.max(0, needed*needed - perpSq));
                             if (nearEdge > 0 && nearEdge < outerDist) outerDist = nearEdge;
@@ -19470,7 +19474,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                   Object.entries(allNodePos).forEach(([nid, npos]) => {
                                     if (nid === id || nid === child.id) return;
                                     const d = Math.hypot(tx - npos.x, ty - npos.y);
-                                    const need = npos.r + childR + 1;
+                                    const need = npos.r + childR + MINIMISED_NODE_GAP;
                                     if (need - d > worst) worst = need - d;
                                   });
                                   placedFlowers.forEach(f => {
@@ -19663,7 +19667,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                               Object.entries(allNodePos).forEach(([nid, npos]) => {
                                 if (nid === id) return;
                                 const d = Math.hypot(px - npos.x, py - npos.y);
-                                const need = npos.r + ownR + 1;
+                                const need = npos.r + ownR + MINIMISED_NODE_GAP;
                                 if (need - d > worst) worst = need - d;
                               });
                               placedFlowers.forEach(f => {
