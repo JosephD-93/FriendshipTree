@@ -3260,7 +3260,7 @@ function AppInner() {
   // algorithm could otherwise persist indefinitely (the cache only ever
   // checked whether the PARENT moved, never whether the logic computing the
   // position had changed underneath it).
-  const MINIMISED_LAYOUT_VERSION = 'v5-straight-line-travel';
+  const MINIMISED_LAYOUT_VERSION = 'v6-parent-clearance';
   useEffect(() => { saveData('ft_feed_positions', feedPositions); }, [feedPositions]);
   // Prune ghost entries -- a feedPositions key is `${dimKey}:${nodeId}`, and
   // if that nodeId no longer exists in `nodes` (deleted, merged away, or
@@ -19253,7 +19253,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         const clearOfEverything = (x, y, rad, excludeIds) => {
                           const excl = Array.isArray(excludeIds) ? excludeIds : [excludeIds];
                           const clearOfNodes = !Object.entries(allNodePos).some(([nid, npos]) => {
-                            if (excl.includes(nid)) return false; // parent (anchor) and the node's own reserved cell are not obstacles to its own flower
+                            if (excl.includes(nid)) return false; // only the minimised node's own now-empty reserved cell is ignored
                             return Math.hypot(x - npos.x, y - npos.y) < npos.r + rad + 1;
                           });
                           if (!clearOfNodes) return false;
@@ -19298,7 +19298,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         const gapBounds = (parentX, parentY, parentR, angle, flowerR, excludeIds) => {
                           const excl = Array.isArray(excludeIds) ? excludeIds : [excludeIds];
                           const dx = Math.cos(angle), dy = Math.sin(angle);
-                          const innerDist = parentR + flowerR + 1;
+                          const innerDist = parentR + flowerR + 10;
                           let outerDist = stripW;
                           Object.entries(allNodePos).forEach(([nid, npos]) => {
                             if (excl.includes(nid)) return;
@@ -19649,7 +19649,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           const tx = parentAnchor.x + Math.cos(realAngleToSelf) * Math.min(placeDist, outerDist - 0.5);
                           const ty = parentAnchor.y + Math.sin(realAngleToSelf) * Math.min(placeDist, outerDist - 0.5);
                           let found = false;
-                          if (tx >= 30 && tx <= stripW - 24 && outerDist > innerDist - 1 && clearOfEverything(tx, ty, ownR, [parentId, id])) {
+                          if (tx >= 30 && tx <= stripW - 24 && outerDist > innerDist - 1 && clearOfEverything(tx, ty, ownR, [id])) {
                             cx = tx; cy = ty; found = true;
                           }
                           if (!found) {
@@ -19661,7 +19661,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                             const overlapAmount = (px, py) => {
                               let worst = 0;
                               Object.entries(allNodePos).forEach(([nid, npos]) => {
-                                if (nid === parentId || nid === id) return;
+                                if (nid === id) return;
                                 const d = Math.hypot(px - npos.x, py - npos.y);
                                 const need = npos.r + ownR + 1;
                                 if (need - d > worst) worst = need - d;
