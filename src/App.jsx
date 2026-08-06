@@ -11,10 +11,10 @@ import { getLocalDateStr, parseBirthdayDateGlobal } from './utils/date';
 import { saveData, loadData, saveRaw } from './services/persistence';
 
 
-const APP_VERSION = '4.3.5';
-const BUILD_ID = '2026-08-06-stable-group-flower-layout';
+const APP_VERSION = '4.3.6';
+const BUILD_ID = '2026-08-06-revalidated-flower-slots';
 const BUILD_DATE = '6 August 2026';
-const WHATS_NEW = 'Minimised flowers now prefer direct groups, respect real group-pill bounds, and retain stable anchors.';
+const WHATS_NEW = 'Cached minimised flowers now move only when their current slot becomes obstructed.';
 
 // ─── Calendar Integration ─────────────────────────────────────────────────
 // Uses the Capgo calendar plugin (Capacitor) to read/write the phone's
@@ -3260,7 +3260,7 @@ function AppInner() {
   // algorithm could otherwise persist indefinitely (the cache only ever
   // checked whether the PARENT moved, never whether the logic computing the
   // position had changed underneath it).
-  const MINIMISED_LAYOUT_VERSION = 'v9-stable-group-pill-layout';
+  const MINIMISED_LAYOUT_VERSION = 'v10-revalidated-stable-slots';
   useEffect(() => { saveData('ft_feed_positions', feedPositions); }, [feedPositions]);
   // Prune ghost entries -- a feedPositions key is `${dimKey}:${nodeId}`, and
   // if that nodeId no longer exists in `nodes` (deleted, merged away, or
@@ -18981,7 +18981,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           const p = positions[m.id];
                           return p && p.row === row && p.col === col + 1;
                         });
-                        const fallbackHalf = (detailed ? r * 2.4 : FEED_HEX * 1.7) / 2;
+                        const fallbackHalf = Math.max(r * 0.9, Math.min(FEED_HEX * 0.8, (((node.label || '').length * 8) + 28) / 2));
                         const neighbourR = (neighbour) => {
                           if (!neighbour) return 0;
                           const nt = neighbour.type === 'hub' ? 1 : (() => {
@@ -19326,7 +19326,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                             const p = positions[m.id];
                             return p && pos && p.row === pos.row && p.col === pos.col + 1;
                           });
-                          const fallbackHalf = (detailed ? r * 2.4 : FEED_HEX * 1.7) / 2;
+                          const fallbackHalf = Math.max(r * 0.9, Math.min(FEED_HEX * 0.8, (((n.label || '').length * 8) + 28) / 2));
                           const leftHalf = leftNeighbour
                             ? Math.max(r * 0.8, colStep - nodeRadius(leftNeighbour) - 6)
                             : fallbackHalf;
@@ -19555,8 +19555,14 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                 const satCacheKey = `${MINIMISED_LAYOUT_VERSION}:${dimKey}:${child.id}:sat`;
                                 const satCached = minimisedFlowerPosCache.current[satCacheKey];
                                 const satParentMoved = !satCached || Math.hypot(satCached.parentX - anchorX, satCached.parentY - anchorY) > 2;
+                                // A stable cache is only valid while its slot remains
+                                // clear in the CURRENT layout. Other people can move
+                                // into that space after a sibling is minimised.
+                                const satCachedClear = satCached && clearOfEverything(
+                                  satCached.x, satCached.y, childR, [id, child.id]
+                                );
                                 let sx, sy;
-                                if (satCached && !satParentMoved) {
+                                if (satCached && !satParentMoved && satCachedClear) {
                                   sx = satCached.x; sy = satCached.y;
                                 } else {
                                 let found = false;
@@ -19729,8 +19735,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           const cacheKey = `${MINIMISED_LAYOUT_VERSION}:${dimKey}:${id}`;
                           const cached = minimisedFlowerPosCache.current[cacheKey];
                           const parentMoved = !cached || Math.hypot(cached.parentX - parentAnchor.x, cached.parentY - parentAnchor.y) > 2;
+                          // Reuse preserves stability only if no current person,
+                          // group pill or earlier flower now occupies this slot.
+                          const cachedClear = cached && clearOfEverything(
+                            cached.x, cached.y, ownR, [id]
+                          );
                           let cx, cy;
-                          if (cached && !parentMoved) {
+                          if (cached && !parentMoved && cachedClear) {
                             cx = cached.x; cy = cached.y;
                           } else {
                           // Travel in a STRAIGHT LINE from the parent toward this
