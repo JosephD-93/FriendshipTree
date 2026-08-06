@@ -11,10 +11,10 @@ import { getLocalDateStr, parseBirthdayDateGlobal } from './utils/date';
 import { saveData, loadData, saveRaw } from './services/persistence';
 
 
-const APP_VERSION = '4.3.4';
-const BUILD_ID = '2026-08-06-tucked-minimised-flowers';
+const APP_VERSION = '4.3.5';
+const BUILD_ID = '2026-08-06-stable-group-flower-layout';
 const BUILD_DATE = '6 August 2026';
-const WHATS_NEW = 'Minimised flowers now tuck beside their connected person or group with short edge-to-edge connectors.';
+const WHATS_NEW = 'Minimised flowers now prefer direct groups, respect real group-pill bounds, and retain stable anchors.';
 
 // ─── Calendar Integration ─────────────────────────────────────────────────
 // Uses the Capgo calendar plugin (Capacitor) to read/write the phone's
@@ -3260,7 +3260,7 @@ function AppInner() {
   // algorithm could otherwise persist indefinitely (the cache only ever
   // checked whether the PARENT moved, never whether the logic computing the
   // position had changed underneath it).
-  const MINIMISED_LAYOUT_VERSION = 'v8-tucked-near-parent';
+  const MINIMISED_LAYOUT_VERSION = 'v9-stable-group-pill-layout';
   useEffect(() => { saveData('ft_feed_positions', feedPositions); }, [feedPositions]);
   // Prune ghost entries -- a feedPositions key is `${dimKey}:${nodeId}`, and
   // if that nodeId no longer exists in `nodes` (deleted, merged away, or
@@ -18982,8 +18982,25 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           return p && p.row === row && p.col === col + 1;
                         });
                         const fallbackHalf = (detailed ? r * 2.4 : FEED_HEX * 1.7) / 2;
-                        const leftHalf = leftNeighbour ? colStep / 2 : fallbackHalf;
-                        const rightHalf = rightNeighbour ? colStep / 2 : fallbackHalf;
+                        const neighbourR = (neighbour) => {
+                          if (!neighbour) return 0;
+                          const nt = neighbour.type === 'hub' ? 1 : (() => {
+                            const tier = getTier(neighbour.interactionScore || 0, neighbour);
+                            if (tier === 1) return 0.55;
+                            if (tier === 2) return 0.75;
+                            return 1;
+                          })();
+                          return baseR * nt;
+                        };
+                        // Stop the pill at the neighbouring circle's edge instead
+                        // of stretching to its centre. The previous half-column
+                        // rule visibly drew group pills underneath adjacent people.
+                        const leftHalf = leftNeighbour
+                          ? Math.max(r * 0.8, colStep - neighbourR(leftNeighbour) - 6)
+                          : fallbackHalf;
+                        const rightHalf = rightNeighbour
+                          ? Math.max(r * 0.8, colStep - neighbourR(rightNeighbour) - 6)
+                          : fallbackHalf;
                         const pillW = leftHalf + rightHalf;
                         const pillH = detailed ? Math.min(pillW, r * 2.4) : r * 1.1;
                         const initials = getInitials(node.label);
@@ -19258,6 +19275,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           const excl = Array.isArray(excludeIds) ? excludeIds : [excludeIds];
                           const clearOfNodes = !Object.entries(allNodePos).some(([nid, npos]) => {
                             if (excl.includes(nid)) return false; // only the minimised node's own now-empty reserved cell is ignored
+                            if (npos.left != null) {
+                              const nearestX = Math.max(npos.left, Math.min(npos.right, x));
+                              const nearestY = Math.max(npos.top, Math.min(npos.bottom, y));
+                              return Math.hypot(x - nearestX, y - nearestY) < rad + MINIMISED_NODE_GAP;
+                            }
                             return Math.hypot(x - npos.x, y - npos.y) < npos.r + rad + MINIMISED_NODE_GAP;
                           });
                           if (!clearOfNodes) return false;
@@ -19287,7 +19309,36 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           return (Math.min(38, FEED_HEX * 0.5) * 1.3) * tierScale;
                         };
                         members.forEach(n => {
-                          if (anchorOf[n.id]) allNodePos[n.id] = { ...anchorOf[n.id], r: nodeRadius(n) };
+                          const anchor = anchorOf[n.id];
+                          if (!anchor) return;
+                          const r = nodeRadius(n);
+                          if (n.type !== 'hub') {
+                            allNodePos[n.id] = { ...anchor, r };
+                            return;
+                          }
+                          const pos = positions[n.id];
+                          const colStep = FEED_HEX * 1.5;
+                          const leftNeighbour = members.find(m => {
+                            const p = positions[m.id];
+                            return p && pos && p.row === pos.row && p.col === pos.col - 1;
+                          });
+                          const rightNeighbour = members.find(m => {
+                            const p = positions[m.id];
+                            return p && pos && p.row === pos.row && p.col === pos.col + 1;
+                          });
+                          const fallbackHalf = (detailed ? r * 2.4 : FEED_HEX * 1.7) / 2;
+                          const leftHalf = leftNeighbour
+                            ? Math.max(r * 0.8, colStep - nodeRadius(leftNeighbour) - 6)
+                            : fallbackHalf;
+                          const rightHalf = rightNeighbour
+                            ? Math.max(r * 0.8, colStep - nodeRadius(rightNeighbour) - 6)
+                            : fallbackHalf;
+                          const pillH = detailed ? Math.min(leftHalf + rightHalf, r * 2.4) : r * 1.1;
+                          allNodePos[n.id] = {
+                            ...anchor, r: Math.max(leftHalf, rightHalf, pillH / 2),
+                            left: anchor.x - leftHalf, right: anchor.x + rightHalf,
+                            top: anchor.y - pillH / 2, bottom: anchor.y + pillH / 2,
+                          };
                         });
                         minimisedHere.forEach(nid => {
                           const saved = feedPositions[`${dimKey}:${nid}`];
@@ -19298,6 +19349,34 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           const n = nodes.find(nd => nd.id === nid);
                           allNodePos[nid] = { x, y, r: nodeRadius(n) };
                         });
+
+                        // Choose a stable semantic parent for minimised placement.
+                        // A direct visible group link outranks whichever route the
+                        // graph traversal happened to visit first; otherwise retain
+                        // the existing tree parent. Sorting makes multiple direct
+                        // groups deterministic instead of link-order dependent.
+                        const placementParentOf = { ...parentOf };
+                        minimisedHere.forEach(id => {
+                          const directGroups = links
+                            .filter(l => l.source === id || l.target === id)
+                            .map(l => l.source === id ? l.target : l.source)
+                            .map(nid => nodes.find(n => n.id === nid))
+                            .filter(n => n && n.type === 'hub' && !minimisedSetAll.has(n.id) && anchorOf[n.id])
+                            .sort((a, b) => (a.label || a.id).localeCompare(b.label || b.id));
+                          if (directGroups.length) placementParentOf[id] = directGroups[0].id;
+                        });
+
+                        const boundaryDistance = (npos, angle, fallbackR) => {
+                          if (!npos || npos.left == null) return fallbackR;
+                          const dx = Math.cos(angle), dy = Math.sin(angle);
+                          const tx = Math.abs(dx) < 0.0001
+                            ? Infinity
+                            : (dx > 0 ? npos.right - npos.x : npos.x - npos.left) / Math.abs(dx);
+                          const ty = Math.abs(dy) < 0.0001
+                            ? Infinity
+                            : (dy > 0 ? npos.bottom - npos.y : npos.y - npos.top) / Math.abs(dy);
+                          return Math.min(tx, ty);
+                        };
 
                         const gapBounds = (parentX, parentY, parentR, angle, flowerR, excludeIds) => {
                           const excl = Array.isArray(excludeIds) ? excludeIds : [excludeIds];
@@ -19330,7 +19409,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         const renderMinimisedFlower = (id, anchorX, anchorY, depth, parentX, parentY, parentRadius = 0) => {
                           const mNode = nodes.find(n => n.id === id);
                           if (!mNode) return null;
-                          const parentId = parentOf[id];
+                          const parentId = placementParentOf[id];
                           const parentNode = nodes.find(n => n.id === parentId);
                           const isHub = mNode.type === 'hub';
                           const ownColor = isHub ? resolveHubColor(id) : (mNode.personalColor || (dm ? '#94a3b8' : 'white'));
@@ -19355,7 +19434,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           // Simple and Detailed Stacked, regardless of anything else that
                           // might otherwise make the two modes look different.
                           const baseR = Math.min(38, FEED_HEX * 0.5) * 1.3 * 0.45;
-                          const directChildIds = minimisedHere.filter(cid => parentOf[cid] === id);
+                          const directChildIds = minimisedHere.filter(cid => placementParentOf[cid] === id);
                           const directChildren = directChildIds.map(cid => nodes.find(n => n.id === cid)).filter(Boolean);
                           // Three-tier sizing: a group (hub) flower is the biggest, a
                           // person who has their own attached branch (at least one
@@ -19568,7 +19647,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         // mirroring the real tree shape rather than flattening
                         // everyone into one same-distance ring regardless of how
                         // they're actually connected to each other.
-                        const topLevelIds = minimisedHere.filter(id => !minimisedSetAll.has(parentOf[id]));
+                        const topLevelIds = minimisedHere.filter(id => !minimisedSetAll.has(placementParentOf[id])).sort();
                         // Multiple top-level roots can share the exact same parent
                         // anchor (e.g. Hayley's three direct people AND Family all
                         // radiate from Hayley's own position) -- without some
@@ -19584,14 +19663,14 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         // parent-child relationships together.
                         const rootsByAnchor = {};
                         topLevelIds.forEach(id => {
-                          const pid = parentOf[id];
+                          const pid = placementParentOf[id];
                           (rootsByAnchor[pid] = rootsByAnchor[pid] || []).push(id);
                         });
                         Object.keys(rootsByAnchor).forEach(pid => rootsByAnchor[pid].sort());
 
                         const freshPositions = {}; // id -> {x, y, r} -- the ACTUAL final position each flower is rendered at THIS pass, used directly by the name pass below instead of re-reading the cache, so a name can never diverge from its own flower's real position.
                         const flowerElements = topLevelIds.map((id) => {
-                          const parentId = parentOf[id];
+                          const parentId = placementParentOf[id];
                           // If the parent is the flower band itself, don't use its
                           // section-wide vertical-midpoint anchor -- that ignores where
                           // THIS root actually sits and could be far away. Use its own
@@ -19637,9 +19716,12 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                             const t = getTier(parentNode.interactionScore || 0, parentNode);
                             if (t === 1) return 0.55; if (t === 2) return 0.75; return 1;
                           })() : 1;
-                          const parentR = parentId === flowerId
+                          const parentCircleR = parentId === flowerId
                             ? BAND_W / 2
                             : (Math.min(38, FEED_HEX * 0.5) * 1.3) * parentTierScale;
+                          const parentBounds = allNodePos[parentId];
+                          const parentRadiusAt = (angle) => boundaryDistance(parentBounds, angle, parentCircleR);
+                          const parentR = parentRadiusAt(realAngleToSelf);
                           // Check cache first -- if this flower was already placed
                           // in a previous render with the same parent position, reuse
                           // that position directly rather than recomputing and
@@ -19682,7 +19764,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                             }
                             for (const nearAngle of nearAngles) {
                               const { innerDist: nearDist } = gapBounds(
-                                parentAnchor.x, parentAnchor.y, parentR,
+                                parentAnchor.x, parentAnchor.y, parentRadiusAt(nearAngle),
                                 nearAngle, ownR, [parentId, id]
                               );
                               const nearX = parentAnchor.x + Math.cos(nearAngle) * nearDist;
@@ -19754,13 +19836,17 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           // size groups used to be -- a group itself now gets an even
                           // bigger size, and a plain person with nothing attached stays
                           // at the base size, unchanged from before.
-                          const hasOwnBranch = minimisedHere.some(nid => nid !== id && parentOf[nid] === id);
+                          const hasOwnBranch = minimisedHere.some(nid => nid !== id && placementParentOf[nid] === id);
                           const baseFlowerR = Math.min(38, FEED_HEX * 0.5) * 1.3 * 0.45;
                           const rootR = isHubForR ? baseFlowerR * 1.55
                                        : hasOwnBranch ? baseFlowerR * 1.3
                                        : baseFlowerR;
                           freshPositions[id] = { x: cx, y: cy, r: rootR };
-                          return renderMinimisedFlower(id, cx, cy, 0, parentAnchor.x, parentAnchor.y, parentR);
+                          const finalAngle = Math.atan2(cy - parentAnchor.y, cx - parentAnchor.x);
+                          return renderMinimisedFlower(
+                            id, cx, cy, 0, parentAnchor.x, parentAnchor.y,
+                            parentRadiusAt(finalAngle)
+                          );
                         });
 
                         // ---- SECOND PASS: curved names, positioned relative to the
@@ -19778,7 +19864,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                         const ultimateRootOf = {};
                         const findRoot = (nid) => {
                           let cur = nid, guard = 0;
-                          while (minimisedSetAll.has(parentOf[cur]) && guard < 100) { cur = parentOf[cur]; guard++; }
+                          while (minimisedSetAll.has(placementParentOf[cur]) && guard < 100) { cur = placementParentOf[cur]; guard++; }
                           return cur;
                         };
                         minimisedHere.forEach(nid => { ultimateRootOf[nid] = findRoot(nid); });
