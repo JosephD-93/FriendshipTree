@@ -11,10 +11,10 @@ import { getLocalDateStr, parseBirthdayDateGlobal } from './utils/date';
 import { saveData, loadData, saveRaw } from './services/persistence';
 
 
-const APP_VERSION = '4.3.6';
-const BUILD_ID = '2026-08-06-revalidated-flower-slots';
+const APP_VERSION = '4.3.7';
+const BUILD_ID = '2026-08-06-remove-ghost-blockers';
 const BUILD_DATE = '6 August 2026';
-const WHATS_NEW = 'Cached minimised flowers now move only when their current slot becomes obstructed.';
+const WHATS_NEW = 'Invisible minimised cells no longer block drops or force flowers into overlapping fallback positions.';
 
 // ─── Calendar Integration ─────────────────────────────────────────────────
 // Uses the Capgo calendar plugin (Capacitor) to read/write the phone's
@@ -3260,7 +3260,7 @@ function AppInner() {
   // algorithm could otherwise persist indefinitely (the cache only ever
   // checked whether the PARENT moved, never whether the logic computing the
   // position had changed underneath it).
-  const MINIMISED_LAYOUT_VERSION = 'v10-revalidated-stable-slots';
+  const MINIMISED_LAYOUT_VERSION = 'v11-no-ghost-blockers';
   useEffect(() => { saveData('ft_feed_positions', feedPositions); }, [feedPositions]);
   // Prune ghost entries -- a feedPositions key is `${dimKey}:${nodeId}`, and
   // if that nodeId no longer exists in `nodes` (deleted, merged away, or
@@ -18080,8 +18080,14 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           row = Math.max(0, row);
           setFeedPositions(prev => {
             const myKey = `${cDimKey}:${nodeId}`;
+            const minimisedPositionKeys = new Set(
+              minimisedNodes.map(id => `${cDimKey}:${id}`)
+            );
             const isFree = (c, r, excludeKeys) => !Object.entries(prev).some(([k, v]) =>
-              k.startsWith(`${cDimKey}:`) && !excludeKeys.has(k) && v.col === c && v.row === r);
+              k.startsWith(`${cDimKey}:`) &&
+              !excludeKeys.has(k) &&
+              !minimisedPositionKeys.has(k) &&
+              v.col === c && v.row === r);
             const findNearestFree = (targetCol, targetRow, excludeKeys) => {
               if (isFree(targetCol, targetRow, excludeKeys)) return { col: targetCol, row: targetRow };
               for (let ring = 1; ring <= 20; ring++) {
@@ -18314,7 +18320,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               const healthListMembers = members.filter(n => n.type === 'health_list');
               const peopleMembers = members.filter(n => n.type !== 'health_list');
               const healthListPositions = resolveHealthListPositions(dimKey, healthListMembers);
-              const positions = resolvePositions(dimKey, peopleMembers, minimisedNodeObjs);
+              const positions = resolvePositions(dimKey, peopleMembers, []);
               Object.keys(healthListPositions).forEach(id => {
                 positions[id] = { ...healthListPositions[id], isHealthListGrid: true };
               });
@@ -19286,6 +19292,38 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           return !placedFlowers.some(f => Math.hypot(x - f.x, y - f.y) < rad + f.r + 8);
                         };
 
+                        // Unlike the old "least overlap" fallback, this helper is
+                        // not allowed to return an obstructed point. It searches
+                        // locally first, then uses a deterministic overflow row
+                        // below every real visible shape if the cluster is crowded.
+                        const findGuaranteedClearFlowerSlot = (preferredX, preferredY, rad, excludeIds) => {
+                          const step = Math.max(14, rad + MINIMISED_NODE_GAP + 6);
+                          for (let ring = 0; ring <= 18; ring++) {
+                            const samples = ring === 0 ? 1 : Math.max(12, ring * 10);
+                            for (let si = 0; si < samples; si++) {
+                              const angle = (si / samples) * Math.PI * 2;
+                              const x = preferredX + Math.cos(angle) * ring * step;
+                              const y = preferredY + Math.sin(angle) * ring * step;
+                              if (x < 30 || x > stripW - 24 || y < 24) continue;
+                              if (clearOfEverything(x, y, rad, excludeIds)) return { x, y };
+                            }
+                          }
+                          const visibleBottom = Math.max(
+                            0,
+                            ...Object.values(allNodePos).map(n => n.bottom != null ? n.bottom : n.y + n.r),
+                            ...placedFlowers.map(f => f.y + f.r),
+                          );
+                          const y = visibleBottom + rad + MINIMISED_NODE_GAP + 16;
+                          const preferred = Math.max(30, Math.min(stripW - 24, preferredX));
+                          if (clearOfEverything(preferred, y, rad, excludeIds)) return { x: preferred, y };
+                          for (let x = 30; x <= stripW - 24; x += step) {
+                            if (clearOfEverything(x, y, rad, excludeIds)) return { x, y };
+                          }
+                          // At this y every real shape is above us; this final
+                          // deterministic point is therefore clear by construction.
+                          return { x: preferred, y: y + rad * 2 + 16 };
+                        };
+
                         // Given a parent position, its radius, and an angle, find the
                         // valid placement band for a flower in that direction:
                         //   innerDist = parent's outer radius edge (flower must sit outside this)
@@ -19340,15 +19378,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                             top: anchor.y - pillH / 2, bottom: anchor.y + pillH / 2,
                           };
                         });
-                        minimisedHere.forEach(nid => {
-                          const saved = feedPositions[`${dimKey}:${nid}`];
-                          if (!saved) return;
-                          const rowShift = (saved.row % 2 === 1) ? FEED_HEX * 0.75 : 0;
-                          const x = BAND_W + colOffsets[saved.col] + rowShift + FEED_HEX;
-                          const y = saved.row * ROW_STEP + (dimKey === 'health' ? 148 : 50);
-                          const n = nodes.find(nd => nd.id === nid);
-                          allNodePos[nid] = { x, y, r: nodeRadius(n) };
-                        });
+                        // Minimized nodes' old cells are intentionally absent
+                        // from allNodePos. They are invisible and must not obstruct
+                        // current people, group pills, flowers, or drop targets.
 
                         // Choose a stable semantic parent for minimised placement.
                         // A direct visible group link outranks whichever route the
@@ -19623,6 +19655,10 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                   sx = bestPx; sy = bestPy;
                                 }
                                 } // end cache-miss else block
+                                if (!clearOfEverything(sx, sy, childR, [id, child.id])) {
+                                  const safe = findGuaranteedClearFlowerSlot(sx, sy, childR, [id, child.id]);
+                                  sx = safe.x; sy = safe.y;
+                                }
                                 sx = Math.max(30, Math.min(stripW - 24, sx));
                                 minimisedFlowerPosCache.current[satCacheKey] = { x: sx, y: sy, parentX: anchorX, parentY: anchorY };
                                 freshPositions[child.id] = { x: sx, y: sy, r: childR };
@@ -19837,6 +19873,10 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                             cx = bestPx; cy = bestPy;
                           }
                           } // end cache-miss else block
+                          if (!clearOfEverything(cx, cy, ownR, [id])) {
+                            const safe = findGuaranteedClearFlowerSlot(cx, cy, ownR, [id]);
+                            cx = safe.x; cy = safe.y;
+                          }
                           cx = Math.max(30, Math.min(stripW - 24, cx));
                           // Store to cache so subsequent renders don't recompute and
                           // reshuffle this flower unless the parent actually moves.
