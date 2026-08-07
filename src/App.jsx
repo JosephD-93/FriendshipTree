@@ -11,8 +11,8 @@ import { getLocalDateStr, parseBirthdayDateGlobal } from './utils/date';
 import { saveData, loadData, saveRaw } from './services/persistence';
 
 
-const APP_VERSION = '4.3.12';
-const BUILD_ID = '2026-08-07-progressive-stack-drag';
+const APP_VERSION = '4.3.13';
+const BUILD_ID = '2026-08-07-atomic-stack-move-undo';
 
 const MAP_VIEW_FAMILIES = [
   { key:'map', emoji:'🗺️', name:'Map', desc:'You in the centre', variants:[{key:'simple',name:'Standard'},{key:'full',name:'Fancy'}] },
@@ -20,7 +20,7 @@ const MAP_VIEW_FAMILIES = [
   { key:'stack', emoji:'📚', name:'Stack', desc:'Groups arranged in stacked sections', variants:[{key:'feed',name:'Standard'},{key:'feedDetailed',name:'Fancy'}] },
 ];
 const BUILD_DATE = '7 August 2026';
-const WHATS_NEW = 'Stack dragging now selects connected tiers progressively, and occupied drops let you choose between moving the branch there or connecting it.';
+const WHATS_NEW = 'Stack branch moves are now all-or-nothing, work when dropped on a selected member, preserve ordering, and are fully recorded by Undo and Redo.';
 
 // ─── Calendar Integration ─────────────────────────────────────────────────
 // Uses the Capgo calendar plugin (Capacitor) to read/write the phone's
@@ -3252,6 +3252,8 @@ function AppInner() {
   // person's real canvas x/y -- this is purely where they sit within the Feed view's
   // fixed-width hex strip for that one dimension.
   const [feedPositions, setFeedPositions] = useState((() => { try { return JSON.parse(localStorage.getItem('ft_feed_positions')||'{}'); } catch(e) { return {}; } })());
+  const feedPositionsRef = useRef(feedPositions);
+  feedPositionsRef.current = feedPositions;
   const feedLayoutHistory = useRef([]); // snapshots of feedPositions taken before any destructive layout operation (optimise, reset), so they can be undone -- the main app's undo only tracks nodes/links, never this
   // Cache for minimised flower positions -- keyed by nodeId, stores {x, y,
   // parentX, parentY} so flowers don't reshuffle every render when any
@@ -4082,6 +4084,7 @@ function AppInner() {
       // Mole lifts immediately -- no hold required
       if (node.type === 'mole') {
         groupDragIds.current = null;
+        snapshot();
         setLiftedNodeId(nodeId);
         return;
       }
@@ -4127,6 +4130,7 @@ function AppInner() {
       clearTimeout(groupLiftTimer.current);
       liftTimer.current = setTimeout(() => {
         isPanningOverride.current = false;
+        snapshot();
         setLiftedNodeId(nodeId);
         // Default behaviour: dragging a node moves its whole DOWNSTREAM branch
         // (children, sub-groups and their members) as a rigid cluster.
@@ -6403,49 +6407,53 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
 
 
   const snapshot = useCallback(() => {
-    // Read latest nodes/links via functional updater to avoid closure staleness
-    setNodes(currentNodes => {
-      setLinks(currentLinks => {
-        historyRef.current = [...historyRef.current.slice(-49), { nodes: currentNodes, links: currentLinks }];
-        futureRef.current  = [];
-        setHistoryLen(historyRef.current.length);
-        setFutureLen(0);
-        return currentLinks; // no change
-      });
-      return currentNodes; // no change
-    });
+    // Capture all user-arranged layout state synchronously. The previous
+    // nested state-updater approach could run after the mutation it was meant
+    // to precede, and it omitted Stack positions entirely.
+    historyRef.current = [...historyRef.current.slice(-49), {
+      nodes: JSON.parse(JSON.stringify(nodesRef.current)),
+      links: JSON.parse(JSON.stringify(linksRef.current)),
+      feedPositions: JSON.parse(JSON.stringify(feedPositionsRef.current)),
+    }];
+    futureRef.current = [];
+    setHistoryLen(historyRef.current.length);
+    setFutureLen(0);
   }, []);
 
 
   const undo = useCallback(() => {
     if (historyRef.current.length === 0) return;
     const prev = historyRef.current[historyRef.current.length - 1];
-    setNodes(currentNodes => {
-      setLinks(currentLinks => {
-        futureRef.current  = [{ nodes: currentNodes, links: currentLinks }, ...futureRef.current.slice(0, 49)];
-        historyRef.current = historyRef.current.slice(0, -1);
-        setHistoryLen(historyRef.current.length);
-        setFutureLen(futureRef.current.length);
-        return prev.links;
-      });
-      return prev.nodes;
-    });
+    futureRef.current = [{
+      nodes: JSON.parse(JSON.stringify(nodesRef.current)),
+      links: JSON.parse(JSON.stringify(linksRef.current)),
+      feedPositions: JSON.parse(JSON.stringify(feedPositionsRef.current)),
+    }, ...futureRef.current.slice(0, 49)];
+    historyRef.current = historyRef.current.slice(0, -1);
+    setNodes(prev.nodes);
+    setLinks(prev.links);
+    if (prev.feedPositions) setFeedPositions(prev.feedPositions);
+    setHistoryLen(historyRef.current.length);
+    setFutureLen(futureRef.current.length);
+    showToast('↩️ Change undone');
   }, []);
 
 
   const redo = useCallback(() => {
     if (futureRef.current.length === 0) return;
     const next = futureRef.current[0];
-    setNodes(currentNodes => {
-      setLinks(currentLinks => {
-        historyRef.current = [...historyRef.current, { nodes: currentNodes, links: currentLinks }];
-        futureRef.current  = futureRef.current.slice(1);
-        setHistoryLen(historyRef.current.length);
-        setFutureLen(futureRef.current.length);
-        return next.links;
-      });
-      return next.nodes;
-    });
+    historyRef.current = [...historyRef.current.slice(-49), {
+      nodes: JSON.parse(JSON.stringify(nodesRef.current)),
+      links: JSON.parse(JSON.stringify(linksRef.current)),
+      feedPositions: JSON.parse(JSON.stringify(feedPositionsRef.current)),
+    }];
+    futureRef.current = futureRef.current.slice(1);
+    setNodes(next.nodes);
+    setLinks(next.links);
+    if (next.feedPositions) setFeedPositions(next.feedPositions);
+    setHistoryLen(historyRef.current.length);
+    setFutureLen(futureRef.current.length);
+    showToast('↪️ Change redone');
   }, []);
 
 
@@ -18182,6 +18190,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             hCol = Math.max(0, Math.min(HEALTH_COLS - colSpan, hCol));
             const healthListBaseY = Number(stripEl.dataset.healthListBaseY) || 250;
             let hRow = Math.max(0, Math.round((localY - healthListBaseY - draggedMetrics.cardH / 2) / HEALTH_LIST_ROW_STEP));
+            snapshot();
             setFeedPositions(prev => {
               const myKey = `${cDimKey}:hlist:${nodeId}`;
               const overlaps = (aCol, aRow, aCols, aRows, bCol, bRow, bCols, bRows) =>
@@ -18214,6 +18223,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           let row = Math.round((localY - yOffsetForDrop) / (ROW_STEP));
           col = Math.max(0, Math.min(COLS - 1, col));
           row = Math.max(0, row);
+          snapshot();
           setFeedPositions(prev => {
             const myKey = `${cDimKey}:${nodeId}`;
             const minimisedPositionKeys = new Set(
@@ -20620,28 +20630,61 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         const dm = theme.darkMode;
         const selectedCount = Math.max(1, feedDropPrompt.branchIds?.length || 1);
         const moveHere = () => {
-          const { dimKey, targetId } = feedDropPrompt;
+          const { dimKey, targetId, nodeId } = feedDropPrompt;
           const selectedSet = new Set(feedDropPrompt.branchIds || [feedDropPrompt.nodeId]);
-          setFeedPositions(prev => {
-            const prefix = `${dimKey}:`;
-            const entries = Object.entries(prev)
-              .filter(([key, pos]) => key.startsWith(prefix) && !key.startsWith(`${prefix}hlist:`) && pos && Number.isFinite(pos.col) && Number.isFinite(pos.row))
-              .map(([key, pos]) => ({ key, id:key.slice(prefix.length), pos }))
-              .sort((a,b) => a.pos.row - b.pos.row || a.pos.col - b.pos.col);
-            const selected = entries.filter(entry => selectedSet.has(entry.id));
-            const remaining = entries.filter(entry => !selectedSet.has(entry.id));
-            const targetIndex = remaining.findIndex(entry => entry.id === targetId);
-            if (!selected.length || targetIndex < 0) return prev;
-            // Reuse the existing occupied slots in reading order. This inserts
-            // the selected block at the target's relative Stack position and
-            // shifts the intervening cards, without creating an overlap or
-            // unexpectedly compacting all deliberate gaps in the section.
-            const slots = entries.map(entry => entry.pos);
-            const ordered = [...remaining.slice(0,targetIndex), ...selected, ...remaining.slice(targetIndex)];
-            const next = { ...prev };
-            ordered.forEach((entry, index) => { next[entry.key] = { ...slots[index] }; });
-            return next;
+          const prev = feedPositionsRef.current;
+          const prefix = `${dimKey}:`;
+          const entries = Object.entries(prev)
+            .filter(([key, pos]) => key.startsWith(prefix) && !key.startsWith(`${prefix}hlist:`) && pos && Number.isFinite(pos.col) && Number.isFinite(pos.row))
+            .map(([key, pos]) => ({ key, id:key.slice(prefix.length), pos }))
+            .sort((a,b) => a.pos.row - b.pos.row || a.pos.col - b.pos.col);
+          const selected = entries.filter(entry => selectedSet.has(entry.id));
+          const targetSlotIndex = entries.findIndex(entry => entry.id === targetId);
+
+          // Never perform a partial move. A missing selected position was the
+          // cause of only some group members moving and damaging the layout.
+          if (selected.length !== selectedSet.size || targetSlotIndex < 0) {
+            setFeedDropPrompt(null);
+            showToast('⚠️ Move cancelled — the complete selected branch was not ready');
+            return;
+          }
+          const remaining = entries.filter(entry => !selectedSet.has(entry.id));
+          if (!remaining.length) {
+            setFeedDropPrompt(null);
+            showToast('Nothing outside this selected branch to move relative to');
+            return;
+          }
+
+          // The dragged root always leads its selected block. Use the target's
+          // ORIGINAL slot index even when that target belongs to the selected
+          // branch; this makes "move the group to one of its member positions"
+          // a real relocation rather than an invalid/no-op lookup.
+          const draggedEntry = selected.find(entry => entry.id === nodeId);
+          const selectedOrdered = [draggedEntry, ...selected.filter(entry => entry.id !== nodeId)].filter(Boolean);
+          const insertionIndex = Math.min(targetSlotIndex, remaining.length);
+          const ordered = [...remaining];
+          ordered.splice(insertionIndex, 0, ...selectedOrdered);
+          const slots = entries.map(entry => entry.pos);
+          const next = { ...prev };
+          ordered.forEach((entry, index) => { next[entry.key] = { ...slots[index] }; });
+
+          const changed = entries.some(entry => {
+            const p = next[entry.key];
+            return !p || p.col !== entry.pos.col || p.row !== entry.pos.row;
           });
+          if (!changed) {
+            setFeedDropPrompt(null);
+            showToast('Already at that relative Stack position');
+            return;
+          }
+
+          // Record both undo systems before applying one complete replacement.
+          const before = {};
+          Object.keys(prev).forEach(key => { if (key.startsWith(prefix)) before[key] = prev[key]; });
+          feedLayoutHistory.current = [...feedLayoutHistory.current.slice(-9), { dimKey, positions:before }];
+          snapshot();
+          feedPositionsRef.current = next;
+          setFeedPositions(next);
           setFeedDropPrompt(null);
           showToast(`↕️ Moved ${selectedCount === 1 ? dragged.label : `${dragged.label} and ${selectedCount-1} connected item${selectedCount===2?'':'s'}`}`);
         };
@@ -20654,10 +20697,12 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           if (dragged.type === 'hub' && target.type === 'hub') {
             setMergePrompt({ type:'group', a:nodeId, b:targetId });
           } else if (target.type === 'hub') {
+            snapshot();
             setLinks(prev => [...prev, { source:targetId, target:nodeId }]);
             showLinkUndo(targetId, nodeId);
             showToast('🌱 Added to ' + target.label);
           } else if (dragged.type === 'hub') {
+            snapshot();
             setLinks(prev => [...prev, { source:nodeId, target:targetId }]);
             showLinkUndo(nodeId, targetId);
             showToast('🌱 Added ' + target.label + ' to ' + dragged.label);
