@@ -11,8 +11,8 @@ import { getLocalDateStr, parseBirthdayDateGlobal } from './utils/date';
 import { saveData, loadData, saveRaw } from './services/persistence';
 
 
-const APP_VERSION = '4.3.11';
-const BUILD_ID = '2026-08-07-stable-pinch-zoom';
+const APP_VERSION = '4.3.12';
+const BUILD_ID = '2026-08-07-progressive-stack-drag';
 
 const MAP_VIEW_FAMILIES = [
   { key:'map', emoji:'🗺️', name:'Map', desc:'You in the centre', variants:[{key:'simple',name:'Standard'},{key:'full',name:'Fancy'}] },
@@ -20,7 +20,7 @@ const MAP_VIEW_FAMILIES = [
   { key:'stack', emoji:'📚', name:'Stack', desc:'Groups arranged in stacked sections', variants:[{key:'feed',name:'Standard'},{key:'feedDetailed',name:'Fancy'}] },
 ];
 const BUILD_DATE = '7 August 2026';
-const WHATS_NEW = 'Pinch zoom now stays anchored between your fingers and reliably keeps its final scale and position when either finger lifts.';
+const WHATS_NEW = 'Stack dragging now selects connected tiers progressively, and occupied drops let you choose between moving the branch there or connecting it.';
 
 // ─── Calendar Integration ─────────────────────────────────────────────────
 // Uses the Capgo calendar plugin (Capacitor) to read/write the phone's
@@ -3300,6 +3300,7 @@ function AppInner() {
   const feedLiveTouchRef = useRef(null); // {x, y, pointerId} -- continuously updated on every move from touch-down, even before the 350ms lift fires, so the lift starts from a fresh position instead of a stale touch-down snapshot
   const feedHoldTimer = useRef(null);
   const feedLiftTimer = useRef(null);
+  const feedTierTimer = useRef(null); // adds one downstream tier at a time while a Stack node remains held
   const listTitleLastTapRef = useRef({}); // { [nodeId]: timestamp } for double-tap-to-open on health list titles
   const feedLastTapRef = useRef(new Map()); // nodeId -> timestamp, for double-tap-to-minimise detection in Feed
   const feedSingleTapTimersRef = useRef(new Map()); // nodeId -> timer, one independent pending-open timer PER node (a single shared slot was the actual bug: tapping a different node mid-sequence stomped on it)
@@ -3312,6 +3313,7 @@ function AppInner() {
   // scrolls, then taps again to place) or 'twohand' (one finger holds while
   // a second, independent finger scrolls; lifting the holding finger drops it).
   const [feedCarrying, setFeedCarrying] = useState(null); // {dimKey, nodeId, branchIds, pageX, pageY, dropMode, holdPointerId}
+  const [feedDropPrompt, setFeedDropPrompt] = useState(null); // occupied Stack drop: choose relative move or relationship change
   const [feedScrollTop, setFeedScrollTop] = useState(0);
   const [healthSectionInView, setHealthSectionInView] = useState(false);
   useEffect(() => {
@@ -18141,12 +18143,10 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           const { dimKey: cDimKey, nodeId, branchIds } = feedCarrying;
           const draggedNode = nodes.find(n => n.id === nodeId);
 
-          // Check whether the drop point lands ON another node's circle (not
-          // just an empty grid cell) -- if so, create a connection instead of
-          // repositioning, same behaviour as dropping onto a target on the
-          // main canvas: person dropped on a hub joins that group; person
-          // dropped on another person opens the connect/merge prompt; groups
-          // dropped on groups open the group-merge prompt.
+          // Dropping on another Stack card is deliberately ambiguous: it can
+          // mean either "put this branch at this point in the reading order"
+          // or "change the relationship". Ask instead of silently connecting
+          // or refusing the occupied position.
           const stripRect = stripEl.getBoundingClientRect();
           const elementsUnder = document.elementsFromPoint(screenX, screenY);
           const targetEl = elementsUnder.find(el => el.dataset && el.dataset.feedNodeId && el.dataset.feedNodeId !== nodeId);
@@ -18154,42 +18154,13 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           const targetNode = targetId ? nodes.find(n => n.id === targetId) : null;
 
           if (targetNode && draggedNode) {
-            const alreadyLinked = links.some(l =>
-              (l.source === nodeId && l.target === targetId) || (l.source === targetId && l.target === nodeId));
             setFeedCarrying(null);
-            if (targetNode.type === 'flower') {
-              if (!alreadyLinked) {
-                setLinks(prev => [...prev, { source: targetId, target: nodeId }]);
-                showLinkUndo(targetId, nodeId);
-                showToast('🌱 Connected to ' + targetNode.label);
-              } else {
-                showToast('Already connected');
-              }
-            } else if (draggedNode.type === 'hub' && targetNode.type === 'hub') {
-              setMergePrompt({ type: 'group', a: nodeId, b: targetId });
-            } else if (targetNode.type === 'hub') {
-              if (!alreadyLinked) {
-                setLinks(prev => [...prev, { source: targetId, target: nodeId }]);
-                showLinkUndo(targetId, nodeId);
-                showToast('🌱 Added to ' + targetNode.label);
-              } else {
-                showToast('Already connected');
-              }
-            } else if (draggedNode.type === 'hub') {
-              if (!alreadyLinked) {
-                setLinks(prev => [...prev, { source: nodeId, target: targetId }]);
-                showLinkUndo(nodeId, targetId);
-                showToast('🌱 Added ' + targetNode.label + ' to ' + draggedNode.label);
-              } else {
-                showToast('Already connected');
-              }
-            } else {
-              if (!alreadyLinked) {
-                setMergePrompt({ type: 'friend', a: nodeId, b: targetId });
-              } else {
-                showToast('Already connected');
-              }
-            }
+            setFeedDropPrompt({
+              dimKey: cDimKey,
+              nodeId,
+              targetId,
+              branchIds: Array.from(branchIds && branchIds.size ? branchIds : new Set([nodeId])),
+            });
             return;
           }
 
@@ -19199,22 +19170,16 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                               // render) -- this is what the lift below reads from, instead
                               // of a single snapshot taken at touch-down that goes stale
                               // over the 350ms wait.
-                              feedLiveTouchRef.current = { x: startX, y: startY, pointerId };
+                              feedLiveTouchRef.current = { x: startX, y: startY, startX, startY, pointerId };
                               // Hold still briefly to pick the node up. No movement threshold
                               // races here -- the page is always free to scroll normally up
                               // until the moment this timer actually fires.
                               feedLiftTimer.current = setTimeout(() => {
+                                // First hold lifts ONLY this card. Every further
+                                // interval adds exactly one tier farther away from
+                                // the dimension flower/main group.
                                 const branchIds = new Set([node.id]);
-                                const stack = [node.id];
-                                while (stack.length) {
-                                  const cur = stack.pop();
-                                  members.forEach(m => {
-                                    if (parentOf[m.id] === cur && !branchIds.has(m.id)) {
-                                      branchIds.add(m.id);
-                                      stack.push(m.id);
-                                    }
-                                  });
-                                }
+                                let frontier = [node.id];
                                 try { targetEl.setPointerCapture(pointerId); } catch(err) {}
                                 // Use the LATEST known live position, not the original
                                 // touch-down snapshot -- the finger has likely drifted
@@ -19226,10 +19191,29 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                 const liveY = (live && live.pointerId === pointerId) ? live.y : startY;
                                 setFeedCarrying({ dimKey, nodeId: node.id, branchIds, screenX: liveX, screenY: liveY,
                                   dropMode: feedDragMode, holdPointerId: feedDragMode === 'twohand' ? pointerId : null });
-                              }, 350);
+                                showToast(`✋ Moving ${node.label} · hold for connected tier`);
+                                clearInterval(feedTierTimer.current);
+                                feedTierTimer.current = setInterval(() => {
+                                  const nextTier = members.filter(m => frontier.includes(parentOf[m.id]) && !branchIds.has(m.id));
+                                  if (!nextTier.length) {
+                                    clearInterval(feedTierTimer.current);
+                                    feedTierTimer.current = null;
+                                    return;
+                                  }
+                                  nextTier.forEach(m => branchIds.add(m.id));
+                                  frontier = nextTier.map(m => m.id);
+                                  setFeedCarrying(current => current && current.nodeId === node.id
+                                    ? { ...current, branchIds: new Set(branchIds) }
+                                    : current);
+                                  try { navigator.vibrate?.(25); } catch(err) {}
+                                  showToast(`🌿 ${branchIds.size} connected item${branchIds.size === 1 ? '' : 's'} selected`);
+                                }, 650);
+                              }, 450);
                             }}
                             onPointerUp={e=>{
                               clearTimeout(feedLiftTimer.current);
+                              clearInterval(feedTierTimer.current);
+                              feedTierTimer.current = null;
                               feedLiveTouchRef.current = null;
                               try { e.currentTarget.releasePointerCapture(e.pointerId); } catch(err) {}
                             }}
@@ -19241,6 +19225,15 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                               if (feedLiveTouchRef.current && feedLiveTouchRef.current.pointerId === e.pointerId) {
                                 feedLiveTouchRef.current.x = e.clientX;
                                 feedLiveTouchRef.current.y = e.clientY;
+                                const moved = Math.hypot(
+                                  e.clientX - feedLiveTouchRef.current.startX,
+                                  e.clientY - feedLiveTouchRef.current.startY
+                                );
+                                if (moved > 12) {
+                                  if (!feedCarrying) clearTimeout(feedLiftTimer.current);
+                                  clearInterval(feedTierTimer.current);
+                                  feedTierTimer.current = null;
+                                }
                               }
                               // Move events for a touch-derived pointer often stay
                               // targeted at whatever element the gesture started on,
@@ -19257,7 +19250,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                                 feedDragRAF.current = null;
                               });
                             }}
-                            onPointerLeave={()=>{ clearTimeout(feedLiftTimer.current); }}
+                            onPointerLeave={()=>{
+                              clearTimeout(feedLiftTimer.current);
+                              clearInterval(feedTierTimer.current);
+                              feedTierTimer.current = null;
+                            }}
                             onClick={() => {
                               if (feedCarrying || feedJustPlaced.current.has(node.id)) return;
                               const now = Date.now();
@@ -20616,6 +20613,76 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           </div>
         </div>
       )}
+      {feedDropPrompt && (() => {
+        const dragged = nodes.find(n => n.id === feedDropPrompt.nodeId);
+        const target = nodes.find(n => n.id === feedDropPrompt.targetId);
+        if (!dragged || !target) { setFeedDropPrompt(null); return null; }
+        const dm = theme.darkMode;
+        const selectedCount = Math.max(1, feedDropPrompt.branchIds?.length || 1);
+        const moveHere = () => {
+          const { dimKey, targetId } = feedDropPrompt;
+          const selectedSet = new Set(feedDropPrompt.branchIds || [feedDropPrompt.nodeId]);
+          setFeedPositions(prev => {
+            const prefix = `${dimKey}:`;
+            const entries = Object.entries(prev)
+              .filter(([key, pos]) => key.startsWith(prefix) && !key.startsWith(`${prefix}hlist:`) && pos && Number.isFinite(pos.col) && Number.isFinite(pos.row))
+              .map(([key, pos]) => ({ key, id:key.slice(prefix.length), pos }))
+              .sort((a,b) => a.pos.row - b.pos.row || a.pos.col - b.pos.col);
+            const selected = entries.filter(entry => selectedSet.has(entry.id));
+            const remaining = entries.filter(entry => !selectedSet.has(entry.id));
+            const targetIndex = remaining.findIndex(entry => entry.id === targetId);
+            if (!selected.length || targetIndex < 0) return prev;
+            // Reuse the existing occupied slots in reading order. This inserts
+            // the selected block at the target's relative Stack position and
+            // shifts the intervening cards, without creating an overlap or
+            // unexpectedly compacting all deliberate gaps in the section.
+            const slots = entries.map(entry => entry.pos);
+            const ordered = [...remaining.slice(0,targetIndex), ...selected, ...remaining.slice(targetIndex)];
+            const next = { ...prev };
+            ordered.forEach((entry, index) => { next[entry.key] = { ...slots[index] }; });
+            return next;
+          });
+          setFeedDropPrompt(null);
+          showToast(`↕️ Moved ${selectedCount === 1 ? dragged.label : `${dragged.label} and ${selectedCount-1} connected item${selectedCount===2?'':'s'}`}`);
+        };
+        const connectHere = () => {
+          const { nodeId, targetId } = feedDropPrompt;
+          const alreadyLinked = links.some(l =>
+            (l.source === nodeId && l.target === targetId) || (l.source === targetId && l.target === nodeId));
+          setFeedDropPrompt(null);
+          if (alreadyLinked) { showToast('Already connected'); return; }
+          if (dragged.type === 'hub' && target.type === 'hub') {
+            setMergePrompt({ type:'group', a:nodeId, b:targetId });
+          } else if (target.type === 'hub') {
+            setLinks(prev => [...prev, { source:targetId, target:nodeId }]);
+            showLinkUndo(targetId, nodeId);
+            showToast('🌱 Added to ' + target.label);
+          } else if (dragged.type === 'hub') {
+            setLinks(prev => [...prev, { source:nodeId, target:targetId }]);
+            showLinkUndo(nodeId, targetId);
+            showToast('🌱 Added ' + target.label + ' to ' + dragged.label);
+          } else {
+            setMergePrompt({ type:'friend', a:nodeId, b:targetId });
+          }
+        };
+        return (
+          <div style={{position:'fixed',inset:0,zIndex:510,background:'rgba(0,0,0,0.62)',display:'flex',alignItems:'center',justifyContent:'center'}}
+            onClick={e=>{if(e.target===e.currentTarget)setFeedDropPrompt(null);}}>
+            <div style={{background:dm?'#0f172a':'white',borderRadius:16,padding:22,width:'min(90vw,360px)',boxShadow:'0 25px 60px rgba(0,0,0,0.5)',border:`1px solid ${dm?'#334155':'#e2e8f0'}`}}>
+              <div style={{fontSize:30,textAlign:'center',marginBottom:7}}>↕️</div>
+              <h3 style={{textAlign:'center',fontWeight:800,fontSize:17,color:dm?'#e2e8f0':'#1e293b',marginBottom:6}}>Move or connect?</h3>
+              <p style={{textAlign:'center',fontSize:13,lineHeight:1.45,color:dm?'#94a3b8':pw.secondText,marginBottom:18}}>
+                Place {selectedCount===1 ? dragged.label : `${dragged.label}'s selected ${selectedCount}-item branch`} at {target.label}'s position in the Stack, or change their relationship?
+              </p>
+              <div style={{display:'grid',gap:9}}>
+                <button onClick={moveHere} style={{padding:'11px',borderRadius:10,background:'#10b981',color:'white',border:'none',fontWeight:800,fontSize:14}}>↕ Move here</button>
+                <button onClick={connectHere} style={{padding:'11px',borderRadius:10,background:dm?'#2563eb':'#3b82f6',color:'white',border:'none',fontWeight:700,fontSize:14}}>🌱 Connect</button>
+                <button onClick={()=>setFeedDropPrompt(null)} style={{padding:'10px',borderRadius:10,background:dm?'#334155':'#e2e8f0',color:dm?'#e2e8f0':'#334155',border:'none',fontWeight:600,fontSize:14}}>Cancel</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
       {mergePrompt && (() => {
         const nodeA = nodes.find(n => n.id === mergePrompt.a);
         const nodeB = nodes.find(n => n.id === mergePrompt.b);
