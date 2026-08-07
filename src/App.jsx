@@ -11,16 +11,16 @@ import { getLocalDateStr, parseBirthdayDateGlobal } from './utils/date';
 import { saveData, loadData, saveRaw } from './services/persistence';
 
 
-const APP_VERSION = '4.3.10';
-const BUILD_ID = '2026-08-06-compact-branch-cards';
+const APP_VERSION = '4.3.11';
+const BUILD_ID = '2026-08-07-stable-pinch-zoom';
 
 const MAP_VIEW_FAMILIES = [
   { key:'map', emoji:'🗺️', name:'Map', desc:'You in the centre', variants:[{key:'simple',name:'Standard'},{key:'full',name:'Fancy'}] },
   { key:'branch', emoji:'🌿', name:'Branch', desc:'You at the side; connections branch right', variants:[{key:'branch',name:'Standard'},{key:'branchDetailed',name:'Fancy · Coming next',disabled:true}] },
   { key:'stack', emoji:'📚', name:'Stack', desc:'Groups arranged in stacked sections', variants:[{key:'feed',name:'Standard'},{key:'feedDetailed',name:'Fancy'}] },
 ];
-const BUILD_DATE = '6 August 2026';
-const WHATS_NEW = 'Branch view now uses compact photo cards and much tighter rows and columns so large relationship trees remain usable.';
+const BUILD_DATE = '7 August 2026';
+const WHATS_NEW = 'Pinch zoom now stays anchored between your fingers and reliably keeps its final scale and position when either finger lifts.';
 
 // ─── Calendar Integration ─────────────────────────────────────────────────
 // Uses the Capgo calendar plugin (Capacitor) to read/write the phone's
@@ -3716,6 +3716,9 @@ function AppInner() {
   const panRafRef = useRef(null);
   const panSyncRafRef = useRef(null); // throttles setTransform during an active pan to once per frame, since applyTransform already handles the actual visual movement directly via the DOM
   const panSyncLatestRef = useRef(null); // always holds the most recent position, so the throttled sync never commits a stale intermediate value
+  const liveTransformRef = useRef(transform); // synchronous source of truth while pointer events update the SVG outside React
+  const panStartRef = useRef(panStart);
+  const pinchStartRef = useRef(null);
   const [hubGalleryItems, setHubGalleryItems] = useState([]);
   const [hubGalleryLoading, setHubGalleryLoading] = useState(false);
   const [hubGalleryViewer, setHubGalleryViewer] = useState(null);
@@ -3737,6 +3740,10 @@ function AppInner() {
   const [canvasVelocity, setCanvasVelocity] = useState({ x: 0, y: 0 });
   const lastPanPos = useRef({ x: 0, y: 0 });
   const panTimer = useRef(null);
+
+  useEffect(() => {
+    liveTransformRef.current = transform;
+  }, [transform]);
 
 
   useEffect(() => {
@@ -4022,8 +4029,23 @@ function AppInner() {
       // Pinch zoom init
       const [p0, p1] = allPtrs;
       const dx = p1.x - p0.x, dy = p1.y - p0.y;
-      initialPinchDist.current = Math.sqrt(dx*dx + dy*dy);
-      initialPinchScale.current = transform.scale;
+      const startTransform = panSyncLatestRef.current || liveTransformRef.current;
+      const distance = Math.sqrt(dx*dx + dy*dy);
+      const midpoint = { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 };
+      initialPinchDist.current = distance;
+      initialPinchScale.current = startTransform.scale;
+      pinchStartRef.current = {
+        distance,
+        midpoint,
+        transform: { ...startTransform },
+      };
+      clearTimeout(liftTimer.current);
+      clearTimeout(groupLiftTimer.current);
+      setDragNode(null);
+      liftedIdRef.current = null;
+      setLiftedNodeId(null);
+      isPanningOverride.current = true;
+      setIsPanning(true);
       return;
     }
 
@@ -4217,8 +4239,11 @@ function AppInner() {
       }, 2000);
     } else {
       // Background touch — start panning immediately
+      const liveTransform = panSyncLatestRef.current || liveTransformRef.current;
+      const nextPanStart = { x: e.clientX - liveTransform.x, y: e.clientY - liveTransform.y };
       setIsPanning(true);
-      setPanStart({ x: e.clientX - transform.x, y: e.clientY - transform.y });
+      panStartRef.current = nextPanStart;
+      setPanStart(nextPanStart);
       lastPanPos.current = { x: e.clientX, y: e.clientY };
       setSelectedNodeId(null);
       setAddFriendForms([]);
@@ -4264,9 +4289,19 @@ function AppInner() {
       const [p0, p1] = allPtrs;
       const dx = p1.x - p0.x, dy = p1.y - p0.y;
       const dist = Math.sqrt(dx*dx + dy*dy);
-      if (initialPinchDist.current > 0) {
-        const newScale = Math.min(Math.max(0.01, initialPinchScale.current * (dist / initialPinchDist.current)), 3);
-        const newT = { ...transform, scale: newScale };
+      const pinchStart = pinchStartRef.current;
+      if (pinchStart?.distance > 0) {
+        const newScale = Math.min(Math.max(0.01, pinchStart.transform.scale * (dist / pinchStart.distance)), 3);
+        const midpoint = { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 };
+        // Keep the same canvas point under the midpoint of the two fingers.
+        // Moving both fingers together therefore pans naturally while pinching.
+        const anchorX = (pinchStart.midpoint.x - pinchStart.transform.x) / pinchStart.transform.scale;
+        const anchorY = (pinchStart.midpoint.y - pinchStart.transform.y) / pinchStart.transform.scale;
+        const newT = {
+          x: midpoint.x - anchorX * newScale,
+          y: midpoint.y - anchorY * newScale,
+          scale: newScale,
+        };
         applyTransform(newT);
         // Keep React out of the live pinch loop. The SVG group has already
         // been updated directly above; committing transform state here would
@@ -4295,7 +4330,10 @@ function AppInner() {
           liftedIdRef.current = null;
           setLiftedNodeId(null);
           setIsPanning(true);
-          setPanStart({ x: ptr.startX - transform.x, y: ptr.startY - transform.y });
+          const liveTransform = panSyncLatestRef.current || liveTransformRef.current;
+          const nextPanStart = { x: ptr.startX - liveTransform.x, y: ptr.startY - liveTransform.y };
+          panStartRef.current = nextPanStart;
+          setPanStart(nextPanStart);
           lastPanPos.current = { x: ptr.startX, y: ptr.startY };
         } else {
           return; // still deciding — don't move anything
@@ -4307,11 +4345,13 @@ function AppInner() {
 
 
     // Panning
-    if (isPanning && !liftedNodeId) {
-      const newX = e.clientX - panStart.x;
-      const newY = e.clientY - panStart.y;
+    if ((isPanning || isPanningOverride.current) && !liftedNodeId) {
+      const liveTransform = liveTransformRef.current;
+      const currentPanStart = panStartRef.current;
+      const newX = e.clientX - currentPanStart.x;
+      const newY = e.clientY - currentPanStart.y;
       // Apply directly to DOM for smooth 60fps — no React re-render
-      const newT = { ...transform, x: newX, y: newY };
+      const newT = { ...liveTransform, x: newX, y: newY };
       applyTransform(newT);
       // React state only needs to keep up at roughly frame rate, not on every
       // single raw pointer event (which can fire well above 60/sec) -- the
@@ -4391,7 +4431,38 @@ function AppInner() {
     groupDragOrigins.current = {};
     const ptr = activePointers.current.get(e.pointerId);
     if (!ptr) return;
+    const wasPinching = activePointers.current.size === 2 && !!pinchStartRef.current;
     activePointers.current.delete(e.pointerId);
+
+    if (wasPinching) {
+      // Commit the pinch as soon as either finger lifts. Without this, the
+      // remaining pointer can pan using the pre-pinch React state and restore
+      // the old scale/position before the final pointer-up event arrives.
+      const finalTransform = panSyncLatestRef.current || liveTransformRef.current;
+      liveTransformRef.current = finalTransform;
+      setTransform(finalTransform);
+      panSyncLatestRef.current = null;
+      pinchStartRef.current = null;
+      initialPinchDist.current = null;
+      initialPinchScale.current = null;
+
+      const remaining = Array.from(activePointers.current.values())[0];
+      if (remaining) {
+        remaining.startX = remaining.x;
+        remaining.startY = remaining.y;
+        remaining.nodeId = null;
+        remaining.decidedPan = true;
+        const nextPanStart = {
+          x: remaining.x - finalTransform.x,
+          y: remaining.y - finalTransform.y,
+        };
+        panStartRef.current = nextPanStart;
+        setPanStart(nextPanStart);
+        isPanningOverride.current = true;
+        setIsPanning(true);
+      }
+      return;
+    }
 
 
     const moved = Math.sqrt((ptr.x - ptr.startX)**2 + (ptr.y - ptr.startY)**2);
@@ -4614,9 +4685,13 @@ function AppInner() {
         panSyncRafRef.current = null;
       }
       if (panSyncLatestRef.current) {
+        liveTransformRef.current = panSyncLatestRef.current;
         setTransform(panSyncLatestRef.current);
         panSyncLatestRef.current = null;
       }
+      pinchStartRef.current = null;
+      initialPinchDist.current = null;
+      initialPinchScale.current = null;
     }
   };
 
@@ -8512,6 +8587,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
   // Apply transform directly to SVG group for smooth panning (bypasses React re-render)
   const applyTransform = useCallback((t) => {
+    liveTransformRef.current = t;
     if (svgGroupRef.current) {
       svgGroupRef.current.setAttribute('transform', `translate(${t.x}, ${t.y}) scale(${t.scale})`);
     }
