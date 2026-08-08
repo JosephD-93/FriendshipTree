@@ -9,18 +9,21 @@ import {
 import { detectImageMimeFromBase64 } from './utils/image';
 import { getLocalDateStr, parseBirthdayDateGlobal } from './utils/date';
 import { saveData, loadData, saveRaw } from './services/persistence';
+import { SocialLogin } from '@capgo/capacitor-social-login';
 
 
-const APP_VERSION = '4.3.13';
-const BUILD_ID = '2026-08-07-atomic-stack-move-undo';
+const APP_VERSION = '4.3.14';
+const BUILD_ID = '2026-08-08-google-drive-snapshot';
+const GOOGLE_WEB_CLIENT_ID = '54802084194-qiej4s3ahd0eojf26rnjtsoius482fio.apps.googleusercontent.com';
+const GOOGLE_DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 
 const MAP_VIEW_FAMILIES = [
   { key:'map', emoji:'🗺️', name:'Map', desc:'You in the centre', variants:[{key:'simple',name:'Standard'},{key:'full',name:'Fancy'}] },
   { key:'branch', emoji:'🌿', name:'Branch', desc:'You at the side; connections branch right', variants:[{key:'branch',name:'Standard'},{key:'branchDetailed',name:'Fancy · Coming next',disabled:true}] },
   { key:'stack', emoji:'📚', name:'Stack', desc:'Groups arranged in stacked sections', variants:[{key:'feed',name:'Standard'},{key:'feedDetailed',name:'Fancy'}] },
 ];
-const BUILD_DATE = '7 August 2026';
-const WHATS_NEW = 'Stack branch moves are now all-or-nothing, work when dropped on a selected member, preserve ordering, and are fully recorded by Undo and Redo.';
+const BUILD_DATE = '8 August 2026';
+const WHATS_NEW = 'Google Drive connection and safe dated cloud snapshots are now available in Settings, without overwriting existing phone data.';
 
 // ─── Calendar Integration ─────────────────────────────────────────────────
 // Uses the Capgo calendar plugin (Capacitor) to read/write the phone's
@@ -2328,6 +2331,11 @@ function AppInner() {
   const [backupManagerOpen, setBackupManagerOpen] = useState(null);
   const [backupOperation, setBackupOperation] = useState('');
   const autoBackupRunningRef = useRef(false);
+  const [driveAccount, setDriveAccount] = useState(null); // {name,email,imageUrl}; access token deliberately remains memory-only
+  const [driveOperation, setDriveOperation] = useState('');
+  const [lastDriveUploadAt, setLastDriveUploadAt] = useState(() => localStorage.getItem('ft_drive_last_upload_at') || '');
+  const driveAccessTokenRef = useRef(null);
+  const driveUploadRunningRef = useRef(false);
   const [fontSize, setFontSize] = useState(() => { try { return parseFloat(localStorage.getItem('ft_fontSize')||'1'); } catch(e) { return 1; } });
   useEffect(() => {
     document.documentElement.style.fontSize = `${fontSize * 16}px`;
@@ -7265,6 +7273,208 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
     return { manifest, photoFiles, galleryFiles };
   };
 
+  // -- Google Drive recovery snapshots -------------------------------------
+  // Phase 1 is intentionally upload-only. It creates a new dated folder for
+  // every run and writes the manifest LAST, so an interrupted transfer can
+  // never masquerade as a complete snapshot or overwrite established data.
+  const driveRequest = async (url, options = {}) => {
+    const token = driveAccessTokenRef.current;
+    if (!token) throw new Error('Connect your Google Drive account first');
+    const response = await fetch(url, {
+      ...options,
+      headers: { Authorization:`Bearer ${token}`, ...(options.headers || {}) },
+    });
+    if (!response.ok) {
+      let detail = '';
+      try { const body = await response.json(); detail = body?.error?.message || ''; } catch(e) {}
+      if (response.status === 401) throw new Error('Google access expired — reconnect Drive and try again');
+      if (response.status === 403) throw new Error(detail || 'Drive access was denied — confirm the Drive API is enabled');
+      throw new Error(detail || `Google Drive request failed (${response.status})`);
+    }
+    if (response.status === 204) return null;
+    return response.json();
+  };
+
+  const driveCreateFolder = (name, parentId = null) => driveRequest('https://www.googleapis.com/drive/v3/files?fields=id,name', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({
+      name,
+      mimeType:'application/vnd.google-apps.folder',
+      ...(parentId ? { parents:[parentId] } : {}),
+    }),
+  });
+
+  const driveFindOrCreateRoot = async () => {
+    const escaped = "FriendshipTree Sync".replace(/'/g, "\\'");
+    const params = new URLSearchParams({
+      q:`name='${escaped}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+      spaces:'drive', fields:'files(id,name,createdTime)', pageSize:'10', orderBy:'createdTime',
+    });
+    const result = await driveRequest(`https://www.googleapis.com/drive/v3/files?${params}`);
+    return result?.files?.[0] || driveCreateFolder('FriendshipTree Sync');
+  };
+
+  const driveUploadJson = async (name, parentId, value) => {
+    const payload = JSON.stringify(value);
+    const body = new Blob([payload], { type:'application/json' });
+    const token = driveAccessTokenRef.current;
+    if (!token) throw new Error('Connect your Google Drive account first');
+    // Resumable sessions work for tiny manifests and unusually large gallery
+    // records alike. Multipart uploads can reject a single large Base64 photo.
+    const start = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,size', {
+      method:'POST',
+      headers:{
+        Authorization:`Bearer ${token}`,
+        'Content-Type':'application/json; charset=UTF-8',
+        'X-Upload-Content-Type':'application/json',
+        'X-Upload-Content-Length':String(body.size),
+      },
+      body:JSON.stringify({ name, parents:[parentId], mimeType:'application/json' }),
+    });
+    if (!start.ok) {
+      let detail = '';
+      try { detail = (await start.json())?.error?.message || ''; } catch(e) {}
+      throw new Error(detail || `Could not start Drive upload (${start.status})`);
+    }
+    const sessionUrl = start.headers.get('Location');
+    if (!sessionUrl) throw new Error('Google Drive did not return an upload session');
+    const upload = await fetch(sessionUrl, {
+      method:'PUT',
+      headers:{ Authorization:`Bearer ${token}`, 'Content-Type':'application/json' },
+      body,
+    });
+    if (!upload.ok) {
+      let detail = '';
+      try { detail = (await upload.json())?.error?.message || ''; } catch(e) {}
+      if (upload.status === 401) throw new Error('Google access expired — reconnect Drive and try again');
+      throw new Error(detail || `Drive upload failed (${upload.status})`);
+    }
+    return upload.json();
+  };
+
+  const connectGoogleDrive = async () => {
+    setDriveOperation('Connecting to Google…');
+    try {
+      await SocialLogin.initialize({ google:{ webClientId:GOOGLE_WEB_CLIENT_ID, mode:'online' } });
+      const login = await SocialLogin.login({
+        provider:'google',
+        options:{
+          scopes:['email','profile',GOOGLE_DRIVE_SCOPE],
+          filterByAuthorizedAccounts:false,
+          style:'standard',
+        },
+      });
+      const result = login?.result;
+      const token = result?.accessToken?.token;
+      if (!token) throw new Error('Google connected but did not return Drive permission');
+      driveAccessTokenRef.current = token;
+      setDriveAccount(result.profile || { name:'Google account', email:'' });
+      setDriveOperation('Connected — ready to upload a dated snapshot');
+      showToast('☁️ Google Drive connected');
+      return true;
+    } catch(err) {
+      console.warn('Google Drive connection failed:', err);
+      driveAccessTokenRef.current = null;
+      setDriveAccount(null);
+      const message = err?.message || String(err);
+      setDriveOperation(`Connection failed: ${message}`);
+      showToast(`❌ Drive connection failed: ${message}`);
+      return false;
+    }
+  };
+
+  const disconnectGoogleDrive = async () => {
+    try { await SocialLogin.logout({ provider:'google' }); } catch(e) {}
+    driveAccessTokenRef.current = null;
+    setDriveAccount(null);
+    setDriveOperation('Disconnected');
+  };
+
+  const collectDriveSnapshotIndex = async () => {
+    const localStorageData = {};
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('ft_')) localStorageData[key] = localStorage.getItem(key);
+    }
+    localStorageData.ft_nodes = JSON.stringify(nodesRef.current);
+    localStorageData.ft_links = JSON.stringify(linksRef.current);
+    localStorageData.ft_dimensions = JSON.stringify(dimensions);
+    const db = idbRef.current || (idbRef.current = await openPhotoDB());
+    const keysFor = storeName => new Promise((resolve,reject) => {
+      const tx = db.transaction(storeName,'readonly');
+      const request = tx.objectStore(storeName).getAllKeys();
+      request.onsuccess = () => resolve(request.result || []);
+      request.onerror = () => reject(request.error);
+    });
+    const [photoKeys, galleryKeys] = await Promise.all([keysFor('photos'), keysFor('gallery')]);
+    return {
+      db, photoKeys, galleryKeys,
+      manifest:{
+        format:'FriendshipTreeDriveSnapshot', version:1, backupFormatVersion:5,
+        appVersion:APP_VERSION, exportedAt:new Date().toISOString(),
+        localStorageData, nodes:nodesRef.current, links:linksRef.current, dimensions,
+        profilePhotoKeys:photoKeys, galleryPhotoKeys:galleryKeys,
+        counts:{ profilePhotos:photoKeys.length, galleryPhotos:galleryKeys.length },
+      },
+    };
+  };
+
+  const readDriveSnapshotRecord = (db, storeName, key) => new Promise((resolve,reject) => {
+    const tx = db.transaction(storeName,'readonly');
+    const request = tx.objectStore(storeName).get(key);
+    request.onsuccess = () => resolve(request.result || null);
+    request.onerror = () => reject(request.error);
+  });
+
+  const uploadDriveSnapshot = async () => {
+    if (driveUploadRunningRef.current) return;
+    if (!driveAccessTokenRef.current) { await connectGoogleDrive(); return; }
+    driveUploadRunningRef.current = true;
+    try {
+      setDriveOperation('Preparing Drive snapshot…');
+      if (pendingPhotoWrites.current.size) await Promise.allSettled([...pendingPhotoWrites.current]);
+      const snapshot = await collectDriveSnapshotIndex();
+      const root = await driveFindOrCreateRoot();
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const snapshotFolder = await driveCreateFolder(`snapshot-${stamp}-v${APP_VERSION}`, root.id);
+      const photosFolder = await driveCreateFolder('photos', snapshotFolder.id);
+      const assets = [
+        ...snapshot.photoKeys.map(key => ({ store:'photos', key })),
+        ...snapshot.galleryKeys.map(key => ({ store:'gallery', key })),
+      ];
+      let completed = 0;
+      for (const asset of assets) {
+        const record = await readDriveSnapshotRecord(snapshot.db, asset.store, asset.key);
+        if (!record) throw new Error(`A photo changed during upload (${asset.key}) — retry to capture a consistent snapshot`);
+        const safeKey = String(asset.key).replace(/[^a-zA-Z0-9._-]/g,'_').slice(0,100);
+        const fileName = `${asset.store}-${String(completed+1).padStart(5,'0')}-${safeKey}.json`;
+        setDriveOperation(`Uploading photos ${completed + 1}/${assets.length}…`);
+        await driveUploadJson(fileName, photosFolder.id, record);
+        completed++;
+        if (completed % 3 === 0) await new Promise(resolve => setTimeout(resolve, 0));
+      }
+      // The final manifest is the completion marker. A folder without it is
+      // visibly incomplete and will be ignored by the future restore/sync step.
+      await driveUploadJson('manifest.json', snapshotFolder.id, {
+        ...snapshot.manifest,
+        driveSnapshot:{ version:1, snapshotFolderId:snapshotFolder.id, photosFolderId:photosFolder.id, complete:true },
+      });
+      const completedAt = new Date().toISOString();
+      saveRaw('ft_drive_last_upload_at', completedAt);
+      setLastDriveUploadAt(completedAt);
+      setDriveOperation(`Upload complete — ${assets.length} photos safely stored`);
+      showToast(`✅ Drive snapshot complete (${assets.length} photos)`);
+    } catch(err) {
+      console.error('Drive snapshot failed:', err);
+      const message = err?.message || String(err);
+      setDriveOperation(`Upload failed safely: ${message}`);
+      showToast(`❌ Drive upload stopped: ${message}`);
+    } finally {
+      driveUploadRunningRef.current = false;
+    }
+  };
+
   const writeBackupPackage = async ({ directory, rootPath, onProgress }) => {
     const FilesystemP = window.Capacitor?.Plugins?.Filesystem;
     if (!FilesystemP || typeof FilesystemP.writeFile !== 'function') throw new Error('Capacitor Filesystem is unavailable');
@@ -9789,6 +9999,39 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       </div>
                       <div style={{fontSize:11,color:theme.darkMode?'#64748b':'#94a3b8',marginTop:7,lineHeight:1.4}}>
                         Complete backups use a memory-safe package: one small manifest plus separate photo files. Seven dated phone snapshots are retained. When importing an exported package, select every JSON file in the package together.
+                      </div>
+                      <div style={{marginTop:10,padding:10,borderRadius:10,border:`1px solid ${driveAccount?'#10b981':pw.border}`,background:theme.darkMode?'#0f172a':'#f8fafc'}}>
+                        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8}}>
+                          <div>
+                            <div style={{fontSize:12,fontWeight:800,color:theme.darkMode?'#e2e8f0':pw.bodyText}}>☁️ Google Drive snapshots</div>
+                            <div style={{fontSize:10,color:driveAccount?'#10b981':(theme.darkMode?'#94a3b8':'#64748b'),marginTop:2}}>
+                              {driveAccount ? `Connected${driveAccount.email ? ` as ${driveAccount.email}` : ''}` : 'Not connected'}
+                            </div>
+                          </div>
+                          {driveAccount && driveAccount.imageUrl ? <img src={driveAccount.imageUrl} alt="" style={{width:30,height:30,borderRadius:'50%'}}/> : null}
+                        </div>
+                        <div style={{fontSize:10,color:theme.darkMode?'#94a3b8':'#64748b',marginTop:7,lineHeight:1.4}}>
+                          Creates a new dated recovery folder in <strong>FriendshipTree Sync</strong>. This first test is upload-only and cannot overwrite phone data or an older snapshot.
+                        </div>
+                        {!driveAccount ? (
+                          <button onClick={connectGoogleDrive} disabled={driveOperation.startsWith('Connecting')}
+                            style={{width:'100%',marginTop:8,padding:'8px 0',borderRadius:9,background:'#4285f4',color:'white',border:'none',fontSize:12,fontWeight:800,opacity:driveOperation.startsWith('Connecting')?0.6:1}}>
+                            {driveOperation.startsWith('Connecting')?'Connecting…':'Connect Google Drive'}
+                          </button>
+                        ) : (
+                          <div style={{display:'flex',gap:7,marginTop:8}}>
+                            <button onClick={uploadDriveSnapshot} disabled={driveUploadRunningRef.current}
+                              style={{flex:1,padding:'8px 0',borderRadius:9,background:'#10b981',color:'white',border:'none',fontSize:12,fontWeight:800,opacity:driveUploadRunningRef.current?0.6:1}}>
+                              Upload this device
+                            </button>
+                            <button onClick={disconnectGoogleDrive} disabled={driveUploadRunningRef.current}
+                              style={{padding:'8px 10px',borderRadius:9,background:theme.darkMode?'#334155':'#e2e8f0',color:theme.darkMode?'#e2e8f0':'#334155',border:'none',fontSize:11,fontWeight:700}}>
+                              Disconnect
+                            </button>
+                          </div>
+                        )}
+                        {lastDriveUploadAt && <div style={{fontSize:10,color:'#10b981',marginTop:6}}>Last complete Drive upload: {new Date(lastDriveUploadAt).toLocaleString('en-GB')}</div>}
+                        {driveOperation && <div style={{fontSize:10,fontWeight:700,color:/failed|denied|expired/i.test(driveOperation)?'#ef4444':'#3b82f6',marginTop:6,wordBreak:'break-word'}}>{driveOperation}</div>}
                       </div>
                       <div style={{marginTop:10,padding:10,borderRadius:10,border:`1px solid ${pw.border}`,background:theme.darkMode?'#0f172a':'#f8fafc'}}>
                         <div style={{fontSize:12,fontWeight:800,color:theme.darkMode?'#e2e8f0':pw.bodyText}}>Backup location</div>
