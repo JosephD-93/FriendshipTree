@@ -21,7 +21,7 @@
     "@capacitor/preferences": "^8.0.1",
     "@capgo/capacitor-calendar": "^8.0.7",
     "@capgo/capacitor-health": "^8.9.1",
-    "@capgo/capacitor-social-login": "^8.3.33",
+    "@capgo/capacitor-social-login": "^8.3.40",
     "@capgo/capacitor-updater": "^8.51.2",
     "lucide-react": "^0.383.0",
     "react": "^18.3.1",
