@@ -9,13 +9,14 @@ import {
 import { detectImageMimeFromBase64 } from './utils/image';
 import { getLocalDateStr, parseBirthdayDateGlobal } from './utils/date';
 import { saveData, loadData, saveRaw } from './services/persistence';
-import { SocialLogin } from '@capgo/capacitor-social-login';
+import { registerPlugin } from '@capacitor/core';
 
 
-const APP_VERSION = '4.3.15';
-const BUILD_ID = '2026-08-11-google-drive-auth-diagnostics';
+const APP_VERSION = '4.3.17';
+const BUILD_ID = '2026-08-11-google-drive-direct-authorization';
 const GOOGLE_WEB_CLIENT_ID = '54802084194-qiej4s3ahd0eojf26rnjtsoius482fio.apps.googleusercontent.com';
 const GOOGLE_DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+const GoogleDriveAuthorization = registerPlugin('GoogleDriveAuthorization');
 
 const MAP_VIEW_FAMILIES = [
   { key:'map', emoji:'🗺️', name:'Map', desc:'You in the centre', variants:[{key:'simple',name:'Standard'},{key:'full',name:'Fancy'}] },
@@ -23,7 +24,7 @@ const MAP_VIEW_FAMILIES = [
   { key:'stack', emoji:'📚', name:'Stack', desc:'Groups arranged in stacked sections', variants:[{key:'feed',name:'Standard'},{key:'feedDetailed',name:'Fancy'}] },
 ];
 const BUILD_DATE = '11 August 2026';
-const WHATS_NEW = 'Google Drive connection errors now preserve native diagnostic codes and use the latest Android sign-in fixes.';
+const WHATS_NEW = 'Google Drive now requests Drive permission directly, without the failing identity sign-in step.';
 
 // ─── Calendar Integration ─────────────────────────────────────────────────
 // Uses the Capgo calendar plugin (Capacitor) to read/write the phone's
@@ -7356,20 +7357,11 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
   const connectGoogleDrive = async () => {
     setDriveOperation('Connecting to Google…');
     try {
-      await SocialLogin.initialize({ google:{ webClientId:GOOGLE_WEB_CLIENT_ID, mode:'online' } });
-      const login = await SocialLogin.login({
-        provider:'google',
-        options:{
-          scopes:['email','profile',GOOGLE_DRIVE_SCOPE],
-          filterByAuthorizedAccounts:false,
-          style:'standard',
-        },
-      });
-      const result = login?.result;
-      const token = result?.accessToken?.token;
+      const result = await GoogleDriveAuthorization.authorize({ scope:GOOGLE_DRIVE_SCOPE });
+      const token = result?.accessToken;
       if (!token) throw new Error('Google connected but did not return Drive permission');
       driveAccessTokenRef.current = token;
-      setDriveAccount(result.profile || { name:'Google account', email:'' });
+      setDriveAccount({ name:'Google Drive', email:'' });
       setDriveOperation('Connected — ready to upload a dated snapshot');
       showToast('☁️ Google Drive connected');
       return true;
@@ -7387,7 +7379,6 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
   };
 
   const disconnectGoogleDrive = async () => {
-    try { await SocialLogin.logout({ provider:'google' }); } catch(e) {}
     driveAccessTokenRef.current = null;
     setDriveAccount(null);
     setDriveOperation('Disconnected');
