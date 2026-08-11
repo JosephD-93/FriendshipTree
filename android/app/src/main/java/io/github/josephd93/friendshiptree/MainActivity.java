@@ -19,6 +19,7 @@ public class MainActivity extends BridgeActivity implements ModifiedMainActivity
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(GoogleAuthDiagnosticsPlugin.class);
+        registerPlugin(GoogleDriveAuthorizationPlugin.class);
         super.onCreate(savedInstanceState);
         if (!googleDiagnosticShown) {
             googleDiagnosticShown = true;
@@ -46,6 +47,15 @@ public class MainActivity extends BridgeActivity implements ModifiedMainActivity
     @Override
     public void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+
+        if (requestCode == GoogleDriveAuthorizationPlugin.REQUEST_AUTHORIZE_DRIVE) {
+            PluginHandle authorizationHandle = getBridge().getPlugin("GoogleDriveAuthorization");
+            if (authorizationHandle != null && authorizationHandle.getInstance() instanceof GoogleDriveAuthorizationPlugin) {
+                ((GoogleDriveAuthorizationPlugin) authorizationHandle.getInstance())
+                    .handleAuthorizationResult(resultCode, data);
+            }
+            return;
+        }
 
         if (requestCode >= GoogleProvider.REQUEST_AUTHORIZE_GOOGLE_MIN && requestCode < GoogleProvider.REQUEST_AUTHORIZE_GOOGLE_MAX) {
             PluginHandle pluginHandle = getBridge().getPlugin("SocialLogin");
