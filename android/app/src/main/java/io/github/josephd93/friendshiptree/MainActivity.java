@@ -6,11 +6,32 @@ import ee.forgr.capacitor.social.login.ModifiedMainActivityForSocialLoginPlugin;
 import com.getcapacitor.PluginHandle;
 import com.getcapacitor.Plugin;
 import android.content.Intent;
+import android.os.Bundle;
 import android.util.Log;
+import androidx.appcompat.app.AlertDialog;
 import com.getcapacitor.BridgeActivity;
+import com.getcapacitor.JSObject;
 
 // ModifiedMainActivityForSocialLoginPlugin is VERY VERY important !!!!!!
 public class MainActivity extends BridgeActivity implements ModifiedMainActivityForSocialLoginPlugin {
+    private static boolean googleDiagnosticShown = false;
+
+    @Override
+    public void onCreate(Bundle savedInstanceState) {
+        registerPlugin(GoogleAuthDiagnosticsPlugin.class);
+        super.onCreate(savedInstanceState);
+        if (!googleDiagnosticShown) {
+            googleDiagnosticShown = true;
+            JSObject config = GoogleAuthDiagnosticsPlugin.readRuntimeConfig(this);
+            new AlertDialog.Builder(this)
+                .setTitle("Google sign-in configuration")
+                .setMessage("Package: " + config.getString("packageName")
+                    + "\n\nSigning SHA-1: " + config.getString("signingSha1")
+                    + "\n\nWeb client ID: " + config.getString("webClientId"))
+                .setPositiveButton("OK", null)
+                .show();
+        }
+    }
 
     @Override
     public void onPause() {
