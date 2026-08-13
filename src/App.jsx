@@ -12,8 +12,8 @@ import { saveData, loadData, saveRaw } from './services/persistence';
 import { registerPlugin } from '@capacitor/core';
 
 
-const APP_VERSION = '4.3.17';
-const BUILD_ID = '2026-08-11-google-drive-direct-authorization';
+const APP_VERSION = '4.3.18';
+const BUILD_ID = '2026-08-12-google-drive-result-diagnostics';
 const GOOGLE_WEB_CLIENT_ID = '54802084194-qiej4s3ahd0eojf26rnjtsoius482fio.apps.googleusercontent.com';
 const GOOGLE_DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 const GoogleDriveAuthorization = registerPlugin('GoogleDriveAuthorization');
@@ -23,8 +23,8 @@ const MAP_VIEW_FAMILIES = [
   { key:'branch', emoji:'🌿', name:'Branch', desc:'You at the side; connections branch right', variants:[{key:'branch',name:'Standard'},{key:'branchDetailed',name:'Fancy · Coming next',disabled:true}] },
   { key:'stack', emoji:'📚', name:'Stack', desc:'Groups arranged in stacked sections', variants:[{key:'feed',name:'Standard'},{key:'feedDetailed',name:'Fancy'}] },
 ];
-const BUILD_DATE = '11 August 2026';
-const WHATS_NEW = 'Google Drive now requests Drive permission directly, without the failing identity sign-in step.';
+const BUILD_DATE = '12 August 2026';
+const WHATS_NEW = 'Google Drive now reports the native authorization status returned after account selection.';
 
 // ─── Calendar Integration ─────────────────────────────────────────────────
 // Uses the Capgo calendar plugin (Capacitor) to read/write the phone's

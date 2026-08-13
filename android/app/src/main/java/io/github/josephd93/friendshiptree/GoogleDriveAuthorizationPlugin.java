@@ -64,8 +64,12 @@ public class GoogleDriveAuthorizationPlugin extends Plugin {
         PluginCall call = pendingCall;
         pendingCall = null;
         if (call == null) return;
-        if (resultCode != Activity.RESULT_OK || data == null) {
-            call.reject("Google Drive permission was not granted", "AUTH_CANCELLED");
+        if (data == null) {
+            call.reject(
+                "Google Drive permission screen returned no diagnostic result (activity result "
+                    + resultCode + ")",
+                "AUTH_CANCELLED"
+            );
             return;
         }
         try {
@@ -73,7 +77,12 @@ public class GoogleDriveAuthorizationPlugin extends Plugin {
                 .getAuthorizationResultFromIntent(data);
             resolve(call, result);
         } catch (ApiException error) {
-            reject(call, "Google Drive permission failed", error);
+            reject(
+                call,
+                "Google Drive permission failed after account selection (activity result "
+                    + resultCode + ")",
+                error
+            );
         }
     }
 
