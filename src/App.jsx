@@ -12,8 +12,8 @@ import { saveData, loadData, saveRaw } from './services/persistence';
 import { registerPlugin } from '@capacitor/core';
 
 
-const APP_VERSION = '4.3.19';
-const BUILD_ID = '2026-08-13-current-photo-snapshots';
+const APP_VERSION = '4.3.20';
+const BUILD_ID = '2026-08-13-selective-drive-backups';
 const GOOGLE_WEB_CLIENT_ID = '54802084194-qiej4s3ahd0eojf26rnjtsoius482fio.apps.googleusercontent.com';
 const GOOGLE_DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 const GoogleDriveAuthorization = registerPlugin('GoogleDriveAuthorization');
@@ -24,7 +24,7 @@ const MAP_VIEW_FAMILIES = [
   { key:'stack', emoji:'📚', name:'Stack', desc:'Groups arranged in stacked sections', variants:[{key:'feed',name:'Standard'},{key:'feedDetailed',name:'Fancy'}] },
 ];
 const BUILD_DATE = '13 August 2026';
-const WHATS_NEW = 'Drive snapshots now include only photos assigned to people who currently exist, and the temporary Google configuration popup is removed.';
+const WHATS_NEW = 'Choose backup categories and specific people before a Google Drive upload, with visible item counts and clearer failure progress.';
 
 // ─── Calendar Integration ─────────────────────────────────────────────────
 // Uses the Capgo calendar plugin (Capacitor) to read/write the phone's
@@ -2334,6 +2334,7 @@ function AppInner() {
   const autoBackupRunningRef = useRef(false);
   const [driveAccount, setDriveAccount] = useState(null); // {name,email,imageUrl}; access token deliberately remains memory-only
   const [driveOperation, setDriveOperation] = useState('');
+  const [driveBackupSelector, setDriveBackupSelector] = useState(null);
   const [lastDriveUploadAt, setLastDriveUploadAt] = useState(() => localStorage.getItem('ft_drive_last_upload_at') || '');
   const driveAccessTokenRef = useRef(null);
   const driveUploadRunningRef = useRef(false);
@@ -7384,15 +7385,21 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
     setDriveOperation('Disconnected');
   };
 
-  const collectDriveSnapshotIndex = async () => {
+  const collectDriveSnapshotIndex = async (selection = null) => {
+    const includeAppData = selection?.appData !== false;
+    const includeProfiles = selection?.profilePhotos !== false;
+    const includeGallery = selection?.galleryPhotos !== false;
+    const selectedPersonIds = selection?.personIds ? new Set(selection.personIds.map(String)) : null;
     const localStorageData = {};
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key && key.startsWith('ft_')) localStorageData[key] = localStorage.getItem(key);
+    if (includeAppData) {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('ft_')) localStorageData[key] = localStorage.getItem(key);
+      }
+      localStorageData.ft_nodes = JSON.stringify(nodesRef.current);
+      localStorageData.ft_links = JSON.stringify(linksRef.current);
+      localStorageData.ft_dimensions = JSON.stringify(dimensions);
     }
-    localStorageData.ft_nodes = JSON.stringify(nodesRef.current);
-    localStorageData.ft_links = JSON.stringify(linksRef.current);
-    localStorageData.ft_dimensions = JSON.stringify(dimensions);
     const db = idbRef.current || (idbRef.current = await openPhotoDB());
     const recordsFor = storeName => new Promise((resolve,reject) => {
       const tx = db.transaction(storeName,'readonly');
@@ -7401,63 +7408,56 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
       request.onerror = () => reject(request.error);
     });
     const [storedProfiles, storedGallery] = await Promise.all([recordsFor('photos'), recordsFor('gallery')]);
-
-    // A person may have several durable representations of one picture:
-    // current crop, original and old carousel slots. Select keys from the
-    // current node state so a snapshot does not preserve obsolete records.
     const currentPeople = nodesRef.current.filter(node =>
-      node?.id && (
-        node.id === 'me'
-        || node.type === 'friend'
-        || (!node.type && (node.img || (Array.isArray(node.photos) && node.photos.length)))
-      )
+      node?.id && (node.id === 'me' || node.type === 'friend' || (!node.type && (node.img || (Array.isArray(node.photos) && node.photos.length))))
     );
-    const currentPersonIds = new Set(currentPeople.map(node => String(node.id)));
-    const availableProfileKeys = new Set(
-      storedProfiles.filter(record => record?.dataUrl).map(record => String(record.nodeId))
-    );
-    const wantedProfileKeys = new Set();
-    currentPeople.forEach(node => {
-      let matchedCarouselPhoto = false;
+    const availableProfiles = new Set(storedProfiles.filter(record => record?.dataUrl).map(record => String(record.nodeId)));
+    const personOptions = currentPeople.map(node => {
+      const profileKeys = [];
       if (Array.isArray(node.photos)) {
         node.photos.forEach((photo, index) => {
           if (!photo?.cropped && !photo?.orig) return;
-          const key = `${node.id}_photo_${index}`;
-          if (availableProfileKeys.has(key)) {
-            wantedProfileKeys.add(key);
-            matchedCarouselPhoto = true;
-          }
+          const key = String(node.id) + '_photo_' + index;
+          if (availableProfiles.has(key)) profileKeys.push(key);
         });
       }
-      // Older people may have only the single current-profile record.
-      if (!matchedCarouselPhoto && node.img && availableProfileKeys.has(String(node.id))) {
-        wantedProfileKeys.add(String(node.id));
-      }
-    });
-
-    const photoKeys = storedProfiles
-      .filter(record => record?.dataUrl && wantedProfileKeys.has(String(record.nodeId)))
-      .map(record => record.nodeId);
-    const galleryKeys = storedGallery
-      .filter(record => record?.dataUrl && currentPersonIds.has(String(record.nodeId)))
-      .map(record => record.key);
-    const excludedStoredRecords = (storedProfiles.length - photoKeys.length)
-      + (storedGallery.length - galleryKeys.length);
-
+      if (!profileKeys.length && node.img && availableProfiles.has(String(node.id))) profileKeys.push(String(node.id));
+      const galleryKeys = storedGallery.filter(record => record?.dataUrl && String(record.nodeId) === String(node.id)).map(record => record.key);
+      return { id:String(node.id), label:node.id === 'me' ? 'Me' : (node.label || 'Unnamed person'), profileKeys, galleryKeys };
+    }).sort((a,b) => a.label.localeCompare(b.label));
+    const allowedPeople = selectedPersonIds || new Set(personOptions.map(person => person.id));
+    const photoKeys = includeProfiles ? personOptions.filter(person => allowedPeople.has(person.id)).flatMap(person => person.profileKeys) : [];
+    const galleryKeys = includeGallery ? personOptions.filter(person => allowedPeople.has(person.id)).flatMap(person => person.galleryKeys) : [];
+    const excludedStoredRecords = (storedProfiles.length - photoKeys.length) + (storedGallery.length - galleryKeys.length);
+    const selectedPeople = personOptions.filter(person => allowedPeople.has(person.id));
     return {
-      db, photoKeys, galleryKeys,
+      db, photoKeys, galleryKeys, personOptions,
       manifest:{
         format:'FriendshipTreeDriveSnapshot', version:1, backupFormatVersion:5,
-        appVersion:APP_VERSION, exportedAt:new Date().toISOString(),
-        localStorageData, nodes:nodesRef.current, links:linksRef.current, dimensions,
+        appVersion:APP_VERSION, exportedAt:new Date().toISOString(), localStorageData,
+        nodes:includeAppData ? nodesRef.current : [], links:includeAppData ? linksRef.current : [], dimensions:includeAppData ? dimensions : {},
         profilePhotoKeys:photoKeys, galleryPhotoKeys:galleryKeys,
-        counts:{
-          profilePhotos:photoKeys.length,
-          galleryPhotos:galleryKeys.length,
-          excludedStoredRecords,
+        selection:{
+          appData:includeAppData, profilePhotos:includeProfiles, galleryPhotos:includeGallery,
+          personIds:selectedPeople.map(person => person.id),
+          people:selectedPeople.map(person => ({ id:person.id, label:person.label, profilePhotos:includeProfiles ? person.profileKeys.length : 0, galleryPhotos:includeGallery ? person.galleryKeys.length : 0 })),
         },
+        counts:{ profilePhotos:photoKeys.length, galleryPhotos:galleryKeys.length, excludedStoredRecords },
       },
     };
+  };
+
+  const openDriveBackupSelector = async () => {
+    try {
+      setDriveOperation('Counting available backup items…');
+      if (pendingPhotoWrites.current.size) await Promise.allSettled([...pendingPhotoWrites.current]);
+      const preview = await collectDriveSnapshotIndex();
+      const personIds = preview.personOptions.filter(person => person.profileKeys.length || person.galleryKeys.length).map(person => person.id);
+      setDriveBackupSelector({ appData:true, profilePhotos:true, galleryPhotos:false, personIds, people:preview.personOptions });
+      setDriveOperation('Choose what to upload');
+    } catch(err) {
+      setDriveOperation('Could not prepare selector: ' + (err?.message || String(err)));
+    }
   };
 
   const readDriveSnapshotRecord = (db, storeName, key) => new Promise((resolve,reject) => {
@@ -7467,14 +7467,16 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
     request.onerror = () => reject(request.error);
   });
 
-  const uploadDriveSnapshot = async () => {
+  const uploadDriveSnapshot = async (selection) => {
     if (driveUploadRunningRef.current) return;
     if (!driveAccessTokenRef.current) { await connectGoogleDrive(); return; }
     driveUploadRunningRef.current = true;
+    let completed = 0;
+    let totalAssets = 0;
     try {
       setDriveOperation('Preparing Drive snapshot…');
       if (pendingPhotoWrites.current.size) await Promise.allSettled([...pendingPhotoWrites.current]);
-      const snapshot = await collectDriveSnapshotIndex();
+      const snapshot = await collectDriveSnapshotIndex(selection);
       const root = await driveFindOrCreateRoot();
       const stamp = new Date().toISOString().replace(/[:.]/g, '-');
       const snapshotFolder = await driveCreateFolder(`snapshot-${stamp}-v${APP_VERSION}`, root.id);
@@ -7483,7 +7485,7 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
         ...snapshot.photoKeys.map(key => ({ store:'photos', key })),
         ...snapshot.galleryKeys.map(key => ({ store:'gallery', key })),
       ];
-      let completed = 0;
+      totalAssets = assets.length;
       for (const asset of assets) {
         const record = await readDriveSnapshotRecord(snapshot.db, asset.store, asset.key);
         if (!record) throw new Error(`A photo changed during upload (${asset.key}) — retry to capture a consistent snapshot`);
@@ -7508,8 +7510,9 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
     } catch(err) {
       console.error('Drive snapshot failed:', err);
       const message = err?.message || String(err);
-      setDriveOperation(`Upload failed safely: ${message}`);
-      showToast(`❌ Drive upload stopped: ${message}`);
+      const progress = totalAssets ? ` after ${completed}/${totalAssets} photo items` : '';
+      setDriveOperation(`Upload failed safely${progress}: ${message}`);
+      showToast(`❌ Drive upload stopped${progress}: ${message}`);
     } finally {
       driveUploadRunningRef.current = false;
     }
@@ -10060,9 +10063,9 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                           </button>
                         ) : (
                           <div style={{display:'flex',gap:7,marginTop:8}}>
-                            <button onClick={uploadDriveSnapshot} disabled={driveUploadRunningRef.current}
+                            <button onClick={openDriveBackupSelector} disabled={driveUploadRunningRef.current}
                               style={{flex:1,padding:'8px 0',borderRadius:9,background:'#10b981',color:'white',border:'none',fontSize:12,fontWeight:800,opacity:driveUploadRunningRef.current?0.6:1}}>
-                              Upload this device
+                              Choose & upload
                             </button>
                             <button onClick={disconnectGoogleDrive} disabled={driveUploadRunningRef.current}
                               style={{padding:'8px 10px',borderRadius:9,background:theme.darkMode?'#334155':'#e2e8f0',color:theme.darkMode?'#e2e8f0':'#334155',border:'none',fontSize:11,fontWeight:700}}>
@@ -24528,6 +24531,66 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           </div>
         </>
       )}
+
+      {driveBackupSelector && (() => {
+        const selector = driveBackupSelector;
+        const selectedIds = new Set(selector.personIds);
+        const visiblePeople = selector.people.filter(person => (selector.profilePhotos ? person.profileKeys.length : 0) + (selector.galleryPhotos ? person.galleryKeys.length : 0) > 0);
+        const selectedProfileCount = visiblePeople.filter(person => selectedIds.has(person.id)).reduce((sum, person) => sum + (selector.profilePhotos ? person.profileKeys.length : 0), 0);
+        const selectedGalleryCount = visiblePeople.filter(person => selectedIds.has(person.id)).reduce((sum, person) => sum + (selector.galleryPhotos ? person.galleryKeys.length : 0), 0);
+        const canUpload = selector.appData || selectedProfileCount || selectedGalleryCount;
+        const togglePerson = id => setDriveBackupSelector(current => ({ ...current, personIds:current.personIds.includes(id) ? current.personIds.filter(value => value !== id) : [...current.personIds,id] }));
+        return (
+          <div style={{position:'fixed',inset:0,zIndex:720,background:'rgba(2,6,23,0.82)',display:'flex',alignItems:'center',justifyContent:'center',padding:16}} onClick={event=>{if(event.target===event.currentTarget)setDriveBackupSelector(null);}}>
+            <div style={{width:'min(94vw,480px)',maxHeight:'88vh',overflowY:'auto',borderRadius:18,padding:16,background:theme.darkMode?'#0f172a':'white',color:theme.darkMode?'#e2e8f0':'#1e293b',boxShadow:'0 25px 70px rgba(0,0,0,0.55)'}}>
+              <div style={{display:'flex',justifyContent:'space-between',gap:12,alignItems:'center'}}>
+                <div><div style={{fontSize:18,fontWeight:900}}>Choose Drive backup</div><div style={{fontSize:11,color:'#94a3b8',marginTop:3}}>Nothing uploads until you confirm.</div></div>
+                <button onClick={()=>setDriveBackupSelector(null)} style={{border:'none',background:'transparent',fontSize:24,color:'inherit'}}>×</button>
+              </div>
+              <div style={{marginTop:14,fontSize:12,fontWeight:900}}>1. Categories</div>
+              {[
+                ['appData','App data','People, relationships, trackers, calendar and settings'],
+                ['profilePhotos','Profile photos','Current profile carousel photos'],
+                ['galleryPhotos','Gallery photos','Gallery records for current people'],
+              ].map(([key,label,description])=><label key={key} style={{display:'flex',gap:10,alignItems:'flex-start',padding:'10px 4px',borderBottom:'1px solid #334155'}}>
+                <input type="checkbox" checked={!!selector[key]} onChange={event=>setDriveBackupSelector(current=>({...current,[key]:event.target.checked}))} style={{marginTop:3,width:18,height:18}}/>
+                <span><span style={{fontSize:13,fontWeight:800}}>{label}</span><span style={{display:'block',fontSize:10,color:'#94a3b8',marginTop:2}}>{description}</span></span>
+              </label>)}
+              {(selector.profilePhotos || selector.galleryPhotos) && <>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:15,gap:8}}>
+                  <div style={{fontSize:12,fontWeight:900}}>2. People</div>
+                  <div style={{display:'flex',gap:6}}>
+                    <button onClick={()=>setDriveBackupSelector(current=>({...current,personIds:visiblePeople.map(person=>person.id)}))} style={{padding:'5px 8px',borderRadius:7,border:'none',background:'#10b981',color:'white',fontSize:10,fontWeight:800}}>Select all</button>
+                    <button onClick={()=>setDriveBackupSelector(current=>({...current,personIds:[]}))} style={{padding:'5px 8px',borderRadius:7,border:'none',background:'#64748b',color:'white',fontSize:10,fontWeight:800}}>Clear</button>
+                  </div>
+                </div>
+                <div style={{marginTop:7,border:'1px solid #334155',borderRadius:10,maxHeight:250,overflowY:'auto'}}>
+                  {visiblePeople.length ? visiblePeople.map(person => {
+                    const profileCount = selector.profilePhotos ? person.profileKeys.length : 0;
+                    const galleryCount = selector.galleryPhotos ? person.galleryKeys.length : 0;
+                    return <label key={person.id} style={{display:'flex',alignItems:'center',gap:9,padding:'9px 10px',borderBottom:'1px solid #334155'}}>
+                      <input type="checkbox" checked={selectedIds.has(person.id)} onChange={()=>togglePerson(person.id)} style={{width:17,height:17}}/>
+                      <span style={{flex:1,fontSize:12,fontWeight:750}}>{person.label}</span>
+                      <span style={{fontSize:10,color:'#94a3b8'}}>{profileCount ? profileCount + ' profile' : ''}{profileCount&&galleryCount?' · ':''}{galleryCount ? galleryCount + ' gallery' : ''}</span>
+                    </label>;
+                  }) : <div style={{padding:12,fontSize:11,color:'#64748b'}}>No current photos found for these categories.</div>}
+                </div>
+              </>}
+              <div style={{marginTop:14,padding:10,borderRadius:10,background:theme.darkMode?'#111827':'#f1f5f9',fontSize:11,lineHeight:1.5}}>
+                <strong>Selected:</strong> {selector.appData?' App data':''}{selector.appData&&(selectedProfileCount||selectedGalleryCount)?' · ':''}{selectedProfileCount} profile photo{selectedProfileCount===1?'':'s'}{selectedGalleryCount ? ' · ' + selectedGalleryCount + ' gallery photo' + (selectedGalleryCount===1?'':'s') : ''}
+              </div>
+              <div style={{display:'flex',gap:8,marginTop:14}}>
+                <button onClick={()=>setDriveBackupSelector(null)} style={{flex:1,padding:10,borderRadius:9,border:'none',background:'#64748b',color:'white',fontWeight:800}}>Cancel</button>
+                <button disabled={!canUpload} onClick={()=>{
+                  const selection={appData:selector.appData,profilePhotos:selector.profilePhotos,galleryPhotos:selector.galleryPhotos,personIds:selector.personIds};
+                  setDriveBackupSelector(null);
+                  uploadDriveSnapshot(selection);
+                }} style={{flex:2,padding:10,borderRadius:9,border:'none',background:'#10b981',color:'white',fontWeight:900,opacity:canUpload?1:0.45}}>Upload selection</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Ghost circle following the finger while dragging the bottom-bar Add button out */}
       {bottomAddDrag && (
