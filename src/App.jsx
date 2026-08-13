@@ -12,8 +12,8 @@ import { saveData, loadData, saveRaw } from './services/persistence';
 import { registerPlugin } from '@capacitor/core';
 
 
-const APP_VERSION = '4.3.18';
-const BUILD_ID = '2026-08-12-google-drive-result-diagnostics';
+const APP_VERSION = '4.3.19';
+const BUILD_ID = '2026-08-13-current-photo-snapshots';
 const GOOGLE_WEB_CLIENT_ID = '54802084194-qiej4s3ahd0eojf26rnjtsoius482fio.apps.googleusercontent.com';
 const GOOGLE_DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 const GoogleDriveAuthorization = registerPlugin('GoogleDriveAuthorization');
@@ -23,8 +23,8 @@ const MAP_VIEW_FAMILIES = [
   { key:'branch', emoji:'🌿', name:'Branch', desc:'You at the side; connections branch right', variants:[{key:'branch',name:'Standard'},{key:'branchDetailed',name:'Fancy · Coming next',disabled:true}] },
   { key:'stack', emoji:'📚', name:'Stack', desc:'Groups arranged in stacked sections', variants:[{key:'feed',name:'Standard'},{key:'feedDetailed',name:'Fancy'}] },
 ];
-const BUILD_DATE = '12 August 2026';
-const WHATS_NEW = 'Google Drive now reports the native authorization status returned after account selection.';
+const BUILD_DATE = '13 August 2026';
+const WHATS_NEW = 'Drive snapshots now include only photos assigned to people who currently exist, and the temporary Google configuration popup is removed.';
 
 // ─── Calendar Integration ─────────────────────────────────────────────────
 // Uses the Capgo calendar plugin (Capacitor) to read/write the phone's
@@ -7394,13 +7394,56 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
     localStorageData.ft_links = JSON.stringify(linksRef.current);
     localStorageData.ft_dimensions = JSON.stringify(dimensions);
     const db = idbRef.current || (idbRef.current = await openPhotoDB());
-    const keysFor = storeName => new Promise((resolve,reject) => {
+    const recordsFor = storeName => new Promise((resolve,reject) => {
       const tx = db.transaction(storeName,'readonly');
-      const request = tx.objectStore(storeName).getAllKeys();
+      const request = tx.objectStore(storeName).getAll();
       request.onsuccess = () => resolve(request.result || []);
       request.onerror = () => reject(request.error);
     });
-    const [photoKeys, galleryKeys] = await Promise.all([keysFor('photos'), keysFor('gallery')]);
+    const [storedProfiles, storedGallery] = await Promise.all([recordsFor('photos'), recordsFor('gallery')]);
+
+    // A person may have several durable representations of one picture:
+    // current crop, original and old carousel slots. Select keys from the
+    // current node state so a snapshot does not preserve obsolete records.
+    const currentPeople = nodesRef.current.filter(node =>
+      node?.id && (
+        node.id === 'me'
+        || node.type === 'friend'
+        || (!node.type && (node.img || (Array.isArray(node.photos) && node.photos.length)))
+      )
+    );
+    const currentPersonIds = new Set(currentPeople.map(node => String(node.id)));
+    const availableProfileKeys = new Set(
+      storedProfiles.filter(record => record?.dataUrl).map(record => String(record.nodeId))
+    );
+    const wantedProfileKeys = new Set();
+    currentPeople.forEach(node => {
+      let matchedCarouselPhoto = false;
+      if (Array.isArray(node.photos)) {
+        node.photos.forEach((photo, index) => {
+          if (!photo?.cropped && !photo?.orig) return;
+          const key = `${node.id}_photo_${index}`;
+          if (availableProfileKeys.has(key)) {
+            wantedProfileKeys.add(key);
+            matchedCarouselPhoto = true;
+          }
+        });
+      }
+      // Older people may have only the single current-profile record.
+      if (!matchedCarouselPhoto && node.img && availableProfileKeys.has(String(node.id))) {
+        wantedProfileKeys.add(String(node.id));
+      }
+    });
+
+    const photoKeys = storedProfiles
+      .filter(record => record?.dataUrl && wantedProfileKeys.has(String(record.nodeId)))
+      .map(record => record.nodeId);
+    const galleryKeys = storedGallery
+      .filter(record => record?.dataUrl && currentPersonIds.has(String(record.nodeId)))
+      .map(record => record.key);
+    const excludedStoredRecords = (storedProfiles.length - photoKeys.length)
+      + (storedGallery.length - galleryKeys.length);
+
     return {
       db, photoKeys, galleryKeys,
       manifest:{
@@ -7408,7 +7451,11 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
         appVersion:APP_VERSION, exportedAt:new Date().toISOString(),
         localStorageData, nodes:nodesRef.current, links:linksRef.current, dimensions,
         profilePhotoKeys:photoKeys, galleryPhotoKeys:galleryKeys,
-        counts:{ profilePhotos:photoKeys.length, galleryPhotos:galleryKeys.length },
+        counts:{
+          profilePhotos:photoKeys.length,
+          galleryPhotos:galleryKeys.length,
+          excludedStoredRecords,
+        },
       },
     };
   };
