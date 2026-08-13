@@ -12,8 +12,8 @@ import { saveData, loadData, saveRaw } from './services/persistence';
 import { registerPlugin } from '@capacitor/core';
 
 
-const APP_VERSION = '4.3.20';
-const BUILD_ID = '2026-08-13-selective-drive-backups';
+const APP_VERSION = '4.3.21';
+const BUILD_ID = '2026-08-13-daily-activity-planner';
 const GOOGLE_WEB_CLIENT_ID = '54802084194-qiej4s3ahd0eojf26rnjtsoius482fio.apps.googleusercontent.com';
 const GOOGLE_DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 const GoogleDriveAuthorization = registerPlugin('GoogleDriveAuthorization');
@@ -24,7 +24,7 @@ const MAP_VIEW_FAMILIES = [
   { key:'stack', emoji:'📚', name:'Stack', desc:'Groups arranged in stacked sections', variants:[{key:'feed',name:'Standard'},{key:'feedDetailed',name:'Fancy'}] },
 ];
 const BUILD_DATE = '13 August 2026';
-const WHATS_NEW = 'Choose backup categories and specific people before a Google Drive upload, with visible item counts and clearer failure progress.';
+const WHATS_NEW = 'Plan and complete daily activities in Today, three-day, week and month views, with reversible person-linked interaction points.';
 
 // ─── Calendar Integration ─────────────────────────────────────────────────
 // Uses the Capgo calendar plugin (Capacitor) to read/write the phone's
@@ -2241,6 +2241,10 @@ function AppInner() {
   const [calYear, setCalYear] = useState(() => new Date().getFullYear());
   const [calEvents, setCalEvents] = useState(() => loadData('ft_cal_events', []));
   const [calRecurring, setCalRecurring] = useState(() => loadData('ft_cal_recurring', []));
+  const [activities, setActivities] = useState(() => loadData('ft_activities', []));
+  const [activityView, setActivityView] = useState('today');
+  const [activityAnchorDate, setActivityAnchorDate] = useState(() => getLocalDateStr(new Date()));
+  const [activityDraft, setActivityDraft] = useState(() => ({ title:'', date:getLocalDateStr(new Date()), personId:'', points:20 }));
   const [showAddCalEvent, setShowAddCalEvent] = useState(null); // date string for new event modal
   const [calEventSelectedPeople, setCalEventSelectedPeople] = useState([]); // node ids selected in event modal
 
@@ -5104,6 +5108,70 @@ function AppInner() {
     trip: 'Trip Away', gesture: 'Meaningful Gesture', general: 'Interaction',
   };
 
+  const persistActivities = next => {
+    setActivities(next);
+    saveData('ft_activities', next);
+  };
+
+  const addPlannedActivity = () => {
+    const title = activityDraft.title.trim();
+    if (!title) { showToast('Add an activity description first'); return; }
+    const points = Math.max(0, Math.min(200, Number(activityDraft.points) || 0));
+    const item = {
+      id:'activity_' + Date.now() + '_' + Math.random().toString(36).slice(2,6),
+      title,
+      date:activityDraft.date || getLocalDateStr(new Date()),
+      personId:activityDraft.personId || '',
+      points,
+      completed:false,
+      createdAt:new Date().toISOString(),
+    };
+    persistActivities([...activities, item]);
+    setActivityDraft(prev => ({...prev,title:'',personId:'',points:20}));
+    showToast('📋 Activity planned');
+  };
+
+  const togglePlannedActivity = activityId => {
+    const item = activities.find(activity => activity.id === activityId);
+    if (!item) return;
+    const completing = !item.completed;
+    const completedAt = completing ? new Date().toISOString() : null;
+    const next = activities.map(activity => activity.id === activityId ? {...activity,completed:completing,completedAt} : activity);
+    persistActivities(next);
+    if (item.personId && item.points > 0) {
+      const delta = completing ? item.points : -item.points;
+      setNodes(prev => prev.map(node => {
+        if (node.id !== item.personId) return node;
+        const logId = 'planned:' + item.id;
+        const withoutEntry = (node.interactionLog || []).filter(entry => entry.activityId !== logId);
+        const interactionLog = completing ? [...withoutEntry, {
+          activityId:logId,
+          label:item.title,
+          pts:item.points,
+          date:new Date(item.date + 'T12:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short'}),
+          ts:new Date(item.date + 'T12:00:00').getTime(),
+          type:'planned',
+        }].slice(-50) : withoutEntry;
+        const oldScore = node.interactionScore || 0;
+        const interactionScore = Math.max(0, Math.min(MAX_SCORE, oldScore + delta));
+        const scoreHistory = [...(node.scoreHistory || []), {score:interactionScore,ts:Date.now()}].slice(-48);
+        return {...node,prevScore:oldScore,interactionScore,interactionLog,scoreHistory};
+      }));
+      setDimensions(prev => {
+        const social = prev.social || {};
+        const weeklyDelta = Math.ceil(item.points / 10) * (completing ? 1 : -1);
+        return {...prev,social:{...social,weeklyScore:Math.max(0,(social.weeklyScore || 0) + weeklyDelta)}};
+      });
+    }
+    showToast(completing ? '✅ Completed and points logged' : '↩ Completion and points reversed');
+  };
+
+  const deletePlannedActivity = activityId => {
+    const item = activities.find(activity => activity.id === activityId);
+    if (!item) return;
+    if (item.completed) togglePlannedActivity(activityId);
+    persistActivities(activities.filter(activity => activity.id !== activityId));
+  };
 
   const logActivity = (points, type = 'general') => {
     if (!selectedNodeId) return;
@@ -15462,6 +15530,78 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           </div>
         )}
 
+        {viewMode === 'calendar' && calViewMode === 'activities' && (() => {
+          const dm = theme.darkMode;
+          const anchor = new Date(activityAnchorDate + 'T12:00:00');
+          const dayKey = date => getLocalDateStr(date);
+          const addDays = (date,count) => { const next=new Date(date); next.setDate(next.getDate()+count); return next; };
+          let visibleDates = [];
+          if (activityView === 'today') visibleDates = [dayKey(anchor)];
+          if (activityView === 'three') visibleDates = [-1,0,1].map(offset=>dayKey(addDays(anchor,offset)));
+          if (activityView === 'week') {
+            const monday = addDays(anchor,-((anchor.getDay()+6)%7));
+            visibleDates = Array.from({length:7},(_,index)=>dayKey(addDays(monday,index)));
+          }
+          if (activityView === 'month') {
+            const count = new Date(anchor.getFullYear(),anchor.getMonth()+1,0).getDate();
+            visibleDates = Array.from({length:count},(_,index)=>dayKey(new Date(anchor.getFullYear(),anchor.getMonth(),index+1)));
+          }
+          const people = nodes.filter(node => node.id !== 'me' && node.type !== 'hub' && node.type !== 'flower')
+            .sort((a,b)=>(a.label||'').localeCompare(b.label||''));
+          const formatDay = key => new Date(key+'T12:00:00').toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short'});
+          const shift = direction => {
+            const amount = activityView==='month' ? 30 : activityView==='week' ? 7 : activityView==='three' ? 3 : 1;
+            const next=addDays(anchor,direction*amount);
+            setActivityAnchorDate(dayKey(next));
+            setActivityDraft(prev=>({...prev,date:dayKey(next)}));
+          };
+          return <div style={{position:'absolute',inset:0,zIndex:55,overflowY:'auto',background:dm?'#07101f':'#f8fafc',padding:'12px 12px 90px'}}>
+            <div style={{maxWidth:900,margin:'0 auto'}}>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8}}>
+                <button onClick={()=>setCalViewMode('monthly')} style={{border:'none',background:'transparent',color:dm?'#94a3b8':'#64748b',fontWeight:800}}>← Calendar</button>
+                <div style={{fontSize:18,fontWeight:900,color:dm?'white':'#0f172a'}}>Daily activities</div>
+                <button onClick={()=>{const now=getLocalDateStr(new Date());setActivityAnchorDate(now);setActivityDraft(prev=>({...prev,date:now}));}} style={{border:'none',borderRadius:8,padding:'6px 9px',background:'#10b981',color:'white',fontWeight:800}}>Today</button>
+              </div>
+              <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:5,marginTop:12}}>
+                {[['today','Today'],['three','3 days'],['week','Week'],['month','Month']].map(([id,label])=><button key={id} onClick={()=>setActivityView(id)} style={{padding:'8px 3px',borderRadius:9,border:'none',background:activityView===id?'#10b981':(dm?'#1e293b':'#e2e8f0'),color:activityView===id?'white':(dm?'#cbd5e1':'#334155'),fontWeight:800,fontSize:11}}>{label}</button>)}
+              </div>
+              <div style={{display:'flex',justifyContent:'center',alignItems:'center',gap:10,marginTop:10}}>
+                <button onClick={()=>shift(-1)} style={{border:'none',background:'transparent',color:dm?'white':'#0f172a',fontSize:22}}>‹</button>
+                <strong style={{fontSize:13,color:dm?'#e2e8f0':'#334155'}}>{activityView==='month' ? anchor.toLocaleDateString('en-GB',{month:'long',year:'numeric'}) : formatDay(activityAnchorDate)}</strong>
+                <button onClick={()=>shift(1)} style={{border:'none',background:'transparent',color:dm?'white':'#0f172a',fontSize:22}}>›</button>
+              </div>
+              <div style={{marginTop:12,padding:12,borderRadius:13,background:dm?'#0f172a':'white',border:'1px solid #334155'}}>
+                <div style={{fontSize:12,fontWeight:900,color:dm?'white':'#0f172a'}}>Quick plan or log</div>
+                <input value={activityDraft.title} onChange={event=>setActivityDraft(prev=>({...prev,title:event.target.value}))} onKeyDown={event=>{if(event.key==='Enter')addPlannedActivity();}} placeholder="e.g. Dinner with Mum" style={{width:'100%',marginTop:8,padding:9,borderRadius:8,border:'1px solid #475569',background:dm?'#111827':'white',color:dm?'white':'#0f172a'}}/>
+                <div style={{display:'grid',gridTemplateColumns:'1.2fr 1.5fr .7fr',gap:6,marginTop:7}}>
+                  <input type="date" value={activityDraft.date} onChange={event=>setActivityDraft(prev=>({...prev,date:event.target.value}))} style={{minWidth:0,padding:7,borderRadius:8,border:'1px solid #475569',background:dm?'#111827':'white',color:dm?'white':'#0f172a'}}/>
+                  <select value={activityDraft.personId} onChange={event=>setActivityDraft(prev=>({...prev,personId:event.target.value}))} style={{minWidth:0,padding:7,borderRadius:8,border:'1px solid #475569',background:dm?'#111827':'white',color:dm?'white':'#0f172a'}}>
+                    <option value="">No person</option>{people.map(person=><option key={person.id} value={person.id}>{person.label||'Unnamed'}</option>)}
+                  </select>
+                  <input type="number" min="0" max="200" value={activityDraft.points} onChange={event=>setActivityDraft(prev=>({...prev,points:event.target.value}))} aria-label="Points" style={{minWidth:0,padding:7,borderRadius:8,border:'1px solid #475569',background:dm?'#111827':'white',color:dm?'white':'#0f172a'}}/>
+                </div>
+                <button onClick={addPlannedActivity} style={{width:'100%',marginTop:8,padding:9,borderRadius:9,border:'none',background:'#3b82f6',color:'white',fontWeight:900}}>Add activity</button>
+              </div>
+              <div style={{display:'grid',gridTemplateColumns:activityView==='month'?'repeat(2,minmax(0,1fr))':'1fr',gap:8,marginTop:10}}>
+                {visibleDates.map(date => {
+                  const items=activities.filter(activity=>activity.date===date).sort((a,b)=>Number(a.completed)-Number(b.completed));
+                  return <section key={date} style={{padding:10,borderRadius:12,background:dm?'#0f172a':'white',border:'1px solid #334155',minHeight:72}}>
+                    <div style={{fontSize:12,fontWeight:900,color:date===getLocalDateStr(new Date())?'#10b981':(dm?'#e2e8f0':'#334155')}}>{formatDay(date)}</div>
+                    {items.length ? items.map(item=>{
+                      const person=people.find(value=>value.id===item.personId);
+                      return <div key={item.id} style={{display:'flex',gap:8,alignItems:'center',marginTop:8,padding:8,borderRadius:9,background:dm?'#111827':'#f1f5f9',opacity:item.completed?0.65:1}}>
+                        <input type="checkbox" checked={!!item.completed} onChange={()=>togglePlannedActivity(item.id)} style={{width:19,height:19}}/>
+                        <div style={{flex:1,minWidth:0}}><div style={{fontSize:12,fontWeight:800,textDecoration:item.completed?'line-through':'none'}}>{item.title}</div><div style={{fontSize:9,color:'#94a3b8'}}>{person?person.label+' · ':''}{item.personId?item.points+' points':'No points logged'}</div></div>
+                        <button onClick={()=>deletePlannedActivity(item.id)} style={{border:'none',background:'transparent',color:'#ef4444',fontSize:16}}>×</button>
+                      </div>;
+                    }) : <div style={{fontSize:10,color:'#64748b',marginTop:7}}>Nothing planned</div>}
+                  </section>;
+                })}
+              </div>
+            </div>
+          </div>;
+        })()}
+
         {/* ── Monthly Calendar View ─────────────────────────────── */}
         {viewMode === 'calendar' && calViewMode === 'monthly' && (() => {
           const dm = theme.darkMode;
@@ -15641,6 +15781,14 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                     background:dm?'#1e293b':'#f1f5f9',
                     color:dm?'#94a3b8':'#64748b',fontSize:22,transition:'all 0.15s'}}>
                   ↻
+                </button>
+                <button onClick={()=>setCalViewMode('activities')}
+                  title="Daily activity planner"
+                  style={{height:40,padding:'0 11px',borderRadius:10,border:'none',cursor:'pointer',
+                    display:'flex',alignItems:'center',justifyContent:'center',gap:5,
+                    background:calViewMode==='activities'?'#10b981':(dm?'#1e293b':'#f1f5f9'),
+                    color:calViewMode==='activities'?'white':(dm?'#cbd5e1':'#475569'),fontSize:11,fontWeight:800}}>
+                  ✅ Activities
                 </button>
                 {/* 🎂 birthdays */}
                 <button onClick={()=>setCalViewMode('birthdays')}
