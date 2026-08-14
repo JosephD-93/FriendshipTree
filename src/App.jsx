@@ -12,8 +12,8 @@ import { saveData, loadData, saveRaw } from './services/persistence';
 import { registerPlugin } from '@capacitor/core';
 
 
-const APP_VERSION = '4.3.24';
-const BUILD_ID = '2026-08-14-radial-birthday-calendar';
+const APP_VERSION = '4.3.25';
+const BUILD_ID = '2026-08-14-month-photo-calendar';
 const GOOGLE_WEB_CLIENT_ID = '54802084194-qiej4s3ahd0eojf26rnjtsoius482fio.apps.googleusercontent.com';
 const GOOGLE_DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 const GoogleDriveAuthorization = registerPlugin('GoogleDriveAuthorization');
@@ -860,7 +860,7 @@ const KEYFRAMES_CSS = [
   '.ft-safe-top{top:var(--sat) !important;}',
   // In landscape the physical bottom edge is the app's right edge. Keep the
   // navigation there while its icons and labels remain upright.
-  '@media (orientation:landscape) and (max-height:600px){body{padding-bottom:0!important;padding-right:0!important;}.ft-app-shell{top:0!important;bottom:0!important;left:0!important;right:calc(72px + var(--sar))!important;width:auto!important;height:auto!important;}.ft-bottom-tabs{top:0!important;bottom:0!important;left:auto!important;right:0!important;width:calc(72px + var(--sar))!important;height:100dvh!important;flex-direction:column!important;padding-bottom:0!important;padding-right:var(--sar)!important;border-top:none!important;border-left:1px solid #334155!important;}.ft-bottom-tab{width:72px!important;min-height:0!important;flex:1 1 0!important;border-top:none!important;border-right:2px solid transparent!important;padding:4px!important;}.ft-bottom-tab-active{border-right-color:#10b981!important;}}',
+  '@media (orientation:landscape) and (max-height:600px){.ft-stacked-scroll{overflow-x:auto!important;overflow-y:hidden!important;white-space:nowrap;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch}.ft-stacked-scroll>.ft-stacked-leading-space{display:inline-block;width:64px;height:100%!important;vertical-align:top}.ft-stacked-scroll>[data-feed-section]{display:inline-block!important;vertical-align:top;white-space:normal;width:calc(100vw - 72px - env(safe-area-inset-right,0px));min-width:calc(100vw - 72px - env(safe-area-inset-right,0px));scroll-snap-align:start}body{padding-bottom:0!important;padding-right:0!important}.ft-app-shell{top:0!important;bottom:0!important;left:0!important;right:calc(72px + var(--sar))!important;width:auto!important;height:auto!important}.ft-bottom-tabs{top:0!important;bottom:0!important;left:auto!important;right:0!important;width:calc(72px + var(--sar))!important;height:100dvh!important;flex-direction:column!important;padding-bottom:0!important;padding-right:var(--sar)!important;border-top:none!important;border-left:1px solid #334155!important}.ft-bottom-tab{width:72px!important;min-height:0!important;flex:1 1 0!important;border-top:none!important;border-right:2px solid transparent!important;padding:4px!important}.ft-bottom-tab-active{border-right-color:#10b981!important}}',
   // Fixed full-screen overlays should still cover the whole screen
 ].join(' ');
 
@@ -2193,7 +2193,9 @@ function TaggedPhotosSection({ nodeId, nodes, links, openPhotoDB, setHubGalleryO
 
 
 
-function BirthdayYearWheel({ nodes, darkMode, year, onPerson }) {
+function BirthdayYearWheel({ nodes, darkMode, year, onPerson, galleryPhotos=[] }) {
+  const [selectedMonth, setSelectedMonth] = React.useState(null);
+  const [photoViewer, setPhotoViewer] = React.useState(null);
   const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
   const dayLetters = ['M','T','W','T','F','S','S'];
   const palette = [
@@ -2244,6 +2246,70 @@ function BirthdayYearWheel({ nodes, darkMode, year, onPerson }) {
       cells.push({month,day,week,column,angle,radius,people:byDate.get(month+'-'+day)||[]});
     }
   }
+  const datedPhotos = galleryPhotos.filter(item=>{
+    if(!item || !item.dataUrl || !item.date) return false;
+    const d=new Date(item.date);
+    return !Number.isNaN(d.getTime()) && d.getFullYear()===year;
+  });
+  const photosByDate=new Map();
+  datedPhotos.forEach(item=>{
+    const d=new Date(item.date),key=d.getMonth()+'-'+d.getDate();
+    if(!photosByDate.has(key))photosByDate.set(key,[]);
+    photosByDate.get(key).push(item);
+  });
+  const ageFor=(person)=>{
+    const parsed=parseBirthdayDateGlobal(person.birthday);
+    return parsed && parsed.year ? Math.max(0,year-parsed.year) : null;
+  };
+  if(selectedMonth!==null){
+    const col=palette[selectedMonth];
+    const first=(new Date(year,selectedMonth,1).getDay()+6)%7;
+    const days=new Date(year,selectedMonth+1,0).getDate();
+    const monthCells=Array.from({length:42},(_,i)=>{
+      const day=i-first+1;
+      return day>=1&&day<=days?day:null;
+    });
+    return <div style={{position:'absolute',inset:0,zIndex:photoViewer?250:58,paddingTop:'calc(env(safe-area-inset-top, 0px) + 104px)',paddingBottom:'calc(68px + env(safe-area-inset-bottom, 0px))',boxSizing:'border-box',overflow:'auto',background:darkMode?'linear-gradient(180deg,#0f172a,#07101f)':'linear-gradient(180deg,#f8fafc,#ecfdf5)'}}>
+      <div style={{width:'min(940px,calc(100% - 24px))',margin:'0 auto 24px',borderRadius:22,overflow:'hidden',background:darkMode?'#111c31':'white',border:'1px solid '+(darkMode?'#334155':'#d1fae5'),boxShadow:'0 16px 42px rgba(0,0,0,.2)'}}>
+        <div style={{padding:'14px 16px',display:'flex',alignItems:'center',gap:12,background:col.accent,color:col.text}}>
+          <button onClick={()=>setSelectedMonth(null)} style={{border:0,borderRadius:12,padding:'9px 12px',background:'rgba(255,255,255,.7)',color:col.text,fontWeight:900,cursor:'pointer'}}>← Year wheel</button>
+          <div style={{flex:1,textAlign:'center',fontWeight:900,fontSize:22}}>{monthNames[selectedMonth]} {year}</div>
+          <div style={{width:95}}/>
+        </div>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(7,minmax(0,1fr))',gap:2,padding:8}}>
+          {['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(day=><div key={day} style={{textAlign:'center',padding:'8px 2px',fontSize:11,fontWeight:900,color:darkMode?'#cbd5e1':col.text}}>{day}</div>)}
+          {monthCells.map((day,index)=>{
+            if(!day)return <div key={'empty-'+index} style={{minHeight:88,background:darkMode?'rgba(30,41,59,.3)':'rgba(248,250,252,.55)',borderRadius:8}}/>;
+            const people=byDate.get(selectedMonth+'-'+day)||[];
+            const photos=photosByDate.get(selectedMonth+'-'+day)||[];
+            return <div key={day} onClick={()=>photos.length&&setPhotoViewer({photos,index:0})} style={{position:'relative',minHeight:88,borderRadius:8,overflow:'hidden',cursor:photos.length?'pointer':'default',background:darkMode?'rgba(30,41,59,.78)':col.body,border:'1px solid '+(people.length?col.accent:(darkMode?'#263449':'#e2e8f0'))}}>
+              {photos.length>0&&<div style={{position:'absolute',inset:0,display:'grid',gridTemplateColumns:photos.length>1?'repeat(2,1fr)':'1fr',gridTemplateRows:photos.length>2?'repeat(2,1fr)':'1fr'}}>
+                {photos.slice(0,4).map((photo,photoIndex)=><div key={photo.key||photoIndex} style={{position:'relative',overflow:'hidden'}}><img src={photo.dataUrl} alt="" style={{width:'100%',height:'100%',objectFit:'cover',display:'block'}}/>{photoIndex===3&&photos.length>4&&<div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',background:'rgba(0,0,0,.55)',color:'white',fontWeight:900}}>+{photos.length-4}</div>}</div>)}
+              </div>}
+              {photos.length>0&&<div style={{position:'absolute',inset:0,background:'linear-gradient(180deg,rgba(0,0,0,.12),rgba(0,0,0,.46))'}}/>}
+              <div style={{position:'absolute',top:5,left:6,zIndex:2,width:24,height:24,borderRadius:99,display:'flex',alignItems:'center',justifyContent:'center',fontWeight:900,fontSize:12,background:photos.length?'rgba(0,0,0,.64)':'rgba(255,255,255,.72)',color:photos.length?'white':col.text}}>{day}</div>
+              <div style={{position:'absolute',left:5,right:5,bottom:5,zIndex:3,display:'flex',gap:3,alignItems:'flex-end',flexWrap:'wrap'}}>
+                {people.slice(0,5).map(person=>{const age=ageFor(person);return <button key={person.id} title={(person.label||'Unnamed')+(age!==null?' · '+age:'')} onClick={e=>{e.stopPropagation();onPerson(person.id);}} style={{position:'relative',width:34,height:34,borderRadius:'50%',padding:0,border:'2px solid '+col.accent,overflow:'visible',background:col.accent,cursor:'pointer'}}>
+                  {person.img?<img src={person.img} alt={person.label||''} style={{width:'100%',height:'100%',objectFit:'cover',borderRadius:'50%',display:'block'}}/>:<span style={{fontWeight:900,color:col.text}}>{(person.label||'?')[0]}</span>}
+                  {age!==null&&<span style={{position:'absolute',right:-5,top:-6,minWidth:17,height:17,padding:'0 3px',borderRadius:9,display:'flex',alignItems:'center',justifyContent:'center',background:'#0f172a',border:'1px solid white',color:'white',fontSize:8,fontWeight:900}}>{age}</span>}
+                </button>})}
+                {people.length>5&&<span style={{color:'white',fontSize:10,fontWeight:900,textShadow:'0 1px 3px #000'}}>+{people.length-5}</span>}
+              </div>
+            </div>;
+          })}
+        </div>
+        <div style={{padding:'0 14px 14px',fontSize:11,color:darkMode?'#94a3b8':'#64748b'}}>Tap a photo-filled date to browse every saved image from that day. Birthday faces remain selectable.</div>
+      </div>
+      {photoViewer&&<div onClick={()=>setPhotoViewer(null)} style={{position:'fixed',inset:0,zIndex:500,display:'flex',alignItems:'center',justifyContent:'center',background:'rgba(2,6,23,.96)',padding:20}}>
+        <button onClick={()=>setPhotoViewer(null)} style={{position:'absolute',top:'calc(env(safe-area-inset-top, 0px) + 12px)',right:16,width:44,height:44,borderRadius:'50%',border:0,background:'rgba(255,255,255,.16)',color:'white',fontSize:24}}>×</button>
+        {photoViewer.photos.length>1&&<button onClick={e=>{e.stopPropagation();setPhotoViewer(v=>({...v,index:(v.index-1+v.photos.length)%v.photos.length}));}} style={{position:'absolute',left:12,border:0,background:'rgba(255,255,255,.16)',color:'white',borderRadius:99,width:44,height:58,fontSize:28}}>‹</button>}
+        <img onClick={e=>e.stopPropagation()} src={photoViewer.photos[photoViewer.index].dataUrl} alt="" style={{maxWidth:'92%',maxHeight:'84%',objectFit:'contain',borderRadius:14}}/>
+        {photoViewer.photos.length>1&&<button onClick={e=>{e.stopPropagation();setPhotoViewer(v=>({...v,index:(v.index+1)%v.photos.length}));}} style={{position:'absolute',right:12,border:0,background:'rgba(255,255,255,.16)',color:'white',borderRadius:99,width:44,height:58,fontSize:28}}>›</button>}
+        <div style={{position:'absolute',bottom:'calc(env(safe-area-inset-bottom, 0px) + 14px)',color:'white',fontWeight:800}}>{photoViewer.index+1} / {photoViewer.photos.length}</div>
+      </div>}
+    </div>;
+  }
+
   return <div style={{position:'absolute',inset:0,zIndex:58,paddingTop:'calc(env(safe-area-inset-top, 0px) + 104px)',paddingBottom:'calc(68px + env(safe-area-inset-bottom, 0px))',boxSizing:'border-box',display:'flex',alignItems:'center',justifyContent:'center',overflow:'hidden',background:darkMode?'radial-gradient(circle at 50% 48%,#172554 0%,#0f172a 48%,#07101f 100%)':'radial-gradient(circle at 50% 48%,#ffffff 0%,#f0fdf4 58%,#dcfce7 100%)'}}>
     <svg viewBox="0 0 1000 1000" style={{display:'block',width:'min(100%, calc(100vh - 180px))',height:'auto',maxHeight:'100%',filter:darkMode?'drop-shadow(0 16px 36px rgba(0,0,0,.38))':'drop-shadow(0 14px 30px rgba(21,128,61,.16))'}}>
       <defs>
@@ -2252,7 +2318,7 @@ function BirthdayYearWheel({ nodes, darkMode, year, onPerson }) {
       <circle cx={C} cy={C} r="488" fill={darkMode?'rgba(15,23,42,.9)':'rgba(255,255,255,.96)'} stroke={darkMode?'#334155':'#bbf7d0'} strokeWidth="3"/>
       {monthNames.map((name,month)=>{
         const a1=-90+month*30+1,a2=-90+(month+1)*30-1,col=palette[month];
-        return <g key={name}>
+        return <g key={name} onClick={()=>setSelectedMonth(month)} style={{cursor:'pointer'}}>
           <path d={sector(258,452,a1,a2)} fill={col.body} opacity={darkMode ? .3 : .72} stroke={darkMode?'rgba(255,255,255,.08)':'rgba(255,255,255,.9)'} strokeWidth="2"/>
           <path d={sector(452,488,a1,a2)} fill={col.accent} opacity={darkMode ? .92 : 1}/>
           {dayLetters.map((letter,column)=>{
@@ -2260,7 +2326,7 @@ function BirthdayYearWheel({ nodes, darkMode, year, onPerson }) {
             return <text key={column} x={p.x} y={p.y} textAnchor="middle" dominantBaseline="middle" fontSize="9" fontWeight="900" fill={darkMode?'#cbd5e1':col.text} opacity=".78">{letter}</text>;
           })}
           {(()=>{
-            const mid=(a1+a2)/2,p=polar(470,mid),flip=mid>90&&mid<270;
+            const mid=(a1+a2)/2,p=polar(470,mid),normalised=((mid%360)+360)%360,flip=normalised>90&&normalised<270;
             return <text x={p.x} y={p.y} textAnchor="middle" dominantBaseline="middle" fontSize="15" fontWeight="900" letterSpacing=".8" fill={col.text} transform={`rotate(${mid+90+(flip?180:0)} ${p.x} ${p.y})`}>{name.toUpperCase()}</text>;
           })()}
         </g>;
@@ -2344,6 +2410,7 @@ function AppInner() {
     try { return JSON.parse(localStorage.getItem('ft_viewMode')) || 'canvas'; } catch(e) { return 'canvas'; }
   });
   const [calendarLayout, setCalendarLayout] = useState('circle');
+  const [calendarGalleryPhotos, setCalendarGalleryPhotos] = useState([]);
   const [calViewMode, setCalViewMode] = useState('monthly');
   const [calMonth, setCalMonth] = useState(() => new Date().getMonth());
   const [calYear, setCalYear] = useState(() => new Date().getFullYear());
@@ -2729,6 +2796,18 @@ function AppInner() {
     } catch(e) { console.warn('Tag update failed', e); }
   };
 
+
+  useEffect(() => {
+    let cancelled=false;
+    if(viewMode!=='calendar'||calViewMode!=='birthdays'||calendarLayout!=='circle') return () => { cancelled=true; };
+    openPhotoDB().then(db=>new Promise((resolve,reject)=>{
+      const tx=db.transaction('gallery','readonly');
+      const req=tx.objectStore('gallery').getAll();
+      req.onsuccess=()=>resolve(req.result||[]);
+      req.onerror=reject;
+    })).then(items=>{if(!cancelled)setCalendarGalleryPhotos(items);}).catch(()=>{if(!cancelled)setCalendarGalleryPhotos([]);});
+    return () => { cancelled=true; };
+  }, [viewMode,calViewMode,calendarLayout]);
 
   // Resize any source image (data URL) up or down to a standard square,
   // matching the quality standard used for manually-cropped photos elsewhere
@@ -15456,7 +15535,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           </div>
         )}
         {viewMode === 'calendar' && calViewMode === 'birthdays' && calendarLayout === 'circle' && (
-          <BirthdayYearWheel nodes={nodes} darkMode={theme.darkMode} year={calYear}
+          <BirthdayYearWheel nodes={nodes} darkMode={theme.darkMode} year={calYear} galleryPhotos={calendarGalleryPhotos}
             onPerson={id=>{setSelectedNodeId(id);setViewMode('canvas');}}/>
         )}
         {viewMode === 'calendar' && calViewMode === 'birthdays' && (
@@ -18260,7 +18339,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         // pushing the last couple of columns off-screen with no way to scroll
         // to them. stripW = (COLS-1)*hex*1.5 + hex*2, solved for hex given the
         // available width after the band.
-        const availW = window.innerWidth - BAND_W - 16; // small side margin
+        const landscapeNavReserve = window.innerWidth > window.innerHeight && window.innerHeight <= 600 ? 72 : 0;
+        const availW = window.innerWidth - BAND_W - landscapeNavReserve - 16; // small side margin
         const FEED_HEX = Math.max(28, Math.min(72, availW / ((COLS - 1) * 1.5 + 2)));
         // Health list cards get their own target width, independent of the
         // 4-column people grid -- sized so roughly 6 fit across the
@@ -18853,7 +18933,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         };
 
         return (
-          <div ref={feedScrollRef} style={{position:'absolute', top:0, left:0, right:0, bottom:56, zIndex:1,
+          <div ref={feedScrollRef} className="ft-stacked-scroll" style={{position:'absolute', top:0, left:0, right:0, bottom:56, zIndex:1,
             overflowY: (feedCarrying || feedSlashing) ? 'hidden' : 'auto',
             touchAction: (feedCarrying || feedSlashing || feedMacheteMode) ? 'none' : 'auto',
             cursor: feedMacheteMode ? 'crosshair' : 'auto',
@@ -18954,7 +19034,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 very top edge of the screen, where it's under the header overlays
                 or too high to reach with a thumb. Shifts all sections down
                 uniformly, so node and flower positions stay consistent. */}
-            <div style={{height: 76}} />
+            <div className="ft-stacked-leading-space" style={{height: 76}} />
             {sectionDefs.map(({dimKey, flowerId}) => {
               const dim = dimensions[dimKey];
               const flowerNode = nodes.find(n => n.id === flowerId);
