@@ -12,8 +12,8 @@ import { saveData, loadData, saveRaw } from './services/persistence';
 import { registerPlugin } from '@capacitor/core';
 
 
-const APP_VERSION = '4.3.28';
-const BUILD_ID = '2026-08-14-unified-calendar-planner';
+const APP_VERSION = '4.3.29';
+const BUILD_ID = '2026-08-14-calendar-render-hotfix';
 const GOOGLE_WEB_CLIENT_ID = '54802084194-qiej4s3ahd0eojf26rnjtsoius482fio.apps.googleusercontent.com';
 const GOOGLE_DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 const GoogleDriveAuthorization = registerPlugin('GoogleDriveAuthorization');
@@ -6963,9 +6963,9 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
   }, [nodes]);
   useEffect(() => { saveData('ft_links', links); }, [links]);
   useEffect(() => { saveData('ft_cal_events', calEvents); }, [calEvents]);
-  useEffect(()=>saveData('ft_calendar_layout',calendarLayout),[calendarLayout]);
-  useEffect(()=>saveData('ft_planner_preference',plannerPreference),[plannerPreference]);
-  useEffect(()=>saveData('ft_planner_notes',plannerNotes),[plannerNotes]);
+  useEffect(()=>{saveData('ft_calendar_layout',calendarLayout);},[calendarLayout]);
+  useEffect(()=>{saveData('ft_planner_preference',plannerPreference);},[plannerPreference]);
+  useEffect(()=>{saveData('ft_planner_notes',plannerNotes);},[plannerNotes]);
   useEffect(() => { saveData('ft_cal_recurring', calRecurring); }, [calRecurring]);
   useEffect(() => { saveData('ft_health_lists', healthLists); }, [healthLists]);
   useEffect(() => { saveData('ft_habit_today_v2', habitToday); }, [habitToday]);
