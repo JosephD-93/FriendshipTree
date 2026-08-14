@@ -12,8 +12,8 @@ import { saveData, loadData, saveRaw } from './services/persistence';
 import { registerPlugin } from '@capacitor/core';
 
 
-const APP_VERSION = '4.3.22';
-const BUILD_ID = '2026-08-14-visual-time-planner';
+const APP_VERSION = '4.3.23';
+const BUILD_ID = '2026-08-14-calendar-visual-fixes';
 const GOOGLE_WEB_CLIENT_ID = '54802084194-qiej4s3ahd0eojf26rnjtsoius482fio.apps.googleusercontent.com';
 const GOOGLE_DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 const GoogleDriveAuthorization = registerPlugin('GoogleDriveAuthorization');
@@ -24,7 +24,7 @@ const MAP_VIEW_FAMILIES = [
   { key:'stack', emoji:'📚', name:'Stack', desc:'Groups arranged in stacked sections', variants:[{key:'feed',name:'Standard'},{key:'feedDetailed',name:'Fancy'}] },
 ];
 const BUILD_DATE = '14 August 2026';
-const WHATS_NEW = 'A safe-area-aware visual planner adds hourly Day and seven-column Week timelines, timed activity blocks, and a compact Month overview.';
+const WHATS_NEW = 'Birthday photos now stay bright and firefly-free, calendar layers fully cover the canvas, and landscape navigation moves to the right edge.';
 
 // ─── Calendar Integration ─────────────────────────────────────────────────
 // Uses the Capgo calendar plugin (Capacitor) to read/write the phone's
@@ -858,6 +858,9 @@ const KEYFRAMES_CSS = [
   'body{padding-top:var(--sat);padding-bottom:var(--sab);padding-left:var(--sal);padding-right:var(--sar);box-sizing:border-box;}',
   // Fixed top bars sit below the status bar
   '.ft-safe-top{top:var(--sat) !important;}',
+  // In landscape the physical bottom edge is the app's right edge. Keep the
+  // navigation there while its icons and labels remain upright.
+  '@media (orientation:landscape) and (max-height:600px){body{padding-bottom:0;padding-right:calc(72px + var(--sar));}.ft-bottom-tabs{top:0!important;bottom:0!important;left:auto!important;right:0!important;width:calc(72px + var(--sar))!important;flex-direction:column!important;padding-bottom:0!important;padding-right:var(--sar)!important;border-top:none!important;border-left:1px solid #334155!important;}.ft-bottom-tab{width:72px!important;min-height:0!important;flex:1 1 0!important;border-top:none!important;border-right:2px solid transparent!important;padding:4px!important;}.ft-bottom-tab-active{border-right-color:#10b981!important;}}',
   // Fixed full-screen overlays should still cover the whole screen
 ].join(' ');
 
@@ -14773,7 +14776,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
 
             {/* ---- Dark-mode darkness overlay: fireflies reveal light through it ---- */}
-            {theme.darkMode && darknessFilter && fancyDiag.darkness && (() => {
+            {theme.darkMode && darknessFilter && fancyDiag.darkness && !(viewMode === 'calendar' && calViewMode === 'birthdays') && (() => {
               // huge rect in canvas coords; the mask is dark with soft white
               // circles at each firefly so light shows through there.
               const BIG = 100000;
@@ -14840,7 +14843,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
 
             {/* ---- Butterflies (day) / Fireflies (night) ---- */}
-            {!simpleMode && fancyDiag.creatures && creatures.map(c => {
+            {!simpleMode && fancyDiag.creatures && !(viewMode === 'calendar' && calViewMode === 'birthdays' && theme.darkMode) && creatures.map(c => {
               // WAVE: fixed cycle for ALL butterflies so waves never drift/clash.
               // The delay (0..WAVE_SWEEP) is set purely by diagonal position, so
               // the wave ripples across; everyone flaps with the SAME duration and
@@ -15348,7 +15351,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           </div>
         )}
         {viewMode === 'calendar' && calViewMode === 'birthdays' && (
-          <div style={{position:'absolute',top:16,left:'50%',transform:'translateX(-50%)',zIndex:60,
+          <div style={{position:'absolute',top:'calc(env(safe-area-inset-top, 0px) + 16px)',left:'50%',transform:'translateX(-50%)',zIndex:60,
             display:'flex',gap:6,background:theme.darkMode?'rgba(15,23,42,0.92)':'rgba(255,255,255,0.92)',
             borderRadius:99,padding:'6px 10px',boxShadow:'0 4px 20px rgba(0,0,0,0.2)',
             border:`1px solid ${theme.darkMode?'#334155':'#e2e8f0'}`}}>
@@ -15377,7 +15380,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         {viewMode === 'calendar' && calViewMode === 'birthdays' && (
           <button
             onClick={() => setShowGCalPanel(p => !p)}
-            style={{position:'absolute', top:60, left:'50%', transform:'translateX(-50%)',
+            style={{position:'absolute', top:'calc(env(safe-area-inset-top, 0px) + 60px)', left:'50%', transform:'translateX(-50%)',
               zIndex:60, display:'flex', alignItems:'center', gap:6,
               background: gCalToken ? '#10b981' : (theme.darkMode?'rgba(15,23,42,0.92)':'rgba(255,255,255,0.92)'),
               color: gCalToken ? 'white' : (theme.darkMode?'#94a3b8':'#64748b'),
@@ -15389,7 +15392,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         )}
         {/* Google Calendar panel */}
         {showGCalPanel && viewMode === 'calendar' && (
-          <div style={{position:'absolute', top:105, left:'50%', transform:'translateX(-50%)',
+          <div style={{position:'absolute', top:'calc(env(safe-area-inset-top, 0px) + 105px)', left:'50%', transform:'translateX(-50%)',
             zIndex:70, width:Math.min(360, window.innerWidth-32),
             background:theme.darkMode?'#0f172a':'white',
             border:`1px solid ${theme.darkMode?'#334155':'#e2e8f0'}`,
@@ -15588,8 +15591,8 @@ Return only the JSON array. If nothing trackable is found, return [].`;
   const monthCells=[...Array((monthStart.getDay()+6)%7).fill(null),...Array.from({length:monthDays},(_,i)=>dayKey(new Date(anchor.getFullYear(),anchor.getMonth(),i+1)))];
   while(monthCells.length%7)monthCells.push(null);
   const field={width:'100%',marginTop:3,padding:7,borderRadius:8,border:'1px solid #475569',background:dm?'#111827':'white',color:dm?'white':'#0f172a'};
-  return <div style={{position:'absolute',inset:'0 0 calc(64px + env(safe-area-inset-bottom, 0px)) 0',zIndex:55,overflowY:'auto',background:dm?'#07101f':'#f8fafc'}}>
-    <div style={{maxWidth:1200,margin:'0 auto',padding:'0 12px 28px'}}>
+  return <div style={{position:'absolute',inset:0,zIndex:55,overflowY:'auto',background:dm?'#07101f':'#f8fafc'}}>
+    <div style={{maxWidth:1200,margin:'0 auto',padding:'0 12px calc(90px + env(safe-area-inset-bottom, 0px))'}}>
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,padding:'14px 0 10px',paddingTop:'calc(env(safe-area-inset-top, 0px) + 14px)',position:'sticky',top:0,zIndex:20,background:dm?'#07101f':'#f8fafc',borderBottom:`1px solid ${dm?'#1e293b':'#e2e8f0'}`}}>
         <button onClick={()=>setCalViewMode('monthly')} style={{border:'none',background:'transparent',color:dm?'#94a3b8':'#64748b',fontWeight:800}}>← Calendar</button>
         <div style={{fontSize:18,fontWeight:900,color:dm?'white':'#0f172a'}}>Activity planner</div>
@@ -16243,7 +16246,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         {/* Back to monthly button when in birthdays view */}
         {viewMode === 'calendar' && calViewMode === 'birthdays' && (
           <button onClick={()=>setCalViewMode('monthly')}
-            style={{position:'absolute',top:12,left:12,zIndex:60,
+            style={{position:'absolute',top:'calc(env(safe-area-inset-top, 0px) + 12px)',left:12,zIndex:60,
               padding:'6px 12px',borderRadius:99,border:'none',
               background:theme.darkMode?'rgba(15,23,42,0.9)':'rgba(255,255,255,0.9)',
               color:theme.darkMode?'#94a3b8':'#64748b',fontSize:12,fontWeight:700,cursor:'pointer',
@@ -24612,7 +24615,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         );
       })()}
       {/* -- Bottom Tab Bar ------------------------------------------------------ */}
-      <div style={{
+      <div className="ft-bottom-tabs" style={{
         position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 200,
         display: 'flex', alignItems: 'stretch',
         background: theme.darkMode ? '#0f172a' : 'white',
@@ -24651,7 +24654,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
           const isAddTab = tab.id === 'add';
           const isMapTab = tab.id === 'canvas';
           return (
-            <button key={tab.id}
+            <button key={tab.id} className={'ft-bottom-tab'+(active?' ft-bottom-tab-active':'')}
               onClick={() => { if (tab.action) { if (!isAddTab) tab.action(); } else { setViewMode(tab.id); } }}
               onPointerDown={isAddTab ? (e=>{
                 e.currentTarget.setPointerCapture(e.pointerId);
