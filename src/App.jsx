@@ -12,8 +12,8 @@ import { saveData, loadData, saveRaw } from './services/persistence';
 import { registerPlugin } from '@capacitor/core';
 
 
-const APP_VERSION = '4.3.26';
-const BUILD_ID = '2026-08-14-stack-landscape-orientation-fix';
+const APP_VERSION = '4.3.27';
+const BUILD_ID = '2026-08-14-physical-edge-stack-fix';
 const GOOGLE_WEB_CLIENT_ID = '54802084194-qiej4s3ahd0eojf26rnjtsoius482fio.apps.googleusercontent.com';
 const GOOGLE_DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 const GoogleDriveAuthorization = registerPlugin('GoogleDriveAuthorization');
@@ -860,7 +860,7 @@ const KEYFRAMES_CSS = [
   '.ft-safe-top{top:var(--sat) !important;}',
   // In landscape the physical bottom edge is the app's right edge. Keep the
   // navigation there while its icons and labels remain upright.
-  '@media (orientation:landscape) and (max-height:600px){.ft-stacked-scroll{transform:none!important}.ft-add-menu{right:calc(72px + var(--sar) + 14px)!important;bottom:14px!important;flex-direction:row!important;align-items:center!important}body{padding-bottom:0!important;padding-right:0!important}.ft-app-shell{top:0!important;bottom:0!important;left:0!important;right:calc(72px + var(--sar))!important;width:auto!important;height:auto!important}.ft-bottom-tabs{top:0!important;bottom:0!important;left:auto!important;right:0!important;width:calc(72px + var(--sar))!important;height:100dvh!important;flex-direction:column!important;padding-bottom:0!important;padding-right:var(--sar)!important;border-top:none!important;border-left:1px solid #334155!important}.ft-bottom-tab{width:72px!important;min-height:0!important;flex:1 1 0!important;border-top:none!important;border-right:2px solid transparent!important;padding:4px!important}.ft-bottom-tab-active{border-right-color:#10b981!important}}',
+  '@media (orientation:landscape) and (max-height:600px){.ft-stacked-scroll{top:0!important;left:0!important;right:auto!important;bottom:auto!important;width:100dvh!important;height:calc(100dvw - 72px - var(--sar))!important;transform-origin:top left;transform:translateY(100dvh) rotate(-90deg)!important;overflow-y:auto!important;overflow-x:hidden!important}.ft-stacked-scroll [data-feed-node-id]:not(.ft-stack-band){transform:rotate(90deg)!important;transform-origin:center center}.ft-stacked-scroll .ft-stack-band-content{transform:rotate(90deg);transform-origin:center center}.ft-add-menu{right:calc(72px + var(--sar) + 14px)!important;bottom:14px!important;flex-direction:row!important;align-items:center!important}body{padding-bottom:0!important;padding-right:0!important}.ft-app-shell{top:0!important;bottom:0!important;left:0!important;right:calc(72px + var(--sar))!important;width:auto!important;height:auto!important}.ft-bottom-tabs{top:0!important;bottom:0!important;left:auto!important;right:0!important;width:calc(72px + var(--sar))!important;height:100dvh!important;flex-direction:column!important;padding-bottom:0!important;padding-right:var(--sar)!important;border-top:none!important;border-left:1px solid #334155!important}.ft-bottom-tab{width:72px!important;min-height:0!important;flex:1 1 0!important;border-top:none!important;border-right:2px solid transparent!important;padding:4px!important}.ft-bottom-tab-active{border-right-color:#10b981!important}}',
   // Fixed full-screen overlays should still cover the whole screen
 ].join(' ');
 
@@ -9539,7 +9539,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         boxShadow: '0 0 0 2px rgba(0,0,0,0.15)',
         animation: saveStatus !== 'saved' ? 'pulse 1s ease-in-out infinite' : 'none'}}/>
     {photosRestoring && (
-      <div style={{position:'fixed', top:12, left:'50%', transform:'translateX(-50%)', zIndex:9999,
+      <div style={{position:'fixed', top:'calc(env(safe-area-inset-top, 0px) + 12px)', left:'50%', transform:'translateX(-50%)', zIndex:9999,
         background:'rgba(15,23,42,0.9)', color:'white', padding:'6px 14px', borderRadius:99,
         fontSize:12, fontWeight:600, display:'flex', alignItems:'center', gap:8, pointerEvents:'none',
         boxShadow:'0 4px 12px rgba(0,0,0,0.3)'}}>
@@ -18333,7 +18333,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         const dm = theme.darkMode;
         const bg = dm ? '#0f172a' : '#f8fafc';
         const COLS = 4; // locked horizontal width
-        const BAND_W = 40; // width of the flower band itself, sits left of column 0 (66% of the original 60)
+        const BAND_W = 32; // 20% thinner band; portrait-left becomes the physical bottom edge in clockwise landscape
         // Size hexes so 5 columns always fit within the actual screen width --
         // previously a fixed 56px hex made the strip wider than the viewport,
         // pushing the last couple of columns off-screen with no way to scroll
@@ -19036,7 +19036,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 very top edge of the screen, where it's under the header overlays
                 or too high to reach with a thumb. Shifts all sections down
                 uniformly, so node and flower positions stay consistent. */}
-            <div className="ft-stacked-leading-space" style={{height: 76}} />
+            <div className="ft-stacked-leading-space" style={{height: 0}} />
             {sectionDefs.map(({dimKey, flowerId}) => {
               const dim = dimensions[dimKey];
               const flowerNode = nodes.find(n => n.id === flowerId);
@@ -19259,7 +19259,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                 <div key={dimKey} data-feed-section={dimKey} style={{borderBottom:`1px solid ${dm?'#1e293b':'#e2e8f0'}`, padding:'0'}}>
                   <div style={{position:'relative', height:sectionH}}>
                     {/* Flower band, full height of the section */}
-                    <div data-feed-node-id={flowerId}
+                    <div className="ft-stack-band" data-feed-node-id={flowerId}
                       onClick={() => {
                         const now = Date.now();
                         const lastTap = feedLastTapRef.current.get(flowerId) || 0;
@@ -19273,10 +19273,11 @@ Return only the JSON array. If nothing trackable is found, return [].`;
                       style={{position:'absolute', left:0, top:0, bottom:0, width:BAND_W,
                       background:dim.color, display:'flex', flexDirection:'column', alignItems:'center',
                       justifyContent:'center', gap:6, borderRight:'3px solid #000000', cursor:'pointer'}}>
-                      <div style={{fontSize:22}}>{dim.emoji}</div>
-                      <div style={{fontSize:11, fontWeight:800, color:'white', writingMode:'vertical-rl',
-                        textOrientation:'mixed', letterSpacing:0.5}}>{dim.label}</div>
-                      <div style={{fontSize:10, color:'rgba(255,255,255,0.8)'}}>{members.length}</div>
+                      <div className="ft-stack-band-content" style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:6}}>
+                        <div style={{fontSize:22}}>{dim.emoji}</div>
+                        <div style={{fontSize:11, fontWeight:800, color:'white', whiteSpace:'nowrap',letterSpacing:0.5}}>{dim.label}</div>
+                        <div style={{fontSize:10, color:'rgba(255,255,255,0.8)'}}>{members.length}</div>
+                      </div>
                     </div>
 
                     {/* Connecting lines -- drawn first so circles sit on top.
