@@ -12,8 +12,8 @@ import { saveData, loadData, saveRaw } from './services/persistence';
 import { registerPlugin } from '@capacitor/core';
 
 
-const APP_VERSION = '4.3.23';
-const BUILD_ID = '2026-08-14-calendar-visual-fixes';
+const APP_VERSION = '4.3.24';
+const BUILD_ID = '2026-08-14-radial-birthday-calendar';
 const GOOGLE_WEB_CLIENT_ID = '54802084194-qiej4s3ahd0eojf26rnjtsoius482fio.apps.googleusercontent.com';
 const GOOGLE_DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 const GoogleDriveAuthorization = registerPlugin('GoogleDriveAuthorization');
@@ -24,7 +24,7 @@ const MAP_VIEW_FAMILIES = [
   { key:'stack', emoji:'📚', name:'Stack', desc:'Groups arranged in stacked sections', variants:[{key:'feed',name:'Standard'},{key:'feedDetailed',name:'Fancy'}] },
 ];
 const BUILD_DATE = '14 August 2026';
-const WHATS_NEW = 'Birthday photos now stay bright and firefly-free, calendar layers fully cover the canvas, and landscape navigation moves to the right edge.';
+const WHATS_NEW = 'The Circle birthday view is now a pastel radial year calendar with faces on their dates, cleaner controls, and corrected landscape content bounds.';
 
 // ─── Calendar Integration ─────────────────────────────────────────────────
 // Uses the Capgo calendar plugin (Capacitor) to read/write the phone's
@@ -860,7 +860,7 @@ const KEYFRAMES_CSS = [
   '.ft-safe-top{top:var(--sat) !important;}',
   // In landscape the physical bottom edge is the app's right edge. Keep the
   // navigation there while its icons and labels remain upright.
-  '@media (orientation:landscape) and (max-height:600px){body{padding-bottom:0;padding-right:calc(72px + var(--sar));}.ft-bottom-tabs{top:0!important;bottom:0!important;left:auto!important;right:0!important;width:calc(72px + var(--sar))!important;flex-direction:column!important;padding-bottom:0!important;padding-right:var(--sar)!important;border-top:none!important;border-left:1px solid #334155!important;}.ft-bottom-tab{width:72px!important;min-height:0!important;flex:1 1 0!important;border-top:none!important;border-right:2px solid transparent!important;padding:4px!important;}.ft-bottom-tab-active{border-right-color:#10b981!important;}}',
+  '@media (orientation:landscape) and (max-height:600px){body{padding-bottom:0!important;padding-right:0!important;}.ft-app-shell{top:0!important;bottom:0!important;left:0!important;right:calc(72px + var(--sar))!important;width:auto!important;height:auto!important;}.ft-bottom-tabs{top:0!important;bottom:0!important;left:auto!important;right:0!important;width:calc(72px + var(--sar))!important;height:100dvh!important;flex-direction:column!important;padding-bottom:0!important;padding-right:var(--sar)!important;border-top:none!important;border-left:1px solid #334155!important;}.ft-bottom-tab{width:72px!important;min-height:0!important;flex:1 1 0!important;border-top:none!important;border-right:2px solid transparent!important;padding:4px!important;}.ft-bottom-tab-active{border-right-color:#10b981!important;}}',
   // Fixed full-screen overlays should still cover the whole screen
 ].join(' ');
 
@@ -2191,6 +2191,111 @@ function TaggedPhotosSection({ nodeId, nodes, links, openPhotoDB, setHubGalleryO
   );
 }
 
+
+
+function BirthdayYearWheel({ nodes, darkMode, year, onPerson }) {
+  const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const dayLetters = ['M','T','W','T','F','S','S'];
+  const palette = [
+    {body:'#dbeafe',accent:'#93c5fd',text:'#1e3a8a'},
+    {body:'#e0e7ff',accent:'#a5b4fc',text:'#3730a3'},
+    {body:'#dcfce7',accent:'#86efac',text:'#14532d'},
+    {body:'#d1fae5',accent:'#6ee7b7',text:'#065f46'},
+    {body:'#ecfccb',accent:'#bef264',text:'#365314'},
+    {body:'#fef3c7',accent:'#fcd34d',text:'#78350f'},
+    {body:'#ffe4e6',accent:'#fda4af',text:'#881337'},
+    {body:'#fecdd3',accent:'#fb7185',text:'#881337'},
+    {body:'#ffedd5',accent:'#fdba74',text:'#7c2d12'},
+    {body:'#fed7aa',accent:'#fb923c',text:'#7c2d12'},
+    {body:'#fef3c7',accent:'#fbbf24',text:'#78350f'},
+    {body:'#f8fafc',accent:'#e2e8f0',text:'#334155'},
+  ];
+  const C=500;
+  const polar=(r,deg)=>{const a=deg*Math.PI/180;return{x:C+Math.cos(a)*r,y:C+Math.sin(a)*r};};
+  const sector=(r1,r2,a1,a2)=>{
+    const p1=polar(r2,a1),p2=polar(r2,a2),p3=polar(r1,a2),p4=polar(r1,a1);
+    return `M ${p1.x} ${p1.y} A ${r2} ${r2} 0 0 1 ${p2.x} ${p2.y} L ${p3.x} ${p3.y} A ${r1} ${r1} 0 0 0 ${p4.x} ${p4.y} Z`;
+  };
+  const birthdays = nodes.filter(n=>n && n.id!=='me' && n.type!=='hub' && n.type!=='flower' && n.birthday)
+    .map(n=>({node:n,parsed:parseBirthdayDateGlobal(n.birthday)})).filter(x=>x.parsed);
+  const byDate = new Map();
+  birthdays.forEach(entry=>{
+    const key=entry.parsed.month+'-'+entry.parsed.day;
+    if(!byDate.has(key))byDate.set(key,[]);
+    byDate.get(key).push(entry.node);
+  });
+  const today=new Date();
+  const thisYear=today.getFullYear();
+  const upcoming=birthdays.map(entry=>{
+    let date=new Date(thisYear,entry.parsed.month,entry.parsed.day,12);
+    if(date<new Date(thisYear,today.getMonth(),today.getDate(),0))date=new Date(thisYear+1,entry.parsed.month,entry.parsed.day,12);
+    return {...entry,date};
+  }).sort((a,b)=>a.date-b.date).slice(0,3);
+  const cells=[];
+  for(let month=0;month<12;month++){
+    const days=new Date(year,month+1,0).getDate();
+    const firstMondayColumn=(new Date(year,month,1).getDay()+6)%7;
+    for(let day=1;day<=days;day++){
+      const cellIndex=firstMondayColumn+day-1;
+      const week=Math.floor(cellIndex/7),column=cellIndex%7;
+      const startAngle=-90+month*30+1;
+      const angle=startAngle+(column+.5)*(28/7);
+      const radius=278+week*29;
+      cells.push({month,day,week,column,angle,radius,people:byDate.get(month+'-'+day)||[]});
+    }
+  }
+  return <div style={{position:'absolute',inset:0,zIndex:58,paddingTop:'calc(env(safe-area-inset-top, 0px) + 104px)',paddingBottom:'calc(68px + env(safe-area-inset-bottom, 0px))',boxSizing:'border-box',display:'flex',alignItems:'center',justifyContent:'center',overflow:'hidden',background:darkMode?'radial-gradient(circle at 50% 48%,#172554 0%,#0f172a 48%,#07101f 100%)':'radial-gradient(circle at 50% 48%,#ffffff 0%,#f0fdf4 58%,#dcfce7 100%)'}}>
+    <svg viewBox="0 0 1000 1000" style={{display:'block',width:'min(100%, calc(100vh - 180px))',height:'auto',maxHeight:'100%',filter:darkMode?'drop-shadow(0 16px 36px rgba(0,0,0,.38))':'drop-shadow(0 14px 30px rgba(21,128,61,.16))'}}>
+      <defs>
+        {birthdays.map(({node})=><clipPath key={'clip-'+node.id} id={'birthday-wheel-'+String(node.id).replace(/[^a-zA-Z0-9_-]/g,'')}><circle cx="0" cy="0" r="13"/></clipPath>)}
+      </defs>
+      <circle cx={C} cy={C} r="488" fill={darkMode?'rgba(15,23,42,.9)':'rgba(255,255,255,.96)'} stroke={darkMode?'#334155':'#bbf7d0'} strokeWidth="3"/>
+      {monthNames.map((name,month)=>{
+        const a1=-90+month*30+1,a2=-90+(month+1)*30-1,col=palette[month];
+        return <g key={name}>
+          <path d={sector(258,452,a1,a2)} fill={col.body} opacity={darkMode ? .3 : .72} stroke={darkMode?'rgba(255,255,255,.08)':'rgba(255,255,255,.9)'} strokeWidth="2"/>
+          <path d={sector(452,488,a1,a2)} fill={col.accent} opacity={darkMode ? .92 : 1}/>
+          {dayLetters.map((letter,column)=>{
+            const p=polar(267,a1+(column+.5)*(28/7));
+            return <text key={column} x={p.x} y={p.y} textAnchor="middle" dominantBaseline="middle" fontSize="9" fontWeight="900" fill={darkMode?'#cbd5e1':col.text} opacity=".78">{letter}</text>;
+          })}
+          {(()=>{
+            const mid=(a1+a2)/2,p=polar(470,mid),flip=mid>90&&mid<270;
+            return <text x={p.x} y={p.y} textAnchor="middle" dominantBaseline="middle" fontSize="15" fontWeight="900" letterSpacing=".8" fill={col.text} transform={`rotate(${mid+90+(flip?180:0)} ${p.x} ${p.y})`}>{name.toUpperCase()}</text>;
+          })()}
+        </g>;
+      })}
+      {cells.map(cell=>{
+        const p=polar(cell.radius,cell.angle),col=palette[cell.month],people=cell.people;
+        return <g key={cell.month+'-'+cell.day}>
+          <circle cx={p.x} cy={p.y} r="13.5" fill={darkMode?'rgba(15,23,42,.42)':'rgba(255,255,255,.5)'} stroke={people.length?col.accent:'transparent'} strokeWidth={people.length?2:0}/>
+          {people.length===0&&<text x={p.x} y={p.y} textAnchor="middle" dominantBaseline="middle" fontSize="10" fontWeight="800" fill={darkMode?'#e2e8f0':col.text} opacity=".86">{cell.day}</text>}
+          {people.slice(0,4).map((person,index)=>{
+            const count=Math.min(people.length,4),r=count===1?12.5:count===2?8.5:7;
+            const offsets=count===1?[[0,0]]:count===2?[[-6,0],[6,0]]:count===3?[[0,-6],[-6,5],[6,5]]:[[-6,-6],[6,-6],[-6,6],[6,6]];
+            const [ox,oy]=offsets[index],clip='birthday-wheel-'+String(person.id).replace(/[^a-zA-Z0-9_-]/g,'');
+            return <g key={person.id} transform={`translate(${p.x+ox},${p.y+oy})`} onClick={e=>{e.stopPropagation();onPerson(person.id);}} style={{cursor:'pointer'}}>
+              <circle r={r+1.5} fill={col.accent}/>
+              {person.img?<image href={person.img} x={-r} y={-r} width={r*2} height={r*2} preserveAspectRatio="xMidYMid slice" clipPath={`url(#${clip})`}/>:<circle r={r} fill={col.accent}/>}
+              {!person.img&&<text textAnchor="middle" dominantBaseline="middle" fontSize={r} fontWeight="900" fill={col.text}>{(person.label||'?')[0]}</text>}
+              <title>{person.label||'Unnamed'} — {cell.day} {monthNames[cell.month]}</title>
+            </g>;
+          })}
+          {people.length>0&&<text x={p.x+11} y={p.y-10} textAnchor="middle" fontSize="7" fontWeight="900" fill={darkMode?'white':col.text}>{cell.day}</text>}
+          {people.length>4&&<text x={p.x} y={p.y+20} textAnchor="middle" fontSize="7" fontWeight="900" fill={darkMode?'#f8fafc':col.text}>+{people.length-4}</text>}
+        </g>;
+      })}
+      <circle cx={C} cy={C} r="225" fill={darkMode?'#0f172a':'#ffffff'} stroke={darkMode?'#334155':'#d1fae5'} strokeWidth="3"/>
+      <text x={C} y={456} textAnchor="middle" fontSize="17" fontWeight="900" letterSpacing="2" fill="#10b981">BIRTHDAY CALENDAR</text>
+      <text x={C} y={525} textAnchor="middle" fontSize="64" fontWeight="900" fill={darkMode?'#f8fafc':'#14532d'}>{year}</text>
+      <text x={C} y={555} textAnchor="middle" fontSize="13" fontWeight="800" fill={darkMode?'#94a3b8':'#64748b'}>{birthdays.length} birthdays saved</text>
+      {upcoming.length>0&&<g>
+        <text x={C} y={595} textAnchor="middle" fontSize="11" fontWeight="900" fill={darkMode?'#cbd5e1':'#475569'}>COMING NEXT</text>
+        {upcoming.map((entry,index)=><text key={entry.node.id} x={C} y={618+index*19} textAnchor="middle" fontSize="11" fontWeight={index===0?900:700} fill={index===0?'#10b981':(darkMode?'#94a3b8':'#64748b')}>{entry.date.toLocaleDateString('en-GB',{day:'numeric',month:'short'})} · {entry.node.label||'Unnamed'}</text>)}
+      </g>}
+    </svg>
+  </div>;
+}
 
 function AppInner() {
   const svgRef = useRef(null);
@@ -9364,7 +9469,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         Loading photos…
       </div>
     )}
-    <div className={`fixed inset-0 font-sans overflow-hidden transition-colors duration-300 ${theme.darkMode ? 'text-slate-100' : 'text-slate-50'}`}
+    <div className={`ft-app-shell fixed inset-0 font-sans overflow-hidden transition-colors duration-300 ${theme.darkMode ? 'text-slate-100' : 'text-slate-50'}`}
       style={{
         display:'flex', flexDirection:'column',
         backgroundColor: theme.darkMode ? '#0f172a' : '#19432a',
@@ -14772,7 +14877,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
 
 
             {/* ---- Minimise flower bundles (collapsed branches) ---- */}
-            {collapseInfo.bundles.map(b => renderMinimisedBundle(b, theme.darkMode, (anchorId) => setMinimisedNodes(prev => prev.filter(id=>id!==anchorId))))}
+            {viewMode === 'canvas' && collapseInfo.bundles.map(b => renderMinimisedBundle(b, theme.darkMode, (anchorId) => setMinimisedNodes(prev => prev.filter(id=>id!==anchorId))))}
 
 
             {/* ---- Dark-mode darkness overlay: fireflies reveal light through it ---- */}
@@ -15350,8 +15455,12 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               style={{padding:'3px 8px', borderRadius:99, border:'none', cursor:'pointer', fontSize:10, fontWeight:700, background:'#ef4444', color:'white'}}>✕</button>
           </div>
         )}
+        {viewMode === 'calendar' && calViewMode === 'birthdays' && calendarLayout === 'circle' && (
+          <BirthdayYearWheel nodes={nodes} darkMode={theme.darkMode} year={calYear}
+            onPerson={id=>{setSelectedNodeId(id);setViewMode('canvas');}}/>
+        )}
         {viewMode === 'calendar' && calViewMode === 'birthdays' && (
-          <div style={{position:'absolute',top:'calc(env(safe-area-inset-top, 0px) + 16px)',left:'50%',transform:'translateX(-50%)',zIndex:60,
+          <div style={{position:'absolute',top:'calc(env(safe-area-inset-top, 0px) + 52px)',left:'50%',transform:'translateX(-50%)',zIndex:60,
             display:'flex',gap:6,background:theme.darkMode?'rgba(15,23,42,0.92)':'rgba(255,255,255,0.92)',
             borderRadius:99,padding:'6px 10px',boxShadow:'0 4px 20px rgba(0,0,0,0.2)',
             border:`1px solid ${theme.darkMode?'#334155':'#e2e8f0'}`}}>
@@ -15375,24 +15484,22 @@ Return only the JSON array. If nothing trackable is found, return [].`;
             ))}
           </div>
         )}
-        {/* Google Calendar sync button — only floating in birthdays mode,
-            in monthly mode it appears in the action buttons row instead */}
+        {/* Compact calendar-sync control. Permission/connect wording lives in the panel. */}
         {viewMode === 'calendar' && calViewMode === 'birthdays' && (
-          <button
-            onClick={() => setShowGCalPanel(p => !p)}
-            style={{position:'absolute', top:'calc(env(safe-area-inset-top, 0px) + 60px)', left:'50%', transform:'translateX(-50%)',
-              zIndex:60, display:'flex', alignItems:'center', gap:6,
-              background: gCalToken ? '#10b981' : (theme.darkMode?'rgba(15,23,42,0.92)':'rgba(255,255,255,0.92)'),
-              color: gCalToken ? 'white' : (theme.darkMode?'#94a3b8':'#64748b'),
-              border: `1px solid ${gCalToken?'#10b981':(theme.darkMode?'#334155':'#e2e8f0')}`,
-              borderRadius:99, padding:'5px 14px', fontSize:12, fontWeight:600, cursor:'pointer',
-              boxShadow:'0 4px 12px rgba(0,0,0,0.15)'}}>
-            📅 {gCalToken ? `Google Calendar (${gCalEvents.length})` : 'Connect Google Calendar'}
+          <button onClick={() => setShowGCalPanel(p => !p)} title="Calendar sync" aria-label="Calendar sync"
+            style={{position:'absolute',top:'calc(env(safe-area-inset-top, 0px) + 10px)',right:12,zIndex:60,
+              width:40,height:40,borderRadius:12,border:`1px solid ${gCalToken?'#10b981':(theme.darkMode?'#334155':'#d1fae5')}`,
+              display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',
+              background:theme.darkMode?'rgba(15,23,42,.94)':'rgba(255,255,255,.94)',
+              color:gCalToken?'#10b981':(theme.darkMode?'#cbd5e1':'#166534'),
+              boxShadow:'0 3px 12px rgba(0,0,0,.16)',fontSize:19}}>
+            📅
+            {gCalToken&&<span style={{position:'absolute',right:5,top:5,width:8,height:8,borderRadius:'50%',background:'#10b981',border:'1px solid white'}}/>}
           </button>
         )}
         {/* Google Calendar panel */}
         {showGCalPanel && viewMode === 'calendar' && (
-          <div style={{position:'absolute', top:'calc(env(safe-area-inset-top, 0px) + 105px)', left:'50%', transform:'translateX(-50%)',
+          <div style={{position:'absolute', top:'calc(env(safe-area-inset-top, 0px) + 58px)', right:12,
             zIndex:70, width:Math.min(360, window.innerWidth-32),
             background:theme.darkMode?'#0f172a':'white',
             border:`1px solid ${theme.darkMode?'#334155':'#e2e8f0'}`,
@@ -16246,7 +16353,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         {/* Back to monthly button when in birthdays view */}
         {viewMode === 'calendar' && calViewMode === 'birthdays' && (
           <button onClick={()=>setCalViewMode('monthly')}
-            style={{position:'absolute',top:'calc(env(safe-area-inset-top, 0px) + 12px)',left:12,zIndex:60,
+            style={{position:'absolute',top:'calc(env(safe-area-inset-top, 0px) + 10px)',left:12,zIndex:60,
               padding:'6px 12px',borderRadius:99,border:'none',
               background:theme.darkMode?'rgba(15,23,42,0.9)':'rgba(255,255,255,0.9)',
               color:theme.darkMode?'#94a3b8':'#64748b',fontSize:12,fontWeight:700,cursor:'pointer',
