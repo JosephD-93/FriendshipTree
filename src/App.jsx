@@ -15634,7 +15634,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       </section>}
     </div>
   </div>;
-})()
+})()}
 
         {/* ── Monthly Calendar View ─────────────────────────────── */}
         {viewMode === 'calendar' && calViewMode === 'monthly' && (() => {
