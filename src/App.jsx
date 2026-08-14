@@ -12,8 +12,8 @@ import { saveData, loadData, saveRaw } from './services/persistence';
 import { registerPlugin } from '@capacitor/core';
 
 
-const APP_VERSION = '4.3.25';
-const BUILD_ID = '2026-08-14-month-photo-calendar';
+const APP_VERSION = '4.3.26';
+const BUILD_ID = '2026-08-14-stack-landscape-orientation-fix';
 const GOOGLE_WEB_CLIENT_ID = '54802084194-qiej4s3ahd0eojf26rnjtsoius482fio.apps.googleusercontent.com';
 const GOOGLE_DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 const GoogleDriveAuthorization = registerPlugin('GoogleDriveAuthorization');
@@ -860,7 +860,7 @@ const KEYFRAMES_CSS = [
   '.ft-safe-top{top:var(--sat) !important;}',
   // In landscape the physical bottom edge is the app's right edge. Keep the
   // navigation there while its icons and labels remain upright.
-  '@media (orientation:landscape) and (max-height:600px){.ft-stacked-scroll{top:0!important;left:0!important;right:auto!important;bottom:auto!important;width:100dvh!important;height:calc(100dvw - 72px - env(safe-area-inset-right,0px))!important;transform-origin:top left;transform:translateX(calc(100dvw - 72px - env(safe-area-inset-right,0px))) rotate(90deg);overflow-y:auto!important;overflow-x:hidden!important;white-space:normal!important;-webkit-overflow-scrolling:touch}.ft-stacked-scroll>.ft-stacked-leading-space{display:block!important;width:auto!important;height:76px!important}.ft-stacked-scroll>[data-feed-section]{display:block!important;width:auto!important;min-width:0!important;white-space:normal!important}body{padding-bottom:0!important;padding-right:0!important}.ft-app-shell{top:0!important;bottom:0!important;left:0!important;right:calc(72px + var(--sar))!important;width:auto!important;height:auto!important}.ft-bottom-tabs{top:0!important;bottom:0!important;left:auto!important;right:0!important;width:calc(72px + var(--sar))!important;height:100dvh!important;flex-direction:column!important;padding-bottom:0!important;padding-right:var(--sar)!important;border-top:none!important;border-left:1px solid #334155!important}.ft-bottom-tab{width:72px!important;min-height:0!important;flex:1 1 0!important;border-top:none!important;border-right:2px solid transparent!important;padding:4px!important}.ft-bottom-tab-active{border-right-color:#10b981!important}}',
+  '@media (orientation:landscape) and (max-height:600px){.ft-stacked-scroll{transform:none!important}.ft-add-menu{right:calc(72px + var(--sar) + 14px)!important;bottom:14px!important;flex-direction:row!important;align-items:center!important}body{padding-bottom:0!important;padding-right:0!important}.ft-app-shell{top:0!important;bottom:0!important;left:0!important;right:calc(72px + var(--sar))!important;width:auto!important;height:auto!important}.ft-bottom-tabs{top:0!important;bottom:0!important;left:auto!important;right:0!important;width:calc(72px + var(--sar))!important;height:100dvh!important;flex-direction:column!important;padding-bottom:0!important;padding-right:var(--sar)!important;border-top:none!important;border-left:1px solid #334155!important}.ft-bottom-tab{width:72px!important;min-height:0!important;flex:1 1 0!important;border-top:none!important;border-right:2px solid transparent!important;padding:4px!important}.ft-bottom-tab-active{border-right-color:#10b981!important}}',
   // Fixed full-screen overlays should still cover the whole screen
 ].join(' ');
 
@@ -10729,7 +10729,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
       {showAddMenu && (
         <>
           <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:199}} onClick={()=>setShowAddMenu(false)}/>
-          <div style={{
+          <div className="ft-add-menu" style={{
             position:'fixed', bottom:76, right:16, zIndex:200,
             display:'flex', flexDirection:'column', alignItems:'center', gap:14,
           }}>
