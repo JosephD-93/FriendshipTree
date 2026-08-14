@@ -12,8 +12,8 @@ import { saveData, loadData, saveRaw } from './services/persistence';
 import { registerPlugin } from '@capacitor/core';
 
 
-const APP_VERSION = '4.3.27';
-const BUILD_ID = '2026-08-14-physical-edge-stack-fix';
+const APP_VERSION = '4.3.28';
+const BUILD_ID = '2026-08-14-unified-calendar-planner';
 const GOOGLE_WEB_CLIENT_ID = '54802084194-qiej4s3ahd0eojf26rnjtsoius482fio.apps.googleusercontent.com';
 const GOOGLE_DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 const GoogleDriveAuthorization = registerPlugin('GoogleDriveAuthorization');
@@ -2193,7 +2193,7 @@ function TaggedPhotosSection({ nodeId, nodes, links, openPhotoDB, setHubGalleryO
 
 
 
-function BirthdayYearWheel({ nodes, darkMode, year, onPerson, galleryPhotos=[] }) {
+function BirthdayYearWheel({ nodes, darkMode, year, onPerson, onDay, galleryPhotos=[] }) {
   const [selectedMonth, setSelectedMonth] = React.useState(null);
   const [photoViewer, setPhotoViewer] = React.useState(null);
   const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -2282,7 +2282,7 @@ function BirthdayYearWheel({ nodes, darkMode, year, onPerson, galleryPhotos=[] }
             if(!day)return <div key={'empty-'+index} style={{minHeight:88,background:darkMode?'rgba(30,41,59,.3)':'rgba(248,250,252,.55)',borderRadius:8}}/>;
             const people=byDate.get(selectedMonth+'-'+day)||[];
             const photos=photosByDate.get(selectedMonth+'-'+day)||[];
-            return <div key={day} onClick={()=>photos.length&&setPhotoViewer({photos,index:0})} style={{position:'relative',minHeight:88,borderRadius:8,overflow:'hidden',cursor:photos.length?'pointer':'default',background:darkMode?'rgba(30,41,59,.78)':col.body,border:'1px solid '+(people.length?col.accent:(darkMode?'#263449':'#e2e8f0'))}}>
+            return <div key={day} onClick={()=>{if(onDay)onDay(year+'-'+String(selectedMonth+1).padStart(2,'0')+'-'+String(day).padStart(2,'0'));else if(photos.length)setPhotoViewer({photos,index:0});}} style={{position:'relative',minHeight:88,borderRadius:8,overflow:'hidden',cursor:photos.length?'pointer':'default',background:darkMode?'rgba(30,41,59,.78)':col.body,border:'1px solid '+(people.length?col.accent:(darkMode?'#263449':'#e2e8f0'))}}>
               {photos.length>0&&<div style={{position:'absolute',inset:0,display:'grid',gridTemplateColumns:photos.length>1?'repeat(2,1fr)':'1fr',gridTemplateRows:photos.length>2?'repeat(2,1fr)':'1fr'}}>
                 {photos.slice(0,4).map((photo,photoIndex)=><div key={photo.key||photoIndex} style={{position:'relative',overflow:'hidden'}}><img src={photo.dataUrl} alt="" style={{width:'100%',height:'100%',objectFit:'cover',display:'block'}}/>{photoIndex===3&&photos.length>4&&<div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',background:'rgba(0,0,0,.55)',color:'white',fontWeight:900}}>+{photos.length-4}</div>}</div>)}
               </div>}
@@ -2362,6 +2362,23 @@ function BirthdayYearWheel({ nodes, darkMode, year, onPerson, galleryPhotos=[] }
     </svg>
   </div>;
 }
+function CalendarPlannerV2({nodes,darkMode,year,setYear,layout,setLayout,events,deviceEvents,photos,onPerson,onEvent,onPhoto,notes,setNotes,preference,setPreference}){
+ const [day,setDay]=React.useState(null),[drag,setDrag]=React.useState(null),[draft,setDraft]=React.useState(null),[input,setInput]=React.useState({priority:'',todo:''});
+ const months=['January','February','March','April','May','June','July','August','September','October','November','December'],cols=['#93c5fd','#a5b4fc','#86efac','#6ee7b7','#bef264','#fcd34d','#fda4af','#fb7185','#fdba74','#fb923c','#fbbf24','#e2e8f0'],pad=n=>String(n).padStart(2,'0'),dateKey=(m,d)=>year+'-'+pad(m+1)+'-'+pad(d);
+ const people=nodes.filter(n=>n&&n.id!=='me'&&n.type!=='hub'&&n.type!=='flower'),evs={},birth={},pics={};
+ events.forEach(e=>{if(e.date)(evs[e.date]=evs[e.date]||[]).push(e)});deviceEvents.forEach(e=>{const k=(e.start?.dateTime||e.start?.date||'').slice(0,10);if(k)(evs[k]=evs[k]||[]).push({...e,title:e.summary||'Calendar event',device:true})});
+ people.forEach(p=>{const b=parseBirthdayDateGlobal(p.birthday);if(b)(birth[dateKey(b.month,b.day)]=birth[dateKey(b.month,b.day)]||[]).push(p)});
+ photos.forEach(p=>{const d=new Date(p.date);if(p.dataUrl&&!Number.isNaN(d.getTime())){const k=d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());(pics[k]=pics[k]||[]).push(p)}});
+ const monthDays=m=>{const f=(new Date(year,m,1).getDay()+6)%7,n=new Date(year,m+1,0).getDate(),x=[...Array(f).fill(0),...Array.from({length:n},(_,i)=>i+1)];while(x.length%7)x.push(0);return x};
+ const Month=({m})=><section style={{width:'min(94vw,610px)',minWidth:'min(94vw,610px)',scrollSnapAlign:'center',borderRadius:16,overflow:'hidden',background:darkMode?'#111827':'white',border:'1px solid '+(darkMode?'#334155':'#dbeafe')}}><header style={{padding:11,background:cols[m],color:'#172554',fontWeight:900,fontSize:18}}>{months[m]} {year}</header><div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:2,padding:7}}>{['M','T','W','T','F','S','S'].map((x,i)=><b key={i} style={{textAlign:'center',fontSize:9,color:'#64748b'}}>{x}</b>)}{monthDays(m).map((d,i)=>!d?<span key={i}/>:<button key={d} onClick={()=>setDay(dateKey(m,d))} style={{position:'relative',minHeight:70,overflow:'hidden',borderRadius:6,border:'1px solid '+(darkMode?'#334155':'#e2e8f0'),background:darkMode?'#172033':'#f8fafc',color:darkMode?'white':'#0f172a',textAlign:'left',padding:4}}>{pics[dateKey(m,d)]?.[0]&&<><img src={pics[dateKey(m,d)][0].dataUrl} style={{position:'absolute',inset:0,width:'100%',height:'100%',objectFit:'cover'}}/><i style={{position:'absolute',inset:0,background:'rgba(0,0,0,.42)'}}/></>}<b style={{position:'relative',zIndex:2}}>{d}</b><span style={{position:'absolute',zIndex:2,left:3,right:3,top:20}}>{(evs[dateKey(m,d)]||[]).slice(0,2).map((e,j)=><small key={j} style={{display:'block',fontSize:7,padding:2,marginBottom:2,borderRadius:3,background:e.device?'#4285f4':'#10b981',color:'white',overflow:'hidden',whiteSpace:'nowrap'}}>{e.title}</small>)}</span><span style={{position:'absolute',zIndex:3,left:3,bottom:3,display:'flex'}}>{(birth[dateKey(m,d)]||[]).slice(0,3).map((p,j)=><span key={p.id} onClick={e=>{e.stopPropagation();onPerson(p.id)}} style={{width:23,height:23,marginLeft:j?-5:0,borderRadius:'50%',border:'1px solid white',overflow:'hidden',background:cols[m]}}>{p.img?<img src={p.img} style={{width:'100%',height:'100%',objectFit:'cover'}}/>:(p.label||'?')[0]}</span>)}</span></button>)}</div></section>;
+ const ix=e=>{const r=e.currentTarget.getBoundingClientRect();return Math.max(0,Math.min(47,Math.floor((e.clientY-r.top)/(r.height/48))))},tm=n=>pad(Math.floor(n/2))+':'+(n%2?'30':'00');
+ const Timeline=({date})=>{const s=drag?.date===date?{a:Math.min(drag.a,drag.b),b:Math.max(drag.a,drag.b)}:null;return <section style={{minWidth:330,borderRadius:14,overflow:'hidden',background:darkMode?'#111827':'white',border:'1px solid '+(darkMode?'#334155':'#cbd5e1')}}><header style={{padding:10,fontWeight:900}}>{new Date(date+'T12:00:00').toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long'})}</header><div style={{display:'grid',gridTemplateColumns:'54px 1fr'}}><aside style={{position:'relative',height:1248}}>{Array.from({length:25},(_,h)=><span key={h} style={{position:'absolute',right:6,top:h*52,transform:h?'translateY(-50%)':'none',fontSize:9,color:'#64748b'}}>{pad(h===24?0:h)}:00</span>)}</aside><main onPointerDown={e=>{e.currentTarget.setPointerCapture(e.pointerId);const n=ix(e);setDrag({date,a:n,b:n,id:e.pointerId})}} onPointerMove={e=>drag?.id===e.pointerId&&setDrag(x=>({...x,b:ix(e)}))} onPointerUp={e=>{if(drag?.id!==e.pointerId)return;const lo=Math.min(drag.a,drag.b),hi=Math.max(drag.a,drag.b)+1;setDraft({date,title:'',notes:'',location:'',peopleIds:[],startTime:tm(lo),endTime:hi===48?'23:59':tm(hi)});setDrag(null)}} style={{position:'relative',height:1248,touchAction:'none',background:darkMode?'#0f172a':'white'}}>{Array.from({length:48},(_,n)=><i key={n} style={{position:'absolute',left:0,right:0,top:n*26,height:26,borderTop:n%2===0?'1px solid '+(darkMode?'#334155':'#cbd5e1'):'none'}}/>)}{s&&<i style={{position:'absolute',zIndex:4,left:2,right:2,top:s.a*26,height:(s.b-s.a+1)*26,border:'2px solid #3b82f6',borderRadius:5,background:'rgba(59,130,246,.12)'}}/>}{(evs[date]||[]).filter(e=>e.startTime).map((e,j)=>{const f=t=>{const z=t.split(':').map(Number);return z[0]*2+(z[1]>=30?1:0)},st=f(e.startTime),en=Math.max(st+1,f(e.endTime));return <div key={e.id||j} style={{position:'absolute',zIndex:3,left:4,right:4,top:st*26+2,height:(en-st)*26-4,padding:4,borderRadius:5,background:'#10b981',color:'white',fontSize:9,fontWeight:800}}>{e.title}</div>})}</main></div></section>};
+ const ddata={priorities:[],todos:[],...(notes[day]||{})},patch=x=>setNotes(p=>({...p,[day]:{...ddata,...x}}));
+ const Sidebar=()=> <aside style={{minWidth:240,display:'flex',flexDirection:'column',gap:10}}>{[['Top priorities','priority'],['To-do list','todo']].map(([title,type])=><section key={type} style={{padding:11,borderRadius:12,background:darkMode?'#111827':'white'}}><b>{title}</b>{(type==='priority'?ddata.priorities:ddata.todos).map((x,j)=>type==='priority'?<div key={j}>{j+1}. {x}</div>:<label key={j} style={{display:'block'}}><input type="checkbox" checked={x.done} onChange={()=>patch({todos:ddata.todos.map((t,k)=>k===j?{...t,done:!t.done}:t)})}/>{x.text}</label>)}<input value={input[type]} onChange={e=>setInput(v=>({...v,[type]:e.target.value}))} placeholder={'Add '+type}/><button onClick={()=>{const v=input[type].trim();if(!v)return;if(type==='priority')patch({priorities:[...ddata.priorities,v]});else patch({todos:[...ddata.todos,{text:v,done:false}]});setInput(x=>({...x,[type]:''}))}}>＋</button></section>)}<section style={{padding:11,borderRadius:12,background:darkMode?'#111827':'white'}}><b>My photo journal</b><div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:4,marginTop:7}}>{(pics[day]||[]).map(p=><img key={p.key} src={p.dataUrl} style={{width:'100%',aspectRatio:'1',objectFit:'cover'}}/>)}</div><label style={{display:'block',marginTop:7,padding:8,textAlign:'center',background:'#3b82f6',color:'white'}}>＋ Add photo<input hidden type="file" accept="image/*" onChange={e=>{const f=e.target.files?.[0];if(f){const r=new FileReader();r.onload=()=>onPhoto(day,r.result);r.readAsDataURL(f)}e.target.value=''}}/></label></section></aside>;
+ if(day){const n=new Date(day+'T12:00:00');n.setDate(n.getDate()+1);const next=n.toISOString().slice(0,10),mode=preference==='auto'?(window.innerWidth>window.innerHeight?'horizontal':'vertical'):preference;return <div style={{position:'absolute',inset:'0 0 calc(64px + env(safe-area-inset-bottom,0px)) 0',zIndex:85,overflow:'auto',background:darkMode?'#07101f':'#f1f5f9',color:darkMode?'white':'#0f172a'}}><header style={{position:'sticky',top:0,zIndex:10,padding:'calc(env(safe-area-inset-top,0px) + 8px) 10px 8px',background:darkMode?'#0f172a':'white',display:'flex'}}><button onClick={()=>setDay(null)}>← Calendar</button><b style={{flex:1,textAlign:'center'}}>Daily planner</b><select value={preference} onChange={e=>setPreference(e.target.value)}><option value="auto">Adaptive</option><option value="vertical">Vertical</option><option value="horizontal">Horizontal</option></select></header>{mode==='vertical'?<div style={{display:'grid',gridTemplateColumns:'minmax(330px,1fr) 250px',gap:10,padding:10,minWidth:600}}><div style={{display:'flex',flexDirection:'column',gap:10}}><Timeline date={day}/><Timeline date={next}/></div><Sidebar/></div>:<div style={{padding:10}}><div style={{display:'flex',gap:10,overflowX:'auto'}}><Timeline date={day}/><Timeline date={next}/></div><Sidebar/></div>}{draft&&<div style={{position:'fixed',inset:0,zIndex:500,display:'flex',alignItems:'center',justifyContent:'center',background:'rgba(2,6,23,.7)',padding:15}}><form onSubmit={e=>{e.preventDefault();if(draft.title.trim()){onEvent({...draft,id:'evt_'+Date.now()});setDraft(null)}} style={{width:'min(500px,100%)',padding:16,borderRadius:16,background:darkMode?'#111827':'white'}}><h3>New event</h3><input required value={draft.title} onChange={e=>setDraft({...draft,title:e.target.value})} placeholder="Title"/><input type="time" step="1800" value={draft.startTime} onChange={e=>setDraft({...draft,startTime:e.target.value})}/><input type="time" step="1800" value={draft.endTime} onChange={e=>setDraft({...draft,endTime:e.target.value})}/><input value={draft.location} onChange={e=>setDraft({...draft,location:e.target.value})} placeholder="Location"/><textarea value={draft.notes} onChange={e=>setDraft({...draft,notes:e.target.value})} placeholder="Notes"/><div>{people.map(p=><label key={p.id}><input type="checkbox" checked={draft.peopleIds.includes(p.id)} onChange={()=>setDraft({...draft,peopleIds:draft.peopleIds.includes(p.id)?draft.peopleIds.filter(x=>x!==p.id):[...draft.peopleIds,p.id]})}/>{p.label}</label>)}</div><button type="button" onClick={()=>setDraft(null)}>Cancel</button><button type="submit">Save & sync</button></form></div>}</div>}
+ return <div style={{position:'absolute',inset:'0 0 calc(64px + env(safe-area-inset-bottom,0px)) 0',zIndex:80,background:darkMode?'#07101f':'#f1f5f9',color:darkMode?'white':'#0f172a'}}><header style={{position:'absolute',zIndex:100,top:0,left:0,right:0,padding:'calc(env(safe-area-inset-top,0px) + 7px) 9px 7px',display:'flex',gap:6,background:darkMode?'#0f172a':'white'}}><button onClick={()=>setYear(year-1)}>‹</button><b>{year}</b><button onClick={()=>setYear(year+1)}>›</button><span style={{flex:1}}/>{[['circle','Circle'],['stack','Stack'],['row','Row']].map(x=><button key={x[0]} onClick={()=>setLayout(x[0])}>{x[1]}</button>)}</header><main style={{position:'absolute',inset:'calc(env(safe-area-inset-top,0px) + 48px) 0 0',overflow:layout==='row'?'hidden':'auto'}}>{layout==='circle'?<BirthdayYearWheel nodes={nodes} darkMode={darkMode} year={year} onPerson={onPerson} onDay={setDay} galleryPhotos={photos}/>:layout==='stack'?<div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:12,padding:12}}>{months.map((_,m)=><Month key={m} m={m}/>)}</div>:<div style={{height:'100%',display:'flex',alignItems:'center',gap:12,overflowX:'auto',padding:'0 3vw',scrollSnapType:'x mandatory'}}>{months.map((_,m)=><Month key={m} m={m}/>)}</div>}</main></div>
+}
+
 
 function AppInner() {
   const svgRef = useRef(null);
@@ -2409,8 +2426,10 @@ function AppInner() {
   const [viewMode, setViewMode] = useState(() => {
     try { return JSON.parse(localStorage.getItem('ft_viewMode')) || 'canvas'; } catch(e) { return 'canvas'; }
   });
-  const [calendarLayout, setCalendarLayout] = useState('circle');
-  const [calendarGalleryPhotos, setCalendarGalleryPhotos] = useState([]);
+  const [calendarLayout,setCalendarLayout]=useState(()=>{const x=loadData('ft_calendar_layout','circle');return ['circle','stack','row'].includes(x)?x:'circle'});
+  const [calendarGalleryPhotos,setCalendarGalleryPhotos]=useState([]);
+  const [plannerPreference,setPlannerPreference]=useState(()=>loadData('ft_planner_preference','auto'));
+  const [plannerNotes,setPlannerNotes]=useState(()=>loadData('ft_planner_notes',{}));
   const [calViewMode, setCalViewMode] = useState('monthly');
   const [calMonth, setCalMonth] = useState(() => new Date().getMonth());
   const [calYear, setCalYear] = useState(() => new Date().getFullYear());
@@ -2799,7 +2818,7 @@ function AppInner() {
 
   useEffect(() => {
     let cancelled=false;
-    if(viewMode!=='calendar'||calViewMode!=='birthdays'||calendarLayout!=='circle') return () => { cancelled=true; };
+    if(viewMode!=='calendar') return () => { cancelled=true; };
     openPhotoDB().then(db=>new Promise((resolve,reject)=>{
       const tx=db.transaction('gallery','readonly');
       const req=tx.objectStore('gallery').getAll();
@@ -2807,7 +2826,7 @@ function AppInner() {
       req.onerror=reject;
     })).then(items=>{if(!cancelled)setCalendarGalleryPhotos(items);}).catch(()=>{if(!cancelled)setCalendarGalleryPhotos([]);});
     return () => { cancelled=true; };
-  }, [viewMode,calViewMode,calendarLayout]);
+  }, [viewMode]);
 
   // Resize any source image (data URL) up or down to a standard square,
   // matching the quality standard used for manually-cropped photos elsewhere
@@ -6944,6 +6963,9 @@ Respond with ONLY a JSON object in this exact shape, no markdown formatting, no 
   }, [nodes]);
   useEffect(() => { saveData('ft_links', links); }, [links]);
   useEffect(() => { saveData('ft_cal_events', calEvents); }, [calEvents]);
+  useEffect(()=>saveData('ft_calendar_layout',calendarLayout),[calendarLayout]);
+  useEffect(()=>saveData('ft_planner_preference',plannerPreference),[plannerPreference]);
+  useEffect(()=>saveData('ft_planner_notes',plannerNotes),[plannerNotes]);
   useEffect(() => { saveData('ft_cal_recurring', calRecurring); }, [calRecurring]);
   useEffect(() => { saveData('ft_health_lists', healthLists); }, [healthLists]);
   useEffect(() => { saveData('ft_habit_today_v2', habitToday); }, [habitToday]);
@@ -15534,6 +15556,7 @@ Return only the JSON array. If nothing trackable is found, return [].`;
               style={{padding:'3px 8px', borderRadius:99, border:'none', cursor:'pointer', fontSize:10, fontWeight:700, background:'#ef4444', color:'white'}}>✕</button>
           </div>
         )}
+        {viewMode==='calendar'&&<CalendarPlannerV2 nodes={nodes} darkMode={theme.darkMode} year={calYear} setYear={setCalYear} layout={calendarLayout} setLayout={setCalendarLayout} events={calEvents} deviceEvents={gCalEvents} photos={calendarGalleryPhotos} notes={plannerNotes} setNotes={setPlannerNotes} preference={plannerPreference} setPreference={setPlannerPreference} onPerson={id=>{setSelectedNodeId(id);setViewMode('canvas')}} onPhoto={async(date,dataUrl)=>{const stamp=date+'T12:00:00',k=await saveToGallery('me',dataUrl,{sourceType:'daily-journal',date:stamp,taggedNodeIds:['me']});if(k)setCalendarGalleryPhotos(p=>[...p,{key:k,nodeId:'me',dataUrl,date:stamp,sourceType:'daily-journal',taggedNodeIds:['me']}])}} onEvent={async event=>{setCalEvents(p=>[...p,{...event,createdAt:new Date().toISOString()}]);const Cal=window.Capacitor?.Plugins?.CapacitorCalendar;if(gCalToken&&Cal){try{const names=(event.peopleIds||[]).map(id=>nodes.find(n=>n.id===id)?.label).filter(Boolean);await Cal.createEvent({title:event.title,startDate:new Date(event.date+'T'+event.startTime+':00').getTime(),endDate:new Date(event.date+'T'+event.endTime+':00').getTime(),description:[event.notes,names.join(', ')].filter(Boolean).join('\n\n'),location:event.location||''});showToast('📅 Saved and synced');await gCalFetchEvents()}catch(e){showToast('Saved locally — sync needs retrying')}}else showToast('📅 Event saved locally')}}/>}
         {viewMode === 'calendar' && calViewMode === 'birthdays' && calendarLayout === 'circle' && (
           <BirthdayYearWheel nodes={nodes} darkMode={theme.darkMode} year={calYear} galleryPhotos={calendarGalleryPhotos}
             onPerson={id=>{setSelectedNodeId(id);setViewMode('canvas');}}/>
