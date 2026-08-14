@@ -12,8 +12,8 @@ import { saveData, loadData, saveRaw } from './services/persistence';
 import { registerPlugin } from '@capacitor/core';
 
 
-const APP_VERSION = '4.3.21';
-const BUILD_ID = '2026-08-13-daily-activity-planner';
+const APP_VERSION = '4.3.22';
+const BUILD_ID = '2026-08-14-visual-time-planner';
 const GOOGLE_WEB_CLIENT_ID = '54802084194-qiej4s3ahd0eojf26rnjtsoius482fio.apps.googleusercontent.com';
 const GOOGLE_DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 const GoogleDriveAuthorization = registerPlugin('GoogleDriveAuthorization');
@@ -23,8 +23,8 @@ const MAP_VIEW_FAMILIES = [
   { key:'branch', emoji:'🌿', name:'Branch', desc:'You at the side; connections branch right', variants:[{key:'branch',name:'Standard'},{key:'branchDetailed',name:'Fancy · Coming next',disabled:true}] },
   { key:'stack', emoji:'📚', name:'Stack', desc:'Groups arranged in stacked sections', variants:[{key:'feed',name:'Standard'},{key:'feedDetailed',name:'Fancy'}] },
 ];
-const BUILD_DATE = '13 August 2026';
-const WHATS_NEW = 'Plan and complete daily activities in Today, three-day, week and month views, with reversible person-linked interaction points.';
+const BUILD_DATE = '14 August 2026';
+const WHATS_NEW = 'A safe-area-aware visual planner adds hourly Day and seven-column Week timelines, timed activity blocks, and a compact Month overview.';
 
 // ─── Calendar Integration ─────────────────────────────────────────────────
 // Uses the Capgo calendar plugin (Capacitor) to read/write the phone's
@@ -2242,9 +2242,9 @@ function AppInner() {
   const [calEvents, setCalEvents] = useState(() => loadData('ft_cal_events', []));
   const [calRecurring, setCalRecurring] = useState(() => loadData('ft_cal_recurring', []));
   const [activities, setActivities] = useState(() => loadData('ft_activities', []));
-  const [activityView, setActivityView] = useState('today');
+  const [activityView, setActivityView] = useState('day');
   const [activityAnchorDate, setActivityAnchorDate] = useState(() => getLocalDateStr(new Date()));
-  const [activityDraft, setActivityDraft] = useState(() => ({ title:'', date:getLocalDateStr(new Date()), personId:'', points:20 }));
+  const [activityDraft, setActivityDraft] = useState(() => ({ title:'', date:getLocalDateStr(new Date()), startTime:'09:00', endTime:'10:00', personId:'', points:20 }));
   const [showAddCalEvent, setShowAddCalEvent] = useState(null); // date string for new event modal
   const [calEventSelectedPeople, setCalEventSelectedPeople] = useState([]); // node ids selected in event modal
 
@@ -5117,10 +5117,16 @@ function AppInner() {
     const title = activityDraft.title.trim();
     if (!title) { showToast('Add an activity description first'); return; }
     const points = Math.max(0, Math.min(200, Number(activityDraft.points) || 0));
+    const startTime = activityDraft.startTime || '09:00';
+    const endTime = activityDraft.endTime || '10:00';
+    const toMinutes = value => { const [hours,minutes] = value.split(':').map(Number); return hours * 60 + minutes; };
+    if (toMinutes(endTime) <= toMinutes(startTime)) { showToast('End time must be after start time'); return; }
     const item = {
       id:'activity_' + Date.now() + '_' + Math.random().toString(36).slice(2,6),
       title,
       date:activityDraft.date || getLocalDateStr(new Date()),
+      startTime,
+      endTime,
       personId:activityDraft.personId || '',
       points,
       completed:false,
@@ -15531,76 +15537,104 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         )}
 
         {viewMode === 'calendar' && calViewMode === 'activities' && (() => {
-          const dm = theme.darkMode;
-          const anchor = new Date(activityAnchorDate + 'T12:00:00');
-          const dayKey = date => getLocalDateStr(date);
-          const addDays = (date,count) => { const next=new Date(date); next.setDate(next.getDate()+count); return next; };
-          let visibleDates = [];
-          if (activityView === 'today') visibleDates = [dayKey(anchor)];
-          if (activityView === 'three') visibleDates = [-1,0,1].map(offset=>dayKey(addDays(anchor,offset)));
-          if (activityView === 'week') {
-            const monday = addDays(anchor,-((anchor.getDay()+6)%7));
-            visibleDates = Array.from({length:7},(_,index)=>dayKey(addDays(monday,index)));
-          }
-          if (activityView === 'month') {
-            const count = new Date(anchor.getFullYear(),anchor.getMonth()+1,0).getDate();
-            visibleDates = Array.from({length:count},(_,index)=>dayKey(new Date(anchor.getFullYear(),anchor.getMonth(),index+1)));
-          }
-          const people = nodes.filter(node => node.id !== 'me' && node.type !== 'hub' && node.type !== 'flower')
-            .sort((a,b)=>(a.label||'').localeCompare(b.label||''));
-          const formatDay = key => new Date(key+'T12:00:00').toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short'});
-          const shift = direction => {
-            const amount = activityView==='month' ? 30 : activityView==='week' ? 7 : activityView==='three' ? 3 : 1;
-            const next=addDays(anchor,direction*amount);
-            setActivityAnchorDate(dayKey(next));
-            setActivityDraft(prev=>({...prev,date:dayKey(next)}));
-          };
-          return <div style={{position:'absolute',inset:0,zIndex:55,overflowY:'auto',background:dm?'#07101f':'#f8fafc',padding:'12px 12px 90px'}}>
-            <div style={{maxWidth:900,margin:'0 auto'}}>
-              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8}}>
-                <button onClick={()=>setCalViewMode('monthly')} style={{border:'none',background:'transparent',color:dm?'#94a3b8':'#64748b',fontWeight:800}}>← Calendar</button>
-                <div style={{fontSize:18,fontWeight:900,color:dm?'white':'#0f172a'}}>Daily activities</div>
-                <button onClick={()=>{const now=getLocalDateStr(new Date());setActivityAnchorDate(now);setActivityDraft(prev=>({...prev,date:now}));}} style={{border:'none',borderRadius:8,padding:'6px 9px',background:'#10b981',color:'white',fontWeight:800}}>Today</button>
-              </div>
-              <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:5,marginTop:12}}>
-                {[['today','Today'],['three','3 days'],['week','Week'],['month','Month']].map(([id,label])=><button key={id} onClick={()=>setActivityView(id)} style={{padding:'8px 3px',borderRadius:9,border:'none',background:activityView===id?'#10b981':(dm?'#1e293b':'#e2e8f0'),color:activityView===id?'white':(dm?'#cbd5e1':'#334155'),fontWeight:800,fontSize:11}}>{label}</button>)}
-              </div>
-              <div style={{display:'flex',justifyContent:'center',alignItems:'center',gap:10,marginTop:10}}>
-                <button onClick={()=>shift(-1)} style={{border:'none',background:'transparent',color:dm?'white':'#0f172a',fontSize:22}}>‹</button>
-                <strong style={{fontSize:13,color:dm?'#e2e8f0':'#334155'}}>{activityView==='month' ? anchor.toLocaleDateString('en-GB',{month:'long',year:'numeric'}) : formatDay(activityAnchorDate)}</strong>
-                <button onClick={()=>shift(1)} style={{border:'none',background:'transparent',color:dm?'white':'#0f172a',fontSize:22}}>›</button>
-              </div>
-              <div style={{marginTop:12,padding:12,borderRadius:13,background:dm?'#0f172a':'white',border:'1px solid #334155'}}>
-                <div style={{fontSize:12,fontWeight:900,color:dm?'white':'#0f172a'}}>Quick plan or log</div>
-                <input value={activityDraft.title} onChange={event=>setActivityDraft(prev=>({...prev,title:event.target.value}))} onKeyDown={event=>{if(event.key==='Enter')addPlannedActivity();}} placeholder="e.g. Dinner with Mum" style={{width:'100%',marginTop:8,padding:9,borderRadius:8,border:'1px solid #475569',background:dm?'#111827':'white',color:dm?'white':'#0f172a'}}/>
-                <div style={{display:'grid',gridTemplateColumns:'1.2fr 1.5fr .7fr',gap:6,marginTop:7}}>
-                  <input type="date" value={activityDraft.date} onChange={event=>setActivityDraft(prev=>({...prev,date:event.target.value}))} style={{minWidth:0,padding:7,borderRadius:8,border:'1px solid #475569',background:dm?'#111827':'white',color:dm?'white':'#0f172a'}}/>
-                  <select value={activityDraft.personId} onChange={event=>setActivityDraft(prev=>({...prev,personId:event.target.value}))} style={{minWidth:0,padding:7,borderRadius:8,border:'1px solid #475569',background:dm?'#111827':'white',color:dm?'white':'#0f172a'}}>
-                    <option value="">No person</option>{people.map(person=><option key={person.id} value={person.id}>{person.label||'Unnamed'}</option>)}
-                  </select>
-                  <input type="number" min="0" max="200" value={activityDraft.points} onChange={event=>setActivityDraft(prev=>({...prev,points:event.target.value}))} aria-label="Points" style={{minWidth:0,padding:7,borderRadius:8,border:'1px solid #475569',background:dm?'#111827':'white',color:dm?'white':'#0f172a'}}/>
-                </div>
-                <button onClick={addPlannedActivity} style={{width:'100%',marginTop:8,padding:9,borderRadius:9,border:'none',background:'#3b82f6',color:'white',fontWeight:900}}>Add activity</button>
-              </div>
-              <div style={{display:'grid',gridTemplateColumns:activityView==='month'?'repeat(2,minmax(0,1fr))':'1fr',gap:8,marginTop:10}}>
-                {visibleDates.map(date => {
-                  const items=activities.filter(activity=>activity.date===date).sort((a,b)=>Number(a.completed)-Number(b.completed));
-                  return <section key={date} style={{padding:10,borderRadius:12,background:dm?'#0f172a':'white',border:'1px solid #334155',minHeight:72}}>
-                    <div style={{fontSize:12,fontWeight:900,color:date===getLocalDateStr(new Date())?'#10b981':(dm?'#e2e8f0':'#334155')}}>{formatDay(date)}</div>
-                    {items.length ? items.map(item=>{
-                      const person=people.find(value=>value.id===item.personId);
-                      return <div key={item.id} style={{display:'flex',gap:8,alignItems:'center',marginTop:8,padding:8,borderRadius:9,background:dm?'#111827':'#f1f5f9',opacity:item.completed?0.65:1}}>
-                        <input type="checkbox" checked={!!item.completed} onChange={()=>togglePlannedActivity(item.id)} style={{width:19,height:19}}/>
-                        <div style={{flex:1,minWidth:0}}><div style={{fontSize:12,fontWeight:800,textDecoration:item.completed?'line-through':'none'}}>{item.title}</div><div style={{fontSize:9,color:'#94a3b8'}}>{person?person.label+' · ':''}{item.personId?item.points+' points':'No points logged'}</div></div>
-                        <button onClick={()=>deletePlannedActivity(item.id)} style={{border:'none',background:'transparent',color:'#ef4444',fontSize:16}}>×</button>
-                      </div>;
-                    }) : <div style={{fontSize:10,color:'#64748b',marginTop:7}}>Nothing planned</div>}
-                  </section>;
-                })}
-              </div>
-            </div>
-          </div>;
-        })()}
+  const dm=theme.darkMode, anchor=new Date(activityAnchorDate+'T12:00:00'), todayKey=getLocalDateStr(new Date());
+  const dayKey=d=>getLocalDateStr(d);
+  const addDays=(d,n)=>{const x=new Date(d);x.setDate(x.getDate()+n);return x;};
+  const monday=addDays(anchor,-((anchor.getDay()+6)%7));
+  const weekDates=Array.from({length:7},(_,i)=>dayKey(addDays(monday,i)));
+  const people=nodes.filter(n=>n.id!=='me'&&n.type!=='hub'&&n.type!=='flower').sort((a,b)=>(a.label||'').localeCompare(b.label||''));
+  const fmt=(key,short=false)=>new Date(key+'T12:00:00').toLocaleDateString('en-GB',short?{weekday:'short',day:'numeric'}:{weekday:'short',day:'numeric',month:'short'});
+  const mins=value=>{if(!value)return null;const [h,m]=value.split(':').map(Number);return Number.isFinite(h)&&Number.isFinite(m)?h*60+m:null;};
+  const hourHeight=activityView==='week'?44:52, timelineHeight=24*hourHeight, hours=Array.from({length:25},(_,i)=>i);
+  const timed=date=>activities.filter(a=>a.date===date&&mins(a.startTime)!==null&&mins(a.endTime)!==null).sort((a,b)=>mins(a.startTime)-mins(b.startTime));
+  const person=id=>people.find(p=>p.id===id);
+  const shift=dir=>{
+    const next=activityView==='month'?new Date(anchor.getFullYear(),anchor.getMonth()+dir,1):addDays(anchor,dir*(activityView==='week'?7:1));
+    setActivityAnchorDate(dayKey(next));setActivityDraft(p=>({...p,date:dayKey(next)}));
+  };
+  const block=(item,compact=false)=>{
+    const start=mins(item.startTime),end=mins(item.endTime),p=person(item.personId);
+    const top=start/60*hourHeight,height=Math.max(24,(end-start)/60*hourHeight-3);
+    return <div key={item.id} style={{position:'absolute',top,left:compact?3:6,right:compact?3:6,height,zIndex:2,borderRadius:7,padding:compact?'3px 4px':'5px 7px',overflow:'hidden',background:item.completed?'#475569':item.personId?'#2563eb':'#0d9488',color:'white',boxShadow:'0 1px 3px rgba(0,0,0,.3)',opacity:item.completed?0.72:1}}>
+      <div style={{display:'flex',gap:compact?3:5,height:'100%'}}>
+        <input type="checkbox" checked={!!item.completed} onChange={()=>togglePlannedActivity(item.id)} style={{width:compact?13:16,height:compact?13:16,margin:0,flex:'0 0 auto'}}/>
+        <div style={{minWidth:0,flex:1}}>
+          <div style={{fontSize:compact?9:11,fontWeight:900,lineHeight:1.15,whiteSpace:height<(compact?36:42)?'nowrap':'normal',overflow:'hidden',textOverflow:'ellipsis',textDecoration:item.completed?'line-through':'none'}}>{item.title}</div>
+          {height>34&&<div style={{fontSize:compact?7:9,opacity:.9,marginTop:2,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{item.startTime}–{item.endTime}{p?' · '+p.label:''}</div>}
+        </div>
+        {!compact&&height>35&&<button onClick={()=>deletePlannedActivity(item.id)} style={{border:'none',background:'transparent',color:'white',padding:0,fontSize:14}}>×</button>}
+      </div>
+    </div>;
+  };
+  const lines=<>{hours.map(h=><div key={h} style={{position:'absolute',top:h*hourHeight,left:0,right:0,borderTop:`1px solid ${dm?'#263449':'#e2e8f0'}`}}/>)}{Array.from({length:24},(_,h)=><div key={'half'+h} style={{position:'absolute',top:(h+.5)*hourHeight,left:0,right:0,borderTop:`1px dashed ${dm?'#1e293b':'#f1f5f9'}`}}/>)}</>;
+  const dayTimeline=<div style={{display:'grid',gridTemplateColumns:'48px minmax(0,1fr)',border:`1px solid ${dm?'#334155':'#cbd5e1'}`,borderRadius:12,overflow:'hidden',background:dm?'#0f172a':'white'}}>
+    <div style={{position:'relative',height:timelineHeight,background:dm?'#111827':'#f8fafc'}}>{hours.map(h=><div key={h} style={{position:'absolute',top:h*hourHeight-7,right:7,fontSize:9,fontWeight:700,color:'#64748b'}}>{String(h%24).padStart(2,'0')}:00</div>)}</div>
+    <div style={{position:'relative',height:timelineHeight,borderLeft:`1px solid ${dm?'#334155':'#cbd5e1'}`}}>{lines}{timed(activityAnchorDate).map(a=>block(a))}</div>
+  </div>;
+  const weekTimeline=<div style={{overflowX:'auto',border:`1px solid ${dm?'#334155':'#cbd5e1'}`,borderRadius:12,background:dm?'#0f172a':'white'}}>
+    <div style={{minWidth:900}}>
+      <div style={{display:'grid',gridTemplateColumns:'46px repeat(7,minmax(118px,1fr))',position:'sticky',top:0,zIndex:5,background:dm?'#0f172a':'white'}}>
+        <div/>{weekDates.map(d=><div key={d} style={{padding:8,textAlign:'center',borderLeft:`1px solid ${dm?'#334155':'#cbd5e1'}`,color:d===todayKey?'#10b981':dm?'#e2e8f0':'#334155',fontSize:10,fontWeight:900}}>{fmt(d,true)}</div>)}
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'46px repeat(7,minmax(118px,1fr))'}}>
+        <div style={{position:'relative',height:timelineHeight,background:dm?'#111827':'#f8fafc'}}>{hours.map(h=><div key={h} style={{position:'absolute',top:h*hourHeight-6,right:5,fontSize:8,fontWeight:700,color:'#64748b'}}>{String(h%24).padStart(2,'0')}</div>)}</div>
+        {weekDates.map(d=><div key={d} style={{position:'relative',height:timelineHeight,borderLeft:`1px solid ${dm?'#334155':'#cbd5e1'}`,background:d===todayKey?'rgba(16,185,129,.05)':'transparent'}}>{lines}{timed(d).map(a=>block(a,true))}</div>)}
+      </div>
+    </div>
+  </div>;
+  const unscheduledDates=activityView==='week'?weekDates:[activityAnchorDate];
+  const unscheduled=activities.filter(a=>unscheduledDates.includes(a.date)&&(mins(a.startTime)===null||mins(a.endTime)===null));
+  const monthStart=new Date(anchor.getFullYear(),anchor.getMonth(),1),monthDays=new Date(anchor.getFullYear(),anchor.getMonth()+1,0).getDate();
+  const monthCells=[...Array((monthStart.getDay()+6)%7).fill(null),...Array.from({length:monthDays},(_,i)=>dayKey(new Date(anchor.getFullYear(),anchor.getMonth(),i+1)))];
+  while(monthCells.length%7)monthCells.push(null);
+  const field={width:'100%',marginTop:3,padding:7,borderRadius:8,border:'1px solid #475569',background:dm?'#111827':'white',color:dm?'white':'#0f172a'};
+  return <div style={{position:'absolute',inset:'0 0 calc(64px + env(safe-area-inset-bottom, 0px)) 0',zIndex:55,overflowY:'auto',background:dm?'#07101f':'#f8fafc'}}>
+    <div style={{maxWidth:1200,margin:'0 auto',padding:'0 12px 28px'}}>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,padding:'14px 0 10px',paddingTop:'calc(env(safe-area-inset-top, 0px) + 14px)',position:'sticky',top:0,zIndex:20,background:dm?'#07101f':'#f8fafc',borderBottom:`1px solid ${dm?'#1e293b':'#e2e8f0'}`}}>
+        <button onClick={()=>setCalViewMode('monthly')} style={{border:'none',background:'transparent',color:dm?'#94a3b8':'#64748b',fontWeight:800}}>← Calendar</button>
+        <div style={{fontSize:18,fontWeight:900,color:dm?'white':'#0f172a'}}>Activity planner</div>
+        <button onClick={()=>{const now=getLocalDateStr(new Date());setActivityAnchorDate(now);setActivityDraft(p=>({...p,date:now}));}} style={{border:'none',borderRadius:8,padding:'7px 10px',background:'#10b981',color:'white',fontWeight:800}}>Today</button>
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:6,marginTop:12}}>
+        {[['day','Day'],['week','Week'],['month','Month']].map(([id,label])=><button key={id} onClick={()=>setActivityView(id)} style={{padding:10,borderRadius:9,border:'none',background:activityView===id?'#10b981':dm?'#1e293b':'#e2e8f0',color:activityView===id?'white':dm?'#cbd5e1':'#334155',fontWeight:900}}>{label}</button>)}
+      </div>
+      <div style={{display:'flex',justifyContent:'center',alignItems:'center',gap:12,marginTop:9}}>
+        <button onClick={()=>shift(-1)} style={{border:'none',background:'transparent',color:dm?'white':'#0f172a',fontSize:24}}>‹</button>
+        <strong style={{fontSize:13,color:dm?'#e2e8f0':'#334155'}}>{activityView==='month'?anchor.toLocaleDateString('en-GB',{month:'long',year:'numeric'}):activityView==='week'?fmt(weekDates[0])+' – '+fmt(weekDates[6]):fmt(activityAnchorDate)}</strong>
+        <button onClick={()=>shift(1)} style={{border:'none',background:'transparent',color:dm?'white':'#0f172a',fontSize:24}}>›</button>
+      </div>
+      <details style={{marginTop:9,padding:10,borderRadius:12,background:dm?'#0f172a':'white',border:`1px solid ${dm?'#334155':'#cbd5e1'}`}}>
+        <summary style={{fontSize:12,fontWeight:900,color:dm?'white':'#0f172a'}}>＋ Plan or log an activity</summary>
+        <input value={activityDraft.title} onChange={e=>setActivityDraft(p=>({...p,title:e.target.value}))} onKeyDown={e=>{if(e.key==='Enter')addPlannedActivity();}} placeholder="e.g. Dinner with Mum" style={{...field,marginTop:10}}/>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(2,minmax(0,1fr))',gap:7,marginTop:7}}>
+          <label style={{fontSize:9,color:'#94a3b8'}}>Date<input type="date" value={activityDraft.date} onChange={e=>setActivityDraft(p=>({...p,date:e.target.value}))} style={field}/></label>
+          <label style={{fontSize:9,color:'#94a3b8'}}>Person<select value={activityDraft.personId} onChange={e=>setActivityDraft(p=>({...p,personId:e.target.value}))} style={field}><option value="">No person</option>{people.map(p=><option key={p.id} value={p.id}>{p.label||'Unnamed'}</option>)}</select></label>
+          <label style={{fontSize:9,color:'#94a3b8'}}>Starts<input type="time" value={activityDraft.startTime} onChange={e=>setActivityDraft(p=>({...p,startTime:e.target.value}))} style={field}/></label>
+          <label style={{fontSize:9,color:'#94a3b8'}}>Ends<input type="time" value={activityDraft.endTime} onChange={e=>setActivityDraft(p=>({...p,endTime:e.target.value}))} style={field}/></label>
+        </div>
+        <label style={{display:'block',fontSize:9,color:'#94a3b8',marginTop:7}}>Interaction points<input type="number" min="0" max="200" value={activityDraft.points} onChange={e=>setActivityDraft(p=>({...p,points:e.target.value}))} style={field}/></label>
+        <button onClick={addPlannedActivity} style={{width:'100%',marginTop:9,padding:10,borderRadius:9,border:'none',background:'#3b82f6',color:'white',fontWeight:900}}>Add to planner</button>
+      </details>
+      <div style={{marginTop:11}}>
+        {activityView==='day'&&dayTimeline}
+        {activityView==='week'&&weekTimeline}
+        {activityView==='month'&&<div style={{border:`1px solid ${dm?'#334155':'#cbd5e1'}`,borderRadius:12,overflow:'hidden',background:dm?'#0f172a':'white'}}>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)'}}>{['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d=><div key={d} style={{padding:7,textAlign:'center',fontSize:9,fontWeight:900,color:'#94a3b8'}}>{d}</div>)}</div>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(7,minmax(0,1fr))'}}>{monthCells.map((date,i)=>{const items=date?activities.filter(a=>a.date===date):[];return <div key={date||i} onClick={()=>{if(date){setActivityAnchorDate(date);setActivityDraft(p=>({...p,date}));setActivityView('day');}}} style={{minHeight:76,padding:4,borderTop:`1px solid ${dm?'#263449':'#e2e8f0'}`,borderRight:`1px solid ${dm?'#263449':'#e2e8f0'}`,background:date===todayKey?'rgba(16,185,129,.08)':'transparent'}}>
+            {date&&<><div style={{fontSize:10,fontWeight:900,color:date===todayKey?'#10b981':dm?'#cbd5e1':'#334155'}}>{Number(date.slice(-2))}</div>{items.slice(0,3).map(a=><div key={a.id} style={{marginTop:3,padding:'2px 3px',borderRadius:4,background:a.completed?'#475569':a.personId?'#2563eb':'#0d9488',color:'white',fontSize:7,fontWeight:800,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{a.startTime?a.startTime+' ':''}{a.title}</div>)}{items.length>3&&<div style={{fontSize:7,color:'#94a3b8'}}>+{items.length-3} more</div>}</>}
+          </div>;})}</div>
+        </div>}
+      </div>
+      {activityView!=='month'&&unscheduled.length>0&&<section style={{marginTop:12,padding:10,borderRadius:12,background:dm?'#0f172a':'white',border:`1px solid ${dm?'#334155':'#cbd5e1'}`}}>
+        <div style={{fontSize:12,fontWeight:900,color:dm?'white':'#0f172a'}}>Unscheduled</div>
+        <div style={{fontSize:9,color:'#94a3b8'}}>Older activities without start and end times</div>
+        {unscheduled.map(a=><div key={a.id} style={{display:'flex',alignItems:'center',gap:7,marginTop:7,padding:7,borderRadius:8,background:dm?'#111827':'#f1f5f9'}}>
+          <input type="checkbox" checked={!!a.completed} onChange={()=>togglePlannedActivity(a.id)} style={{width:17,height:17}}/><div style={{flex:1,fontSize:11,fontWeight:800,textDecoration:a.completed?'line-through':'none'}}>{activityView==='week'&&fmt(a.date,true)+' · '}{a.title}</div><button onClick={()=>deletePlannedActivity(a.id)} style={{border:'none',background:'transparent',color:'#ef4444',fontSize:16}}>×</button>
+        </div>)}
+      </section>}
+    </div>
+  </div>;
+})()
 
         {/* ── Monthly Calendar View ─────────────────────────────── */}
         {viewMode === 'calendar' && calViewMode === 'monthly' && (() => {
