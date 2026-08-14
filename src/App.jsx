@@ -860,7 +860,7 @@ const KEYFRAMES_CSS = [
   '.ft-safe-top{top:var(--sat) !important;}',
   // In landscape the physical bottom edge is the app's right edge. Keep the
   // navigation there while its icons and labels remain upright.
-  '@media (orientation:landscape) and (max-height:600px){.ft-stacked-scroll{overflow-x:auto!important;overflow-y:hidden!important;white-space:nowrap;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch}.ft-stacked-scroll>.ft-stacked-leading-space{display:inline-block;width:64px;height:100%!important;vertical-align:top}.ft-stacked-scroll>[data-feed-section]{display:inline-block!important;vertical-align:top;white-space:normal;width:calc(100vw - 72px - env(safe-area-inset-right,0px));min-width:calc(100vw - 72px - env(safe-area-inset-right,0px));scroll-snap-align:start}body{padding-bottom:0!important;padding-right:0!important}.ft-app-shell{top:0!important;bottom:0!important;left:0!important;right:calc(72px + var(--sar))!important;width:auto!important;height:auto!important}.ft-bottom-tabs{top:0!important;bottom:0!important;left:auto!important;right:0!important;width:calc(72px + var(--sar))!important;height:100dvh!important;flex-direction:column!important;padding-bottom:0!important;padding-right:var(--sar)!important;border-top:none!important;border-left:1px solid #334155!important}.ft-bottom-tab{width:72px!important;min-height:0!important;flex:1 1 0!important;border-top:none!important;border-right:2px solid transparent!important;padding:4px!important}.ft-bottom-tab-active{border-right-color:#10b981!important}}',
+  '@media (orientation:landscape) and (max-height:600px){.ft-stacked-scroll{top:0!important;left:0!important;right:auto!important;bottom:auto!important;width:100dvh!important;height:calc(100dvw - 72px - env(safe-area-inset-right,0px))!important;transform-origin:top left;transform:translateX(calc(100dvw - 72px - env(safe-area-inset-right,0px))) rotate(90deg);overflow-y:auto!important;overflow-x:hidden!important;white-space:normal!important;-webkit-overflow-scrolling:touch}.ft-stacked-scroll>.ft-stacked-leading-space{display:block!important;width:auto!important;height:76px!important}.ft-stacked-scroll>[data-feed-section]{display:block!important;width:auto!important;min-width:0!important;white-space:normal!important}body{padding-bottom:0!important;padding-right:0!important}.ft-app-shell{top:0!important;bottom:0!important;left:0!important;right:calc(72px + var(--sar))!important;width:auto!important;height:auto!important}.ft-bottom-tabs{top:0!important;bottom:0!important;left:auto!important;right:0!important;width:calc(72px + var(--sar))!important;height:100dvh!important;flex-direction:column!important;padding-bottom:0!important;padding-right:var(--sar)!important;border-top:none!important;border-left:1px solid #334155!important}.ft-bottom-tab{width:72px!important;min-height:0!important;flex:1 1 0!important;border-top:none!important;border-right:2px solid transparent!important;padding:4px!important}.ft-bottom-tab-active{border-right-color:#10b981!important}}',
   // Fixed full-screen overlays should still cover the whole screen
 ].join(' ');
 
@@ -18339,8 +18339,10 @@ Return only the JSON array. If nothing trackable is found, return [].`;
         // pushing the last couple of columns off-screen with no way to scroll
         // to them. stripW = (COLS-1)*hex*1.5 + hex*2, solved for hex given the
         // available width after the band.
-        const landscapeNavReserve = window.innerWidth > window.innerHeight && window.innerHeight <= 600 ? 72 : 0;
-        const availW = window.innerWidth - BAND_W - landscapeNavReserve - 16; // small side margin
+        const stackedLandscape = window.innerWidth > window.innerHeight && window.innerHeight <= 600;
+        // Keep the portrait coordinate plane in landscape: its width is the phone's
+        // short axis, while the same vertical stack is rotated into horizontal scrolling.
+        const availW = (stackedLandscape ? window.innerHeight : window.innerWidth) - BAND_W - 16; // small side margin
         const FEED_HEX = Math.max(28, Math.min(72, availW / ((COLS - 1) * 1.5 + 2)));
         // Health list cards get their own target width, independent of the
         // 4-column people grid -- sized so roughly 6 fit across the
