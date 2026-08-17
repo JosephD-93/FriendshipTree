@@ -10,7 +10,7 @@
     "CapacitorUpdater": {
       "appId": "io.github.josephd93.friendshiptree",
       "version": "0.0.0",
-      "autoUpdate": "atBackground"
+      "autoUpdate": "onlyDownload"
     }
   }
 }
