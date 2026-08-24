@@ -1,36 +1,51 @@
-import React,{useMemo,useState}from"react";
+import React,{useMemo}from"react";
 import{WELLBEING_DOMAINS,WELLBEING_NODES}from"./model";
 
-const DOMAIN_STYLE={
-  mind:{icon:"◌",accent:"#8b5cf6",soft:"rgba(139,92,246,.12)"},
-  body:{icon:"♥",accent:"#22c55e",soft:"rgba(34,197,94,.12)"},
-  soul:{icon:"✦",accent:"#f59e0b",soft:"rgba(245,158,11,.12)"},
+const DOMAIN={
+ mind:{icon:"◌",rgb:[139,92,246]},
+ body:{icon:"♥",rgb:[34,197,94]},
+ soul:{icon:"✦",rgb:[245,158,11]},
 };
+const rgb=a=>`rgb(${a.map(Math.round).join(",")})`;
+const mix=ids=>{
+ const colours=ids.map(id=>DOMAIN[id]?.rgb).filter(Boolean);
+ if(!colours.length)return"rgb(100,116,139)";
+ return rgb([0,1,2].map(i=>colours.reduce((s,c)=>s+c[i],0)/colours.length));
+};
+const tint=(c,f=.72)=>rgb(c.map(v=>v+(255-v)*f));
 
 export default function WellbeingStack(){
-  const [open,setOpen]=useState({mind:true,body:true,soul:true});
-  const byDomain=useMemo(()=>Object.fromEntries(WELLBEING_DOMAINS.map(d=>[d.id,WELLBEING_NODES.filter(n=>n.primaryDomain===d.id)])),[]);
-  return <section style={{padding:"12px 12px 96px",maxWidth:760,margin:"0 auto"}}>
-    <div style={{textAlign:"center",padding:"8px 8px 18px"}}>
-      <div style={{width:58,height:58,borderRadius:"50%",margin:"0 auto 8px",display:"grid",placeItems:"center",background:"rgba(255,255,255,.08)",border:"2px solid rgba(255,255,255,.22)",fontSize:24}}>You</div>
-      <div style={{fontSize:12,opacity:.65}}>Mind · Body · Soul</div>
+ const groups=useMemo(()=>Object.fromEntries(WELLBEING_DOMAINS.map(d=>[d.id,WELLBEING_NODES.filter(n=>n.primaryDomain===d.id)])),[]);
+ return <section style={{padding:"8px 8px 110px",maxWidth:760,margin:"0 auto",overflow:"hidden"}}>
+  <div style={{display:"flex",justifyContent:"center",padding:"8px 0 22px"}}><Node label="You" colour="#e2e8f0" size={62}/></div>
+  {WELLBEING_DOMAINS.map((domain,index)=>{
+   const d=DOMAIN[domain.id],nodes=groups[domain.id];
+   return <div key={domain.id} style={{position:"relative",paddingBottom:index===2?4:30}}>
+    <div style={{position:"absolute",left:"50%",top:-22,bottom:0,width:3,transform:"translateX(-50%)",background:`linear-gradient(${rgb(d.rgb)},${rgb(d.rgb)}22)`,borderRadius:4}}/>
+    <div style={{position:"relative",display:"flex",justifyContent:"center",marginBottom:20}}>
+     <Node label={domain.label} icon={d.icon} colour={rgb(d.rgb)} size={74} strong/>
     </div>
-    {WELLBEING_DOMAINS.map(domain=>{
-      const s=DOMAIN_STYLE[domain.id]; const expanded=open[domain.id];
-      return <div key={domain.id} style={{marginBottom:14,borderRadius:18,overflow:"hidden",border:`1px solid ${s.accent}55`,background:"rgba(15,23,42,.72)"}}>
-        <button onClick={()=>setOpen(v=>({...v,[domain.id]:!v[domain.id]}))} style={{width:"100%",border:0,color:"inherit",background:s.soft,padding:"15px 16px",display:"flex",alignItems:"center",gap:12,textAlign:"left"}}>
-          <span style={{width:38,height:38,borderRadius:"50%",display:"grid",placeItems:"center",background:s.accent,color:"#fff",fontSize:19}}>{s.icon}</span>
-          <span style={{flex:1}}><strong style={{display:"block",fontSize:18}}>{domain.label}</strong><span style={{fontSize:12,opacity:.68}}>{domain.description}</span></span>
-          <span style={{fontSize:12,opacity:.65}}>Not enough data</span><span>{expanded?"⌃":"⌄"}</span>
-        </button>
-        {expanded&&<div style={{padding:"6px 12px 12px"}}>{byDomain[domain.id].map(node=>
-          <div key={node.id} style={{padding:"11px 4px",borderBottom:"1px solid rgba(255,255,255,.07)",display:"flex",gap:10,alignItems:"center"}}>
-            <span style={{width:8,height:8,borderRadius:"50%",background:s.accent,opacity:.72}}/>
-            <span style={{flex:1,fontSize:14}}>{node.label}{node.secondaryDomains?.length>0&&<span style={{display:"block",fontSize:10,opacity:.52,marginTop:2}}>Also connects to {node.secondaryDomains.map(id=>WELLBEING_DOMAINS.find(d=>d.id===id)?.label).filter(Boolean).join(" · ")}</span>}</span>
-            <span style={{fontSize:11,opacity:.5}}>Not enough data</span>
-          </div>)}
-        </div>}
+    <div style={{position:"relative",display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",columnGap:8,rowGap:24,padding:"0 4px"}}>
+     {nodes.map((node,i)=>{
+      const influences=[node.primaryDomain,...(node.secondaryDomains||[])];
+      const colour=mix(influences);
+      const pure=influences.length===1;
+      const x=(i%3)*50+25;
+      return <div key={node.id} style={{position:"relative",minWidth:0,display:"flex",justifyContent:"center"}}>
+       <svg aria-hidden="true" style={{position:"absolute",width:"100%",height:42,top:-25,left:0,overflow:"visible",pointerEvents:"none"}} viewBox="0 0 100 42" preserveAspectRatio="none">
+        <path d={`M 50 42 C 50 18, ${50+(x-50)*.18} 16, 50 0`} fill="none" stroke={colour} strokeOpacity=".48" strokeWidth="2.5" vectorEffect="non-scaling-stroke"/>
+       </svg>
+       <Node label={node.label} colour={pure?tint(d.rgb,.25):colour} shared={!pure} size={56}/>
       </div>})}
-    <p style={{fontSize:11,lineHeight:1.5,opacity:.5,padding:"2px 6px"}}>This first view shows the wellbeing structure only. States will appear as FriendshipTree connects real observed, inferred and reported evidence.</p>
-  </section>;
+    </div>
+   </div>})}
+  <div style={{textAlign:"center",fontSize:11,opacity:.48,padding:"18px 18px 0"}}>Shared colours show where a branch draws from more than one part of wellbeing. Growth states and evidence will be layered onto these nodes next.</div>
+ </section>;
+}
+
+function Node({label,icon,colour,size=56,strong=false,shared=false}){
+ return <div title={shared?"Shared across wellbeing domains":undefined} style={{position:"relative",zIndex:1,width:size,height:size,borderRadius:"50%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:5,textAlign:"center",background:`radial-gradient(circle at 35% 28%,rgba(255,255,255,.28),transparent 34%),${colour}`,border:strong?"3px solid rgba(255,255,255,.82)":"2px solid rgba(255,255,255,.48)",boxShadow:strong?`0 0 22px ${colour}88`:`0 4px 12px rgba(0,0,0,.28),0 0 10px ${colour}44`,color:"white",fontWeight:strong?900:750,fontSize:strong?15:10,lineHeight:1.05,textShadow:"0 1px 2px rgba(0,0,0,.55)"}}>
+  {icon&&<span style={{fontSize:18,lineHeight:1,marginBottom:3}}>{icon}</span>}<span>{label}</span>
+  {shared&&<span style={{position:"absolute",right:2,bottom:2,width:9,height:9,borderRadius:"50%",background:"rgba(255,255,255,.82)",border:"1px solid rgba(15,23,42,.6)"}}/>}
+ </div>;
 }
