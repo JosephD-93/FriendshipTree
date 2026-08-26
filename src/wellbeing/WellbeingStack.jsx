@@ -7,24 +7,32 @@ const rgb=a=>`rgb(${a.map(Math.round).join(",")})`;
 const mix=ids=>{const cs=ids.map(id=>DOMAIN[id]?.rgb).filter(Boolean);return rgb([0,1,2].map(i=>cs.reduce((s,c)=>s+c[i],0)/cs.length))};
 const clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
 const START=DOMAIN_ANGLES.mind,SPAN=Math.PI*2;
-const ORBITS=[31,56,81];
-const MIN_GAP=18;
-const CIRCLE_CX=-43,CIRCLE_CY=50,CIRCLE_R=55;
+const ORBITS=[29,48,67,86];
+const MIN_GAP=17;
+// A real circle whose circumference meets the phone's left edge at the top and bottom.
+// The app clips the rest of the circle, so the user sees only its right-hand chord/arc.
+const CIRCLE_CY=50,CIRCLE_R=76,CIRCLE_CX=-Math.sqrt(CIRCLE_R*CIRCLE_R-CIRCLE_CY*CIRCLE_CY);
 
 function circleX(y){const dy=y-CIRCLE_CY;return CIRCLE_CX+Math.sqrt(Math.max(0,CIRCLE_R*CIRCLE_R-dy*dy))}
 function placeWithoutOverlap(nodes){
- const lanes=[[],[],[]];
+ const lanes=ORBITS.map(()=>[]);
  return nodes.sort((a,b)=>a.delta-b.delta).map((node,i)=>{
-  const preferred=(node.secondaryDomains?.length||0)>0?1:(i%3);
+  const preferred=(node.secondaryDomains?.length||0)>0?1:(i%ORBITS.length);
   const desired=50+node.delta*(node.secondaryDomains?.length?15*node.parallax:21);
   let best=null;
-  for(const lane of [preferred,(preferred+1)%3,(preferred+2)%3]){
+  const laneOrder=Array.from({length:ORBITS.length},(_,offset)=>(preferred+offset)%ORBITS.length);
+  for(const lane of laneOrder){
    const occupied=lanes[lane];
-   const candidates=[desired,...Array.from({length:10},(_,k)=>desired+((k%2?1:-1)*Math.ceil((k+1)/2)*MIN_GAP))];
-   for(const candidate of candidates){const y=clamp(candidate,7,93);if(occupied.every(v=>Math.abs(y-v)>=MIN_GAP)){best={lane,y};break}}
+   const candidates=[desired,...Array.from({length:18},(_,k)=>desired+((k%2?1:-1)*Math.ceil((k+1)/2)*MIN_GAP))];
+   for(const candidate of candidates){const y=clamp(candidate,8,92);if(occupied.every(v=>Math.abs(y-v)>=MIN_GAP)){best={lane,y};break}}
    if(best)break;
   }
-  if(!best){const lane=lanes.map((v,j)=>({j,n:v.length})).sort((a,b)=>a.n-b.n)[0].j;best={lane,y:clamp(desired,7,93)}}
+  if(!best){
+   // Last resort: choose the lane/position with the greatest clearance instead of allowing bubbles to stack.
+   let clearanceBest={lane:0,y:50,clearance:-1};
+   for(let lane=0;lane<lanes.length;lane++)for(let y=8;y<=92;y+=2){const clearance=lanes[lane].length?Math.min(...lanes[lane].map(v=>Math.abs(y-v))):99;if(clearance>clearanceBest.clearance)clearanceBest={lane,y,clearance}}
+   best={lane:clearanceBest.lane,y:clearanceBest.y};
+  }
   lanes[best.lane].push(best.y);return{...node,...best};
  });
 }
@@ -41,9 +49,9 @@ export default function WellbeingStack(){
    <div style={{height:"360vh"}}/>
    <div style={{position:"sticky",top:0,height:"82vh",minHeight:500,marginTop:"-360vh",pointerEvents:"none"}}>
     <svg aria-hidden="true" viewBox="0 0 100 100" preserveAspectRatio="none" style={{position:"absolute",inset:0,width:"100%",height:"100%",overflow:"hidden"}}>
-     <defs><path id="wellbeing-active-perimeter" d={`M ${CIRCLE_CX} ${CIRCLE_CY-CIRCLE_R} A ${CIRCLE_R} ${CIRCLE_R} 0 0 1 ${CIRCLE_CX} ${CIRCLE_CY+CIRCLE_R}`}/></defs>
+     <defs><path id="wellbeing-active-perimeter" d={`M 0 0 A ${CIRCLE_R} ${CIRCLE_R} 0 0 1 0 100`}/></defs>
      <circle cx={CIRCLE_CX} cy={CIRCLE_CY} r={CIRCLE_R} fill="none" stroke={rgb(active.rgb)} strokeWidth="12" strokeOpacity=".82" vectorEffect="non-scaling-stroke"/>
-     <text fill="white" fontSize="5.2" fontWeight="900" letterSpacing=".55" style={{textShadow:"0 1px 2px rgba(0,0,0,.65)"}}><textPath href="#wellbeing-active-perimeter" startOffset="50%" textAnchor="middle">{nearest.label.toUpperCase()}</textPath></text>
+     <text fill="white" fontSize="5.2" fontWeight="900" letterSpacing=".45" style={{textShadow:"0 1px 2px rgba(0,0,0,.65)"}}><textPath href="#wellbeing-active-perimeter" startOffset="50%" textAnchor="middle">{nearest.label.toUpperCase()}</textPath></text>
      {ORBITS.map((x,i)=><path key={i} d={`M ${x} 0 Q ${x+3} 50 ${x} 100`} fill="none" stroke="rgba(255,255,255,.22)" strokeWidth=".65" strokeDasharray="2 3" vectorEffect="non-scaling-stroke"/>)}
     </svg>
     {layout.map(node=>{const influences=[node.primaryDomain,...(node.secondaryDomains||[])],colour=mix(influences),shared=influences.length>1,x=ORBITS[node.lane],anchorX=circleX(node.y);
