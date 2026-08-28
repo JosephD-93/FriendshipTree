@@ -40,7 +40,7 @@ function FriendshipTreeRoot(){
       if(planner){
         planner.dataset.ftOldStyle=planner.getAttribute('style')||'';
         planner.setAttribute('data-ft-isolated-planner','true');
-        Object.assign(planner.style,{position:'fixed',inset:'0',zIndex:'240',width:'100vw',height:'100dvh',maxWidth:'none',maxHeight:'none',margin:'0',overflowX:'hidden',overflowY:'auto',overscrollBehavior:'contain',background:'#07101f',touchAction:'pan-y'});
+        Object.assign(planner.style,{position:'fixed',top:'0',left:'0',right:'0',bottom:'calc(72px + env(safe-area-inset-bottom,0px))',zIndex:'140',width:'100vw',height:'auto',maxWidth:'none',maxHeight:'none',margin:'0',overflowX:'hidden',overflowY:'auto',overscrollBehavior:'contain',background:'#07101f',touchAction:'pan-y'});
       }
     };
     apply();
