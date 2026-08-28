@@ -8,13 +8,13 @@ const circularMean=angles=>Math.atan2(angles.reduce((s,a)=>s+Math.sin(a),0),angl
 export const getNodeAngle=node=>circularMean([node.primaryDomain,...(node.secondaryDomains||[])].map(id=>DOMAIN_ANGLES[id]).filter(Number.isFinite));
 export const getEcosystemLayout=()=>({domains:WELLBEING_DOMAINS.map(d=>({...d,angle:DOMAIN_ANGLES[d.id]})),nodes:WELLBEING_NODES.map((n,i)=>({...n,angle:getNodeAngle(n),orbit:1+(i%3)*.12}))});
 
-// Stack is not a second layout: it is a projection of the circular ecosystem.
-// Shared nodes are weighted toward the viewport because their circular mean lies
-// between parent domains; a small parallax factor makes multi-domain nodes drift
-// more slowly while scrolling between sections.
+// Stack is a projection of the circular ecosystem. Keep the visible window narrower
+// than a full half-turn so the phone view does not try to show almost every node at once.
 export const projectNodeToStack=(node,scrollAngle)=>{
  const influenceCount=1+(node.secondaryDomains?.length||0);
  const delta=wrap(getNodeAngle(node)-scrollAngle);
  const parallax=1/Math.sqrt(influenceCount);
- return{delta,x:delta*parallax,parallax,visible:Math.abs(delta)<Math.PI*.82};
+ const edge=Math.PI*.64;
+ const proximity=Math.max(0,1-Math.abs(delta)/edge);
+ return{delta,x:delta*parallax,parallax,proximity,visible:Math.abs(delta)<edge};
 };
