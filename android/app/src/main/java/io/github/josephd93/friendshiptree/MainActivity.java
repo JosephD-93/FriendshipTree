@@ -6,6 +6,7 @@ import ee.forgr.capacitor.social.login.ModifiedMainActivityForSocialLoginPlugin;
 import com.getcapacitor.PluginHandle;
 import com.getcapacitor.Plugin;
 import android.content.Intent;
+import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
 import android.webkit.WebView;
@@ -27,10 +28,10 @@ public class MainActivity extends BridgeActivity implements ModifiedMainActivity
         // again. Keep the renderer bound to this foreground activity and do not waive its
         // priority merely because the WebView is temporarily not visible.
         WebView webView = getBridge() != null ? getBridge().getWebView() : null;
-        if (webView != null) {
+        if (webView != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             webView.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_BOUND, false);
             Log.i(LIFECYCLE_TAG, "WebView renderer priority policy set to BOUND / waiveWhenNotVisible=false");
-        } else {
+        } else if (webView == null) {
             Log.w(LIFECYCLE_TAG, "WebView unavailable while applying renderer priority policy");
         }
     }
