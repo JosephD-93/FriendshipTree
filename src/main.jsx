@@ -19,34 +19,73 @@ function findDailyPlannerRoot(){
   return null;
 }
 
+function findBirthdayCalendarRoot(){
+  const all=[...document.querySelectorAll('#root *')];
+  const title=all.find(el=>el.childElementCount===0&&el.textContent?.trim()==='BIRTHDAY CALENDAR');
+  if(!title)return null;
+  let node=title;
+  while(node&&node.parentElement&&node.parentElement.id!=='root'){
+    const style=getComputedStyle(node);
+    if((style.position==='absolute'||style.position==='fixed')&&style.inset!=='auto')return node;
+    node=node.parentElement;
+  }
+  return node&&node.parentElement?.id==='root'?node:null;
+}
+
 function FriendshipTreeRoot(){
   const [wellbeingOpen,setWellbeingOpen]=useState(false);
   const [plannerOpen,setPlannerOpen]=useState(false);
 
   useEffect(()=>{
     let active=null;
+    let hiddenCalendar=null;
+    const restoreCalendar=()=>{
+      if(!hiddenCalendar)return;
+      hiddenCalendar.style.display=hiddenCalendar.dataset.ftPageOldDisplay||'';
+      hiddenCalendar.removeAttribute('aria-hidden');
+      hiddenCalendar.inert=false;
+      delete hiddenCalendar.dataset.ftPageOldDisplay;
+      hiddenCalendar=null;
+    };
     const apply=()=>{
       const planner=findDailyPlannerRoot();
-      if(planner===active)return;
-      if(active){
-        active.removeAttribute('data-ft-isolated-planner');
-        active.style.cssText=active.dataset.ftOldStyle||'';
-        delete active.dataset.ftOldStyle;
+      if(planner!==active){
+        if(active){
+          active.removeAttribute('data-ft-isolated-planner');
+          active.style.cssText=active.dataset.ftOldStyle||'';
+          delete active.dataset.ftOldStyle;
+        }
+        active=planner;
+        setPlannerOpen(Boolean(planner));
+        document.documentElement.classList.toggle('ft-daily-planner-open',Boolean(planner));
+        document.body.classList.toggle('ft-daily-planner-open',Boolean(planner));
+        if(planner){
+          planner.dataset.ftOldStyle=planner.getAttribute('style')||'';
+          planner.setAttribute('data-ft-isolated-planner','true');
+          Object.assign(planner.style,{position:'fixed',top:'0',left:'0',right:'0',bottom:'0',zIndex:'140',width:'100vw',height:'auto',maxWidth:'none',maxHeight:'none',margin:'0',paddingBottom:'calc(72px + env(safe-area-inset-bottom,0px))',boxSizing:'border-box',overflowX:'hidden',overflowY:'auto',overscrollBehavior:'contain',background:'#07101f',touchAction:'pan-y'});
+        }
       }
-      active=planner;
-      setPlannerOpen(Boolean(planner));
-      document.documentElement.classList.toggle('ft-daily-planner-open',Boolean(planner));
-      document.body.classList.toggle('ft-daily-planner-open',Boolean(planner));
       if(planner){
-        planner.dataset.ftOldStyle=planner.getAttribute('style')||'';
-        planner.setAttribute('data-ft-isolated-planner','true');
-        Object.assign(planner.style,{position:'fixed',top:'0',left:'0',right:'0',bottom:'0',zIndex:'140',width:'100vw',height:'auto',maxWidth:'none',maxHeight:'none',margin:'0',paddingBottom:'calc(72px + env(safe-area-inset-bottom,0px))',boxSizing:'border-box',overflowX:'hidden',overflowY:'auto',overscrollBehavior:'contain',background:'#07101f',touchAction:'pan-y'});
-      }
+        const calendar=findBirthdayCalendarRoot();
+        if(calendar&&calendar!==hiddenCalendar){
+          restoreCalendar();
+          hiddenCalendar=calendar;
+          hiddenCalendar.dataset.ftPageOldDisplay=hiddenCalendar.style.display||'';
+          hiddenCalendar.style.display='none';
+          hiddenCalendar.setAttribute('aria-hidden','true');
+          hiddenCalendar.inert=true;
+        }
+      }else restoreCalendar();
     };
     apply();
     const observer=new MutationObserver(()=>requestAnimationFrame(apply));
     observer.observe(document.getElementById('root'),{childList:true,subtree:true});
-    return()=>{observer.disconnect();document.documentElement.classList.remove('ft-daily-planner-open');document.body.classList.remove('ft-daily-planner-open');};
+    return()=>{
+      observer.disconnect();
+      restoreCalendar();
+      document.documentElement.classList.remove('ft-daily-planner-open');
+      document.body.classList.remove('ft-daily-planner-open');
+    };
   },[]);
 
   return <>
