@@ -19,6 +19,23 @@ function findDailyPlannerRoot(){
   return null;
 }
 
+function setPlannerPageIsolation(planner,enabled){
+  const page=planner?.parentElement;
+  if(!page)return;
+  [...page.children].forEach(child=>{
+    if(child===planner)return;
+    if(enabled){
+      if(!child.hasAttribute('data-ft-planner-old-display')) child.setAttribute('data-ft-planner-old-display',child.style.display||'');
+      child.style.display='none';
+      child.setAttribute('data-ft-hidden-behind-planner','true');
+    }else if(child.hasAttribute('data-ft-hidden-behind-planner')){
+      child.style.display=child.getAttribute('data-ft-planner-old-display')||'';
+      child.removeAttribute('data-ft-planner-old-display');
+      child.removeAttribute('data-ft-hidden-behind-planner');
+    }
+  });
+}
+
 function FriendshipTreeRoot(){
   const [wellbeingOpen,setWellbeingOpen]=useState(false);
   const [plannerOpen,setPlannerOpen]=useState(false);
@@ -29,6 +46,7 @@ function FriendshipTreeRoot(){
       const planner=findDailyPlannerRoot();
       if(planner===active)return;
       if(active){
+        setPlannerPageIsolation(active,false);
         active.removeAttribute('data-ft-isolated-planner');
         active.style.cssText=active.dataset.ftOldStyle||'';
         delete active.dataset.ftOldStyle;
@@ -38,15 +56,21 @@ function FriendshipTreeRoot(){
       document.documentElement.classList.toggle('ft-daily-planner-open',Boolean(planner));
       document.body.classList.toggle('ft-daily-planner-open',Boolean(planner));
       if(planner){
+        setPlannerPageIsolation(planner,true);
         planner.dataset.ftOldStyle=planner.getAttribute('style')||'';
         planner.setAttribute('data-ft-isolated-planner','true');
-        Object.assign(planner.style,{position:'fixed',top:'0',left:'0',right:'0',bottom:'0',zIndex:'140',width:'100vw',height:'auto',maxWidth:'none',maxHeight:'none',margin:'0',paddingBottom:'calc(72px + env(safe-area-inset-bottom,0px))',boxSizing:'border-box',overflowX:'hidden',overflowY:'auto',overscrollBehavior:'contain',background:'#07101f',touchAction:'pan-y'});
+        Object.assign(planner.style,{position:'relative',inset:'auto',zIndex:'auto',width:'100%',height:'100%',maxWidth:'none',maxHeight:'none',margin:'0',paddingBottom:'calc(72px + env(safe-area-inset-bottom,0px))',boxSizing:'border-box',overflowX:'hidden',overflowY:'auto',overscrollBehavior:'contain',background:'#07101f',touchAction:'pan-y'});
       }
     };
     apply();
     const observer=new MutationObserver(()=>requestAnimationFrame(apply));
     observer.observe(document.getElementById('root'),{childList:true,subtree:true});
-    return()=>{observer.disconnect();document.documentElement.classList.remove('ft-daily-planner-open');document.body.classList.remove('ft-daily-planner-open');};
+    return()=>{
+      observer.disconnect();
+      if(active)setPlannerPageIsolation(active,false);
+      document.documentElement.classList.remove('ft-daily-planner-open');
+      document.body.classList.remove('ft-daily-planner-open');
+    };
   },[]);
 
   return <>
