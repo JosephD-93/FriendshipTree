@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "test:appearance": "node --test src/design/appearance.test.js",
-    "prebuild": "npm run test:appearance"
+    "prebuild": "npm run test:appearance && npm run test:balance",
+    "test:balance": "node --test src/design/balanceGeometry.test.js"
   },
   "dependencies": {
     "@capacitor-community/contacts": "^7.2.0",
