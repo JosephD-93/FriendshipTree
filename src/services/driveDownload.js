@@ -44,7 +44,7 @@ export async function downloadDriveSnapshot({request,snapshot,write,progress=()=
   const files=await listDriveFiles(request,children(m.driveSnapshot.photosFolderId));
   const expected={photos:new Set(m.profilePhotoKeys),gallery:new Set(m.galleryPhotoKeys)};
   const count=expected.photos.size+expected.gallery.size;
-  if(files.length!==count)throw new Error("Snapshot photo file count mismatch");
+  if(new Set(files.map(f=>f.name)).size!==files.length||files.length!==count)throw new Error("Snapshot photo file count mismatch");
   await write("manifest.json.partial",{format:m.format,status:"downloading"});
   let done=0;
   for(const file of files){
