@@ -1,4 +1,6 @@
 import React,{useState} from "react";
+import BalanceWheel from "./BalanceWheel.jsx";
+import {EXAMPLE_POSITIONS,DIMENSIONS} from "./balanceGeometry.js";
 import {ROLES,PRESETS,normalizeAppearance,resolvePalette,contrastRatio,onColour} from "./appearance.js";
 
 function PlannerPreview({p}){
@@ -19,6 +21,7 @@ export default function AppearanceSettings({value,onChange,darkMode}){
   const a=normalizeAppearance(value);
   const [previewDark,setPreviewDark]=useState(darkMode);
   const [name,setName]=useState("");
+  const [perfect,setPerfect]=useState(false);
   const [editing,setEditing]=useState(null);
   const mode=previewDark?"dark":"light";
   const p=resolvePalette(a,previewDark);
@@ -45,6 +48,7 @@ export default function AppearanceSettings({value,onChange,darkMode}){
     <div style={{display:"flex",gap:6,marginTop:10}}><input aria-label="New palette name" value={name} onChange={e=>setName(e.target.value)} maxLength={48} placeholder="Palette name" style={{...button,flex:1,minWidth:0}}/><button type="button" disabled={a.custom.length>=30} onClick={create} style={button}>Create</button></div>
     {current&&<><button type="button" onClick={()=>setEditing(editing===current.id?null:current.id)} style={{...button,width:"100%",marginTop:6}}>{editing===current.id?"Done editing":"Edit selected palette"}</button>
       {editing===current.id&&<div style={{marginTop:8}}>{ROLES.map(([key,label])=><label key={key} style={{display:"flex",alignItems:"center",justifyContent:"space-between",fontSize:12,minHeight:44}}>{label}<input type="color" aria-label={label} value={p[key]} onChange={e=>changeColour(key,e.target.value)} style={{width:44,height:44,padding:3,border:0,background:"transparent"}}/></label>)}</div>}</>}
+    <details style={{marginTop:12}}><summary style={{cursor:"pointer",minHeight:44,display:"flex",alignItems:"center",fontWeight:600,fontSize:13}}>Balance wheel design preview</summary><p style={{fontSize:11,color:p.muted}}>Example data only. Your existing Overview scores are unchanged.</p><BalanceWheel positions={perfect?Object.fromEntries(DIMENSIONS.map(([key])=>[key,3])):EXAMPLE_POSITIONS} score={perfect?100:78} palette={p}/><label style={{display:"flex",alignItems:"center",gap:8,minHeight:44,fontSize:12}}><input type="checkbox" checked={perfect} onChange={e=>setPerfect(e.target.checked)}/>Preview perfect balance</label></details>
     {warning&&<p role="status" style={{fontSize:12,color:p.text}}>Some text colours may be difficult to read. Try increasing contrast.</p>}
   </section>;
 }
